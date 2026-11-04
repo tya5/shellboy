@@ -4626,3 +4626,10 @@ and cursor continuation. Focused macOS tests passed (2/2), and a clean
 `cargo check --tests` passed. Formatting, diff and 105-suite layout checks pass.
 Push and default/all-OS CI remain pending. CLI
 reference, English/Japanese User Guides and Agent Guide updated.
+## #219 proposal 1: indexed interrupted tool-group candidates
+
+Implementation replaces startup's completed-history scan with a transactionally
+maintained candidate marker. Schema migration 28 backfills existing databases;
+fresh schema installs the same triggers. Design and decision records document
+crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
+measurements. Focused test and CI results are pending on the task branch.

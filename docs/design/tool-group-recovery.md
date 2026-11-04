@@ -51,17 +51,37 @@ to their call source and rejects unresolved/inconsistent groups before HTTP.
 The existing DB worker owns this one startup transaction. Scan groups, calls and
 affected Threads in keyset pages of 32. Insert selected-path rows with SQL ordinal
 shifts and window ranking; do not collect all history payloads or paths in RAM.
-The group scan visits all group metadata in primary-key order on each startup,
-with predicate probes into call/result primary keys. Keyset pages bound working
-RAM, not total scan time: startup work remains proportional to stored groups,
-including retired GC groups. No partial index is added without measured benefit.
-No table,
-worker, queue, Core event, dependency or paid indexing request is introduced.
-Actual SQLite/I/O failures, missing global root_revision, savepoint failure,
-snapshot failure, or later startup failure still abort the outer transaction.
-Fatal repair errors identify the Thread/group and retain SaveFailed classification.
-Only explicitly classified group-local structural inconsistencies are isolated;
-SQL constraint/storage failures are never silently skipped. No user data is repaired
+Recovery candidates are recorded in an indexable `tool_group_recovery_candidate`
+marker table keyed by group ID. A marker exists exactly when the legacy recovery
+predicate is true: group state is not completed, or any call is pending/running,
+or any call lacks its committed result. Startup reads markers in group-ID keyset
+pages of 32 and then applies the existing per-group repair/savepoint behavior;
+it never walks completed groups to discover candidates. Marker candidate reads,
+per-group inspection, and repair retain bounded keyset work per page, but no
+wall-time budget or timing promise is made.
+
+All marker maintenance is in SQLite triggers within the transaction that changes
+the group, call, or result. Insert/update/delete of any relevant row recomputes
+only its affected group's predicate and inserts/deletes its marker. Thus opening
+a group/call and completing a call/result cannot commit without its matching
+marker; a crash before commit rolls back both, and a crash after commit leaves
+both. The schema migration creates the marker table and triggers and performs a
+one-time backfill using the exact legacy predicate in its own atomic migration
+transaction. A pre-migration database therefore cannot be read by the new
+candidate-only recovery path until backfill commits. No permanent legacy-scan
+fallback is retained. Fresh databases install the same table and triggers. On the one 3.4 GiB VACUUM
+INTO snapshot (57,465 groups), candidate enumeration measured 1.031 s cold and
+0.238/0.354 s warm for the legacy query; after migration, the marker keyset loop
+measured 40 microseconds cold and 8-11 microseconds warm with zero candidates.
+This is candidate-discovery work only, not a full-stage or startup timing claim;
+the snapshot was deleted after measurement.
+
+No separate worker, queue, Core event, dependency or paid indexing request is
+introduced. Actual SQLite/I/O failures, missing global root_revision, savepoint
+failure, snapshot failure, or later startup failure still abort the outer
+transaction. Fatal repair errors identify the Thread/group and retain SaveFailed
+classification. Only explicitly classified group-local structural
+inconsistencies are isolated; SQL constraint/storage failures are never silently skipped. No user data is repaired
 outside the explicitly opened owner store.
 
 ## Live-process limitation

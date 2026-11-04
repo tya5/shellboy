@@ -3281,3 +3281,35 @@ available, or if instrumentation gains work per statement.
 
 Source: leader acceptance for #201, 2026-11-04; benchmark details and ranges in
 issue #201 comments 6627459223 and 6627587728.
+
+
+## 2026-11-04: Index interrupted tool-group recovery candidates (#219 proposal 1)
+
+Replace startup's all-group candidate discovery with an indexable marker table
+keyed by tool-group ID. The marker predicate exactly preserves legacy behavior:
+non-completed group, pending/running call, or call missing its committed result.
+SQLite triggers maintain it atomically with group/call/result writes; migration
+backfills existing rows once, in its transaction, before the new code reads only
+markers. No permanent old-scan fallback or wall-time promise. Keep keyset pages
+and all existing repair, savepoint, replay-blocking, and transaction contracts.
+
+The design is motivated by W9's read-only reproduction: the old repair candidate
+query returned one candidate from 56,540 groups; its first run took 5.940 s,
+versus 6.606 s for the entire observed `interrupted_work` startup stage. This is
+not an exact stage attribution or a timing budget. Validate recovery equivalence,
+crash atomicity, migration coverage, and sparse candidate workloads; remeasure on
+a read-only VACUUM INTO copy and report the observed result without promising a
+latency.
+
+Source: W9 #219 comment; user-approved implementation scope, 2026-11-04.
+
+Measurement follow-up (2026-11-04): on one 3.4 GiB read-only `VACUUM INTO`
+snapshot (57,465 groups, 59,430 calls/results; zero unresolved candidates), the
+legacy candidate keyset loop took 1.031 s cold and 0.238/0.354 s on two warm
+repeats (median 0.354 s). After applying migration 28 to that same copy, the
+marker keyset loop took 40 microseconds cold and 8-11 microseconds warm (median
+9 microseconds). EXPLAIN changed from a primary-key walk over `tool_group` with
+correlated call/result probes to a covering primary-key seek over the candidate
+marker. This measures candidate enumeration only, not the entire
+`interrupted_work` stage or startup; the W9 5.940 s query and 6.606 s stage
+remain distinct historical measurements. The snapshot was deleted after use.

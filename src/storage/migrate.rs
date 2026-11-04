@@ -139,6 +139,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0027_index_recovery.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 28,
+        sql: include_str!("../../migrations/0028_tool_group_recovery_candidates.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(
@@ -243,10 +248,12 @@ mod activity_migration_tests {
 
     #[test]
     fn recovery_index_upgrades_from_each_recent_schema() {
-        for start in [24, 25, 26] {
+        for start in [24, 25, 26, 27] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             db.execute_batch("DROP INDEX jobs_running_recovery;")
+                .unwrap();
+            db.execute_batch("DROP TRIGGER tool_group_recovery_group_insert; DROP TRIGGER tool_group_recovery_group_update; DROP TRIGGER tool_group_recovery_group_delete; DROP TRIGGER tool_group_recovery_call_insert; DROP TRIGGER tool_group_recovery_call_update; DROP TRIGGER tool_group_recovery_call_delete; DROP TRIGGER tool_group_recovery_result_insert; DROP TRIGGER tool_group_recovery_result_update; DROP TRIGGER tool_group_recovery_result_delete; DROP TABLE tool_group_recovery_candidate;")
                 .unwrap();
             if start < 26 {
                 db.execute_batch("DROP INDEX receipt_reply_pending;")
@@ -263,20 +270,48 @@ mod activity_migration_tests {
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
-                27
+                28
             );
             assert_eq!(
                 db.query_row(
-                    "SELECT name FROM schema_migration WHERE version=27",
+                    "SELECT name FROM schema_migration WHERE version=28",
                     [],
                     |r| r.get::<_, String>(0)
                 )
                 .unwrap(),
-                "0027_index_recovery"
+                "0028_tool_group_recovery_candidates"
             );
-            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job WHERE state='running' AND id>?1 ORDER BY id LIMIT 128", [""], |r| r.get(3)).unwrap();
-            assert!(plan.contains("jobs_running_recovery"), "{plan}");
+            if start < 27 {
+                let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job WHERE state='running' AND id>?1 ORDER BY id LIMIT 128", [""], |r| r.get(3)).unwrap();
+                assert!(plan.contains("jobs_running_recovery"), "{plan}");
+            }
+            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT group_id FROM tool_group_recovery_candidate WHERE group_id>?1 ORDER BY group_id LIMIT 32", [""], |r| r.get(3)).unwrap();
+            assert!(plan.contains("tool_group_recovery_candidate"), "{plan}");
         }
+    }
+
+    #[test]
+    fn recovery_candidate_migration_backfills_preexisting_rows() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("DROP TRIGGER tool_group_recovery_group_insert; DROP TRIGGER tool_group_recovery_group_update; DROP TRIGGER tool_group_recovery_group_delete; DROP TRIGGER tool_group_recovery_call_insert; DROP TRIGGER tool_group_recovery_call_update; DROP TRIGGER tool_group_recovery_call_delete; DROP TRIGGER tool_group_recovery_result_insert; DROP TRIGGER tool_group_recovery_result_update; DROP TRIGGER tool_group_recovery_result_delete; DROP TABLE tool_group_recovery_candidate; DELETE FROM schema_migration WHERE version=28; PRAGMA user_version=27;
+            INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','old');
+            INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','stopped','old');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','stopped','old');
+            INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('n','u','tool_result','old','{}');
+            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','old');
+            INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('old-open','a','u','running','old'),('old-done','a','u','completed','old'),('old-missing','a','u','completed','old');
+            INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('old-done','done',0,'shell','{}','completed'),('old-missing','missing',0,'shell','{}','completed');
+            INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('old-done','done','n','completed');").unwrap();
+        run(&mut db, 27, &|_, _| {}, &|| {}).unwrap();
+        let candidates: Vec<String> = db
+            .prepare("SELECT group_id FROM tool_group_recovery_candidate ORDER BY group_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(candidates, vec!["old-missing", "old-open"]);
     }
 
     #[test]
@@ -332,7 +367,7 @@ mod activity_migration_tests {
         .unwrap();
         assert_eq!(
             *observed.borrow(),
-            vec![(1, 5), (2, 5), (3, 5), (4, 5), (5, 5)]
+            vec![(1, 6), (2, 6), (3, 6), (4, 6), (5, 6), (6, 6)]
         );
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(

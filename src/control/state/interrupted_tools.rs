@@ -53,7 +53,7 @@ pub(crate) fn repair_interrupted_tool_groups(
     loop {
         let comparison = if after.is_some() { ">" } else { ">=" };
         let sql = format!(
-            "SELECT g.id,g.attempt_id,g.turn_id,g.state,u.thread_id FROM tool_group g JOIN turn u ON u.id=g.turn_id WHERE g.id {comparison} ?1 AND (g.state<>'completed' OR EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state IN ('pending','running') OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) ORDER BY g.id LIMIT {PAGE}"
+            "SELECT g.id,g.attempt_id,g.turn_id,g.state,u.thread_id FROM tool_group_recovery_candidate candidate JOIN tool_group g ON g.id=candidate.group_id JOIN turn u ON u.id=g.turn_id WHERE candidate.group_id {comparison} ?1 ORDER BY candidate.group_id LIMIT {PAGE}"
         );
         let groups = tx
             .prepare_cached(&sql)?
@@ -937,5 +937,125 @@ mod tests {
                 1
             );
         }
+    }
+    fn legacy_candidates(db: &Connection) -> Vec<String> {
+        let mut statement = db.prepare("SELECT g.id FROM tool_group g WHERE g.state<>'completed' OR EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state IN ('pending','running') OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))) ORDER BY g.id").unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    fn indexed_candidates(db: &Connection) -> Vec<String> {
+        let mut statement = db
+            .prepare("SELECT group_id FROM tool_group_recovery_candidate ORDER BY group_id")
+            .unwrap();
+        statement
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn recovery_marker_matches_legacy_scan_with_many_completed_groups() {
+        let db = fixture();
+        db.execute(
+            "UPDATE tool_call SET state='completed' WHERE group_id='group'",
+            [],
+        )
+        .unwrap();
+        db.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('group','b','source','completed'),('group','c','source','completed')", []).unwrap();
+        db.execute(
+            "UPDATE tool_group SET state='completed' WHERE id='group'",
+            [],
+        )
+        .unwrap();
+        for index in 0..512 {
+            db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','turn','completed','old')", [format!("done-{index:04}")]).unwrap();
+        }
+        db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('empty-open','attempt','turn','running','old')", []).unwrap();
+        db.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('missing-result','attempt','turn','completed','old')", []).unwrap();
+        db.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('missing-result','call',0,'shell','{}','completed')", []).unwrap();
+        assert_eq!(indexed_candidates(&db), legacy_candidates(&db));
+        assert_eq!(
+            indexed_candidates(&db),
+            vec!["empty-open", "missing-result"]
+        );
+        db.execute("DELETE FROM tool_call WHERE group_id='missing-result'", [])
+            .unwrap();
+        assert_eq!(indexed_candidates(&db), vec!["empty-open"]);
+        db.execute(
+            "UPDATE tool_group SET state='completed' WHERE id='empty-open'",
+            [],
+        )
+        .unwrap();
+        assert!(indexed_candidates(&db).is_empty());
+    }
+
+    #[test]
+    fn recovery_marker_is_atomic_across_call_completion_and_crash_rollback() {
+        let mut db = fixture();
+        assert_eq!(indexed_candidates(&db), vec!["group"]);
+        {
+            let tx = db.transaction().unwrap();
+            tx.execute(
+                "UPDATE tool_result SET status='completed' WHERE group_id='group' AND call_id='a'",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "UPDATE tool_call SET state='completed' WHERE group_id='group' AND call_id='b'",
+                [],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('group','b','source','completed'),('group','c','source','completed')", []).unwrap();
+            tx.execute(
+                "UPDATE tool_call SET state='completed' WHERE group_id='group' AND call_id='c'",
+                [],
+            )
+            .unwrap();
+            tx.execute(
+                "UPDATE tool_group SET state='completed' WHERE id='group'",
+                [],
+            )
+            .unwrap();
+            assert!(indexed_candidates(&tx).is_empty());
+            // Dropping the uncommitted transaction models a crash before commit.
+        }
+        assert_eq!(indexed_candidates(&db), vec!["group"]);
+        let tx = db.transaction().unwrap();
+        tx.execute(
+            "UPDATE tool_result SET status='completed' WHERE group_id='group' AND call_id='a'",
+            [],
+        )
+        .unwrap();
+        tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES('group','b','source','completed'),('group','c','source','completed')", []).unwrap();
+        tx.execute("UPDATE tool_call SET state='completed' WHERE group_id='group' AND call_id IN ('b','c')", []).unwrap();
+        tx.execute(
+            "UPDATE tool_group SET state='completed' WHERE id='group'",
+            [],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        assert!(indexed_candidates(&db).is_empty());
+    }
+
+    #[test]
+    fn recovery_marker_is_present_at_open_boundary_before_completion() {
+        let mut db = fixture();
+        {
+            let tx = db.transaction().unwrap();
+            tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES('new-open','attempt','turn','running','old')", []).unwrap();
+            assert_eq!(indexed_candidates(&tx), vec!["group", "new-open"]);
+            tx.commit().unwrap();
+        }
+        // A process loss here leaves the committed marker for the next startup.
+        assert_eq!(indexed_candidates(&db), vec!["group", "new-open"]);
+        let tx = db.transaction().unwrap();
+        tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('new-open','new-call',0,'shell','{}','pending')", []).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(indexed_candidates(&db), vec!["group", "new-open"]);
     }
 }

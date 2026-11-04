@@ -9678,3 +9678,14 @@ suites). A serialized clean `cargo check --tests` also passed.
 Grouped model-attempt fields retain their existing shape; summary and combined
 counters are additive. Bilingual TUI labels and CLI/User/Agent docs are updated.
 Rebase, push and default/all-OS CI remain pending.
+## #219 proposal 1: tool-group recovery candidates
+
+Synthetic equivalence coverage compares marker candidates with the legacy full
+predicate over 512 completed groups plus open/missing-result cases. Transaction
+rollback verifies the marker remains when group completion rolls back; migration
+coverage seeds legacy rows and verifies one-time backfill. On one 3.4 GiB
+VACUUM INTO snapshot (57,465 groups, 59,430 calls/results), legacy candidate
+enumeration measured 1.031 s cold, then 0.238/0.354 s warm; after migration,
+marker enumeration measured 40 microseconds cold and 8-11 microseconds warm
+with zero candidates. This is candidate enumeration, not full startup-stage
+latency. The snapshot was deleted. Focused suite and CI remain pending.

@@ -173,7 +173,7 @@ mod tests {
         scope.run(&db).unwrap();
         assert!(Check::Full.run(&db).is_err());
         assert_eq!(
-            Check::for_migrations(super::super::migrate::MIGRATIONS, 24, 27),
+            Check::for_migrations(super::super::migrate::MIGRATIONS, 24, 28),
             Check::Skip
         );
     }
