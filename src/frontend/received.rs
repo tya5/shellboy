@@ -128,6 +128,13 @@ pub(super) fn project(
             TITLE
         }
     );
+    p.ui_messages.title = Some(crate::presentation::messages::Message::Text(
+        if observation {
+            crate::presentation::messages::Text::StreamDifference
+        } else {
+            crate::presentation::messages::Text::ReceivedResponse
+        },
+    ));
     p.provisional_stream = false;
     for block in &mut p.blocks {
         block.source_exact = false;
@@ -338,6 +345,40 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn received_response_titles_have_selected_language_copy_without_rewriting_saved_text() {
+        for (kind, expected) in [
+            (
+                "incomplete_response",
+                crate::presentation::messages::Text::ReceivedResponse,
+            ),
+            (
+                "model_stream_observation",
+                crate::presentation::messages::Text::StreamDifference,
+            ),
+        ] {
+            let node = project(
+                kind,
+                UiNode {
+                    node_id: "saved-response".into(),
+                    text: "RAW_RESPONSE".into(),
+                    ..Default::default()
+                },
+                80,
+                false,
+                true,
+            );
+            let message = node.presentation.ui_messages.title.unwrap();
+            assert_eq!(
+                message,
+                crate::presentation::messages::Message::Text(expected)
+            );
+            let english = message.render(crate::config::UiLanguage::En);
+            assert!(english.is_ascii(), "{english}");
+            assert!(english.contains("/received list"));
+            assert_eq!(node.text, "RAW_RESPONSE");
+        }
+    }
     #[test]
     fn prepared_saved_response_retains_snapshot_fences_and_paid_body() {
         let prepared = prepare(

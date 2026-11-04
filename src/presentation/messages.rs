@@ -56,6 +56,8 @@ pub enum Text {
     PreviousShutdown,
     PreviousInterruption,
     PreviousRecord,
+    ReceivedResponse,
+    StreamDifference,
 }
 impl Text {
     pub fn render(self, language: UiLanguage) -> &'static str {
@@ -291,6 +293,16 @@ impl Text {
             Self::PreviousRecord => {
                 crate::ui::i18n::local!(language, "前回処理の保存記録", "Previous work record")
             }
+            Self::ReceivedResponse => crate::ui::i18n::local!(
+                language,
+                "途中で切れた応答（保存済み・会話には含めない）",
+                "Interrupted response (saved; not part of conversation) | /received list"
+            ),
+            Self::StreamDifference => crate::ui::i18n::local!(
+                language,
+                "ストリーム差分 | 最終応答は確定済み",
+                "Stream difference | Final response is complete | /received list"
+            ),
         }
     }
 }
@@ -1322,6 +1334,16 @@ pub fn tool_reason(tool: &super::ToolPresentation, language: UiLanguage) -> Stri
     if language == UiLanguage::Ja {
         return tool.reason.clone();
     }
+    if tool.reason == "エラー詳細はF6" {
+        return "Error details: F6".into();
+    }
+    if let Some(prefix) = tool
+        .reason
+        .strip_suffix(" · 詳細はF6")
+        .or_else(|| tool.reason.strip_suffix(" | 詳細はF6"))
+    {
+        return format!("{prefix} | F6 details");
+    }
     match tool.reason_kind {
         R::RunStopped => "Cancelled because the run stopped",
         R::PriorCallInterrupted => {
@@ -1423,6 +1445,21 @@ impl PresentationMessages {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn generated_error_detail_hints_follow_language_and_keep_raw_prefixes() {
+        let tool = crate::presentation::ToolPresentation {
+            reason: "Provider code | 詳細はF6".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::tool_reason(&tool, crate::config::UiLanguage::En),
+            "Provider code | F6 details"
+        );
+        assert_eq!(
+            super::tool_reason(&tool, crate::config::UiLanguage::Ja),
+            "Provider code | 詳細はF6"
+        );
+    }
     #[test]
     fn reply_events_show_each_message_and_sender() {
         let event = serde_json::json!({"kind":"reply_reminder","payload":{"messages":[{"message_id":"request-one","sender":{"kind":"human","label":"fixture"}},{"message_id":"request-two","sender":{"kind":"external_cli"}}]}});
