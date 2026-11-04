@@ -205,7 +205,80 @@ fn item_name(value: &Value, collection: &str) -> &'static str {
         }
     }
 }
+fn english_key(value: &str) -> String {
+    value
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| match part {
+            "id" => "ID".to_owned(),
+            "ids" => "IDs".to_owned(),
+            "api" => "API".to_owned(),
+            "db" => "DB".to_owned(),
+            "ms" => "ms".to_owned(),
+            "bytes" => "bytes".to_owned(),
+            other => {
+                let mut chars = other.chars();
+                chars.next().map_or_else(String::new, |first| {
+                    first.to_uppercase().chain(chars).collect()
+                })
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub(crate) fn display_label(key: &str, label: &str, language: crate::config::UiLanguage) -> String {
+    match language {
+        crate::config::UiLanguage::Ja => label.to_owned(),
+        crate::config::UiLanguage::En => {
+            let key = key.rsplit(['/', '.']).next().unwrap_or(key);
+            let mut english = english_key(key);
+            if english.is_empty() {
+                english = "Field".into();
+            }
+            if label.contains("件数") {
+                english.push_str(" (count)");
+            }
+            english
+        }
+    }
+}
+
+pub(crate) fn display_value(
+    key: &str,
+    value: &str,
+    displayed: &str,
+    language: crate::config::UiLanguage,
+) -> String {
+    use crate::config::UiLanguage::{En, Ja};
+    if language == Ja {
+        return displayed.to_owned();
+    }
+    let key = key.rsplit(['/', '.']).next().unwrap_or(key);
+    if matches!(
+        key,
+        "state" | "status" | "previous_state" | "startup_state" | "planned_state"
+    ) {
+        return state_label_for(value, En).to_owned();
+    }
+    match displayed {
+        "未確定" => "Undetermined".into(),
+        "[深い構造 · 詳細は原文参照]" | "[深い構造 | 詳細は原文参照]" => {
+            "[Deep structure; see original for details]".into()
+        }
+        other => other.to_owned(),
+    }
+}
+
 pub(crate) fn human_label(pointer: &str, root: &Value) -> String {
+    human_label_for(pointer, root, crate::config::UiLanguage::Ja)
+}
+
+pub(crate) fn human_label_for(
+    pointer: &str,
+    root: &Value,
+    language: crate::config::UiLanguage,
+) -> String {
     let segments: Vec<_> = pointer
         .trim_start_matches('/')
         .split('/')
@@ -219,18 +292,35 @@ pub(crate) fn human_label(pointer: &str, root: &Value) -> String {
             && let Ok(position) = key.parse::<usize>()
         {
             value = items.get(position).unwrap_or(&Value::Null);
-            labels.push(format!("{} {}", item_name(value, collection), position + 1));
+            let name = match language {
+                crate::config::UiLanguage::Ja => item_name(value, collection).to_owned(),
+                crate::config::UiLanguage::En => {
+                    let collection = english_key(collection);
+                    if collection.is_empty() {
+                        "Item".into()
+                    } else {
+                        collection
+                    }
+                }
+            };
+            labels.push(format!("{name} {}", position + 1));
             continue;
         }
         value = value.get(key).unwrap_or(&Value::Null);
         collection = key;
         if !matches!(value, Value::Array(_)) || index + 1 == segments.len() {
-            labels.push(field_name(key).to_owned());
+            labels.push(match language {
+                crate::config::UiLanguage::Ja => field_name(key).to_owned(),
+                crate::config::UiLanguage::En => english_key(key),
+            });
         }
     }
     let mut label = labels.join(" › ");
     if value.is_array() {
-        label.push_str("（件数）");
+        label.push_str(match language {
+            crate::config::UiLanguage::Ja => "（件数）",
+            crate::config::UiLanguage::En => " (count)",
+        });
     }
     label
 }
@@ -462,6 +552,38 @@ fn digits(count: u64) -> String {
         out.push(ch);
     }
     out
+}
+
+pub(crate) fn state_label_for(value: &str, language: crate::config::UiLanguage) -> &str {
+    use crate::config::UiLanguage::Ja;
+    if language == Ja {
+        return state_label(value);
+    }
+    match value {
+        "accepted" => "Accepted",
+        "held" => "Held",
+        "applied" => "Applied",
+        "completed" => "Completed",
+        "running" => "Running",
+        "starting" => "Starting",
+        "preparing" => "Preparing",
+        "inflight" => "In flight",
+        "waiting" => "Waiting",
+        "recovery_wait" => "Waiting for recovery",
+        "pending" => "Pending",
+        "live" => "Active",
+        "stopping" => "Stopping",
+        "stopped" => "Stopped",
+        "failed" => "Failed",
+        "incomplete" => "Incomplete",
+        "cancelled" => "Cancelled",
+        "not_started" => "Not started",
+        "interrupted" => "Interrupted; outcome uncertain",
+        "exited" => "Exited",
+        "idle" => "Idle",
+        "paused" => "Paused",
+        other => return other,
+    }
 }
 
 pub(crate) fn state_label(value: &str) -> &str {
@@ -717,6 +839,69 @@ mod tests {
             assert!(english.is_ascii());
         }
     }
+    #[test]
+    fn generated_field_labels_follow_language_without_changing_pointers_or_values() {
+        use crate::config::UiLanguage::{En, Ja};
+        let raw = serde_json::json!({"thread_id":"thread-full-id","created_at":"opaque-time","items":[{"run_id":"run-full-id"}]});
+        assert_eq!(human_label_for("/thread_id", &raw, Ja), "会話ID");
+        assert_eq!(human_label_for("/thread_id", &raw, En), "Thread ID");
+        assert_eq!(
+            human_label_for("/items/0/run_id", &raw, En),
+            "Items 1 › Run ID"
+        );
+        assert_eq!(state_label_for("running", En), "Running");
+        assert_eq!(state_label_for("running", Ja), "実行中");
+        assert_eq!(display_label("/items", "項目（件数）", En), "Items (count)");
+        assert_eq!(display_value("/state", "running", "実行中", En), "Running");
+        assert_eq!(
+            display_value("/exit_code", "null", "未確定", En),
+            "Undetermined"
+        );
+        assert_eq!(
+            display_value("/deep", "", "[深い構造 · 詳細は原文参照]", En),
+            "[Deep structure; see original for details]"
+        );
+        for state in [
+            "accepted",
+            "held",
+            "applied",
+            "completed",
+            "running",
+            "starting",
+            "preparing",
+            "inflight",
+            "waiting",
+            "recovery_wait",
+            "pending",
+            "live",
+            "stopping",
+            "stopped",
+            "failed",
+            "incomplete",
+            "cancelled",
+            "not_started",
+            "interrupted",
+            "exited",
+            "idle",
+            "paused",
+        ] {
+            assert!(state_label_for(state, En).is_ascii(), "{state}");
+            assert_eq!(state_label_for(state, Ja), state_label(state));
+        }
+        assert_eq!(display_label("/thread_id", "会話ID", En), "Thread ID");
+        assert_eq!(display_label("/thread_id", "会話ID", Ja), "会話ID");
+        let mut fields = fields_of_value(&raw);
+        decorate(&mut fields, &raw);
+        let thread = fields
+            .iter()
+            .find(|field| field.key == "/thread_id")
+            .unwrap();
+        assert_eq!(thread.key, "/thread_id");
+        assert_eq!(thread.value, "thread-full-id");
+        assert_eq!(display_label(&thread.key, &thread.label, En), "Thread ID");
+        assert_eq!(display_label(&thread.key, &thread.label, Ja), "会話ID");
+    }
+
     #[test]
     fn human_terms_leave_canonical_identifiers_and_states_unchanged() {
         let raw = serde_json::json!({"thread_id":"thread-full-id", "run_id":"run-full-id", "turn_id":"turn-full-id", "state":"running"});

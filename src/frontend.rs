@@ -555,15 +555,14 @@ struct EditableRequest {
     attachments: Vec<UiAttachment>,
     run_id: Option<String>,
 }
-fn catalogue_title(label: &'static str) -> String {
+fn catalogue_title(label: &str) -> String {
     label.replace(" · ", crate::ui::text_width::glyphs::separator())
 }
-fn command_title(command: &Command) -> String {
-    catalogue_title(
-        crate::operations::OperationId::from_owner_command(command)
-            .map(|id| id.label())
-            .unwrap_or("Owner shutdown"),
-    )
+fn command_title(command: &Command, language: crate::config::UiLanguage) -> String {
+    let label = crate::operations::OperationId::from_owner_command(command)
+        .map(|id| crate::ui::operation_catalogue_label(id, language))
+        .unwrap_or_else(|| "Owner shutdown".to_owned());
+    catalogue_title(&label)
 }
 // Report operation acceptance separately from presentation: a report-rendering
 // failure must not invite retrying an already-applied mutation.
@@ -1834,7 +1833,7 @@ async fn run_with_delivery(
                         }
                     }
                     UiAction::ClientOperation(operation) => {
-                        let title = catalogue_title(operation.catalogue().spec().label);
+                        let title = catalogue_title(&crate::ui::operation_catalogue_label(operation.catalogue(), language));
                         let mutation = operation.effect() != crate::operations::Effect::Inspect;
                         let notice_owner = management::NoticeOwner::capture(
                             context.as_ref(), submission.as_ref(),
@@ -1880,7 +1879,7 @@ async fn run_with_delivery(
                     UiAction::Command(command) | UiAction::Manage(command) => {
                         if let Some(scope) = context.clone() && let Some(target) = inspection_target(&command) {
                             let generation = management.next_generation();
-                            start_inspection(&mut management,&updates,scope,generation,target,command_title(&command),submission).await;
+                            start_inspection(&mut management,&updates,scope,generation,target,command_title(&command, language),submission).await;
                             // A submitted slash read owns one admitted result and
                             // input acknowledgment even if its display is covered.
                             // Subsequent observation still follows visible scope.
@@ -1901,7 +1900,7 @@ async fn run_with_delivery(
                             }
                             continue;
                         }
-                        let title = command_title(&command);
+                        let title = command_title(&command, language);
                         let mutation = !command.is_read_only();
                         let notice_owner = management::NoticeOwner::capture(
                             context.as_ref(),
@@ -2963,7 +2962,7 @@ async fn run_with_delivery(
                             };
                             if let Some(scope)=context.clone() {
                                 let resolved=match &target {
-                                    management::FollowTarget::Command(command)=>inspection_target(command).map(|target|(target,command_title(command))),
+                                    management::FollowTarget::Command(command)=>inspection_target(command).map(|target|(target,command_title(command, language))),
                                     management::FollowTarget::Attachment {thread_id,attachment_id}=>Some((InspectionTarget::Attachments {thread_id:thread_id.clone(),attachment_id:Some(attachment_id.clone())},i18n::local!(language, "添付の参照", "Attachment references").into())),
                                 };
                                 if let Some((target,title))=resolved {
@@ -2975,7 +2974,7 @@ async fn run_with_delivery(
                             let list_command=match &target {management::FollowTarget::Command(command)=>inspection_lists::capture_command(command),_=>None};
                             let (title,work_status,response)=match target {
                                 management::FollowTarget::Command(command)=> {
-                                    let title=command_title(&command);
+                                    let title=command_title(&command, language);
                                     let work_status=management::work_status(&command);
                                     (title,work_status,management_request(&control,*command,CancellationToken::new()).await)
                                 },
@@ -3039,7 +3038,7 @@ async fn run_with_delivery(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let selected = resolved_pointer;
                             match presentation_work(move || {
-                                management::detail_page(&value, &selected, cursor.as_deref())
+                                management::detail_page(&value, &selected, cursor.as_deref(), language)
                             })
                             .await
                             {
@@ -4527,17 +4526,14 @@ mod catalogue_glyph_tests {
     use crate::ui::text_width;
 
     #[test]
-    fn catalogue_separator_requires_a_measured_single_column() {
-        for (observed, expected) in [
-            (Some(1), "shell · 一覧"),
-            (Some(2), "shell | 一覧"),
-            (None, "shell | 一覧"),
-        ] {
+    fn operation_catalogue_titles_follow_selected_language_and_terminal_width() {
+        for (observed, separator) in [(Some(1), " · "), (Some(2), " | "), (None, " | ")] {
             text_width::set_terminal_width(observed);
-            assert_eq!(
-                catalogue_title(crate::operations::OperationId::ShellList.label()),
-                expected
-            );
+            let id = crate::operations::OperationId::ShellList;
+            let en = crate::ui::operation_catalogue_label(id, crate::config::UiLanguage::En);
+            let ja = crate::ui::operation_catalogue_label(id, crate::config::UiLanguage::Ja);
+            assert_eq!(catalogue_title(&en), format!("Shell{separator}List"));
+            assert_eq!(catalogue_title(&ja), format!("shell{separator}一覧"));
             assert_eq!(catalogue_title("Owner shutdown"), "Owner shutdown");
         }
         text_width::clear_terminal_width();
