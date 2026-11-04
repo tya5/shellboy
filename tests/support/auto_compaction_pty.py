@@ -120,7 +120,10 @@ def main():
                 if args.summary_error:
                     assert events[3:] == ['automatic_compaction_rejected_other', 'automatic_compaction_skipped_no_new_target'], events
                 elif args.cancel:
-                    assert events[3:] == ['automatic_compaction_rejected_other'], events
+                    # Cancellation can be observed by the model request or
+                    # by a pre-adoption fence; both leave the source path intact.
+                    assert events[3:] in (["automatic_compaction_rejected_other"],
+                                          ["automatic_compaction_rejected_invalid_state"]), events
                 else:
                     assert events[3:] == [], events
                 assert recorded[1]['ids'] == recorded[2]['ids'], recorded
