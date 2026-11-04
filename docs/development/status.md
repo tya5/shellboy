@@ -4460,9 +4460,11 @@ selected-language label helper.
 All 320 Japanese catalogue literals are individually source-hash classified as
 reviewed UI-side text. The current exact-source audit on main `22db1a22` plus
 the current reconcile-34 source tree reports `a=2808, b=1555, c=104`; strict `--check` still fails on 104 pending literals outside the reviewed catalogue. English
-counterpart checks and the frontend title regression test are pending local
-execution. Other assigned branch reconciliation and integration acceptance
-remain open.
+catalogue fallback, global argument and frontend title regression tests pass.
+The localized field/usage regressions also pass. Full library suite at the
+pre-DB-fallback-test revision: 1,999 passed, 19 ignored; current DB activity
+suite: 4 passed. Other branch verdicts are recorded in the current #152 issue
+table; strict audit, CI, and integration acceptance remain open.
 ### #152 DB activity language audit
 
 The DB worker status labels already choose English/Japanese pairs for every
