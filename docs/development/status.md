@@ -4789,4 +4789,4 @@ budgeted summary retry with adaptive map concurrency (stage 3) remain separate
 future changes and landings.
 fresh schema installs the same triggers. Design and decision records document
 crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
-measurements. Focused test and CI results are pending on the task branch.
+measurements. The 69-test `recovery_` lib filter and fresh-schema bootstrap check pass; default and all-OS CI are pending on the pushed tip.

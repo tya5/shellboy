@@ -9820,10 +9820,12 @@ loss before completion commits. Migration coverage seeds legacy rows and verifie
 one-time backfill. On one 3.4 GiB
 ## #219 proposal 1: tool-group recovery candidates
 
-Synthetic equivalence coverage compares marker candidates with the legacy full
-predicate over 512 completed groups plus open/missing-result cases. Transaction
-rollback verifies the marker remains when group completion rolls back; migration
-coverage seeds legacy rows and verifies one-time backfill. On one 3.4 GiB
+The 69-test `recovery_` lib filter passed. Synthetic equivalence coverage
+compares marker candidates with the legacy full predicate over 512 completed
+groups plus open/missing-result cases, including zero and one candidate. The
+open-boundary and transaction-rollback tests verify a marker survives process
+loss before completion commits. Migration coverage seeds legacy rows and verifies
+one-time backfill. On one 3.4 GiB
 VACUUM INTO snapshot (57,465 groups, 59,430 calls/results), legacy candidate
 enumeration measured 1.031 s cold, then 0.238/0.354 s warm; after migration,
 marker enumeration measured 40 microseconds cold and 8-11 microseconds warm
