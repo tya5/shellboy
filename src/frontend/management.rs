@@ -554,42 +554,28 @@ pub(super) fn follow(
     }
 }
 /// Structural field tree used for explicit detail pages and small fee previews.
-fn tree(
-    value: &Value,
-    path: &str,
-    labels: Option<&Value>,
-    language: UiLanguage,
-    emit: &mut impl FnMut(&str),
-) {
+fn tree(value: &Value, path: &str, labels: Option<&Value>, emit: &mut impl FnMut(&str)) {
     let label = labels
-        .map(|root| presentation::fields::human_label_for(path, root, language))
+        .map(|root| presentation::fields::human_label(path, root))
         .unwrap_or_else(|| path.to_owned());
     match value {
         Value::Object(items) => {
             if items.is_empty() {
-                emit(&format!(
-                    "{label}: {}\n",
-                    i18n::local!(language, "（空の項目）", "(empty)")
-                ));
+                emit(&format!("{label}: （空の項目）\n"));
             }
             for (key, value) in items {
                 tree(
                     value,
                     &format!("{path}/{}", crate::json_pointer::escape_segment(key)),
                     labels,
-                    language,
                     emit,
                 );
             }
         }
         Value::Array(items) => {
-            emit(&format!(
-                "{label}: {} {}\n",
-                items.len(),
-                i18n::local!(language, "件", "items")
-            ));
+            emit(&format!("{label}: {}件\n", items.len()));
             for (index, value) in items.iter().enumerate() {
-                tree(value, &format!("{path}/{index}"), labels, language, emit);
+                tree(value, &format!("{path}/{index}"), labels, emit);
             }
         }
         Value::String(text) => {
@@ -597,16 +583,7 @@ fn tree(
                 emit(&label);
                 emit(": ");
             }
-            let key = path.rsplit('/').next().unwrap_or(path);
-            let value = if matches!(
-                key,
-                "state" | "status" | "previous_state" | "startup_state" | "planned_state"
-            ) {
-                presentation::fields::state_label_for(text, language)
-            } else {
-                text
-            };
-            emit(value);
+            emit(text);
             emit("\n");
         }
         _ => emit(&format!("{label}: {value}\n")),
@@ -682,16 +659,13 @@ pub(super) fn index_preview_captured_text_in(
 #[cfg(test)]
 fn preview_text(value: &Value) -> String {
     let mut text = String::new();
-    tree(value, "", Some(value), UiLanguage::Ja, &mut |part| {
-        text.push_str(part)
-    });
+    tree(value, "", Some(value), &mut |part| text.push_str(part));
     text
 }
 pub(super) fn detail_page(
     value: &Value,
     pointer: &str,
     cursor: Option<&str>,
-    language: UiLanguage,
 ) -> Result<(String, Option<String>), ApiError> {
     let selected = value.pointer(pointer).ok_or_else(|| {
         ApiError::new(
@@ -735,7 +709,7 @@ pub(super) fn detail_page(
     if let Value::String(value) = selected {
         emit(value);
     } else {
-        tree(selected, "", Some(selected), language, &mut emit);
+        tree(selected, "", None, &mut emit);
     }
     if invalid || offset > position {
         return Err(ApiError::new(
@@ -853,19 +827,6 @@ mod tests {
         );
     }
     #[test]
-    fn detail_page_uses_selected_language_for_generated_labels_without_translating_values() {
-        let value = serde_json::json!({"thread_id":"thread-full-id","state":"running","items":[{"run_id":"run-full-id"}]});
-        let english = detail_page(&value, "", None, UiLanguage::En).unwrap().0;
-        let japanese = detail_page(&value, "", None, UiLanguage::Ja).unwrap().0;
-        assert!(english.contains("Thread ID: thread-full-id"), "{english}");
-        assert!(english.contains("Running"), "{english}");
-        assert!(english.contains("Items (count): 1 items"), "{english}");
-        assert!(!english.contains("会話ID"), "{english}");
-        assert!(japanese.contains("会話ID: thread-full-id"), "{japanese}");
-        assert!(japanese.contains("状態: 実行中"), "{japanese}");
-        assert!(japanese.contains("項目（件数）: 1 件"), "{japanese}");
-    }
-    #[test]
     fn fee_preview_uses_human_structure_while_raw_detail_keeps_pointer_and_values() {
         let value = serde_json::json!({"coverage":{"eligible_sources":3},"sources":5,"segments":7,"characters":0,"already_indexed":2,"unavailable":1});
         let preview = preview_text(&value);
@@ -889,11 +850,11 @@ mod tests {
             assert!(preview.contains(text), "{preview}");
         }
         assert!(!preview.contains("/coverage/") && !preview.contains("eligible_sources"));
-        let (raw, cursor) = detail_page(&value, "", None, UiLanguage::Ja).unwrap();
+        let (raw, cursor) = detail_page(&value, "", None).unwrap();
         assert!(cursor.is_none());
-        assert!(raw.contains("対象資料数: 3"), "{raw}");
+        assert!(raw.contains("/coverage/eligible_sources: 3"), "{raw}");
         assert_eq!(
-            detail_page(&value, "/coverage/eligible_sources", None, UiLanguage::Ja)
+            detail_page(&value, "/coverage/eligible_sources", None)
                 .unwrap()
                 .0,
             ": 3\n"
@@ -972,8 +933,7 @@ mod tests {
         let mut actual = String::new();
         let mut cursor = None;
         loop {
-            let (page, next) =
-                detail_page(&detail, "/a~1b/~0key", cursor.as_deref(), UiLanguage::Ja).unwrap();
+            let (page, next) = detail_page(&detail, "/a~1b/~0key", cursor.as_deref()).unwrap();
             assert!(page.len() <= MAX_BODY_BYTES as usize);
             actual.push_str(&page);
             if next.is_none() {
@@ -982,10 +942,10 @@ mod tests {
             cursor = next;
         }
         assert_eq!(actual, text);
-        assert!(detail_page(&detail, "/a~1b/~0key", Some("1"), UiLanguage::Ja).is_err());
-        let (_, next) = detail_page(&detail, "/a~1b/~0key", None, UiLanguage::Ja).unwrap();
+        assert!(detail_page(&detail, "/a~1b/~0key", Some("1")).is_err());
+        let (_, next) = detail_page(&detail, "/a~1b/~0key", None).unwrap();
         assert_eq!(
-            detail_page(&detail, "/field-149", next.as_deref(), UiLanguage::Ja)
+            detail_page(&detail, "/field-149", next.as_deref())
                 .unwrap_err()
                 .code,
             ErrorCode::CursorExpired

@@ -3038,7 +3038,7 @@ async fn run_with_delivery(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             let selected = resolved_pointer;
                             match presentation_work(move || {
-                                management::detail_page(&value, &selected, cursor.as_deref(), language)
+                                management::detail_page(&value, &selected, cursor.as_deref())
                             })
                             .await
                             {
