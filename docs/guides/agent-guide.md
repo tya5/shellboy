@@ -177,6 +177,11 @@ different units; do not convert one into the other. Compare `input_bytes`
 between attempts (`usage get --attempt ID`) to see which source grows within a
 Turn, then spill or summarize that range. Null means not recorded, not zero.
 Model/shell starts and Run creation select whole lifetimes, not prorated overlap.
+Use `usage get --group-by day|hour|thread` to compare ordinary model-attempt
+usage with the separate summary/compaction section and their combined token total.
+Summary groups are assigned by the first summary-request timestamp; unavailable
+values remain unknown, and summary records may require following `next_cursor`.
+This reports provider usage, not cost.
 Use `compact list --thread THREAD_ID --limit 20` for retained compaction facts
 and `thread get` for the latest observation. Failed/no-target records do not prove
 input changed; missing legacy metrics/collected history stay unknown.
