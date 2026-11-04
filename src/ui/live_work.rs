@@ -2151,7 +2151,12 @@ mod tests {
                     assert!(rows[2].starts_with(&format!("{first}[1]")), "{rows:?}");
                     assert!(rows[3].starts_with(&format!("{first}[2]")), "{rows:?}");
                     assert!(rows[4].starts_with(&format!("{last}[3]")), "{rows:?}");
-                    assert!(rows[2].contains("[1]›$"), "{rows:?}");
+                    let selected_shell = if observed == Some(1) {
+                        "[1]›$"
+                    } else {
+                        "[1]>$"
+                    };
+                    assert!(rows[2].contains(selected_shell), "{rows:?}");
                     assert!(rows[3].contains("↳") && rows[4].contains("⋯"), "{rows:?}");
                     let arrow = if observed == Some(1) {
                         "→ [1]"

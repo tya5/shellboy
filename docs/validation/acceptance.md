@@ -9445,3 +9445,71 @@ CI evidence is reported in the issue handoff. Successful historical benchmarks
 are not tests of this document tip.
 No new measurements, jcode, provider/embedding requests or raw-artifact copying
 or publication occur. Only existing public observations and references are used.
+### #192 session-owned terminal input (2026-11-03)
+
+Design and decoder stages were published separately before session integration.
+Unix uses one session-owned reader, bounded outstanding capability requests,
+private CPR width measurements and crossterm-derived key decoding. Windows keeps
+native console events and does not issue VT capability queries. Missing replies
+remain unknown; cached width is only a baseline and only newly measured widths
+are persisted. The removed `ui.ambiguous_width` configuration is rejected.
+
+macOS integration checks passed: locked strict all-target Clippy; 36 decoder
+(including imported parser) tests, four reply-filter tests, four disposable-PTY
+tests, and four terminal-guard restoration tests. The PTY first-frame handshake
+withholds every response until a completed draw, then checks absent DA, late
+widths 1/2, inconsistent reports, paste and ordinary typing. All 189 Python script
+tests, integration registration/watchdog checks and language classification
+passed. These are synthetic fixtures, not real-terminal latency measurements.
+Further shifted-F3/queued-input and full binary cache tests, and three-OS CI,
+remain pending at this record point. No real provider, installed-binary changes,
+user data, or embedding calls are involved.
+
+#192 follow-up diagnostics: 38 decoder tests and 38 configuration integration
+tests passed locally. The full-binary PTY cache fixture found that the synthetic
+VT renderer did not recognize private CPR queries; it now treats that query as
+non-painting and has an every-split regression. All 190 Python tests passed.
+Linux CI 41639027639 stopped at strict Clippy on openpty's platform-dependent
+winsize pointer signature; passing an explicit raw pointer keeps Linux's const
+and macOS's mutable signatures compatible. This is a test-harness correction,
+not a production timing workaround. Final corrected-tip checks remain pending.
+
+#192 Windows test diagnostics: c8aa227e compiled and passed strict Clippy on
+Windows, then four rendering tests failed because they hard-coded the narrow
+selected marker even under unknown/wide policy. Assertions now select the
+policy-specific marker (or accept the two supported markers in the public
+integration test), keeping row background, content, scrollbar and layout checks.
+The live-work test still explicitly checks all three width policies and both
+languages. No production glyph policy is changed by this correction.
+
+#192 macOS shutdown regression investigation (2026-11-03): exact published tip
+`8e5cc49f` failed native macOS CI `41693893682` while Ubuntu and Windows passed.
+Local arm64 PTY reproduction also failed: N returns from force confirmation,
+but lone Esc never returns to graceful waiting. Freshly rebuilt, marker-checked
+and separately copied child/harness executables traced the Esc byte followed by
+Darwin `poll` reporting `POLLNVAL` (`revents=32`) on `/dev/tty`, then `WouldBlock`
+from read. Idle finalization was consequently never reached. The protected
+reproduction failed in 61.87 seconds; `/tmp/192-shutdown-fresh-roots.log` retains
+the local diagnostic evidence. Earlier local passes without diagnostic markers
+were excluded because shared-target artifacts were stale. The macOS `select`
+correction passed locked strict all-target Clippy and focused decoder/readiness
+tests. Three consecutive protected-binary shutdown PTY runs passed, including
+N/Esc return, explicit force exit and terminal-mode restoration (3.68, 0.57 and
+0.55 seconds; these are observations, not latency guarantees). Local validation
+log: `/tmp/192-select-clean-checks.log`. Readiness unit tests distinguish input,
+idle and EOF without sleeps, and reject out-of-range macOS descriptors before
+`FD_SET`. Corrected-tip three-OS CI, independent re-review and landing remain
+pending. No real-terminal, installed-binary or provider evidence is claimed.
+
+#192 exact-tip CI `41706512517` (`40796c53`) subsequently passed Ubuntu and
+Windows but failed the macOS shutdown PTY test again. This failure has ongoing
+shutdown-screen numeric updates, unlike the original static force-confirmation
+trace; its truncated transcript does not establish the same cause. Twenty
+protected-binary local runs all passed. A separate diagnostic run with a longer
+configured grace also passed and did not prove the proposed raw-marker/diff
+hypothesis. No further production correction or harmless-flake classification
+is justified by these observations. The fixture now logs its transition phase
+and, on failure only, its complete bounded synthetic VT transcript as JSON in
+the harness artifact. Grace, keys, assertions, watchdog and production input
+behavior remain unchanged. A new exact-tip diagnostic CI and independent review
+are required; the earlier failed CI remains part of the evidence.

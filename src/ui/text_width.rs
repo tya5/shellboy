@@ -93,88 +93,6 @@ pub(crate) fn is_emoji_variation_base(c: char) -> bool {
     !c.is_ascii() && c.is_emoji_char()
 }
 
-/// Called in an isolated helper process so a timed-out DSR cannot retain the
-/// crossterm event-reader lock or consume input once the UI starts.
-pub fn probe_child() -> i32 {
-    use std::io::Write;
-    // Crossterm tracks raw mode per process. Mark it enabled in the helper so
-    // position() does not disable the parent's already-active terminal mode.
-    if crossterm::terminal::enable_raw_mode().is_err() {
-        return 3;
-    }
-    let mut out = std::io::stdout();
-    if out
-        .write_all("\x1b[11;1H·".as_bytes())
-        .and_then(|_| out.flush())
-        .is_err()
-    {
-        return 3;
-    }
-    let first = crossterm::cursor::position();
-    if out
-        .write_all("·".as_bytes())
-        .and_then(|_| out.flush())
-        .is_err()
-    {
-        return 3;
-    }
-    let second = crossterm::cursor::position();
-    match (first, second) {
-        (Ok((1, 10)), Ok((2, 10))) => 1,
-        (Ok((2, 10)), Ok((4, 10))) => 2,
-        _ => 3,
-    }
-}
-
-pub(super) fn probe() -> Option<u8> {
-    use std::{
-        process::{Command, Stdio},
-        time::{Duration, Instant},
-    };
-    if std::env::var_os("SHELLBOY_INTERNAL_WIDTH_PROBE").is_some() {
-        return None;
-    }
-    if !crossterm::terminal::size().is_ok_and(|(cols, rows)| cols >= 5 && rows >= 11) {
-        return None;
-    }
-    let exe = std::env::current_exe().ok()?;
-    let mut command = Command::new(exe);
-    command
-        .env("SHELLBOY_INTERNAL_WIDTH_PROBE", "1")
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::null());
-    #[cfg(test)]
-    command.args([
-        "--exact",
-        "ui::text_width_pty_tests::probe_child_fixture",
-        "--nocapture",
-    ]);
-    let mut child = command.spawn().ok()?;
-    let deadline = Instant::now() + Duration::from_millis(300);
-    let result = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                break match status.code() {
-                    Some(1) => Some(1),
-                    Some(2) => Some(2),
-                    _ => None,
-                };
-            }
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break None;
-            }
-        }
-    };
-    use std::io::Write;
-    let _ = std::io::stdout().write_all(b"\x1b[2J\x1b[H");
-    let _ = std::io::stdout().flush();
-    result
-}
-
 /// App-owned decoration selected only from the measured terminal policy.
 pub(crate) mod glyphs {
     use super::terminal_width_observation;
@@ -251,7 +169,7 @@ pub(crate) mod glyphs {
         }
     }
     pub(crate) fn numbered_branch(last: bool, number: usize, selected: bool, kind: &str) -> String {
-        let marker = if selected { SELECTED } else { " " };
+        let marker = if selected { select(SELECTED, ">") } else { " " };
         format!("{}[{number}]{marker}{kind} ", branch(last))
     }
     pub(crate) fn ellipsis() -> &'static str {
@@ -353,6 +271,19 @@ mod tests {
             );
             assert_eq!(glyphs::vertical(), "|");
             assert_eq!(glyphs::formatted!("×{}", "x{}", 3), "x3");
+        }
+        clear_terminal_width();
+    }
+
+    #[test]
+    fn selected_branch_marker_has_conservative_fallback() {
+        for (width, marker) in [(Some(1), "›"), (Some(2), ">"), (None, "> ")] {
+            set_terminal_width(width);
+            let marker = marker.trim_end();
+            assert!(
+                glyphs::numbered_branch(false, 1, true, glyphs::SHELL)
+                    .contains(&format!("]{marker}$"))
+            );
         }
         clear_terminal_width();
     }

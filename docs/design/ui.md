@@ -216,3 +216,72 @@ as requested by the user; label rewriting is deferred. Do not move the indicator
 to a new line. The existing UI
 clock updates the elapsed value, while the frontend receives job transitions
 through the in-memory watch snapshot.
+
+## Nonblocking Terminal Capabilities (#192)
+
+The session-owned implementation is described below; validation evidence is
+tracked separately in acceptance, not inferred from this design.
+
+Before the first Unix startup draw, issue terminal width, device attributes and
+keyboard enhancement queries without waiting. First-frame stage logging records
+the draw itself, not a terminal-response deadline. The common capability-probe mechanism tracks each capability as `Unmeasured`
+or `Measured(value)`. Capabilities start unmeasured; cached width or the conservative fallback is used until a valid width
+reply, and keyboard enhancement stays off until confirmed. The sole input reader
+filters terminal responses throughout startup and normal interaction, preserving
+interleaved keystrokes. Bracketed paste is never filtered and uses the existing
+UTF-8 decoding behavior, including replacement of invalid bytes. Outside paste, replies are consumed only for an outstanding query of
+the matching kind, at most once per query. Plain cursor-position replies can
+collide with Shift+F3; prefer DEC-private DSR when supported. Adoption of a response that changes layout requests one
+redraw. No response is allowed to stall startup or input, and no guessed value
+is cached. The width measurement and cache rules are specified in
+[the terminal width design](ui-language-stage-a-draft.md).
+
+### Crossterm probe thread constraints (investigation)
+
+Crossterm 0.29 ordinarily queues events that do not match a helper's filter,
+but its filtered `read` keeps skipped events in a local queue that is dropped
+on error. Its keyboard helper also performs an unbounded DA read after receiving
+keyboard flags while holding the global event reader mutex. A naive helper thread
+can therefore delay input indefinitely and does not guarantee preservation on
+all error paths. A thread-based implementation must address these cases rather
+than assume a two-second upper bound.
+
+### Session-owned input implementation (#192)
+
+The Unix TUI owns one `/dev/tty` reader for its complete session. A bounded
+incremental reply filter runs before the key decoder; the decoder is adapted
+from pinned crossterm 0.29.0 with its MIT provenance retained. This avoids a new
+runtime dependency and preserves its key, mouse, kitty and paste formats without
+using its process-global reader or any filtered synchronous query helper.
+Already decoded input stays in the reader queue on I/O error. No probe thread,
+helper process or reader-lock wait is introduced. Reads use the existing UI
+poll budget; lone Escape disambiguation is a key-decoding concern, not a
+capability timeout. Probe state is bounded independently of response latency.
+On macOS, readiness uses `select`: Darwin `poll` can report `POLLNVAL` for
+`/dev/tty` even though the same descriptor remains readable. Treating that as
+input readiness prevents idle Escape finalization and spins on `WouldBlock`.
+Validate the descriptor against `FD_SETSIZE` before building the select set;
+an out-of-range descriptor is an explicit input error, never an unchecked set
+write. Other Unix systems retain `poll` and reject `POLLNVAL` as an I/O error.
+Neither path exposes partial capability replies, CSI or paste as idle keys.
+
+Before first draw, write DA/keyboard queries and two private DSR measurements
+at a known cursor location, restoring/clearing the probe area immediately.
+Their responses are independent; keyboard adoption never waits for DA. Two
+consistent cursor advances establish width 1 or 2. No response means unmeasured,
+not a guessed observation. Cached width is an initial layout baseline only.
+Adoption requests redraw and only successful measurements may refresh the cache.
+
+Windows retains crossterm's native console event reader and does not emit VT
+capability queries into that input mode. Unsupported capabilities remain
+unmeasured; native key and resize events continue to work. This is a deliberate
+platform boundary, not a claim that Windows measured width or kitty support.
+A future VT-native Windows input backend must own response filtering too.
+
+The Unix filter accepts only outstanding matching replies, once per query;
+private CPR avoids plain Shift+F3 collisions. Paste contents remain literal,
+including response-shaped bytes and invalid UTF-8 replacement behavior.
+Synthetic unit/PTY fixtures cover missing DA after keyboard flags, silent
+terminals, fragmented/delayed replies, interleaved typing/paste, error retention
+and terminal restoration. Real terminals and Windows behavior require separate
+platform evidence; three-OS CI is required before handoff.

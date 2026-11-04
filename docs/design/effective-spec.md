@@ -414,17 +414,23 @@ terminal-width diagnostic as examples; other screens remain for stage B. It does
 not translate or rewrite model/user content, saved data, protocol values or CLI
 output.
 
-On TUI startup, a bounded isolated helper uses crossterm's public cursor
-position API to measure an ambiguous-width character on the alternate screen,
-before the event loop. Agreeing replies identify width one or two; timeout,
-unsupported input path, impossible response or disagreement is unknown. A small
-terminal that cannot host the probe is also unknown. F1 help reports the result;
-TUI status and diagnostics report a measured mismatch with Ratatui's default.
-`ui.ambiguous_width` selects `cached` (default), `probe`, `narrow`, or `wide`.
-A successful observation is cached per terminal program and version, or TERM;
-unknown identity and failed probes are never cached. `probe` remeasures and
-refreshes the cache, while fixed modes bypass the helper. No terminal-name or
-locale is used to infer width.
+Unix sessions use one application-owned terminal input reader. Windows retains
+native console input without VT capability queries; unsupported observations
+remain unmeasured rather than exposing query replies as native keystrokes.
+
+At every Unix TUI startup, send terminal width, DA and keyboard enhancement queries
+before the first frame without waiting. A common capability-probe mechanism
+represents each capability as `Unmeasured` or `Measured(value)`; the input
+reader consumes matching replies only for outstanding queries, at most one per
+query, and never filters bracketed paste. Plain cursor replies can collide with
+Shift+F3; prefer DEC-private DSR where available. A measured layout change causes
+one redraw. A successful cached width is the initial layout
+baseline, not a measurement for the current launch; otherwise use conservative
+fallback glyphs and widths. Keyboard enhancement stays off until confirmed.
+Only successful new measurements are cached per terminal program/version or
+TERM. No reply means unmeasured indefinitely; no timing guarantee applies.
+There is no `ui.ambiguous_width` setting. Strict configuration parsing rejects
+that removed key; users must remove it from existing configuration.
 
 Shellboy's own layout uses the observation; unknown reserves two cells for
 ambiguous characters, and emoji sequences reserve their component widths.
