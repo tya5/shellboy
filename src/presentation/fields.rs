@@ -415,6 +415,7 @@ pub(crate) fn group_label(
             3 => "References",
             5 => "Summary Usage",
             6 => "Combined Total",
+            7 => "Model Attempts",
             _ => "Other",
         },
     };
@@ -430,7 +431,7 @@ pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
         return (6, "合計使用量");
     }
     if segments.contains(&"model_attempts") {
-        return (1, "通常のモデル要求");
+        return (7, "通常のモデル要求");
     }
     let key = pointer.rsplit('/').next().unwrap_or(pointer);
     if matches!(key, "model_id" | "profile_id") {
