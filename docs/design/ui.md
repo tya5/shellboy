@@ -285,3 +285,30 @@ Synthetic unit/PTY fixtures cover missing DA after keyboard flags, silent
 terminals, fragmented/delayed replies, interleaved typing/paste, error retention
 and terminal restoration. Real terminals and Windows behavior require separate
 platform evidence; three-OS CI is required before handoff.
+
+## Shared Regions And Held Input (#218)
+
+Approved staged change: first extract common fixed-region geometry, row-width
+allocation and painting scaffolding from live work without any visual change.
+Full-cell/style render fixtures must stay identical in this structural commit.
+Live-work clocks, saved snapshots, observers and output previews remain owned by
+live work, not by the shared region framework.
+
+Then add the held-input region below live work and above the composer, with a
+separate `ui.held_input_rows` fixed body capacity. Both headings remain visible
+when empty (None / なし). The shared `◉` means region divider; only live work
+retains activity blinking. Focused region rows use reverse video and bold, not a
+`›` selection caret. Held rows use the same saved-origin mark as their eventual
+conversation message: human `›`, external CLI `⇥`, model/other Thread `↳`, and
+completion-scheduled input `↻`. Saved origin facts, not missing sender guesses,
+determine the mark. No other conversation glyph vocabulary changes are implied.
+
+Shift+Tab traverses rows across both regions; Alt+W folds the focused region.
+Space opens original content and F6 opens details through existing asynchronous
+source/action paths. Preserve /queue, /replies, cancellation confirmation and
+saved-input admission/dedup semantics. The last commit removes the old compact
+queue painting/height path. Narrow rows omit time before shortening reason;
+reverse-video selection remains visible without colors. Both language guides,
+configuration example, responsibility/line/parameter metrics and regression
+fixtures accompany the behavior change. Windows font pixels are not established
+by synthetic render tests or by OS CI.

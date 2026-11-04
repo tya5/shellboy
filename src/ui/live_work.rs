@@ -1,5 +1,6 @@
 //! Bounded fixed-region projection of work owned by the selected Run.
 //! Saved elapsed bases are independent of the UI-observed Turn clock.
+use super::region::{RegionLayout, fit, row_columns};
 use super::*;
 use crate::config::UiLanguage;
 use crate::ui::text_width::glyphs;
@@ -329,50 +330,6 @@ fn byte_boundary(text: &str, limit: usize) -> usize {
     }
     end
 }
-fn fit(text: &str, width: usize) -> String {
-    use crate::ui::text_width::UnicodeWidthStr;
-    use unicode_segmentation::UnicodeSegmentation;
-    if text.width() <= width {
-        return text.into();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    let mut result = String::new();
-    let mut used = 0;
-    for part in text.graphemes(true) {
-        if used + part.width() + 1 > width {
-            break;
-        }
-        used += part.width();
-        result.push_str(part);
-    }
-    result.push_str(glyphs::ellipsis());
-    result
-}
-
-/// Share the live-work right-side budget and truncation policy with notice rows.
-pub(super) fn row_columns(
-    width: usize,
-    prefix: &str,
-    label: &str,
-    metadata: &str,
-    overflow: &str,
-) -> (String, usize, String) {
-    use crate::ui::text_width::UnicodeWidthStr;
-    let right_budget = width / 2;
-    let overflow = fit(overflow, right_budget);
-    let right = format!(
-        "{}{overflow}",
-        fit(metadata, right_budget.saturating_sub(overflow.width()))
-    );
-    let label = fit(
-        label,
-        width.saturating_sub(prefix.width() + right.width() + 3),
-    );
-    let gap = width.saturating_sub(prefix.width() + label.width() + right.width());
-    (label, gap, right)
-}
 
 impl LiveWorkView {
     pub fn set_language(&mut self, language: UiLanguage) {
@@ -485,13 +442,6 @@ impl LiveWorkView {
     /// Heading always; a body of exactly `capacity` rows when open. The height
     /// never depends on how much work exists (#131).
     pub fn height(&self, available: u16) -> u16 {
-        if available <= 3 {
-            return 0;
-        }
-        if self.collapsed {
-            return 2.min(available.saturating_sub(3));
-        }
-        let rows = self.cap() as u16;
         let preview = if self
             .open
             .as_ref()
@@ -501,23 +451,15 @@ impl LiveWorkView {
         } else {
             0
         };
-        (2 + rows + preview).min(available.saturating_sub(3))
+        RegionLayout::new(self.cap(), self.collapsed).height(available, preview)
     }
     pub fn set_area(&mut self, area: Rect) {
         self.area = (area.height > 0).then_some(area);
-        self.visible_rows = if self.collapsed {
-            0
-        } else {
-            let body = usize::from(area.height.saturating_sub(2)).min(self.cap());
-            let overflow = self.snapshot.as_ref().is_some_and(|s| s.overflow > 0);
-            // A separate "他N件" line is the last body row.
-            let items = if overflow && body >= 2 {
-                body - 1
-            } else {
-                body
-            };
-            self.rows().len().min(items)
-        };
+        self.visible_rows = RegionLayout::new(self.cap(), self.collapsed).visible_rows(
+            area,
+            self.rows().len(),
+            self.snapshot.as_ref().is_some_and(|s| s.overflow > 0),
+        );
         if area.height == 0 {
             self.active = false;
         }
@@ -823,22 +765,21 @@ pub(super) fn draw(
     let separate_overflow = hidden > 0
         && view.visible_rows > 0
         && usize::from(area.height.saturating_sub(2)) > view.visible_rows;
-    let mut lines = Vec::new();
-    if area.height > 1 {
-        lines.push(Line::from(""));
-    }
     // Blink changes only the `◉` brightness, never its glyph or the width.
     let dim = heading_dim
         .then(|| palette.live_work_dim())
         .flatten()
         .filter(|_| heading.starts_with(mark));
-    lines.push(match dim {
-        Some(dim) => Line::from(vec![
-            Span::styled(mark.to_owned(), dim),
-            Span::styled(heading[mark.len()..].to_owned(), palette.live_work()),
-        ]),
-        None => Line::styled(heading, palette.live_work()),
-    });
+    let mut lines = super::region::heading_lines(
+        area,
+        match dim {
+            Some(dim) => Line::from(vec![
+                Span::styled(mark.to_owned(), dim),
+                Span::styled(heading[mark.len()..].to_owned(), palette.live_work()),
+            ]),
+            None => Line::styled(heading, palette.live_work()),
+        },
+    );
     for (index, row) in view.rows().iter().take(view.visible_rows).enumerate() {
         let selected = view.active && view.selected.as_ref() == Some(&row.target);
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
@@ -981,12 +922,7 @@ pub(super) fn draw(
             palette.live_work(),
         ));
     }
-    if !view.collapsed {
-        let body = 1 + usize::from(area.height > 1) + view.cap();
-        while lines.len() < body.min(usize::from(area.height)) {
-            lines.push(Line::from(""));
-        }
-    }
+    RegionLayout::new(view.cap(), view.collapsed).pad_body(area, &mut lines);
     if view
         .open
         .as_ref()
@@ -1943,6 +1879,86 @@ mod tests {
             view.output_age_label(0).as_deref(),
             Some(" | 最後の出力 1秒前")
         );
+    }
+
+    #[test]
+    fn region_extraction_full_cell_style_baseline() {
+        let at = Instant::now();
+        let mut digest = 0xcbf29ce484222325_u64;
+        let mut cases = 0;
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            for width in [18, 80, 120] {
+                for policy in [None, Some(1), Some(2)] {
+                    text_width::set_terminal_width(policy);
+                    for (choice, plain) in [
+                        (crate::config::PaletteMode::Dark, false),
+                        (crate::config::PaletteMode::Light, false),
+                        (crate::config::PaletteMode::Dark, true),
+                    ] {
+                        let palette = theme::Palette::from_capabilities(choice, plain, true);
+                        for state in 0..8 {
+                            for dim in [false, true] {
+                                let mut view = LiveWorkView::default();
+                                view.set_language(language);
+                                view.configure(state == 2, 3);
+                                if state != 0 {
+                                    let mut data = snapshot(at);
+                                    data.rows[0].label = "synthetic CJK \u{754c} output".into();
+                                    data.rows[0].description = Some("synthetic description".into());
+                                    if state == 1 {
+                                        data.overflow = 0;
+                                        data.rows.truncate(1);
+                                    }
+                                    if state == 7 {
+                                        data.rows[0].state = "stopping".into();
+                                    }
+                                    view.accept(Some(data), at);
+                                }
+                                let height = if (4..=6).contains(&state) { 8 } else { 5 };
+                                let area = Rect::new(1, 1, width, height);
+                                view.set_area(area);
+                                if state == 3 || state == 7 {
+                                    view.active = true;
+                                }
+                                if (4..=6).contains(&state) {
+                                    view.open = Some("execution".into());
+                                }
+                                if state == 5 {
+                                    view.error = Some("synthetic error".into());
+                                }
+                                if state == 6 {
+                                    view.preview = Some(LiveOutputPreview {
+                                        stdout: "synthetic output".into(),
+                                        stderr: "synthetic stderr".into(),
+                                        decode_uncertain: false,
+                                        skipped: false,
+                                        complete: true,
+                                    });
+                                }
+                                let mut terminal = Terminal::new(
+                                    ratatui::backend::TestBackend::new(width + 2, height + 2),
+                                )
+                                .unwrap();
+                                terminal
+                                    .draw(|frame| draw(frame, area, &view, palette, true, dim))
+                                    .unwrap();
+                                for cell in &terminal.backend().buffer().content {
+                                    for byte in format!("{cell:?}\n").bytes() {
+                                        digest =
+                                            (digest ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+                                    }
+                                }
+                                cases += 1;
+                            }
+                        }
+                    }
+                    text_width::clear_terminal_width();
+                }
+            }
+        }
+        assert_eq!(cases, 864);
+        // Captured from the original renderer before shared-region extraction.
+        assert_eq!(digest, 0xcce04517ab437b25);
     }
 
     fn screen(ui: &mut UiState) -> (String, u16) {

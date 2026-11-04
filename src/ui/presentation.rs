@@ -1055,7 +1055,7 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
     .collect::<Vec<_>>()
     .join(glyphs::separator());
     let (label, gap, right) =
-        super::live_work::row_columns(usize::from(width), &prefix, &title, &metadata, "");
+        super::region::row_columns(usize::from(width), &prefix, &title, &metadata, "");
     Line::from(vec![
         Span::styled(prefix, Style::default().fg(theme::TEXT)),
         Span::raw(label),
@@ -2191,7 +2191,7 @@ fn append_notice_run(
     };
     let prefix = format!("{} ", RowKind::Notice.mark());
     let (label, gap, right) =
-        super::live_work::row_columns(usize::from(width), &prefix, &title, action, "");
+        super::region::row_columns(usize::from(width), &prefix, &title, action, "");
     let header = Line::from(vec![
         Span::styled(prefix, Style::default().fg(theme::TEXT)),
         Span::raw(label),
