@@ -18,6 +18,8 @@ pub(crate) struct Counters {
     pub autoindexes: u64,
     pub vm_steps: u64,
     pub elapsed_ns: u64,
+    #[cfg(feature = "test-db-observation")]
+    pub sample_all_profiles: bool,
     pub rows: Option<u64>,
     row_count: Arc<std::sync::atomic::AtomicU64>,
     pub row_scope: Option<&'static str>,
@@ -206,6 +208,10 @@ fn sample_profile(duration_ns: u64) -> bool {
     duration_ns >= 1_000_000
 }
 
+fn should_sample_profile(sample_all: bool, duration_ns: u64) -> bool {
+    sample_all || sample_profile(duration_ns)
+}
+
 unsafe extern "C" fn profile(
     event: u32,
     context: *mut c_void,
@@ -245,7 +251,7 @@ unsafe extern "C" fn profile(
             return 0;
         }
         let duration = unsafe { *(elapsed as *const u64) };
-        if !context.sample_every_profile && !sample_profile(duration) {
+        if !should_sample_profile(context.sample_every_profile, duration) {
             if let Ok(mut counters) = context.counters.lock() {
                 if counters.fingerprint_frozen && counters.captured_statement == stmt as usize {
                     counters.captured_profile_recorded = true;
@@ -352,6 +358,10 @@ impl<'a> StatementObservation<'a> {
         let mut observation = Self::install_production(connection);
         observation._context.sample_every_profile =
             cfg!(any(test, feature = "test-db-observation"));
+        #[cfg(feature = "test-db-observation")]
+        if let Ok(mut counters) = observation.counters.lock() {
+            counters.sample_all_profiles = observation._context.sample_every_profile;
+        }
         observation
     }
     fn install_production(connection: &'a mut Connection) -> Self {
@@ -804,6 +814,13 @@ mod tests {
         };
         assert!(!format!("{counters:?}").contains(private));
         assert!(!serde_json::to_string(&counters).unwrap().contains(private));
+    }
+
+    #[test]
+    fn sampling_policy_accepts_fast_profiles_only_when_exhaustive() {
+        assert!(!should_sample_profile(false, 0));
+        assert!(should_sample_profile(true, 0));
+        assert!(should_sample_profile(false, 1_000_000));
     }
 
     #[test]

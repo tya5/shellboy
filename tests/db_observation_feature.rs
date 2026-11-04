@@ -19,12 +19,9 @@ async fn integration_worker_samples_fast_statements() {
             .await
     });
     started_rx.await.unwrap();
-    let (steps, elapsed_ns) = db.test_active_statement_counters().unwrap();
+    let (steps, sample_all) = db.test_active_statement_counters().unwrap();
     assert!(steps > 0);
-    assert!(
-        elapsed_ns < 1_000_000,
-        "test statement was not fast: {elapsed_ns} ns"
-    );
+    assert!(sample_all, "integration worker must sample every profile");
     release_tx.send(()).unwrap();
     task.await.unwrap().unwrap();
     db.shutdown().await.unwrap();

@@ -677,12 +677,12 @@ impl DbWorker {
     /// Test-only access to the active worker's sampled VM counter.
     #[cfg(feature = "test-db-observation")]
     #[doc(hidden)]
-    pub fn test_active_statement_counters(&self) -> Option<(u64, u64)> {
+    pub fn test_active_statement_counters(&self) -> Option<(u64, bool)> {
         let active = self.shared.active_job.lock().ok()?;
         let counters = active.as_ref()?.counters.as_ref()?.lock().ok()?;
         counters
             .counter_scope
-            .map(|_| (counters.vm_steps, counters.elapsed_ns))
+            .map(|_| (counters.vm_steps, counters.sample_all_profiles))
     }
 
     /// Background kinds currently deferred at least [`NO_PROGRESS_DEFERRALS`]
