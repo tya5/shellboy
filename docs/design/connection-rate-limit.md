@@ -41,6 +41,9 @@ current Thread settings. No message-substring classification.
 
 All recorded 5xx were 500; another 9 saved errors were 400. 1,951 error records
 have no saved status; 1,798 have no `kind` in the selected error object/fallback.
+Non-null `error_json` is not synonymous with a failed provider call: proactive
+compaction also writes metadata there (`src/control/driver/proactive.rs:610`).
+The untyped records must not be relabeled lost errors or throttles.
 Counts are **lower bounds of recorded HTTP facts**, not a complete provider-side
 incident count or proof of zero usage limits. No second copy was made to extend
 this measurement. Days/profiles absent from the table have no error row, not
@@ -284,8 +287,9 @@ retry decisions. Attribute actual HTTP call identity, UTC observation day, saved
 profile and request kind (conversation/map/reduce/embedding/catalog). Shared
 aliases retain per-profile counts; a domain total must deduplicate actual calls.
 Persist through existing attempt error/usage and summary usage app_meta records,
-not a new table. Fixed-schema counters can extend the existing connection/day
-usage metadata for non-generation endpoints; define retention with existing GC
+not a new table. Propose new fixed-schema connection/day counters under the
+existing `app_meta` for endpoints without attempt records; such counters do not
+exist today. Define retention with existing GC
 before implementation, and never add a record per wait wakeup.
 
 Expose additive `usage get` fields: observed 429/5xx, structured usage-limit
