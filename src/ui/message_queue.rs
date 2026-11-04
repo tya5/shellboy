@@ -157,14 +157,6 @@ fn queue_context(language: UiLanguage, total: u64, shown: usize) -> String {
         UiLanguage::En => format!("Saved input: {total} total / {shown} shown"),
     }
 }
-fn compact_count(language: UiLanguage, count: u64) -> String {
-    let sep = crate::ui::text_width::glyphs::separator();
-    match language {
-        UiLanguage::Ja => format!("/queue{sep}保存済み{count}件"),
-        UiLanguage::En if count == 1 => format!("/queue{sep}1 saved input"),
-        UiLanguage::En => format!("/queue{sep}{count} saved inputs"),
-    }
-}
 fn archive_error(language: UiLanguage, error: &str) -> String {
     let sep = crate::ui::text_width::glyphs::separator();
     let error = crate::presentation::sanitize_plain(error, 0).0;
@@ -354,18 +346,6 @@ impl QueuePopup {
         );
     }
 }
-pub(super) fn height(view: &ThreadView, available: u16) -> u16 {
-    let accepting = view
-        .pending
-        .values()
-        .filter(|p| p.send.is_some() && p.status == ReceiptStatus::Accepting)
-        .count();
-    let count = view.pending_messages.items.len() + accepting;
-    if count == 0 {
-        return 0;
-    }
-    (u16::try_from(count.min(3)).unwrap_or(3) * 2 + 1).min(available.saturating_sub(3))
-}
 // Drawing must never scan or allocate the complete accepting draft: it may be
 // several MiB while only one preview line is visible. Find a bounded UTF-8
 // prefix before sanitization or newline replacement.
@@ -382,86 +362,6 @@ pub(super) fn accepting_excerpt(text: &str) -> String {
     }
     preview
 }
-// Compact rows keep their fixed height; /queue exposes the complete wrapped label.
-fn compact_label(label: &str, width: usize) -> String {
-    use crate::ui::text_width::UnicodeWidthStr;
-    use unicode_segmentation::UnicodeSegmentation;
-    if label.width() <= width {
-        return label.into();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    let mut output = String::new();
-    let mut used = 0;
-    for glyph in label.graphemes(true) {
-        let cells = glyph.width();
-        if used + cells + 1 > width {
-            break;
-        }
-        output.push_str(glyph);
-        used += cells;
-    }
-    output.push_str(crate::ui::text_width::glyphs::ellipsis());
-    output
-}
-fn compact_body(text: &str, width: u16) -> Line<'static> {
-    let indent = if width >= 3 { 2 } else { 0 };
-    let body = compact_label(text, usize::from(width.saturating_sub(indent)));
-    Line::from(format!("{}{}", " ".repeat(usize::from(indent)), body))
-}
-
-pub(super) fn draw_compact(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    view: &ThreadView,
-    language: UiLanguage,
-) {
-    if area.height == 0 {
-        return;
-    }
-    let mut lines = vec![];
-    for item in view.pending_messages.items.iter().take(3) {
-        lines.push(Line::from(compact_label(
-            &crate::presentation::sanitize_plain(&item.label(language), 0).0,
-            usize::from(area.width),
-        )));
-        let excerpt = crate::presentation::sanitize_plain(&item.excerpt, 0)
-            .0
-            .replace('\n', " ");
-        lines.push(compact_body(&excerpt, area.width));
-    }
-    for pending in view
-        .pending
-        .values()
-        .filter(|p| p.send.is_some() && p.status == ReceiptStatus::Accepting)
-        .take(3)
-    {
-        lines.push(Line::from(if pending.source_node_id.is_some() {
-            i18n::local!(language, "保存済み・取得中", "Saved; loading")
-        } else {
-            i18n::local!(language, "送信受付中", "Submitting")
-        }));
-        lines.push(compact_body(
-            &accepting_excerpt(&pending.snapshot.text),
-            area.width,
-        ));
-    }
-    lines.truncate(usize::from(area.height.saturating_sub(1)));
-    lines.push(Line::from(compact_count(
-        language,
-        view.pending_messages.total,
-    )));
-    frame.render_widget(
-        Paragraph::new(lines).style(
-            Style::default()
-                .fg(theme::CODE_TEXT)
-                .bg(theme::SELECTION_BACKGROUND),
-        ),
-        area,
-    );
-}
-
 impl UiState {
     pub(super) fn bind_saved_history(
         &mut self,
@@ -754,22 +654,16 @@ mod tests {
         }
     }
     #[test]
-    fn compact_excerpt_rows_keep_their_fixed_height_and_fit_narrow_widths() {
+    fn region_excerpt_rows_fit_narrow_widths_without_wrapping() {
+        use crate::ui::text_width::UnicodeWidthStr;
         for text in [
-            "A long English compact excerpt that must not wrap.",
+            "A long English excerpt that must not wrap.",
             "狭い表示幅でも折り返さずに省略する日本語の抜粋。",
         ] {
             for width in [0, 1, 2, 3, 12, 48] {
-                let row = compact_body(text, width);
-                let shown = row
-                    .spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>();
-                assert!(row.width() <= usize::from(width), "{width}: {shown}");
-                if width >= 3 {
-                    assert!(shown.starts_with("  "), "{width}: {shown}");
-                }
+                let shown = super::super::region::fit(text, width);
+                assert!(shown.width() <= width, "{width}: {shown}");
+                assert!(!shown.contains('\n'));
             }
         }
     }
@@ -1309,7 +1203,7 @@ mod tests {
         );
     }
     #[test]
-    fn compact_queue_and_popup_bound_terminal_control_text() {
+    fn held_region_bounds_terminal_control_text() {
         let mut ui = ui();
         let mut pending = queued("id");
         pending.excerpt = "visible\x1b[2J text".into();
@@ -1323,7 +1217,9 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         terminal
             .draw(|frame| {
-                super::draw_compact(frame, Rect::new(0, 0, 100, 5), ui.view(), UiLanguage::Ja)
+                let area = Rect::new(0, 0, 100, 5);
+                super::super::held_input::configure(ui.active_view_mut(), false, 3, area);
+                super::super::held_input::draw(frame, area, ui.view(), UiLanguage::Ja)
             })
             .unwrap();
         let mut shown = String::new();
@@ -1366,7 +1262,9 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(100, 8)).unwrap();
         terminal
             .draw(|frame| {
-                super::draw_compact(frame, Rect::new(0, 0, 100, 5), ui.view(), UiLanguage::En)
+                let area = Rect::new(0, 0, 100, 5);
+                super::super::held_input::configure(ui.active_view_mut(), false, 3, area);
+                super::super::held_input::draw(frame, area, ui.view(), UiLanguage::En)
             })
             .unwrap();
         let shown = terminal
@@ -1387,14 +1285,14 @@ mod language_tests {
     use super::*;
 
     #[test]
-    fn compact_queue_labels_preserve_source_and_use_measured_ellipsis() {
+    fn region_labels_preserve_source_and_use_measured_ellipsis() {
         use crate::ui::text_width::{self, UnicodeWidthStr};
         let raw = "user | · → │ source";
         for (policy, suffix) in [(Some(1), "…"), (Some(2), "."), (None, ".")] {
             text_width::set_terminal_width(policy);
-            assert_eq!(compact_label(raw, 120), raw);
+            assert_eq!(super::super::region::fit(raw, 120), raw);
             for width in 0..16 {
-                let shown = compact_label(raw, width);
+                let shown = super::super::region::fit(raw, width);
                 assert!(shown.width() <= width, "{policy:?} {width}: {shown}");
                 if width > 0 && raw.width() > width {
                     assert!(shown.ends_with(suffix), "{shown}");
@@ -1577,13 +1475,11 @@ mod language_tests {
         for count in [0, 1, 2, 123] {
             for language in [UiLanguage::En, UiLanguage::Ja] {
                 let archive = archive_count(language, count);
-                let compact = compact_count(language, count as u64);
                 let who = i18n::local!(language, "会話 raw-id", "Conversation raw-id");
                 let sender = sender_count(language, who, count);
                 let cancel = cancel_detail(language, count, &sender);
                 if language == UiLanguage::Ja {
                     assert_eq!(archive, format!("{count}件 | /restore draft ID"));
-                    assert_eq!(compact, format!("/queue | 保存済み{count}件"));
                     assert_eq!(sender, format!("会話 raw-id: {count}件"));
                     assert!(
                         cancel.starts_with(&format!("表示された{count}件の入力を取り消しますか？"))
@@ -1591,13 +1487,11 @@ mod language_tests {
                     assert!(cancel.contains("新しく届いた入力は対象に含めません。"));
                 } else if count == 1 {
                     assert_eq!(archive, "1 draft | /restore draft ID");
-                    assert_eq!(compact, "/queue | 1 saved input");
                     assert_eq!(sender, "Conversation raw-id: 1 input");
                     assert!(cancel.starts_with("Cancel 1 displayed input?"));
                     assert!(cancel.ends_with("Cancelled input is saved in /restore list."));
                 } else {
                     assert_eq!(archive, format!("{count} drafts | /restore draft ID"));
-                    assert_eq!(compact, format!("/queue | {count} saved inputs"));
                     assert_eq!(sender, format!("Conversation raw-id: {count} inputs"));
                     assert!(cancel.starts_with(&format!("Cancel {count} displayed inputs?")));
                     assert!(cancel.ends_with("Cancelled inputs are saved in /restore list."));
@@ -1718,7 +1612,10 @@ mod language_tests {
                         "{language:?} width={width}: {body}"
                     );
                     assert_eq!(ui.view().pending_messages, before);
-                    let label = compact_label(&before.items[0].label(language), usize::from(width));
+                    let label = super::super::region::fit(
+                        &before.items[0].label(language),
+                        usize::from(width),
+                    );
                     assert!(label.width() <= usize::from(width));
                     if before.items[0].label(language).width() > usize::from(width) {
                         assert!(label.ends_with(crate::ui::text_width::glyphs::ellipsis()));
@@ -1729,14 +1626,14 @@ mod language_tests {
         crate::ui::text_width::clear_terminal_width();
     }
     #[test]
-    fn compact_ellipsis_preserves_graphemes_cells_and_fixed_height() {
+    fn region_ellipsis_preserves_graphemes_cells_and_held_height() {
         use crate::ui::text_width::UnicodeWidthStr;
         use unicode_segmentation::UnicodeSegmentation;
         let source = "state 日本語·e\u{301}👩‍💻 trailing";
         for observed in [Some(1), Some(2), None] {
             crate::ui::text_width::set_terminal_width(observed);
             for width in 0..60 {
-                let label = compact_label(source, width);
+                let label = super::super::region::fit(source, width);
                 assert!(label.width() <= width);
                 if label != source && !label.is_empty() {
                     let ellipsis = crate::ui::text_width::glyphs::ellipsis();
@@ -1754,7 +1651,7 @@ mod language_tests {
             let mut ui = UiState::new(&config, PathBuf::new());
             long_pending(&mut ui);
             ui.queue_popup.visible = false;
-            assert_eq!(height(ui.view(), 30), 3);
+            assert_eq!(super::super::held_input::height(30, false, 3), 5);
         }
         crate::ui::text_width::clear_terminal_width();
     }
