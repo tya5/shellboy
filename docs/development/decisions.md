@@ -3291,3 +3291,32 @@ available, or if instrumentation gains work per statement.
 
 Source: leader acceptance for #201, 2026-11-04; benchmark details and ranges in
 issue #201 comments 6627459223 and 6627587728.
+
+## D-215: Automatic spill ordering and summary reasoning (2026-11-04)
+
+The owner revises D-189: selective edits previously "wait for a boundary
+without a tool call". Automatic mid-Turn spill may now run while the tool
+loop is open, only while preparing the next request, never between a call and
+its result. Protect the latest complete tool group, incomplete groups and
+unreflected user input. Adoption advances the reasoning epoch and clears the
+kept set in the same transaction, dropping all prior reasoning from replay.
+Anthropic documents graceful degradation for missing tool-use thinking; this
+shape has not been live-validated against Anthropic without paid runs.
+
+Automatic order is closed-Turn spill, closed-Turn summary, active-Turn spill,
+active-Turn summary, each only while a calibrated need remains and each with
+a fresh measurement and recorded outcome. Uncalibrated fallback preserves the
+existing escalation. Summary material includes readable reasoning from older
+epochs, but never encrypted or opaque data; replay filtering is unchanged. A
+summary request is plain text, so provider signature rules do not apply; no
+documented reason was found for the old summary-material epoch filter.
+
+Owner clarification (2026-11-04): #182 no longer requires automatic mid-Turn
+summary to replace all rounds. Select oldest-first whole safe groups only until
+the remaining calibrated need is met; retain the latest complete tool group,
+original request, user-instruction fences, incomplete and unreflected inputs.
+Atomically advance the epoch and clear the kept set on adoption, even when no
+spill was adopted: no earlier reasoning survives replay, giving the same
+drop-all provider shape as the approved full summary. Record the remaining need
+before and after. This implements the owner choice to summarize only what is
+needed; provider behavior remains unvalidated by paid Anthropic runs.
