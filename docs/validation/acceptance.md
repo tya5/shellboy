@@ -9360,3 +9360,32 @@ and the deliberately caught screen-diagnostic panic; log
 blocks, causing a missing-method compile error; the subsequent exact-once
 replacement and validation succeeded. No production exit cause is inferred
 from this synthetic writer. Exact-tip CI and fresh hosted comparison pending.
+
+## #151 Objection 7: Existing TUI Workload Evidence (2026-11-04)
+
+Documentation-only, restricted to resource-usage.md, status.md, this acceptance
+record and the existing bundled-guide check in tests/docs_cli.rs. The guide is
+English-only under the existing documentation policy; no Japanese counterpart
+is present. No runtime, benchmark harness, model or dependency changes.
+
+The copied table is the existing report for run 41526337673, source
+`1e7ddd1e17fc1d2ebfefa19388f3f4275b6859ab`, artifact 13181231326: Linux fake
+model, N=1/5/10/20, three cases each, approximately 100 ms PSS samples. Shellboy's
+12 cases completed; compare/overall failed on per-session Codex baseline churn
+before a fake request in the failing case. N=20 medians 34,223/28,576 KiB are
+observed maxima for different serve/TUI-hosted owners/cases, not incremental
+TUI cost, an improvement, true peaks or current-version performance. Later
+run 41553439861 at `2669c1ba59eadce04a1b800bc12e56c34606ae4c` passed compare;
+it is separate and does not prove this failure was repaired or churn resolved.
+
+The existing paginated bundled-guide check now requires all four table rows,
+both source SHAs, failed/partial scope and later compare success. Local macOS
+arm64 validation through rust-slot passed: `cargo fmt --all -- --check`,
+`cargo check --locked --tests`, binary build and the exact bundled-guide test
+(1 passed, 0 failed). The build and test share the same slot; the test uses
+Cargo's built CLI executable. Layout/watchdog gates (103 suites), language
+audit and `git diff --check` passed. Final-tip default and explicit three-OS
+CI evidence is reported in the issue handoff. Successful historical benchmarks
+are not tests of this document tip.
+No new measurements, jcode, provider/embedding requests or raw-artifact copying
+or publication occur. Only existing public observations and references are used.

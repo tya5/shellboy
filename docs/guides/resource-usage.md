@@ -178,6 +178,45 @@ workflow; the fake-model run uses no provider credentials, although installing
 pinned agents requires network access. The artifact preserves the raw samples,
 churn counts, fixture outcomes and provenance; retention is finite.
 
+### TUI-hosted workload observations (#151 objection 7)
+
+[Run 41526337673](https://github.com/tya5/shellboy/actions/runs/41526337673),
+at source `1e7ddd1e17fc1d2ebfefa19388f3f4275b6859ab`, recorded both `serve`
+and a TUI-hosted owner on Ubuntu 24.04.5 x86_64, EPYC 7763, with the same
+five-instruction loopback fake-model workload. Each N used three independent
+cases. All 12 Shellboy cases completed. Each cell below is **minimum / median /
+maximum** of the three case-level observed in-flight PSS maxima, in KiB,
+sampled approximately every 100 ms; short peaks can be missed.
+
+| N | `serve` observed maximum PSS KiB | TUI-hosted owner observed maximum PSS KiB |
+| ---: | ---: | ---: |
+| 1 | 25,493 / 25,521 / 26,407 | 20,730 / 20,851 / 20,873 |
+| 5 | 27,864 / 28,114 / 29,824 | 24,464 / 25,046 / 25,170 |
+| 10 | 29,462 / 32,720 / 32,822 | 26,412 / 27,132 / 27,268 |
+| 20 | 34,071 / 34,223 / 34,627 | 28,564 / 28,576 / 28,829 |
+
+The TUI itself hosts its owner; it does not attach to a separately running
+`serve`. These are different owners and independent cases, not simultaneous
+samples: **the difference is not a TUI increment**, a saving, or an improvement.
+In particular, the N=20 medians 34,223 and 28,576 KiB do not isolate TUI cost.
+Do not combine this table with the preceding run or interpret it as true peak
+memory, current-version performance, or a product ranking.
+
+The **compare job and overall run failed**, despite the completed Shellboy
+cases. Per-session Codex process-tree churn prevented a stable baseline PSS
+snapshot after ten attempts, before any fake-model request in the failed case.
+These are partial results from a failed comparison, not a successful full
+comparison. Source and case status are preserved in
+[artifact 13181231326](https://github.com/tya5/shellboy/actions/runs/41526337673/artifacts/13181231326).
+
+A later, separate [run 41553439861](https://github.com/tya5/shellboy/actions/runs/41553439861)
+at source `2669c1ba59eadce04a1b800bc12e56c34606ae4c` **passed compare** and
+completed all agents, as recorded in the
+[2026-11-03 report](../validation/bench-report-2026-11-03.md). That is not a
+rerun of the TUI-hosted experiment and does not replace or repair the failed
+run above; it also does not establish that process churn is resolved. No new
+benchmark was performed for this documentation update.
+
 ## Stage 4: Request bytes and storage
 
 These observations come from [workflow run 41381063988, attempt 2](https://github.com/tya5/shellboy/actions/runs/41381063988/attempts/2),
