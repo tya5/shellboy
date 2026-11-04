@@ -108,7 +108,7 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
     responses.extend(vec![
         "Intermediate; latest confirmed published, evidence n3."
             .into();
-        3
+        4
     ]);
     responses.push(final_text.into());
     let (f, server) = setup(responses, &log).await;
@@ -130,8 +130,8 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
     let before_lines = lines(&log);
     assert_eq!(before_lines, 0);
     let r = edit(&f, &args("n3")).await.unwrap();
-    assert_eq!(r.compact.model_requests, Some(8));
-    assert_eq!(lines(&log) - before_lines, 8);
+    assert_eq!(r.compact.model_requests, Some(9));
+    assert_eq!(lines(&log) - before_lines, 9);
     assert!(r.after_characters < r.before_characters);
     assert_eq!(r.compact.source_nodes, 4);
     assert!(r.compact.summary_characters.unwrap() <= r.compact.summary_limit.unwrap());
