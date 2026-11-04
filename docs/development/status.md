@@ -4644,5 +4644,9 @@ the local schema-27 database (59,471 groups)
 measured legacy candidate enumeration at 0.598 s on the first pass and 0.206 s
 warm; after migration 28, marker enumeration took 55 microseconds and 12
 microseconds, with zero candidates. Migration took 0.141 s and the temporary
-snapshot was deleted. These figures cover candidate enumeration, not full
-`interrupted_work` stage latency. Final-tip default and all-OS CI remain pending.
+snapshot was deleted. A separate same-copy rollback-safe comparison timed the
+`interrupt_previous_work` body at 1.097229 s with the legacy full-predicate query
+and 37.912 ms with marker lookup; both reported zero repaired, unresolved, and
+retired groups. Timing excludes transaction begin/rollback and migration. This
+local arm64 macOS observation is not a startup promise. Final-tip default and
+all-OS CI remain pending.

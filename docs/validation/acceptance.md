@@ -9695,8 +9695,13 @@ database contained 59,471 groups. On that same copy, legacy full-predicate
 keyset enumeration found zero candidates and took 0.598 s on the first pass and
 0.206 s warm. Applying migration 28 took 0.141 s; marker enumeration also found
 zero candidates and took 55 microseconds on the first pass and 12 microseconds
-warm. That temporary copy was deleted. These are candidate-enumeration timings,
-not full `interrupted_work` stage timings. Default CI 41876622989 passed on
+warm. That temporary copy was deleted; these figures isolate candidate
+enumeration. A separate same-copy rollback-safe
+comparison timed the full `interrupt_previous_work` body at 1.097229 s using the
+legacy full-predicate query and 37.912 ms after migration with marker lookup.
+Both runs reported zero repaired, unresolved, and retired groups. Timing excludes
+transaction begin/rollback and migration; this is a local arm64 macOS observation,
+not a startup promise. Default CI 41876622989 passed on
 pre-rebase SHA `3fdaee53565d822a666ffa90f9e743e1f55052c2`. All-OS CI
 41878748584 attempts 2-4 failed on the same two unrelated Ubuntu integration
 tests; Windows and macOS passed. Main CI

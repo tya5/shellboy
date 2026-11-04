@@ -3317,5 +3317,10 @@ A second one-copy measurement used a read-only `VACUUM INTO` snapshot of the
 local schema-27 database (59,471 groups). Legacy candidate enumeration returned
 zero candidates in 0.598 s on the first pass and 0.206 s warm. Applying migration
 28 took 0.141 s; marker enumeration returned zero candidates in 55 microseconds
-on the first pass and 12 microseconds warm. The temporary copy was deleted. This
-is still candidate enumeration, not full-stage timing.
+on the first pass and 12 microseconds warm. The temporary copy was deleted; those values isolate candidate enumeration.
+A same-copy rollback-safe
+comparison then measured the full `interrupt_previous_work` body: 1.097229 s
+using the legacy full-predicate query and 37.912 ms after migration with marker
+lookup. Both reported zero repaired, unresolved, and retired groups. Timing
+excludes transaction begin/rollback and migration. The local environment was
+arm64 macOS 25.3 with SQLite 3.51.0; this observation is not a startup promise.

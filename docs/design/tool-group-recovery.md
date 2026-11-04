@@ -80,8 +80,13 @@ A second read-only `VACUUM INTO` copy of the local schema-27 database contained
 found zero candidates and took 0.598 s on its first pass and 0.206 s warm. After
 migration 28 (0.141 s), marker enumeration found zero candidates and took 55
 microseconds on its first pass and 12 microseconds warm. That copy was deleted.
-These measurements still cover candidate enumeration only, not the full
-`interrupted_work` stage or startup.
+These measurements still cover candidate enumeration only. On a later one-copy
+stage run (59,522 groups; same rollback-safe copy before/after), the body of
+`interrupt_previous_work` took 1.097229 s with the legacy full-predicate query
+and 37.912 ms after migration with marker lookup; both reported zero repaired,
+unresolved, and retired groups. The timer excludes transaction begin/rollback
+and migration 28. On arm64 macOS with SQLite 3.51.0, this is a local observed
+result, not a timing promise or full application startup measurement.
 
 No separate worker, queue, Core event, dependency or paid indexing request is
 introduced. Actual SQLite/I/O failures, missing global root_revision, savepoint
