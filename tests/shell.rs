@@ -417,7 +417,12 @@ async fn leading_dash_command_is_a_script_not_a_bash_option() {
         ),
     );
     let (chunks, completion) = collect(spawn(&config, args("-x 'arg space'")).await).await;
-    assert_eq!(joined(&chunks, OutputStream::Stdout), b"arg space\n");
+    assert_eq!(
+        joined(&chunks, OutputStream::Stdout),
+        b"arg space\n",
+        "leading-dash completion: {completion:?}; stderr={:?}",
+        joined(&chunks, OutputStream::Stderr)
+    );
     assert_eq!(completion.exit_code, Some(0));
     assert_eq!(completion.state, ShellState::Exited);
     assert!(completion.output_complete);
