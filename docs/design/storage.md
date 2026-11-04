@@ -703,3 +703,33 @@ longer runs global terminal repair from a send/reply transaction. New turn/run
 creation and context events are constant-count; previous turn end uses the
 existing thread/end index. Index authorization receives a singleton node list.
 The legacy writer exemption list is not expanded.
+
+### Migration-Scoped Foreign-Key Validation (#210)
+
+The startup migration registry declares each migration's optional typed foreign-key
+impact beside its version and SQL: `IndexOnly` or `Tables(&[...])`. No SQL text
+classification is allowed. Missing metadata means a full foreign-key check.
+Index-only means no row/FK changes apart from the migration ledger/version;
+migrations 25-27 explicitly have this classification. Table metadata declares
+all affected tables, including data/constraint changes. Validation checks those
+surviving tables and their referencing child tables (transitively, discovered
+from SQLite FK schema metadata, not SQL text). A changed parent must not hide
+violations in an untouched child. Unknown classifications, empty table metadata,
+and malformed/legacy pending markers conservatively require a full check.
+
+Before the first upgrade transaction, persist the union of the entire outstanding
+migration range and any prior pending scope in `integrity.migration_pending`.
+Full dominates table scopes; index-only adds nothing. Persist even an index-only
+scope: interrupted migrations must still resume schema/ledger validation before
+clearing pending. On restart the saved scope applies even if user_version is
+already current. Clear pending only after the selected check and remaining startup
+integrity checks succeed; errors, cancellation or interruption retain it. Fresh
+creation has no upgrade check. Ordinary current-schema reopen has no upgrade FK
+scan. This policy is for applied schema migrations, not arbitrary package-version
+changes without a migration. Manual integrity checks remain full; unclean-start
+quick_check is independent and unchanged. No new schema version or worker is added.
+
+The reviewed registry initially marks only migrations25-27 as `IndexOnly` and
+migration14 as `Tables([turn, draft])` (turn-column addition and draft indexes).
+Other historical entries remain unclassified/full. Ledger/version writes are
+inherent migration bookkeeping, not application-table changes requiring a scan.

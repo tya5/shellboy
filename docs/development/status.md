@@ -4437,3 +4437,13 @@ continues readiness-driven draining through child exit and emits bounded VT
 and screen diagnostics on exit failure. A real PTY writer exceeding capacity
 covers this observation gap. New-tip checks and a fresh full comparison remain
 pending; the first tip's successful 3-OS CI does not cover this follow-up.
+
+#210 follow-up: migration impact is now explicit typed metadata in the startup
+registry. The pending scope is persisted/unioned before migration, index-only
+ranges skip FK scans, table scopes include referencing child dependencies, and
+missing/legacy metadata falls back to full checking. Startup errors retain
+pending validation even at the current schema version. Focused scope/startup/policy tests pass (6+4+3); a closed-snapshot clean startup
+comparison measured 11.170/11.905/10.257s with the previous full policy versus
+0.096/0.085/0.161s with explicit index-only skip. These isolate FK policy on
+identical startup code, not UI-ready latency or cold-cache performance. See the
+#210 acceptance record for stage times, controls and CI handoff evidence.

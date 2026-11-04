@@ -398,3 +398,28 @@ The same helper runs locally as
 It builds one registered integration target, refuses a zero-test selection,
 and records every failure instead of stopping on the first. In the sandbox,
 run it through `rust-slot` so the shared binary cannot change during a repeat.
+
+### Migration FK Scope Timing
+
+The ignored unit test `storage::migration_startup_tests::measure_startup_on_snapshot_copies`
+measures database startup stages on disposable filesystem copies of an explicitly
+provided, closed `VACUUM INTO` snapshot. Set `SHELLBOY_STARTUP_SNAPSHOT` to that
+snapshot and run `cargo test --locked --lib
+storage::migration_startup_tests::measure_startup_on_snapshot_copies -- --ignored
+--exact --nocapture` (through `rust-slot` in the sandbox). Never pass a live WAL
+file as the snapshot. The source is only copied, never modified; each disposable
+copy is reset to schema24 by removing migrations25-27's indexes and ledger entries.
+No owner, model/provider or recovery worker is started. Output contains only
+numeric stage observations, not stored records.
+
+Three before/after pairs compare the old mandatory full-check policy (legacy
+pending marker) and index-only scope selection using identical startup code and
+the same input snapshot. This isolates the policy change, not differences between
+two executable builds. Each phase uses a new SQLite connection and a new copy;
+file copy, fixture setup and diagnostics flushing are excluded from database-open
+wall time. Startup includes journal/pragmas, schema checks, migrations25-27 and the
+selected FK policy; this is not total UI-ready latency. The clean-shutdown flag
+is used, so independent unclean-start quick_check is not part of this comparison.
+OS/file cache conditions are uncontrolled and before always runs first. Inspect
+all emitted `STARTUP_SCOPE_MEASUREMENT` stage records; absent FK stage means skip,
+not a claimed zero-cost complete integrity scan.

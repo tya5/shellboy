@@ -3223,3 +3223,21 @@ no production dependency or terminal input behavior changes. The fixture keeps
 a bounded 4 MiB transcript and prints the completed/live screens and JSON VT
 capture on observation failure. This is synthetic temporary-data evidence,
 not a claim about physical terminal fonts or installed applications.
+
+## 2026-11-03: Scope Post-Migration Foreign-Key Checks (#210)
+
+Adopt explicit typed migration impact metadata, with unknown/missing metadata
+falling back to full checking. Skip only explicitly index-only upgrade ranges;
+otherwise check declared affected tables and referencing child dependencies.
+Persist the combined scope before migration so a crash cannot downgrade pending
+validation to a clean reopen or narrower later upgrade. Keep full manual checks
+and independent unclean-start quick_check.
+
+W9 measured a full FK scan at 19.282s versus 0.496s for three index-target tables
+on a VACUUM INTO snapshot (different warm-cache conditions, not a startup speedup
+guarantee). Migrations 25-27 change indexes only, so even those table scans cannot
+validate a new data/FK change. Avoid that redundant work rather than sample rows
+or infer safety by parsing SQL. Historical migrations remain full unless their
+metadata has been explicitly reviewed. Table scopes still scan every selected
+child row and are not bounded-latency integrity checks. Index-only skip deliberately
+does not discover unrelated pre-existing FK corruption; manual checks cover that.
