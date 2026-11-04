@@ -2633,6 +2633,34 @@ Header's display-only128KiB path allowance avoids treating512-byte identity limi
 as a valid path limit. Oversized settings fail explicitly with a field witness;
 canonical CLI values remain intact. Native synthetic tests can qualify these
 copies/semantics, not Windows filesystem/path execution. No schema/worker/queue.
+## Disable Development Debug Information (2026-11-04)
+
+Set `[profile.dev] debug = false`; test inherits this profile. The target is the
+large set of unpacked macOS codegen object files, not panic source locations:
+those remain available in panic text without debug info. CI and workers do not
+set `RUST_BACKTRACE`. For a one-off build needing line-number backtraces, run
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only cargo test --locked --no-run`.
+
+Measured on this Apple Silicon Mac using Rust 1.99.1, fresh throwaway
+`CARGO_TARGET_DIR` under `/private/tmp`, `cargo test --locked --no-run`, and
+`du -sk target/debug`; three cold builds and one-file incremental rebuilds per
+profile. Before `line-tables-only`: clean 489.12/423.61/293.30s (median
+423.61s, range 293.30-489.12); incremental 2.90/4.15/2.65s (median 2.90s,
+range 2.65-4.15); target size 5,245,940/5,260,688/5,279,620 KiB (median
+5,260,688 KiB). After `debug=false`: clean 156.33/139.28/292.69s (median
+156.33s, range 139.28-292.69); incremental 2.86/2.76/3.90s (median 2.86s,
+range 2.76-3.90); target size 4,182,880/4,174,832/4,205,828 KiB (median
+4,182,880 KiB). Local clean and incremental medians did not increase; target
+size fell about 20.5%. The wide cold-build spread overlaps, so interpret the
+median, not each run in isolation.
+
+Three exact-SHA default CI runs for each profile on main-equivalent source:
+before runs 41931953415, 41931957475, 41932009257 had Ubuntu check durations
+652/538/623s (median 623s, range 538-652); after runs are pending at decision
+record time and must be filled in before accepting this change. This candidate
+is not accepted/landed unless the three after runs show no increase beyond the
+baseline spread. No schema/migration or product behavior changes.
+
 ## #105: Line Tables For Development And Tests (2026-11-01)
 
 Use `[profile.dev] debug = "line-tables-only"`; Cargo's test profile inherits it.
