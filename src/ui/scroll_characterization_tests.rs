@@ -46,7 +46,11 @@ fn fixture(
         first_ordinal,
         selection_revision: 0,
     });
-    (ui, Terminal::new(TestBackend::new(width, height)).unwrap())
+    // Preserve the characterized history viewport beside both fixed regions.
+    (
+        ui,
+        Terminal::new(TestBackend::new(width, height + 5)).unwrap(),
+    )
 }
 fn single(rows: usize) -> (UiState, Terminal<TestBackend>) {
     fixture(vec![node("long", numbered("R", rows))], 1, 0, 60, 33)
@@ -67,7 +71,7 @@ fn rows(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     use crate::ui::text_width::UnicodeWidthStr;
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
-    (2..buffer.area.height - 11)
+    (2..buffer.area.height - 16)
         .map(|y| {
             let mut row = String::new();
             let mut x = 1;
@@ -650,11 +654,11 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
     let (mut ui, mut t) = single(200);
     let tail = rows(&mut ui, &mut t);
     // Following: a narrower and a taller terminal keep the tail.
-    t.backend_mut().resize(40, 33);
+    t.backend_mut().resize(40, 38);
     let narrow = rows(&mut ui, &mut t);
     assert!(last_text(&narrow) == "R199", "{narrow:?}");
     assert!(ui.view().navigation.follow());
-    t.backend_mut().resize(60, 33);
+    t.backend_mut().resize(60, 38);
     assert_eq!(rows(&mut ui, &mut t), tail);
     // Paused: the source anchor is unchanged by width and height changes.
     for _ in 0..5 {
@@ -662,12 +666,12 @@ fn resize_keeps_the_source_anchor_and_a_following_tail() {
     }
     let paused = rows(&mut ui, &mut t);
     let anchor = ui.view().navigation.anchor.clone();
-    t.backend_mut().resize(40, 39);
+    t.backend_mut().resize(40, 44);
     rows(&mut ui, &mut t);
     assert_eq!(ui.view().navigation.anchor, anchor);
     assert!(!ui.view().navigation.follow() && ui.view().navigation.request().is_none());
     assert!(ui.view().navigation.scroll.initialized());
-    t.backend_mut().resize(60, 33);
+    t.backend_mut().resize(60, 38);
     assert_eq!(
         rows(&mut ui, &mut t),
         paused,
@@ -704,7 +708,7 @@ fn render_publishes_only_derived_viewport_cache_and_then_settles() {
     assert!(first.7);
     rows(&mut ui, &mut t);
     assert_eq!(state(&ui), first);
-    t.backend_mut().resize(40, 39);
+    t.backend_mut().resize(40, 44);
     rows(&mut ui, &mut t);
     assert_eq!(ui.view().navigation.scroll.width, 38);
     assert_eq!(ui.view().navigation.scroll.height, 26);

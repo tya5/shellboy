@@ -4619,3 +4619,17 @@ and region tests and is explicitly excluded as evidence. Locked compilation
 and strict all-target Clippy pass with warnings denied before branch CI.
 The final palette measurement retains prior snapshots; held is 664/13/4 and
 live/shared/held totals 3532 lines, not a simplicity/performance claim.
+
+### #218 First Final-Tip CI Is Red
+
+`41884515961` on `1ba45e4` fails Ubuntu assertions. Scroll/input fixtures omitted
+the new five-row region; migration preserves their original history viewport,
+row/page/source/resize checks rather than weakening the assertions. Dedicated
+local UI/scroll and the two separately failing shell-output tests are being run.
+No all-OS dispatch or final acceptance yet; no production scroll/shell source
+change is part of this fixture migration.
+
+Corrected fixtures now pass locally: 19 scroll-characterization, 4 input,
+6 integration scrolling and 88 integration UI cases (1 ignored). Both CI-failing
+shell cases pass individually on macOS; the Linux failure remains unexplained,
+not dismissed as flaky. Next: strict local checks and new exact-tip default CI.

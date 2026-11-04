@@ -1527,7 +1527,7 @@ fn cached_history_render_replaces_same_length_source_and_recomputes_resize() {
         selection_revision: 1,
         total_nodes: 1,
     });
-    let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(60, 21)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("AAAA 日本語"));
     let view_revision = ui.view().navigation.view_revision;
@@ -1548,7 +1548,7 @@ fn cached_history_render_replaces_same_length_source_and_recomputes_resize() {
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("BBBB 日本語"));
     assert!(!screen_text(&terminal).contains("AAAA"));
-    let mut narrow = Terminal::new(TestBackend::new(24, 16)).unwrap();
+    let mut narrow = Terminal::new(TestBackend::new(24, 21)).unwrap();
     narrow.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&narrow).contains("BBBB 日本語"));
 }
@@ -1966,7 +1966,7 @@ fn scroll_wheel(ui: &mut UiState, up: bool) -> Vec<UiAction> {
 fn scroll_cells(ui: &mut UiState, terminal: &mut Terminal<TestBackend>) -> Vec<String> {
     terminal.draw(|frame| draw(frame, ui)).unwrap();
     let buffer = terminal.backend().buffer();
-    (2..buffer.area.height - 11)
+    (2..buffer.area.height - 16)
         .map(|y| {
             let mut out = String::new();
             let mut x = 1;
@@ -1986,8 +1986,8 @@ fn wheel_burst_preserves_rows_across_overlapping_async_history_windows_and_prefe
         .collect::<Vec<_>>();
     let mut expected = scroll_fixture(all.clone(), 0, 120);
     let mut actual = scroll_fixture(all[88..].to_vec(), 88, 120);
-    let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -2077,7 +2077,7 @@ fn wheel_during_initial_loading_cannot_replay_on_unrelated_node_prefetch() {
         selection_revision: 0,
         total_nodes: 1,
     });
-    let mut terminal = Terminal::new(TestBackend::new(60, 28)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(60, 33)).unwrap();
     let before = scroll_cells(&mut ui, &mut terminal);
     ui.apply(UiUpdate::NodeWindow {
         thread_id: "scroll-fixture".into(),
@@ -2094,7 +2094,7 @@ fn more_than_u16_wrapped_rows_draw_the_actual_tail_without_scroll_clamping() {
         .map(|i| scroll_fixture_node(i, format!("{}TAIL{i}", "z\n".repeat(30_000))))
         .collect();
     let mut ui = scroll_fixture(nodes, 0, 3);
-    let mut terminal = Terminal::new(TestBackend::new(40, 20)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(40, 25)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(screen_text(&terminal).contains("TAIL2"));
     assert!(scroll_wheel(&mut ui, true).is_empty());
@@ -2129,7 +2129,7 @@ fn long_folded_reasoning_and_inline_markdown_keep_original_body_position_on_resi
     node.presentation = project("assistant_response", &payload, &original, 0);
     render_markdown(&mut node.presentation, 56);
     let mut ui = scroll_fixture(vec![node.clone()], 0, 1);
-    let mut terminal = Terminal::new(TestBackend::new(60, 28)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(60, 33)).unwrap();
     scroll_cells(&mut ui, &mut terminal);
     assert!(scroll_wheel(&mut ui, true).is_empty());
     scroll_cells(&mut ui, &mut terminal);
@@ -2149,7 +2149,7 @@ fn long_folded_reasoning_and_inline_markdown_keep_original_body_position_on_resi
         view_revision: ui.view().navigation.view_revision,
         node,
     });
-    terminal.backend_mut().resize(48, 28);
+    terminal.backend_mut().resize(48, 33);
     scroll_cells(&mut ui, &mut terminal);
     assert_eq!(ui.view().navigation.anchor, anchor);
     assert!(!screen_text(&terminal).contains("非表示の推論。"));
@@ -2181,7 +2181,7 @@ fn derived_tool_excerpt_moves_by_visible_rows() {
         tool.execution_id = Some("excerpt-execution".into());
     }
     let mut ui = scroll_fixture(vec![node], 0, 1);
-    let mut terminal = Terminal::new(TestBackend::new(60, 17)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(60, 22)).unwrap();
     let closed = scroll_cells(&mut ui, &mut terminal);
     assert!(
         !closed
@@ -2290,8 +2290,8 @@ fn body_window_boundaries_replay_visible_rows_with_real_frontend_overlap() {
             };
             ui.view_mut().navigation.select_reading();
         }
-        let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
-        let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
+        let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
+        let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
         assert_eq!(
             scroll_cells(&mut actual, &mut a),
             scroll_cells(&mut expected, &mut b)
@@ -2361,7 +2361,7 @@ fn late_body_reply_cannot_append_an_older_node_after_the_current_path_window() {
         .map(|i| scroll_fixture_node(i, format!("CURRENT {i}\n")))
         .collect();
     let mut ui = scroll_fixture(nodes, 50, 55);
-    let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(80, 17)).unwrap();
     let before = scroll_cells(&mut ui, &mut terminal);
     scroll_wheel(&mut ui, false);
     ui.apply(UiUpdate::NodeWindow {
@@ -2398,8 +2398,8 @@ fn slow_downward_wheels_remain_monotonic_across_settled_body_windows() {
             char_offset: 104_650,
         };
     }
-    let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 38)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 38)).unwrap();
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -2452,8 +2452,8 @@ fn slow_forward_history_page_keeps_the_visible_rows_until_the_reply() {
             char_offset: 0,
         };
     }
-    let mut a = Terminal::new(TestBackend::new(60, 53)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 53)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 58)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 58)).unwrap();
     let before = scroll_cells(&mut actual, &mut a);
     scroll_cells(&mut expected, &mut b);
     let actions = scroll_wheel(&mut actual, false);
@@ -2525,7 +2525,7 @@ fn restored_anchor_outside_the_cached_body_loads_before_any_scroll_input() {
         },
         follow: false,
     });
-    let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+    let mut terminal = Terminal::new(TestBackend::new(80, 33)).unwrap();
     terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
     assert!(
         ui.take_deferred_actions()
@@ -2572,8 +2572,8 @@ fn ninety_backward_rows_prefetch_one_window_and_show_loading_until_replay_finish
         };
         ui.view_mut().navigation.select_reading();
     }
-    let mut a = Terminal::new(TestBackend::new(100, 36)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(100, 36)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(100, 41)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(100, 41)).unwrap();
     assert_eq!(
         scroll_cells(&mut actual, &mut a),
         scroll_cells(&mut expected, &mut b)
@@ -2661,8 +2661,8 @@ fn forward_page_loads_the_first_unknown_neighbor_before_using_later_rows() {
             char_offset: "N3 row 000\n".chars().count() * 95,
         };
     }
-    let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
     scroll_cells(&mut actual, &mut a);
     scroll_cells(&mut expected, &mut b);
     let actions = actual.event(key(KeyCode::PageDown));
@@ -2738,8 +2738,8 @@ fn zero_cache_navigation_converges_across_many_unknown_nodes_without_pin_growth(
         node_id: Some("scroll-0".into()),
         char_offset: 0,
     };
-    let mut a = Terminal::new(TestBackend::new(60, 28)).unwrap();
-    let mut b = Terminal::new(TestBackend::new(60, 28)).unwrap();
+    let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
+    let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
     let painted_body_rows = scroll_cells(&mut actual, &mut a).len();
     // Even a one-line source consumes a visible row. Retention may protect
     // that actual viewport plus the three-node source neighborhood, never the
@@ -2872,8 +2872,8 @@ fn adjacent_partial_prefix_and_suffix_gaps_preserve_full_reference_page_position
                     char_offset: if up { 0 } else { 95 * row_chars },
                 };
             }
-            let mut a = Terminal::new(TestBackend::new(60, 33)).unwrap();
-            let mut b = Terminal::new(TestBackend::new(60, 33)).unwrap();
+            let mut a = Terminal::new(TestBackend::new(60, 38)).unwrap();
+            let mut b = Terminal::new(TestBackend::new(60, 38)).unwrap();
             scroll_cells(&mut actual, &mut a);
             scroll_cells(&mut expected, &mut b);
             let code = if up {
@@ -2933,7 +2933,7 @@ fn cancelling_an_inflight_scroll_allows_later_resize_and_rejects_its_stale_body(
         node.presentation = project("assistant_response", &payload, &text, node.base_char_offset);
         render_markdown(&mut node.presentation, 76);
         let mut ui = scroll_fixture(vec![node.clone()], 0, 1);
-        let mut terminal = Terminal::new(TestBackend::new(80, 28)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(80, 33)).unwrap();
         scroll_cells(&mut ui, &mut terminal);
         let mut request = None;
         for _ in 0..10 {
@@ -2983,7 +2983,7 @@ fn cancelling_an_inflight_scroll_allows_later_resize_and_rejects_its_stale_body(
         assert_eq!(ui.view().nodes()[0].text, text);
         assert!(!ui.view().navigation.is_loading());
         ui.take_deferred_actions();
-        terminal.backend_mut().resize(68, 28);
+        terminal.backend_mut().resize(68, 33);
         scroll_cells(&mut ui, &mut terminal);
         assert!(
             ui.take_deferred_actions()
