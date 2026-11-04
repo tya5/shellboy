@@ -268,7 +268,7 @@ impl UiState {
                         })
                     }
                     MouseEventKind::Down(event::MouseButton::Left) => {
-                        self.active_view_mut().live_work.active = false;
+                        self.active_view_mut().live_work.region.active = false;
                         self.history_click(mouse.column, mouse.row)
                     }
                     _ => vec![],
@@ -278,7 +278,7 @@ impl UiState {
                 if self.top_overlay().is_none()
                     && mouse.kind == MouseEventKind::Down(event::MouseButton::Left) =>
             {
-                self.active_view_mut().live_work.active = false;
+                self.active_view_mut().live_work.region.active = false;
                 vec![]
             }
             Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -391,7 +391,7 @@ impl UiState {
                 KeyCode::End => {
                     let view = self.active_view_mut();
                     view.items.active = false;
-                    view.live_work.active = false;
+                    view.live_work.region.active = false;
                     view.follow_tail();
                     return view
                         .thread_id

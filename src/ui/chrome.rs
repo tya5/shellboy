@@ -464,7 +464,7 @@ pub(super) fn footer_lines_with_db(
         .snapshot
         .as_ref()
         .is_some_and(|snapshot| snapshot.turn_in_progress)
-        && view.live_work.area.is_none()
+        && view.live_work.region.area.is_none()
         && let Some(work) = view.live_work.footer()
     {
         facts.push(work);
