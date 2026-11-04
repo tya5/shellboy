@@ -4451,3 +4451,16 @@ comparison measured 11.170/11.905/10.257s with the previous full policy versus
 0.096/0.085/0.161s with explicit index-only skip. These isolate FK policy on
 identical startup code, not UI-ready latency or cold-cache performance. See the
 #210 acceptance record for stage times, controls and CI handoff evidence.
+#151 objection 7 documentation-only follow-up: the resource guide now preserves
+run 41526337673's completed Shellboy serve/TUI-hosted cases alongside the failed
+compare/overall status. N=20 median observed maximum PSS was 34,223 versus 28,576
+KiB across different owners/cases, not a TUI increment or improvement. Later
+run 41553439861 passed compare but is a separate experiment, not a repair of the
+TUI result. The bundled-guide check requires the table, source SHAs and limits.
+Only the approved guide/status/acceptance/docs_cli files change; no runtime,
+new benchmark, jcode execution or raw-artifact publication. Local macOS format,
+locked check/tests, binary build and the focused bundled-guide test passed;
+layout/watchdog and language gates passed. Final-tip default then explicit
+three-OS CI is reported in the issue handoff; W8 reviews and lands.
+Artifact 13123328064 permanent storage is outside this change and goes
+to the reviewer's morning report, not an implementation or publication here.
