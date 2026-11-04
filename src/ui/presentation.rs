@@ -816,7 +816,11 @@ fn node_lines_with_header(
             lines = indented_wrap(vec![lines.remove(0)], width);
         }
     }
-    if node.presentation.kind == PresentationKind::Event && lines.len() > 1 {
+    if matches!(
+        node.presentation.kind,
+        PresentationKind::Event | PresentationKind::Interrupted
+    ) && lines.len() > 1
+    {
         let body = lines.split_off(1);
         lines.extend(indented_wrap(body, width));
     }
@@ -5292,6 +5296,82 @@ mod conversation_item_tests {
                         assert!(
                             row.width() <= usize::from(width),
                             "{language:?} {width}: {shown}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn notice_and_interruption_bodies_start_after_the_mark_bilingually() {
+        fn render(
+            kind: &str,
+            value: serde_json::Value,
+            language: UiLanguage,
+            width: u16,
+        ) -> Vec<String> {
+            let payload = serde_json::json!({"text":value.to_string()});
+            let text = crate::history::text_of_payload(&payload);
+            let presentation = crate::presentation::project(kind, &payload, &text, 0);
+            let node = UiNode {
+                node_id: format!("{kind}-{language:?}"),
+                role: if kind == "event" { "event" } else { "" }.into(),
+                text: text.clone(),
+                total_chars: text.chars().count(),
+                presentation,
+                ..Default::default()
+            };
+            node_lines(language, &node, false, 0, width, &mut Vec::new())
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        }
+
+        let shutdown = serde_json::json!({
+            "kind":"app_shutdown",
+            "change":{"result_uncertain":true,"automatic_replay":false,
+                "runs":{"count":1},"turns":{"count":1},"shells":{"count":1},
+                "unreflected_messages":{"count":1}}
+        });
+        let previous_interruption = serde_json::json!({
+            "kind":"previous_instance_interrupted",
+            "change":{"result_uncertain":true,"automatic_replay":false,
+                "runs":{"count":1},"turns":{"count":1}}
+        });
+        let previous_work = serde_json::json!({
+            "kind":"future_interruption_record",
+            "change":{"result_uncertain":true,"automatic_replay":false,"shells":{"count":1}}
+        });
+        let index_pause = serde_json::json!({
+            "kind":"index_state",
+            "change":{"before":{"paused":false},"after":{"paused":true,"paused_at":"2026-11-04T14:40:00Z","pause_kind":"very_long_provider_failure_reason_that_wraps"}}
+        });
+
+        for (kind, value) in [
+            ("interruption_context", shutdown),
+            ("interruption_context", previous_interruption),
+            ("interruption_context", previous_work),
+            ("event", index_pause),
+        ] {
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                for width in [80, 18] {
+                    let rows = render(kind, value.clone(), language, width);
+                    assert!(rows.len() > 2, "{kind} {language:?} {width}: {rows:?}");
+                    assert!(
+                        rows[0].starts_with(if kind == "event" { "⁂ " } else { "⊘ " }),
+                        "{rows:?}"
+                    );
+                    for row in rows.iter().skip(1) {
+                        if !row.trim().is_empty() {
+                            assert!(
+                                row.starts_with("  "),
+                                "{kind} {language:?} {width}: {row:?}"
+                            );
+                        }
+                        assert!(
+                            Line::from(row.as_str()).width() <= usize::from(width),
+                            "{row:?}"
                         );
                     }
                 }
