@@ -322,3 +322,21 @@ and the existing measured-width branch vocabulary are shared presentation,
 not a reason to move live-work clocks or message admission into the framework.
 The structural follow-up retains the original pinned cell/style golden; reverse
 selection and the held region remain later intentional behavior changes.
+
+Held-region rows use the existing bounded current-input worker projection (128
+saved receipts and 512-character excerpts), not UI database reads or full message
+copies. The projection carries the saved sender kind via `MessageSender` and a
+separate completion-scheduled fact: `deliver=complete` together with the current
+completion reservation or saved `delivery_context.reason=run_completion`.
+`sender_thread=None` does not imply human. Missing/invalid sender kind uses the
+existing external/unknown presentation fallback, never a new glyph. Recovery
+transfer out of the completion reservation must stop presenting it as scheduled
+unless the saved delivery context actually records completion admission.
+
+The shared region also retains at most its displayed capacity of stable IDs from
+its most recent frame. Held source/status and cancellation use these IDs rather
+than reselecting by an index into a newer, unpainted worker snapshot. Cancellation
+freezes this ID vector in the existing confirmation action; new arrivals are not
+added. Accepting local rows have a distinct UI-local key and bounded excerpt,
+not a fabricated receipt ID. Region ownership for Alt+W is UI-process state and
+survives folding; it has no clock, database, worker, generation or payload role.

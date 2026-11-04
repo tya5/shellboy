@@ -426,7 +426,11 @@ or a click on the heading folds and unfolds the body; it starts open and shows
 exactly `ui.live_work_rows` rows (blank-padded), so its height changes only when
 you toggle it or resize the terminal.
 
-Use Shift+Tab or click a work row to focus it. Space toggles a shell's bounded
+Shift+Tab visits displayed live-work rows, then held-input rows, then returns to
+the composer. Clicking a row focuses it directly. Focus uses reverse video and
+bold, including with no colors; no selection caret is added. Alt+W folds the
+focused region, or click its heading. Fold state lasts only for this UI process.
+Space toggles a shell's bounded
 output preview, F6 opens the matching inspection form, and `o` opens a selected
 child conversation. Esc returns to the composer. Opening output neither runs
 nor stops the command. An open preview refreshes at most twice per second;
@@ -434,6 +438,28 @@ large backlogs skip to a marked tail and uncertain decoding remains explicit.
 Closed/covered views and conversation switching stop that preview subscription.
 F2 keeps its existing frozen-screen behavior. Use `/status` or F8 when more than
 the configured row limit or full saved facts are needed.
+
+### Held input
+
+A second `◉ Held input` region sits below live work and above the composer. It
+remains visible as `None` when empty and never blinks. Its fixed, blank-padded
+body has `ui.held_input_rows` rows (1 through 10, default 3), independently of
+live work. Small screens show fewer rows; a hidden count includes saved rows
+beyond the bounded worker page. Rows show bounded excerpts and saved receipt
+state/reason; narrow rows omit time before shortening the reason.
+
+Saved-origin marks are `›` for a person, `⇥` for external CLI or unknown origin,
+`↳` for model messages, and `↻` for completion-scheduled input. The latter uses
+the saved completion reservation/delivery context, not merely the original
+`deliver` request; recovery-wait messages do not retain that mark by guesswork.
+Submitting local drafts are shown without copying their full text.
+
+On a held row, Space opens the saved original and F6/Enter requests its status
+asynchronously. `d` asks to cancel the selected saved ID; `a` asks to cancel the
+saved IDs actually displayed in this region. Both require confirmation. An
+unsaved submitting row has no saved source or cancellation ID yet. `/queue`
+still provides the wider saved-input list, source/status and cancellation;
+`/replies` and saved-draft restore are unchanged.
 
 ### Provider content filters and incomplete responses
 

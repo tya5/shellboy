@@ -457,6 +457,15 @@ shown above the composer. It defaults to 3 and accepts integers from 1 to 10;
 other values are configuration errors. Small terminals may show fewer rows and
 report the hidden count. Restart the owner after changing the setting.
 
+## Held Input Rows
+
+`ui.held_input_rows` independently controls the fixed held-input body below live
+work and above the composer. It defaults to 3 and accepts integers from 1 to 10;
+zero, out-of-range values and other types are configuration errors. Empty bodies
+are blank-padded, with a persistent `None` heading. Small terminals can reduce
+the body and show a hidden count. Alt+W or heading clicks fold each region for
+this UI process only; fold state is not saved to the configuration or database.
+
 ## Motion
 
 `ui.motion = "on"` (default) lets at most one thing move in each screen region:
@@ -576,7 +585,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `io` | `output_buffer_bytes=8388608`, `output_batch_bytes=65536`, `output_batch_ms=25` | Raw collection buffer 8MiB, DB batch 64KiB/25ms |
 | `workers` | `attachment=2`, `control_file=1` | Bounded file-worker counts |
 | `indexing` | `auto_history=true`, `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
-| `ui` | `language="en"`, `max_fps=30`, `live_work_rows=3`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"`, `motion="on"` | UI language (`en` or `ja`), rendering, motion, owned work rows, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait. Keyboard enhancement is negotiated at runtime, not configured here; Ctrl+J is the portable fallback and Shift+Enter requires terminal support. |
+| `ui` | `language="en"`, `max_fps=30`, `live_work_rows=3`, `held_input_rows=3`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"`, `motion="on"` | UI language (`en` or `ja`), rendering, motion, independent owned-work and held-input rows, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait. Keyboard enhancement is negotiated at runtime, not configured here; Ctrl+J is the portable fallback and Shift+Enter requires terminal support. |
 | `logging` | `file_bytes=5242880`, `files=3` | Diagnostic logs, 5MiB ×3 |
 
 `cache.history_bytes` exclusively budgets the cross-Thread send-history conversion LRU. `body_bytes` retains UI bodies and node metadata; `layout_bytes` budgets render layouts including widths/folds; `attachment_base64_bytes` budgets converted attachments. These are not a whole-process RSS cap including active viewport/HTTP pins, SQLite/OS caches, runtime resources, or saved history. Cache eviction does not delete history; data is fetched again as needed. A zero cache budget disables retained caching, not all active working memory.

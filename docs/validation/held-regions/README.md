@@ -118,3 +118,57 @@ A test-only import was cfg-gated after the initial strict Clippy failure; correc
 golden/check --tests/strict all-target Clippy pass. The first pushed checkpoint's
 default CI `41868419181` passes at `07f78f2`; this follow-up has separate exact-tip
 validation and is not final held-feature or main landing evidence.
+
+## Stage 2: Held Input Behavior
+
+This stage intentionally changes the layout and focus presentation. It is not
+covered by the stage-1 claim of unchanged visuals. Live work and held input now
+share `RegionRow` clipping/alignment/palette/focus painting in addition to region
+geometry, heading and stable-identity state. Held input retains only borrowed
+saved/accepting rows while drawing and copies at most the displayed capacity of
+stable IDs into frame state. Domain receipt facts, source requests, status and
+confirmation actions stay in the saved-input path; no new worker or persistence
+is added. The bounded worker projection classifies the saved sender and current
+completion reservation/delivery context, rather than guessing from null Thread
+IDs. Existing history completion-context logic and its provenance are unchanged.
+
+The behavior keeps the original fingerprint value. For focused matrix cases the
+test first asserts the approved blank caret slot and reverse/bold visible cells,
+then reverses exactly those changes. Ratatui's non-emitted wide-glyph continuation
+cells are excluded from leading-cell style assertions. Fully default spaces are
+restored to `Cell::EMPTY`: a selected fresh TestBackend draw emits `Some(" ")`
+where the original renderer skips the equal `None` cell, and their derived Debug
+representations differ despite identical symbols/colors/modifiers. This is not
+permission to normalize any nonblank or nondefault cell. A temporary copy of
+the checkpoint renderer was used locally to compare every normalized Cell and
+Debug representation; it was removed after the original `cce04517ab437b25`
+passed. The pinned golden was never regenerated. The standalone test still
+checks all 864 cases; new held tests separately check the intentionally new
+layout and controls. Neither establishes Windows font pixels.
+
+`after-held-behavior.json` is separate from every stage-1 measurement. Physical
+lines include tests, comments and blanks; parameters include `self` and remain
+lexical, not a complexity or performance measure.
+
+| file | shared-state lines | behavior lines | production functions before/after | max parameters before/after |
+| --- | ---: | ---: | ---: | ---: |
+| live_work.rs | 2466 | 2491 | 35 / 35 | 6 / 6 |
+| region.rs | 337 | 377 | 16 / 18 | 5 / 5 |
+| held_input.rs | 0 | 637 | 0 / 13 | 0 / 4 |
+| message_queue.rs | 1761 | 1793 | 20 / 27 | 5 / 5 |
+| ui.rs | 9712 | 9724 | 131 / 131 | 7 / 7 |
+
+Live work plus shared region plus new held input totals 3505 lines, +702 from
+the shared-state checkpoint's 2803 and +1023 from original live work's 2482.
+This includes 11 held regression tests and focus-delta golden assertions, not a
+claim of code shrinkage or maximum-arity reduction. The old compact height and
+painting functions are still present but disconnected; their separate removal
+stage must record its own measurements rather than overwriting this stage.
+
+At this checkpoint the standalone live-work 33, held 11, region 3, queue 22 and
+worker 10 tests, strict held-row config integration test and locked full test
+compilation pass locally. Five disconnected old compact helpers warn as unused
+until their separate removal stage. No behavior/final-tip CI result or landing
+is claimed.
+The final branch must pass default then all-OS CI at one identical SHA and be
+reviewed/integrated by W8. Existing stage-1 CI success is not final-feature CI.

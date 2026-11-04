@@ -51,6 +51,7 @@ pub use inspection::{
     HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot,
     InspectionTarget, ListInspectionScope,
 };
+mod held_input;
 mod message_queue;
 mod models;
 #[allow(dead_code)]
@@ -1803,6 +1804,8 @@ pub struct UiState {
     descendants: watch::DescendantView,
     pub selection_mode: bool,
     pub live_work_collapsed: bool,
+    pub held_input_collapsed: bool,
+    region_owner: held_input::RegionOwner,
     selection_frozen_at: Option<String>,
     pub help_visible: bool,
     // F1 can temporarily cover a popup without discarding its selection/source.
@@ -1923,6 +1926,8 @@ impl UiState {
             descendants: Default::default(),
             selection_mode: false,
             live_work_collapsed: false,
+            held_input_collapsed: false,
+            region_owner: held_input::RegionOwner::Live,
             selection_frozen_at: None,
             help_visible: false,
             help_above_popups: false,
@@ -6685,9 +6690,10 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     } else {
         0
     };
-    let queue_height = message_queue::height(
-        state.view(),
+    let queue_height = held_input::height(
         layout[1].height.saturating_sub(recovery_height),
+        state.held_input_collapsed,
+        state.config.ui.held_input_rows,
     );
     {
         let (collapsed, rows) = (state.live_work_collapsed, state.config.ui.live_work_rows);
@@ -6709,17 +6715,19 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     };
     let queue_area = Rect::new(
         layout[1].x,
-        body_area.bottom() + recovery_height,
+        body_area.bottom() + recovery_height + live_height,
         layout[1].width,
         queue_height,
     );
     let live_area = Rect::new(
         layout[1].x,
-        queue_area.bottom(),
+        body_area.bottom() + recovery_height,
         layout[1].width,
         live_height,
     );
     state.live_work_mut().set_area(live_area);
+    let (fold, cap) = (state.held_input_collapsed, state.config.ui.held_input_rows);
+    held_input::configure(state.active_view_mut(), fold, cap, queue_area);
     let recovery_area = Rect {
         y: body_area.bottom(),
         height: recovery_height,
@@ -6803,7 +6811,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     if let Some(snapshot) = &view.activity.snapshot {
         draw_recovery(frame, recovery_area, snapshot, state.config.ui.language);
     }
-    message_queue::draw_compact(frame, queue_area, view, state.config.ui.language);
+    held_input::draw(frame, queue_area, view, state.config.ui.language);
     live_work::draw(
         frame,
         live_area,
@@ -6829,7 +6837,11 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     let cursor = draw_input(frame, input_area, state, &input, &input_metrics);
     draw_status(frame, layout[3], state);
     state.draw_completions(frame, input_area);
-    if input_body_height > 0 && state.composer_active() {
+    if input_body_height > 0
+        && state.composer_active()
+        && !state.view().live_work.region.active
+        && !state.view().held_input.active
+    {
         frame.set_cursor_position(cursor);
     }
     let popup_area = popup::viewport(area);

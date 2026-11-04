@@ -2,7 +2,7 @@
 //! Saved elapsed bases are independent of the UI-observed Turn clock.
 #[cfg(test)]
 use super::region::fit;
-use super::region::{RegionHit, RegionState, row_columns};
+use super::region::{RegionHit, RegionState};
 use super::*;
 use crate::config::UiLanguage;
 use crate::ui::text_width::glyphs;
@@ -444,6 +444,12 @@ impl LiveWorkView {
         let total = self.rows().len();
         let overflow = self.snapshot.as_ref().is_some_and(|s| s.overflow > 0);
         self.region.set_area(area, total, overflow);
+        self.region.displayed_keys = self
+            .rows()
+            .iter()
+            .take(self.region.visible_rows)
+            .map(|row| row.target.clone())
+            .collect();
         if self.region.selected.is_none() && self.region.visible_rows > 0 {
             self.region.selected = self.rows().first().map(|row| row.target.clone());
         }
@@ -634,11 +640,11 @@ impl LiveWorkView {
             .take(self.region.visible_rows)
             .find(|row| &row.target == selected)
     }
-    fn move_focus(&mut self, down: bool) {
+    pub(super) fn move_focus(&mut self, down: bool) {
         let index = self
             .region
-            .next_index(self.rows().iter().map(|row| &row.target), down);
-        self.region.selected = self.rows().get(index).map(|row| row.target.clone());
+            .next_index(self.region.displayed_keys.iter(), down);
+        self.region.selected = self.region.displayed_keys.get(index).cloned();
     }
     fn toggle(&mut self) {
         let Some(LiveWorkRow {
@@ -841,12 +847,7 @@ pub(super) fn draw(
         };
         let prefix = format!(
             "{}{}",
-            super::region::numbered_branch(
-                last_item && !separate_overflow,
-                index + 1,
-                selected,
-                kind
-            ),
+            super::region::numbered_branch(last_item && !separate_overflow, index + 1, false, kind),
             linked
                 .map(|i| format!("{} [{}] ", glyphs::arrow(), i + 1))
                 .unwrap_or_default()
@@ -855,32 +856,25 @@ pub(super) fn draw(
             "{}{elapsed}{deadline}{age}",
             WorkMessage::state(row).render(view.language)
         );
-        let (label, gap, right) = row_columns(
-            usize::from(area.width),
-            &prefix,
-            if describe_calls
-                && !(view.region.active && view.region.selected.as_ref() == Some(&row.target))
-            {
-                row.description.as_deref().unwrap_or(&row.label)
-            } else {
-                &row.label
-            },
-            &metadata,
-            &overflow,
-        );
-        lines.push(Line::from(vec![
-            Span::styled(prefix, palette.live_work()),
-            Span::styled(label, palette.live_work_content()),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(
-                right,
-                if row.state == "stopping" && !palette.plain() {
+        lines.push(
+            super::region::RegionRow {
+                prefix,
+                label: if describe_calls && !selected {
+                    row.description.as_deref().unwrap_or(&row.label)
+                } else {
+                    &row.label
+                },
+                metadata: &metadata,
+                overflow: &overflow,
+                selected,
+                metadata_style: if row.state == "stopping" && !palette.plain() {
                     Style::default().fg(theme::ATTENTION)
                 } else {
                     Style::default()
                 },
-            ),
-        ]));
+            }
+            .paint(area.width, palette),
+        );
     }
     if separate_overflow {
         lines.push(Line::styled(
@@ -985,28 +979,20 @@ impl UiState {
         self.dirty = true;
     }
     pub(super) fn live_work_key(&mut self, key: KeyEvent) -> Option<Vec<UiAction>> {
-        if !self.composer_active() {
+        if !self.composer_active() || self.has_completions() {
             return None;
-        }
-        if key.code == KeyCode::BackTab
-            && !self.view().live_work.region.active
-            && self.view().live_work.region.visible_rows > 0
-            && !self.has_completions()
-        {
-            self.active_view_mut().items.active = false;
-            self.active_view_mut().live_work.region.active = true;
-            return Some(vec![]);
         }
         if !self.view().live_work.region.active || key.modifiers.contains(KeyModifiers::CONTROL) {
             return None;
         }
         match key.code {
-            KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => {
-                self.active_view_mut().live_work.region.active = false
-            }
+            KeyCode::Esc | KeyCode::Tab => self.active_view_mut().live_work.region.active = false,
             KeyCode::Up => self.active_view_mut().live_work.move_focus(false),
             KeyCode::Down => self.active_view_mut().live_work.move_focus(true),
-            KeyCode::Enter | KeyCode::Char(' ') => self.active_view_mut().live_work.toggle(),
+            KeyCode::Enter => self.active_view_mut().live_work.toggle(),
+            KeyCode::Char(' ') => {
+                self.active_view_mut().live_work.toggle();
+            }
             KeyCode::Char('o') => {
                 if let Some(LiveWorkRow {
                     target: LiveWorkTarget::ChildRun { thread_id, .. },
@@ -1058,6 +1044,8 @@ impl UiState {
         let index = match self.view().live_work.region.hit(column, row) {
             RegionHit::Outside => return false,
             RegionHit::Heading => {
+                self.region_owner = super::held_input::RegionOwner::Live;
+                self.active_view_mut().held_input.active = false;
                 self.toggle_live_work_section();
                 return true;
             }
@@ -1072,6 +1060,8 @@ impl UiState {
             .map(|row| row.target.clone());
         if let Some(target) = target {
             self.active_view_mut().items.active = false;
+            self.active_view_mut().held_input.active = false;
+            self.region_owner = super::held_input::RegionOwner::Live;
             let live = &mut self.active_view_mut().live_work;
             live.region.active = true;
             live.region.selected = Some(target);
@@ -1907,7 +1897,44 @@ mod tests {
                                 terminal
                                     .draw(|frame| draw(frame, area, &view, palette, true, dim))
                                     .unwrap();
-                                for cell in &terminal.backend().buffer().content {
+                                let mut baseline = terminal.backend().buffer().clone();
+                                if state == 3 || state == 7 {
+                                    // Prove only the approved caret/style delta, then compare
+                                    // every cell against the original, immutable golden.
+                                    use ratatui::style::Modifier;
+                                    let y = area.y + 2;
+                                    let marker_x = area.x + 5; // branch + [1]
+                                    assert_eq!(baseline[(marker_x, y)].symbol(), " ");
+                                    for x in area.x..area.right() {
+                                        // Ratatui resets the non-emitted continuation cell
+                                        // of a wide glyph; its leading cell owns the style.
+                                        let continuation = x > area.x
+                                            && unicode_width::UnicodeWidthStr::width(
+                                                baseline[(x - 1, y)].symbol(),
+                                            ) > 1;
+                                        let cell = &mut baseline[(x, y)];
+                                        if !continuation {
+                                            assert!(
+                                                cell.modifier
+                                                    .contains(Modifier::REVERSED | Modifier::BOLD),
+                                                "{language:?} {width} {policy:?} {state} x={x} {cell:?}"
+                                            );
+                                        }
+                                        cell.modifier.remove(Modifier::REVERSED | Modifier::BOLD);
+                                        if x < area.x + 8 {
+                                            cell.modifier |= palette.live_work().add_modifier;
+                                        }
+                                        // Fresh TestBackend draws omit default blanks. Focus
+                                        // emitted them as Some(" "), equal to EMPTY but with
+                                        // different Debug bytes; restore only empty cells.
+                                        if *cell == ratatui::buffer::Cell::EMPTY {
+                                            *cell = ratatui::buffer::Cell::EMPTY;
+                                        }
+                                    }
+                                    baseline[(marker_x, y)]
+                                        .set_symbol(glyphs::select(glyphs::SELECTED, ">"));
+                                }
+                                for cell in &baseline.content {
                                     for byte in format!("{cell:?}\n").bytes() {
                                         digest =
                                             (digest ^ u64::from(byte)).wrapping_mul(0x100000001b3);
@@ -2135,12 +2162,10 @@ mod tests {
                     assert!(rows[2].starts_with(&format!("{first}[1]")), "{rows:?}");
                     assert!(rows[3].starts_with(&format!("{first}[2]")), "{rows:?}");
                     assert!(rows[4].starts_with(&format!("{last}[3]")), "{rows:?}");
-                    let selected_shell = if observed == Some(1) {
-                        "[1]›$"
-                    } else {
-                        "[1]>$"
-                    };
-                    assert!(rows[2].contains(selected_shell), "{rows:?}");
+                    assert!(rows[2].contains("[1] $"), "{rows:?}");
+                    assert!(buffer[(0, 2)].modifier.contains(
+                        ratatui::style::Modifier::REVERSED | ratatui::style::Modifier::BOLD
+                    ));
                     assert!(rows[3].contains("↳") && rows[4].contains("⋯"), "{rows:?}");
                     let arrow = if observed == Some(1) {
                         "→ [1]"

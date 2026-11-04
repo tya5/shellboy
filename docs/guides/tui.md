@@ -120,7 +120,8 @@ Truncated work and tool rows use
 `…` only when the measurement is one column; otherwise they use `.`. No
 terminal width is guessed.
 The one-column kind glyph is `$` for a shell, `↳` for a child Run, and `⋯`
-for a saved wait; `›` marks selection. These fixed-width glyphs do not depend
+for a saved wait. Selection uses reverse video and bold, without a caret.
+These fixed-width glyphs do not depend
 on color. An overflow line uses the last branch; blank padding has no connector.
 
 The composer follows displayed line count, normally limited to one quarter of screen height and at most eight lines; small screens prioritize a three-line control area. Folded pastes become short numbered chips; expand/edit/remove with `/paste NUMBER show|edit|remove`.
@@ -642,3 +643,21 @@ Option B retains existing sender glyphs. Original rows and queued requests show
 saved state tags. A reply row shows `Reply:` and a width-limited original excerpt.
 Japanese UI uses `返事待ち`, `返事済み`, `返事なし`, `取消`, `相手削除`, and `返事:`.
 No new reply glyph is introduced.
+
+## Held Input Region
+
+The fixed `◉ Held input` region follows live work and precedes the composer.
+Its heading persists as `None` when empty and never blinks. The body reserves
+`ui.held_input_rows` rows (1..10, default 3), independently of live work; small
+screens can show fewer rows with an explicit hidden count. Shift+Tab traverses
+the displayed live-work rows, then held rows, then returns to the composer.
+Alt+W folds the last focused region; clicking either heading folds that region.
+A focused row uses reverse video and bold without a caret, even without colors.
+
+Held marks use saved sender/completion facts: person `›`, external CLI/unknown
+`⇥`, model `↳`, completion-scheduled `↻`. State and hold reason appear on the
+right; time is omitted before the reason is shortened. Space opens a saved
+original, F6/Enter requests status, and `d` / `a` confirms cancellation of the
+selected / actually displayed saved IDs. Submitting local drafts have bounded
+excerpts and no invented saved cancellation ID. `/queue`, `/replies` and draft
+restore remain available for the wider saved-input and reply workflows.

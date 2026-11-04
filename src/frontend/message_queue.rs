@@ -18,7 +18,7 @@ pub(super) fn query(
     )?;
     // SQLite returns bounded text fragments; never load 128 full message blobs
     // merely to draw a preview. Full canonical content stays source-addressable.
-    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,r.sender_json,r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id),COALESCE(json_extract(r.result_json,'$.reply.state')='pending',0) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
+    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,substr(r.sender_json,1,8193),r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id),COALESCE(json_extract(r.result_json,'$.reply.state')='pending',0),COALESCE(json_extract(r.result_json,'$.deliver')='complete' AND (r.hold_reason='run_completion' OR json_extract(r.result_json,'$.delivery_context.reason')='run_completion'),0) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
     let items = stmt
         .query_map([thread], |row| {
             let sender: String = row.get(2)?;
@@ -32,6 +32,8 @@ pub(super) fn query(
                 message_id: row.get(0)?,
                 operation_id: row.get(1)?,
                 sender_thread,
+                sender_kind: crate::protocol::MessageSender::from_saved(Some(&sender)).kind,
+                completion_scheduled: row.get(11)?,
                 created_at: row.get(3)?,
                 held: row.get::<_, String>(4)? == "held",
                 hold_reason: row.get(5)?,
@@ -532,6 +534,74 @@ mod tests {
         )
         .unwrap();
     }
+    #[test]
+    fn held_region_projects_saved_sender_and_completion_facts_without_null_guessing() {
+        use crate::protocol::SenderKind;
+        let db = fixture();
+        for (id, sender, expected) in [
+            (
+                "human",
+                serde_json::json!({"kind":"human"}),
+                SenderKind::Human,
+            ),
+            (
+                "external",
+                serde_json::json!({"kind":"external_cli"}),
+                SenderKind::ExternalCli,
+            ),
+            ("legacy-null", Value::Null, SenderKind::Unknown),
+            (
+                "incomplete-model",
+                serde_json::json!({"kind":"model", "thread_id":"other"}),
+                SenderKind::Unknown,
+            ),
+            (
+                "model",
+                serde_json::json!({"kind":"model", "thread_id":"other", "instance_id":"i", "run_id":"r", "turn_id":"t", "execution_id":"e"}),
+                SenderKind::Model,
+            ),
+        ] {
+            input(
+                &db,
+                id,
+                "held",
+                "unadmitted",
+                "synthetic excerpt",
+                sender,
+                false,
+            );
+            let pending = query(&db, "thread").unwrap();
+            let item = pending
+                .items
+                .iter()
+                .find(|item| item.message_id == id)
+                .unwrap();
+            assert_eq!(item.sender_kind, expected);
+            assert!(!item.completion_scheduled);
+        }
+        db.execute("UPDATE receipt SET hold_reason='run_completion',result_json='{\"deliver\":\"complete\"}' WHERE message_node_id='external'", []).unwrap();
+        let completion = |db: &Connection| {
+            query(db, "thread")
+                .unwrap()
+                .items
+                .into_iter()
+                .find(|item| item.message_id == "external")
+                .unwrap()
+                .completion_scheduled
+        };
+        assert!(completion(&db));
+        db.execute(
+            "UPDATE receipt SET hold_reason='recovery_wait' WHERE message_node_id='external'",
+            [],
+        )
+        .unwrap();
+        assert!(!completion(&db));
+        db.execute("UPDATE receipt SET hold_reason=NULL,state='accepted',result_json='{\"deliver\":\"complete\",\"delivery_context\":{\"reason\":\"run_completion\"}}' WHERE message_node_id='external'", []).unwrap();
+        assert!(completion(&db));
+        db.execute("UPDATE receipt SET result_json='{\"deliver\":\"next\",\"delivery_context\":{\"reason\":\"run_completion\"}}' WHERE message_node_id='external'", []).unwrap();
+        assert!(!completion(&db));
+    }
+
     #[test]
     fn queue_uses_saved_sender_admission_membership_and_original_receipt_order() {
         let db = fixture();
