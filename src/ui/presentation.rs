@@ -325,11 +325,11 @@ fn node_lines_inner(
         } else {
             previous_tool = None;
         }
-        if let Some(rendered) = block.rendered.as_ref().filter(|rendered| {
-            rendered.width == width
-                && !rendered.omitted
-                && (!block.source_exact || start <= block.source_start)
-        }) {
+        if let Some(rendered) = block
+            .rendered
+            .as_ref()
+            .filter(|rendered| rendered.width == width && !rendered.omitted)
+        {
             let mut lines = rendered.lines.clone();
             for span in lines.iter_mut().flat_map(|line| &mut line.spans) {
                 if let Some(marker) = span.style.underline_color {
@@ -349,6 +349,24 @@ fn node_lines_inner(
             }
             out.extend(lines);
         } else {
+            if matches!(block.kind, BlockKind::Prose | BlockKind::Reasoning)
+                && block.source_exact
+                && (block
+                    .rendered
+                    .as_ref()
+                    .is_none_or(|rendered| rendered.omitted || rendered.width != width)
+                    || (start > block.source_start && start < block.source_end))
+            {
+                out.push(Line::from(Span::styled(
+                    crate::ui::i18n::local!(
+                        language,
+                        "Markdown 表示を更新しています…",
+                        "Updating Markdown preview…"
+                    ),
+                    Style::default().fg(theme::MUTED),
+                )));
+                continue;
+            }
             let text = if block.source_exact
                 && start > block.source_start
                 && block.source_end - block.source_start == block.text.chars().count()
@@ -4376,6 +4394,85 @@ mod tests {
         let lines = node_lines(UiLanguage::Ja, &node, false, 0, width, &mut targets);
         (node, lines, targets)
     }
+    fn line_text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .flat_map(|line| &line.spans)
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn markdown_fallbacks_keep_raw_syntax_offscreen_for_anchor_width_and_omission() {
+        let text = "A paragraph with **bold** and `code` plus [link](https://example.com).\n";
+        let mut projection =
+            crate::presentation::project("assistant", &serde_json::json!({"text":text}), text, 0);
+        crate::presentation::render_markdown(&mut projection, 40);
+        let node = UiNode {
+            node_id: "fallback".into(),
+            role: "assistant".into(),
+            text: text.into(),
+            total_chars: text.chars().count(),
+            presentation: projection,
+            ..Default::default()
+        };
+        let large = format!("# Huge\n\n{}", "**bold** text\n\n".repeat(6000));
+        let (omitted_node, _, _) = markdown_fixture(&large, 42);
+        assert!(omitted_node.presentation.metadata_limited);
+
+        for language in [UiLanguage::Ja, UiLanguage::En] {
+            let mut targets = Vec::new();
+            let anchored = line_text(&node_lines(language, &node, false, 15, 42, &mut targets));
+            assert!(
+                anchored.contains("bold") && !anchored.contains("**"),
+                "mid-block anchor language={language:?}: rendered={:?} lines={anchored:?}",
+                node.presentation
+                    .blocks
+                    .iter()
+                    .map(|block| (
+                        block.kind.clone(),
+                        block.source_start,
+                        block.source_end,
+                        block.source_exact,
+                        block
+                            .rendered
+                            .as_ref()
+                            .map(|rendered| (rendered.width, rendered.omitted))
+                    ))
+                    .collect::<Vec<_>>()
+            );
+
+            let resized = line_text(&node_lines(language, &node, false, 0, 52, &mut targets));
+            assert!(resized.contains(if language == UiLanguage::Ja {
+                "Markdown 表示を更新"
+            } else {
+                "Updating Markdown preview"
+            }));
+            assert!(
+                !resized.contains("**bold**"),
+                "width-change fallback: {resized:?}"
+            );
+
+            let omitted = line_text(&node_lines(
+                language,
+                &omitted_node,
+                false,
+                0,
+                42,
+                &mut targets,
+            ));
+            assert!(omitted.contains(if language == UiLanguage::Ja {
+                "Markdown 表示を更新"
+            } else {
+                "Updating Markdown preview"
+            }));
+            assert!(
+                !omitted.contains("**bold**"),
+                "metadata-limit fallback: {omitted:?}"
+            );
+        }
+    }
+
     fn marked_text(lines: &[Line<'static>], targets: &[std::sync::Arc<str>], url: &str) -> String {
         let index = targets
             .iter()

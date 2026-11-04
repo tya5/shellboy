@@ -9820,3 +9820,8 @@ query from a 249 ms warm median to 0.064 ms. The thread selector returned the
 same nine IDs and fell from 70 ms to 8.8 ms warm. All timings are local arm64
 macOS / SQLite 3.51 observations, not startup timing guarantees; sample
 boundaries differ. The one snapshot was deleted after measurement.
+## #221 Markdown raw fallback (in progress)
+
+- Synthetic renderer tests reproduced raw Markdown for a mid-block anchor, width mismatch, and `rendered.omitted` after the metadata limit; the display regression now expects rendered content or a localized placeholder, never raw Markdown syntax.
+- Anchored reads use an 8 KiB body window, extended up to 64 KiB when needed to retain a nearby fenced-code opener; an omitted projection gets one retry per thread/generation/view-revision/node/width/anchor. The worker omission/retry case, bilingual presentation assertions, width reload, and focused regression suite pass locally.
+- One local worker measurement: 64,329-byte full body 18 ms; 4,841-byte anchored window 2 ms. Dense anchored windows can still be omitted by the metadata budget; the UI retries once and stays on the localized placeholder rather than exposing Markdown source. Verified locally: `cargo fmt -- --check`; `cargo test --lib markdown_` (11 passed), anchored-window and fence tests, monotonic rows test, and `cargo check --tests`. JA and EN assertions cover anchor/width/omission fallback. Full standard check, final diff review, and hosted CI remain pending; no hosted CI result is claimed.

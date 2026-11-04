@@ -4077,16 +4077,58 @@ pub async fn progress(
     Ok(projection.poll_running)
 }
 
+const MAX_ANCHORED_BODY_BYTES: usize = 8 * 1024;
+fn open_code_fence_before(text: &str, end: usize) -> Option<usize> {
+    let mut open: Option<(usize, u8, usize)> = None;
+    let mut line_start = 0;
+    for line in text[..end].split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        let indent = content.bytes().take_while(|byte| *byte == b' ').count();
+        if indent <= 3 {
+            let tail = &content[indent..];
+            let marker = tail.as_bytes().first().copied();
+            if matches!(marker, Some(b'`' | b'~')) {
+                let count = tail
+                    .bytes()
+                    .take_while(|byte| Some(*byte) == marker)
+                    .count();
+                if count >= 3 {
+                    if let Some((_, open_marker, open_count)) = open {
+                        if marker == Some(open_marker)
+                            && count >= open_count
+                            && tail[count..].trim().is_empty()
+                        {
+                            open = None;
+                        }
+                    } else {
+                        open = Some((line_start, marker.unwrap(), count));
+                    }
+                }
+            }
+        }
+        line_start += line.len();
+    }
+    open.map(|(start, _, _)| start)
+}
 fn window(text: &str, offset: Option<usize>) -> (String, usize, usize) {
     let total = text.chars().count();
-    let start = if let Some(offset) = offset {
+    let mut limit = offset.map_or(MAX_BODY_BYTES as usize, |_| MAX_ANCHORED_BODY_BYTES);
+    let mut start = if let Some(offset) = offset {
         text.char_indices()
             .nth(offset.min(total).saturating_sub(512))
             .map_or(text.len(), |(index, _)| index)
     } else {
         text.ceil_char_boundary(text.len().saturating_sub(MAX_BODY_BYTES as usize))
     };
-    let end = text.floor_char_boundary((start + MAX_BODY_BYTES as usize).min(text.len()));
+    if offset.is_some()
+        && let Some(fence_start) = open_code_fence_before(text, start)
+        && start - fence_start <= MAX_BODY_BYTES as usize
+    {
+        let requested_end = start + limit;
+        start = fence_start;
+        limit = (requested_end - start).min(MAX_BODY_BYTES as usize);
+    }
+    let end = text.floor_char_boundary((start + limit).min(text.len()));
     (
         text[start..end].into(),
         text[..start].chars().count(),
@@ -4478,6 +4520,91 @@ mod stream_tests {
         assert_eq!(times[1].thread_id, "unknown");
         assert_eq!(times[1].date_time, "unknown timezone/date");
         assert_eq!(times[1].time, times[1].raw_updated_at);
+    }
+
+    #[test]
+    fn anchored_history_body_windows_are_smaller_and_centered_near_the_anchor() {
+        let text = "0123456789界".repeat(5000);
+        let (window, base, total) = super::window(&text, Some(30_000));
+        assert!(window.len() <= super::MAX_ANCHORED_BODY_BYTES);
+        assert!(base <= 30_000 && base + window.chars().count() > 30_000);
+        assert_eq!(total, text.chars().count());
+
+        let (tail, _, _) = super::window(&text, None);
+        assert!(tail.len() <= super::MAX_BODY_BYTES as usize);
+        assert!(tail.len() > window.len());
+    }
+
+    #[test]
+    fn anchored_code_window_keeps_its_fence_open_and_close_delimiters() {
+        let prefix = "ordinary text\n".repeat(900);
+        let code = format!("```rust\n{}\n```\n", "let value = 42;\n".repeat(400));
+        let source = format!("{prefix}{code}{}", "after code\n".repeat(9000));
+        let anchor = prefix.chars().count()
+            + "```rust\n".chars().count()
+            + 200 * "let value = 42;\n".chars().count();
+        let (window, base, _) = super::window(&source, Some(anchor));
+        assert!(base <= anchor);
+        assert!(window.starts_with("```rust\n"));
+        assert!(window.contains("\n```\n"));
+        assert!(window.len() <= super::MAX_BODY_BYTES as usize);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn metadata_omission_rerender_stays_bounded_and_measures_worker_time() {
+        let source = format!(
+            "{}[link](https://example.com)\n\n{}",
+            "paragraph with **bold** repeated words. ".repeat(1500),
+            "trailing prose with `code` repeated words.\n".repeat(100),
+        );
+        let anchor = source.find("[link]").unwrap();
+        let payload = serde_json::to_string(&serde_json::json!({"text":source})).unwrap();
+        let worker = crate::presentation::work(move || {
+            let make = || RawNode {
+                id: "answer".into(),
+                received_recovery_wait: false,
+                kind: "assistant".into(),
+                payload: Some(payload.clone()),
+                reason: None,
+            };
+            let full_started = std::time::Instant::now();
+            let full = make().into_ui_node(None, 76, crate::config::UiLanguage::En);
+            let full_elapsed = full_started.elapsed();
+            let anchored_started = std::time::Instant::now();
+            let anchored = make().into_ui_node(
+                Some(NodePosition::At(anchor)),
+                76,
+                crate::config::UiLanguage::En,
+            );
+            let anchored_elapsed = anchored_started.elapsed();
+            (full, anchored, full_elapsed, anchored_elapsed)
+        })
+        .await
+        .unwrap();
+        let (full, anchored, full_elapsed, anchored_elapsed) = worker;
+        assert!(full.presentation.metadata_limited);
+        assert!(anchored.text.len() <= MAX_ANCHORED_BODY_BYTES);
+        assert!(anchored.presentation.metadata_limited);
+        assert!(anchored.presentation.blocks.iter().any(|block| {
+            block
+                .rendered
+                .as_ref()
+                .is_some_and(|rendered| rendered.omitted)
+        }));
+        assert!(
+            anchored
+                .presentation
+                .links
+                .iter()
+                .any(|link| link.url == "https://example.com")
+        );
+        eprintln!(
+            "Markdown presentation worker: full-window={} ms, anchored-window={} ms, bytes={}/{}",
+            full_elapsed.as_millis(),
+            anchored_elapsed.as_millis(),
+            full.text.len(),
+            anchored.text.len(),
+        );
     }
 
     #[test]

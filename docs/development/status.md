@@ -4732,3 +4732,14 @@ reported zero repaired/unresolved/retired groups. The copy was deleted. The
 measurement breakdown and index rationale are posted to #219 comment
 6644330052. Candidate-backed call snapshot and thread selection are implemented
 with a synthetic equivalence fixture; focused test and hosted checks pending.
+## #221 Markdown fallback (in progress)
+
+Raw Markdown fallback reproduced for an anchor inside a `source_exact` block, a
+render-width mismatch, and a rendered projection dropped by the 64 KiB metadata
+bound. The display now keeps the worker-rendered bounded source window for
+mid-block anchors, shows a localized updating placeholder instead of raw syntax
+while a width-specific render is pending, and retries an omitted projection
+once per view/width/anchor. Explicitly anchored history reads use an 8 KiB
+window (versus the 64 KiB unanchored body window); when the anchor is inside a
+fenced code block, the window retains its opening fence and may extend up to
+64 KiB. A synthetic worker measurement rendered a 64,329-byte full body in 18 ms and its 4,841-byte anchor window in 2 ms (single local run; not a benchmark). Dense anchored Markdown may still exceed the metadata budget after retry; in that case the bounded one-time retry leaves the localized placeholder rather than exposing raw syntax. Focused JA/EN presentation tests pass; the final pushed-tip check remains pending.

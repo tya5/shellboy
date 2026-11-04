@@ -1838,6 +1838,7 @@ pub struct UiState {
     painted_body_nodes: Option<(String, u64, Vec<String>)>,
     render_width: u16,
     render_pending: BTreeSet<(String, u64, u64, String, u16, usize)>,
+    omitted_render_retries: BTreeSet<(String, u64, u64, String, u16, usize)>,
     details: Option<details::Details>,
     operations: Option<operations::Operations>,
     models: Option<models::ModelPicker>,
@@ -1960,6 +1961,7 @@ impl UiState {
             painted_body_nodes: None,
             render_width: 0,
             render_pending: BTreeSet::new(),
+            omitted_render_retries: BTreeSet::new(),
             details: None,
             operations: None,
             models: None,
@@ -2055,6 +2057,7 @@ impl UiState {
         if self.render_width != width {
             self.render_width = width;
             self.render_pending.clear();
+            self.omitted_render_retries.clear();
             self.deferred_actions.push(UiAction::RenderWidth { width });
         }
         let view = self.view();
@@ -2092,6 +2095,14 @@ impl UiState {
                     && (offset < node.base_char_offset
                         || (offset >= node.base_char_offset + node.text.chars().count()
                             && offset < node.total_chars));
+                let omitted_key = (
+                    thread.clone(),
+                    generation,
+                    revision,
+                    node.node_id.clone(),
+                    width,
+                    offset,
+                );
                 let needed = node.presentation.body_evicted
                     || outside
                     || node.presentation.blocks.iter().any(|block| {
@@ -2099,40 +2110,54 @@ impl UiState {
                             block.kind,
                             crate::presentation::BlockKind::Prose
                                 | crate::presentation::BlockKind::Reasoning
-                        ) && (block
-                            .rendered
-                            .as_ref()
-                            .is_none_or(|rendered| rendered.width != width)
-                            || (preflight.initializing
-                                && block.source_exact
-                                && offset > block.source_start
-                                && offset < block.source_end))
+                        ) && (block.rendered.as_ref().is_none_or(|rendered| {
+                            rendered.width != width
+                                || (rendered.omitted
+                                    && !self.omitted_render_retries.contains(&omitted_key))
+                        }) || (preflight.initializing
+                            && block.source_exact
+                            && offset > block.source_start
+                            && offset < block.source_end))
                     });
+                let omitted = node.presentation.blocks.iter().any(|block| {
+                    block
+                        .rendered
+                        .as_ref()
+                        .is_some_and(|rendered| rendered.omitted)
+                });
                 needed.then(|| {
                     (
                         node.node_id.clone(),
                         offset,
                         outside || node.presentation.body_evicted,
+                        omitted,
                     )
                 })
             })
             .collect::<Vec<_>>();
-        requests.sort_by_key(|(node, _, _)| !working.contains(node));
+        requests.sort_by_key(|(node, _, _, _)| !working.contains(node));
         self.render_pending.retain(|(t, g, r, _, w, _)| {
             t == &thread && *g == generation && *r == revision && *w == width
         });
-        for (node_id, char_offset, missing_source) in requests {
+        self.omitted_render_retries.retain(|(t, g, r, _, w, _)| {
+            t == &thread && *g == generation && *r == revision && *w == width
+        });
+        for (node_id, char_offset, missing_source, omitted) in requests {
             if self.render_pending.len() >= 3 {
                 break;
             }
-            if self.render_pending.insert((
+            let request_key = (
                 thread.clone(),
                 generation,
                 revision,
                 node_id.clone(),
                 width,
                 char_offset,
-            )) {
+            );
+            if self.render_pending.insert(request_key.clone()) {
+                if omitted {
+                    self.omitted_render_retries.insert(request_key);
+                }
                 if missing_source {
                     self.active_view_mut().navigation.set_loading(true);
                 }
@@ -7437,6 +7462,79 @@ mod layout_cache_tests {
     }
 
     #[test]
+    fn markdown_width_change_requests_a_worker_rerender() {
+        let source = "# Heading\n\nA paragraph with **bold** and `code`.";
+        let mut value = node("answer", source);
+        value.presentation = crate::presentation::project(
+            "assistant",
+            &serde_json::json!({"text":source}),
+            source,
+            0,
+        );
+        crate::presentation::render_markdown(&mut value.presentation, 74);
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        *ui.view_mut().nodes_mut_for_test() = vec![value];
+        ui.view_mut().total_nodes = 1;
+        ui.render_width = 74;
+        ui.prepare_visible_render_width(76, &BTreeSet::from([0]), RenderPreflight::new(ui.view()));
+        assert!(ui
+            .take_deferred_actions()
+            .iter()
+            .any(|action| matches!(action, UiAction::LoadNodeWindow { node_id, .. } if node_id == "answer")));
+    }
+
+    #[test]
+    fn omitted_markdown_projection_requests_one_bounded_reload_only() {
+        let source = format!("# Large\n\n{}", "**bold** repeated text\n\n".repeat(6000));
+        let mut value = node("answer", &source);
+        value.total_chars = source.chars().count();
+        value.presentation = crate::presentation::project(
+            "assistant",
+            &serde_json::json!({"text":source}),
+            &source,
+            0,
+        );
+        crate::presentation::render_markdown(&mut value.presentation, 76);
+        assert!(value.presentation.blocks.iter().any(|block| {
+            block
+                .rendered
+                .as_ref()
+                .is_some_and(|rendered| rendered.omitted)
+        }));
+
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        ui.select_thread("t".into());
+        *ui.view_mut().nodes_mut_for_test() = vec![value.clone()];
+        ui.view_mut().total_nodes = 1;
+        ui.render_width = 76;
+        let generation = ui.view().generation;
+        let revision = ui.view().navigation.view_revision;
+        ui.prepare_visible_render_width(76, &BTreeSet::from([0]), RenderPreflight::new(ui.view()));
+        let first = ui.take_deferred_actions();
+        assert_eq!(
+            first
+                .iter()
+                .filter(|action| matches!(action, UiAction::LoadNodeWindow { .. }))
+                .count(),
+            1
+        );
+
+        ui.apply(UiUpdate::NodeWindow {
+            thread_id: "t".into(),
+            generation,
+            view_revision: revision,
+            node: value,
+        });
+        ui.prepare_visible_render_width(76, &BTreeSet::from([0]), RenderPreflight::new(ui.view()));
+        assert!(
+            ui.take_deferred_actions()
+                .iter()
+                .all(|action| !matches!(action, UiAction::LoadNodeWindow { .. }))
+        );
+    }
+
+    #[test]
     fn completed_markdown_single_rows_remain_monotonic_across_body_reloads() {
         use ratatui::{Terminal, backend::TestBackend};
         let source = (0..2500)
@@ -7459,7 +7557,7 @@ mod layout_cache_tests {
         let payload = serde_json::json!({"text":source});
         let window = |offset: usize| {
             let start = offset.saturating_sub(512);
-            let end = (start + 65_536).min(source.len());
+            let end = (start + 4 * 1024).min(source.len());
             let mut value = node("answer", &source[start..end]);
             value.base_char_offset = start;
             value.total_chars = source.len();
@@ -7470,7 +7568,7 @@ mod layout_cache_tests {
         };
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         ui.select_thread("t".into());
-        *ui.view_mut().nodes_mut_for_test() = vec![window(512)];
+        *ui.view_mut().nodes_mut_for_test() = vec![window(64_000)];
         ui.view_mut().total_nodes = 1;
         ui.view_mut().navigation.select_reading();
         ui.view_mut().navigation.anchor = ViewAnchor {
@@ -7494,7 +7592,7 @@ mod layout_cache_tests {
                         .filter(|n| n.bytes().all(|b| b.is_ascii_digit()))
                         .and_then(|n| n.parse::<usize>().ok())
                 })
-                .unwrap();
+                .unwrap_or_else(|| panic!("step={step} read_count={read_count} screen={text:?}"));
             assert!(
                 first >= previous,
                 "step={step} read_count={read_count} top={previous}->{first}, anchor={:?}",
