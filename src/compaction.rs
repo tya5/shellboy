@@ -588,9 +588,43 @@ impl Compactor {
         let mut ledger = usage::UsageLedger::new(&snapshot);
         let policy = self.config.compaction.clone();
         let range = plan.start..plan.latest;
-        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, Some(plan))
+        self.summarize_recorded(
+            snapshot,
+            range,
+            cancel,
+            policy,
+            &mut ledger,
+            Some(plan),
+            false,
+        )
+        .await
+        .map_err(|error| usage::annotate(error, ledger.usage()))
+    }
+    pub(crate) async fn summarize_target_active(
+        &self,
+        thread: &str,
+        target: u64,
+        cancel: CancellationToken,
+    ) -> Result<(CompactResult, u64), ApiError> {
+        let snapshot = self.snapshot(thread, true).await?;
+        let Some((range, shortfall)) =
+            policy::target_active_range(&snapshot, target, &self.config.compaction)
+        else {
+            return Ok((
+                CompactResult {
+                    no_target: true,
+                    ..Default::default()
+                },
+                target,
+            ));
+        };
+        let mut ledger = usage::UsageLedger::new(&snapshot);
+        let policy = self.config.compaction.clone();
+        let result = self
+            .summarize_recorded(snapshot, range, cancel, policy, &mut ledger, None, true)
             .await
-            .map_err(|error| usage::annotate(error, ledger.usage()))
+            .map_err(|error| usage::annotate(error, ledger.usage()))?;
+        Ok((result, shortfall))
     }
     /// Exact replay projection, used only to measure a completed local edit.
     pub(crate) async fn proactive_history_characters(&self, thread: &str) -> Result<u64, ApiError> {
@@ -612,6 +646,27 @@ impl Compactor {
             });
         };
         self.summarize_snapshot(snapshot, range, cancel).await
+    }
+    pub(crate) async fn summarize_target_prefix(
+        &self,
+        thread: &str,
+        target: u64,
+        cancel: CancellationToken,
+    ) -> Result<(CompactResult, u64), ApiError> {
+        let snapshot = self.snapshot(thread, true).await?;
+        let Some((range, shortfall)) =
+            policy::target_prefix(&snapshot, target, &self.config.compaction)
+        else {
+            return Ok((
+                CompactResult {
+                    no_target: true,
+                    ..Default::default()
+                },
+                target,
+            ));
+        };
+        let result = self.summarize_snapshot(snapshot, range, cancel).await?;
+        Ok((result, shortfall))
     }
     /// #182: whether the provider tool loop is open on the selected path (the
     /// latest assistant output requested a tool). Selective automatic edits
@@ -640,7 +695,7 @@ impl Compactor {
         policy: crate::config::Compaction,
     ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, None)
+        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, None, false)
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))
     }
@@ -652,6 +707,7 @@ impl Compactor {
         policy: crate::config::Compaction,
         ledger: &mut usage::UsageLedger,
         active: Option<policy::ActiveTurnPlan>,
+        drop_all_reasoning: bool,
     ) -> Result<CompactResult, ApiError> {
         // The active-Turn plan already requires complete, unprotected groups;
         // its user messages are summarized, not fences.
@@ -854,7 +910,7 @@ impl Compactor {
         // The ordered replacement sources already give the original order and
         // every message ID (a message ID is its node ID), so nothing else is
         // stored for them.
-        if active.is_some() {
+        if active.is_some() || drop_all_reasoning {
             payload["summary_scope"] = json!("active_turn");
         }
         if edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters {
@@ -863,6 +919,7 @@ impl Compactor {
             ));
         }
         let adoption = SummaryAdoption {
+            drop_all_reasoning,
             snapshot,
             sources,
             payload,
@@ -1970,6 +2027,164 @@ mod tests {
         );
         config
     }
+    /// Synthetic measurement only: no user history or paid provider.
+    #[tokio::test]
+    async fn synthetic_895_shape_spill_and_summary_measurement() {
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old','t','r','completed','now'),('last','t','r','completed','now'),('current','t','r','running','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','old',0,0,'fixture','fixture',0,'completed','{}','now');")?;
+            for i in 0..85 {
+                let group = format!("g{i}");
+                let call = format!("call{i}");
+                let result = format!("result{i}");
+                tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','old','completed','now')", [&group])?;
+                tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?1,0,'shell','{}','completed')", [&group])?;
+                let arguments = json!({"command":"x".repeat(1450)}).to_string();
+                history::append_node(&tx,"t",&call,Some("old"),"assistant_response",&json!({"group_id":group,"reasoning_epoch":0,"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"r".repeat(200)}],"encrypted_content":"opaque-not-summary"},{"type":"function_call","call_id":group,"name":"shell","arguments":arguments}]}),"now")?;
+                let output = json!({"stdout":"y".repeat(4610)}).to_string();
+                history::append_node(&tx,"t",&result,Some("old"),"tool_result",&json!({"group_id":group,"item":{"type":"function_call_output","call_id":group,"output":output}}),"now")?;
+                tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?1,?2,'completed')", params![group,result])?;
+            }
+            for i in 0..148 {
+                history::append_node(&tx,"t",&format!("message{i}"),Some("old"),"message",&json!({"role":"user","content":"z".repeat(1600)}),"now")?;
+            }
+            tx.execute("UPDATE thread SET reasoning_epoch=1 WHERE id='t'", [])?;
+            history::append_node(&tx,"t","last-user",Some("last"),"message",&json!({"role":"user","content":"last"}),"now")?;
+            history::append_node(&tx,"t","current-user",Some("current"),"message",&json!({"role":"user","content":"current"}),"now")?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let baseline = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let snapshot = baseline.snapshot("t", true).await.unwrap();
+        let range = policy::unsummarized_prefix(&snapshot).unwrap();
+        let nodes: usize = snapshot.groups[range.clone()]
+            .iter()
+            .map(|g| g.sources.len())
+            .sum();
+        let originals: Vec<String> = snapshot
+            .groups
+            .iter()
+            .flat_map(|g| &g.sources)
+            .map(|s| s.id.clone())
+            .collect();
+        assert_eq!(originals.len(), 320);
+        let before = edit::history_characters(&snapshot);
+        let tool_result_characters: u64 = snapshot
+            .groups
+            .iter()
+            .flat_map(|g| &g.sources)
+            .filter(|source| {
+                source.payload.pointer("/item/type").and_then(Value::as_str)
+                    == Some("function_call_output")
+            })
+            .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+            .sum();
+        println!(
+            "synthetic total_nodes={} tool_result_projection_chars={tool_result_characters}",
+            originals.len()
+        );
+        let map_count = segments(&snapshot.groups[range.clone()], snapshot.epoch)
+            .unwrap()
+            .len();
+        let mut old_groups = snapshot.groups[range.clone()].to_vec();
+        for source in old_groups.iter_mut().flat_map(|g| &mut g.sources) {
+            if let Some(items) = source
+                .payload
+                .get_mut("output")
+                .and_then(Value::as_array_mut)
+            {
+                items.retain(|item| item["type"] != "reasoning");
+            }
+        }
+        let old_map_count = segments(&old_groups, snapshot.epoch).unwrap().len();
+        let old_rendered: usize = old_groups
+            .iter()
+            .flat_map(|g| &g.sources)
+            .map(|s| render(s, snapshot.epoch).chars().count())
+            .sum();
+        let new_rendered: usize = snapshot.groups[range.clone()]
+            .iter()
+            .flat_map(|g| &g.sources)
+            .map(|s| render(s, snapshot.epoch).chars().count())
+            .sum();
+        println!(
+            "synthetic readable_reasoning_added_chars={} map_requests_before={old_map_count} map_requests_after={map_count}",
+            new_rendered.saturating_sub(old_rendered)
+        );
+        let reply = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"map summary"}]}]});
+        let (url, server) = summary_proxy_capturing(vec![reply; map_count + 1]).await;
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let result = compactor
+            .summarize_snapshot(snapshot, range, CancellationToken::new())
+            .await
+            .unwrap();
+        let calls = server.await.unwrap();
+        let map_chars: usize = calls[..map_count]
+            .iter()
+            .map(|body| {
+                body["input"][1]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .chars()
+                    .count()
+            })
+            .sum();
+        println!(
+            "synthetic baseline nodes={nodes} replay_chars={before} summary_source_chars={} map_input_chars={map_chars} map_requests={map_count} requests={}",
+            result.source_characters.unwrap(),
+            calls.len()
+        );
+        assert!((700_000..850_000).contains(&before));
+        assert_eq!(calls.len(), map_count + 1);
+        let originals_again = originals.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let revision =
+                history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(&tx, "t", revision, &originals, "now")?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let before_spill = compactor.proactive_history_characters("t").await.unwrap();
+        let spill = compactor
+            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new())
+            .await
+            .unwrap();
+        let after_spill = compactor.proactive_history_characters("t").await.unwrap();
+        let removed = before_spill.saturating_sub(after_spill);
+        println!(
+            "synthetic after spilled_groups={} removed_chars={removed} remaining_need={} summary_source_chars=0 model_requests=0",
+            spill.spilled_groups,
+            156_310u64.saturating_sub(removed)
+        );
+        assert!(removed >= 156_310);
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let revision =
+                history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
+            history::select_path(&tx, "t", revision, &originals_again, "now")?;
+            tx.execute("UPDATE thread SET reasoning_epoch=0 WHERE id='t'", [])?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let live_before = compactor.proactive_history_characters("t").await.unwrap();
+        let live_spill = compactor
+            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new())
+            .await
+            .unwrap();
+        let live_after = compactor.proactive_history_characters("t").await.unwrap();
+        println!(
+            "synthetic live_epoch_spill groups={} before={live_before} after={live_after} removed={} versus_old_epoch_removed={removed}",
+            live_spill.spilled_groups,
+            live_before.saturating_sub(live_after)
+        );
+        db.shutdown().await.unwrap();
+    }
     #[tokio::test]
     async fn explicit_middle_summary_retains_prefix_suffix_and_exact_provenance() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\nTask\n## Constraints\nNone\n## Current state\nActive\n## Open issues and next steps\nContinue\n## Key references\nSource"}]}]});
@@ -2374,6 +2589,37 @@ mod tests {
     /// its replacement record and the edge from the request to it. No
     /// original node or edge changes, no original node gains an edge, and the
     /// original order stays readable from the summary's provenance.
+    #[tokio::test]
+    async fn target_active_summary_preserves_later_rounds_and_drops_prior_reasoning() {
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"completed first round"}]}]});
+        let (url, server) = summary_proxy(vec![raw]).await;
+        let (_root, db) = database().await;
+        active_turn_fixture(&db).await;
+        db.call(|db| {
+            let output = json!({"stdout":"x".repeat(20_000)}).to_string();
+            db.execute("UPDATE node SET payload_json=json_set(payload_json, '$.item.output', ?1) WHERE id='g1-result'", [output])?;
+            Ok(())
+        }).await.unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let (result, shortfall) = compactor.summarize_target_active("t", 4_000, CancellationToken::new()).await.unwrap();
+        assert!(!result.no_target);
+        assert_eq!(shortfall, 0);
+        db.call(|db| {
+            let path = selected_path(db, "t")?;
+            assert!(path.contains(&"current-user".to_owned()));
+            assert!(!path.contains(&"g1-call".to_owned()));
+            for node in ["g2-call", "g2-result", "g3-call", "g3-result"] { assert!(path.contains(&node.to_owned())); }
+            let epoch: i64 = db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get(0))?;
+            assert_eq!(epoch, 1);
+            assert!(history::reasoning_keep(db, "t", epoch)?.is_empty());
+            let replay = crate::control::replay::ReplayCache::new(0).load(db, "t")?.materialize();
+            assert!(!replay.iter().any(|item| item["type"] == "reasoning" || crate::model::opaque::is_opaque(item)));
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(server.await.unwrap(), 1);
+        db.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn active_turn_summary_leaves_original_nodes_edges_and_order_intact() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"g1 and g2 ran"}]}]});
