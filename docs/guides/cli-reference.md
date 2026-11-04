@@ -108,7 +108,7 @@ that a particular provider/model implements every feature.
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `usage get --attempt ATTEMPT_ID` | One saved model attempt's IDs/state, bounded standard usage scalars, reported `prompt_cache_diagnostics` or JSON null, and `input_bytes`: measured UTF-8 bytes of the request body actually built for sending, `total` and `categories` (system, instructions, context, user, assistant, reasoning, tool_call, tool_result, spill_placeholder, summary, notice, attachment, other; they sum to `total`), or JSON null when not recorded. Exclusive with aggregate scope/time/group/pagination options; read-only and no provider call. |
-| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME] [--group-by hour\|day\|thread] [--timezone ZONE] [--limit N] [--cursor CURSOR]` | Saved usage totals or bounded grouped request-size/cache statistics. At most one scope ID. Ungrouped default is the caller's Thread; grouped default spans non-deleted Threads. Children require Thread scope. Ungrouped results keep conversation requests in `model_attempts` and compaction summary requests in `compaction` (`compactions`, `requests`, map/reduce counts, input/cached/cache-creation/output tokens; coverage `summary: recorded`); Turn/Run scope counts compactions run while that Turn/Run was current. Grouped results count conversation requests only. Ungrouped results also include `latest_request`: the scope's newest admitted model attempt (own Turns only, newest 33 Turns searched, period not applied) with `usage` and `input_bytes`, or null. Group-only flags and partial/cursor semantics are described under bounded usage breakdowns. No provider call or receipt. |
+| `usage get [--thread THREAD] [--run RUN] [--turn TURN] [--include-children] [--since TIME] [--until TIME] [--group-by hour\|day\|thread] [--timezone ZONE] [--limit N] [--cursor CURSOR]` | Saved usage totals or bounded grouped request-size/cache statistics. At most one scope ID. Ungrouped default is the caller's Thread; grouped default spans non-deleted Threads. Children require Thread scope. Ungrouped results keep conversation requests in `model_attempts` and compaction summary requests in `compaction` (`compactions`, `requests`, map/reduce counts, input/cached/cache-creation/output tokens; coverage `summary: recorded`); Turn/Run scope counts compactions run while that Turn/Run was current. Grouped items retain `model_attempts` unchanged and add a separate `compaction` object with `compactions`, summary `requests`, `map_requests`, `reduce_requests`, and provider-reported input/cached/cache-creation/output counters. `total` combines corresponding model-attempt and summary-request counters; each numeric sum keeps `known_sum`, `unknown_count`, and `overflow`, and unsupported or missing values remain unknown. Grouped period buckets use the summary record's saved first-request timestamp; records with missing/invalid timestamps are counted as unknown and are not assigned. Ungrouped results also include `latest_request`: the scope's newest admitted model attempt (own Turns only, newest 33 Turns searched, period not applied) with `usage` and `input_bytes`, or null. Group-only flags and partial/cursor semantics are described under bounded usage breakdowns. No provider call or receipt. |
 
 `thread get`, `run get` and `turn get` also include `usage_totals`. Counts use saved
 completed/failed/incomplete model attempts, not proof of client transmission.
@@ -121,7 +121,7 @@ A Turn has its own lifetime but does not repeat its parent Run's full lifetime.
 `coverage.scope_complete` concerns selected saved scopes, not knowledge of every
 numeric value. Child traversal uses the existing 200-item read safety bound,
 excluding deleted Threads; a limit reports thread_limit and a partial scope total.
-Summary/embedding/RAG usage is not recorded in these totals and has explicit
+Embedding/RAG usage is not recorded in these totals and has explicit
 coverage rather than a guessed zero. Repeating a read ID evaluates current data.
 
 Slow aggregations only (`>=100ms`, fixed constant) appear in `<data_dir>/logs/shellboy.log` as `event=usage_totals_slow` with `usage_slow.trigger/scope/elapsed_ms`.
@@ -696,7 +696,9 @@ An explicit `--thread`, `--run`, or `--turn` narrows that selection; children
 require an explicit Thread. Ungrouped `usage get` keeps its existing behavior.
 
 Each item has a group `key`, saved per-state `model_attempts` sums with known/
-unknown/overflow fields, `input_per_request` (mean/max/nearest-rank p50/p95,
+unknown/overflow fields, a separate `compaction` summary usage section, a `total`
+section (with `model_attempt_records` and `summary_requests` counts plus combined
+token counters), `input_per_request` (mean/max/nearest-rank p50/p95,
 known/unknown counts, `max_attempt` with attempt/Turn/Run/Thread references), and
 `cache` (paired cached/input ratio and coverage counts). Inspect a max request
 with `turn get --turn TURN_ID`, then use history list/get for that Turn's saved
@@ -722,7 +724,12 @@ selected by string range; missing, malformed and non-current timestamp formats
 are excluded and counted in `excluded_time_count` for each scan window. Valid
 UTC timestamps outside the period appear in `outside_period_count`.
 `elapsed_ms` is an observation, not a pass/fail
-threshold. Summary/embedding usage and monetary cost are not inferred.
+threshold. Summary records use first-request time, not completion time. There is
+an independent 10,000-candidate scan window and cursor for summary metadata; follow
+the same `next_cursor` until `more` is false. A missing/invalid timestamp is
+reported in `unknown_time_compaction_records`, and malformed summary metadata is
+reported in `malformed_compaction_records`; neither contributes a guessed zero.
+Monetary cost is not inferred.
 
 ## Compaction forecast (`compact --dry-run`, v0.6.0)
 

@@ -9610,3 +9610,18 @@ No real data, provider traffic or installed-binary change is part of validation.
 - Verified from the adopted reply design: the receiving Thread's reply body is an ordinary `user` node; its node kind is intentional. Provenance sender is being extended to expose the credential-free `reply.by` fact for replies without a delivery receipt.
 - Added `reply_received` / `message_id` to `wait --help`, plus a matching help regression test; CLI reference example now matches delegation documentation.
 - Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.
+
+## #217 grouped compaction usage
+
+On the `issue-217/compaction-usage` task branch, the focused macOS command
+`cargo test --lib usage_totals::breakdown::tests::compaction_ -- --nocapture`
+passed (2 passed, 0 failed) after a serialized `cargo clean -p shellboy` to avoid
+stale binaries from other worktrees. Synthetic coverage exercises UTC half-open
+boundaries, first-request bucketing, missing/invalid timestamps and token values,
+malformed metadata, a model-only group with no compaction records, and cursor
+continuation after the 10,000-candidate scan window. Rust formatting,
+`git diff --check`, and `python3 scripts/check-test-layout.py` passed (105
+suites). A serialized clean `cargo check --tests` also passed.
+Grouped model-attempt fields retain their existing shape; summary and combined
+counters are additive. Bilingual TUI labels and CLI/User/Agent docs are updated.
+Rebase, push and default/all-OS CI remain pending.

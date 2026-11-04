@@ -4570,3 +4570,18 @@ how history provenance obtains the credential-free replier identity from
 `reply_received` with its `message_id` example, and the CLI reference includes
 the same invocation as the delegation guide. Focused local tests and default /
 all-OS hosted CI are pending; W8 owns review and landing.
+
+## Grouped summary usage (#217)
+
+Grouped `usage get` now scans retained summary-usage metadata in a separate
+10,000-row rowid window with its own cursor watermark, groups by the saved first
+request timestamp, and retains existing model-attempt fields. Each group adds
+`compaction` (compaction/request/map/reduce counts and summary token counters)
+and `total` combined token counters. Missing and malformed evidence is not
+coerced to zero. The TUI labels model attempts, summary usage and combined total
+as distinct sections. Synthetic tests cover half-open period boundaries,
+missing/invalid timestamps and values, malformed metadata, no summary records,
+and cursor continuation. Focused macOS tests passed (2/2), and a clean
+`cargo check --tests` passed. Formatting, diff and 105-suite layout checks pass.
+Push and default/all-OS CI remain pending. CLI
+reference, English/Japanese User Guides and Agent Guide updated.

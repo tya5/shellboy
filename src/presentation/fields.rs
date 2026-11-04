@@ -62,6 +62,14 @@ fn field_name(key: &str) -> &str {
         "details" => "詳細",
         "management" => "管理情報",
         "coverage" => "索引状況",
+        "model_attempts" => "通常のモデル要求",
+        "compaction" => "要約使用量",
+        "total" => "合計使用量",
+        "compactions" => "要約回数",
+        "requests" => "要求数",
+        "map_requests" => "map要求数",
+        "reduce_requests" => "reduce要求数",
+        "summary_requests" => "要約要求数",
         "definitions" => "項目の定義",
         "spaces" => "索引空間",
         "selected_space" => "選択中の空間",
@@ -210,6 +218,14 @@ fn english_key(value: &str) -> String {
         "input_bytes" => return "Input bytes (UTF-8)".into(),
         "input_tokens" => return "Input tokens (provider-reported)".into(),
         "cached_tokens" => return "Cached input tokens (provider-reported)".into(),
+        "model_attempts" => return "Model Attempts".into(),
+        "compaction" => return "Summary Usage".into(),
+        "total" => return "Combined Total".into(),
+        "compactions" => return "Compactions".into(),
+        "requests" => return "Requests".into(),
+        "map_requests" => return "Map Requests".into(),
+        "reduce_requests" => return "Reduce Requests".into(),
+        "summary_requests" => return "Summary Requests".into(),
         "current_source" => return "Current Source".into(),
         "repeat_result" => return "Repeat Result".into(),
         "limited_fields" => return "Limited Fields".into(),
@@ -397,6 +413,8 @@ pub(crate) fn group_label(
             1 => "Execution",
             2 => "Output",
             3 => "References",
+            5 => "Summary Usage",
+            6 => "Combined Total",
             _ => "Other",
         },
     };
@@ -404,6 +422,16 @@ pub(crate) fn group_label(
 }
 
 pub(crate) fn group(pointer: &str) -> (u8, &'static str) {
+    let segments = pointer.split('/').collect::<Vec<_>>();
+    if segments.contains(&"compaction") {
+        return (5, "要約使用量");
+    }
+    if segments.contains(&"total") {
+        return (6, "合計使用量");
+    }
+    if segments.contains(&"model_attempts") {
+        return (1, "通常のモデル要求");
+    }
     let key = pointer.rsplit('/').next().unwrap_or(pointer);
     if matches!(key, "model_id" | "profile_id") {
         return (1, "実行");
@@ -897,6 +925,39 @@ mod tests {
             assert_eq!(group_label(pointer, En), (original.0, english));
             assert!(english.is_ascii());
         }
+    }
+    #[test]
+    fn grouped_usage_sections_are_distinct_and_localized() {
+        use crate::config::UiLanguage::{En, Ja};
+        for (pointer, japanese, english) in [
+            (
+                "/items/0/model_attempts/completed/count",
+                "通常のモデル要求",
+                "Model Attempts",
+            ),
+            (
+                "/items/0/compaction/input_tokens/known_sum",
+                "要約使用量",
+                "Summary Usage",
+            ),
+            (
+                "/items/0/total/input_tokens/known_sum",
+                "合計使用量",
+                "Combined Total",
+            ),
+        ] {
+            assert_eq!(group_label(pointer, Ja).1, japanese);
+            assert_eq!(group_label(pointer, En).1, english);
+        }
+        let raw = serde_json::json!({"items":[{"compaction":{"map_requests":2}}]});
+        assert_eq!(
+            human_label_for("/items/0/compaction/map_requests", &raw, Ja),
+            "項目 1 › 要約使用量 › map要求数"
+        );
+        assert_eq!(
+            human_label_for("/items/0/compaction/map_requests", &raw, En),
+            "Item 1 › Summary Usage › Map Requests"
+        );
     }
     #[test]
     fn generated_field_labels_follow_language_without_changing_pointers_or_values() {
