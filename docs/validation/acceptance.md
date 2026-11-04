@@ -9690,5 +9690,4 @@ VACUUM INTO snapshot (57,465 groups, 59,430 calls/results), legacy candidate
 enumeration measured 1.031 s cold, then 0.238/0.354 s warm; after migration,
 marker enumeration measured 40 microseconds cold and 8-11 microseconds warm
 with zero candidates. This is candidate enumeration, not full startup-stage
-latency. The snapshot was deleted. Rust formatting and `cargo check --tests` are
-being rerun after rebase; default and all-OS CI remain pending.
+latency. The snapshot was deleted. Rust formatting and `cargo check --tests` passed on the implementation tip. The focused migration/reopen integration test passes after correcting the production table-count expectation to 37. Default CI 41871799210 failed on that stale expectation and one cache-diagnostics unit test; the former is fixed, the latter requires exact-tip rerun. The snapshot measurement is candidate enumeration only, not full interrupted_work stage latency. Default rerun and all-OS CI remain pending.

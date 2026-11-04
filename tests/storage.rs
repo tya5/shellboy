@@ -28,7 +28,7 @@ async fn production_migration_pragmas_and_reopen() {
         let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         assert_eq!(version, SCHEMA_VERSION);
         let tables: i64 = connection.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'", [], |row| row.get(0))?;
-        assert_eq!(tables, 36);
+        assert_eq!(tables, 37);
         let journal: String = connection.query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
         assert_eq!(journal, "wal");
         let synchronous: i64 = connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;

@@ -4632,4 +4632,4 @@ Implementation replaces startup's completed-history scan with a transactionally
 maintained candidate marker. Schema migration 28 backfills existing databases;
 fresh schema installs the same triggers. Design and decision records document
 crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
-measurements. The 69-test `recovery_` lib filter and fresh-schema bootstrap check pass; default and all-OS CI are pending on the pushed tip.
+measurements. The 69-test `recovery_` lib filter and fresh-schema bootstrap check pass. Default CI run 41871799210 failed: its integration schema-table count was stale (36 vs 37) and one unrelated cache-diagnostics unit test failed; the table-count expectation is corrected and its focused migration/reopen test passes locally. Exact-tip CI rerun and all-OS CI remain pending. Snapshot timings currently cover candidate enumeration only, not full interrupted_work stage time.
