@@ -101,6 +101,17 @@ struct Snapshot {
     turn_fence: Option<(String, i64)>,
     run_fence: Option<String>,
 }
+#[derive(Clone, Debug, Default, Serialize)]
+pub(crate) struct SpillCounts {
+    candidates: u32,
+    pub(crate) spilled: u32,
+    latest_protected: u32,
+    unsafe_incomplete: u32,
+    already_spilled: u32,
+    non_reducing: u32,
+    open_tool_loop: u32,
+    driver_gate: u32,
+}
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CompactResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -345,6 +356,52 @@ impl Compactor {
         self.spill_cancellable(thread, include_latest, CancellationToken::new())
             .await
     }
+    pub(crate) async fn proactive_spill_counts(
+        &self,
+        thread: &str,
+        open_loop: bool,
+        gate: bool,
+    ) -> Result<SpillCounts, ApiError> {
+        let snapshot = self.snapshot(thread, false).await?;
+        let latest = snapshot.groups.iter().rposition(|g| g.tool && g.complete);
+        let mut counts = SpillCounts::default();
+        for (i, group) in snapshot.groups.iter().enumerate() {
+            let spilled = group
+                .sources
+                .iter()
+                .all(|s| s.payload.get("spill_version").is_some());
+            if !group.tool && !spilled {
+                continue;
+            }
+            counts.candidates = counts.candidates.saturating_add(1);
+            let bucket = if spilled {
+                &mut counts.already_spilled
+            } else if Some(i) == latest {
+                &mut counts.latest_protected
+            } else if !range::group_is_safe(&snapshot, i) {
+                &mut counts.unsafe_incomplete
+            } else {
+                let before = group
+                    .sources
+                    .iter()
+                    .map(|s| edit::projection_characters(&s.payload, snapshot.epoch))
+                    .fold(0u64, u64::saturating_add);
+                if !spill_payload(group)
+                    .is_some_and(|p| edit::projection_characters(&p, snapshot.epoch) < before)
+                {
+                    &mut counts.non_reducing
+                } else if open_loop {
+                    &mut counts.open_tool_loop
+                } else if !gate {
+                    &mut counts.driver_gate
+                } else {
+                    continue;
+                }
+            };
+            *bucket = bucket.saturating_add(1);
+        }
+        Ok(counts)
+    }
     /// Proactive spill only adopts groups whose actual replay projection shrinks.
     pub(crate) async fn spill_reducing_cancellable(
         &self,
@@ -366,7 +423,38 @@ impl Compactor {
                 })
             })
             .collect();
-        self.spill_snapshot(snapshot, ranges, cancel).await
+        self.spill_snapshot(snapshot, ranges, cancel, false).await
+    }
+
+    pub(crate) async fn spill_staged_cancellable(
+        &self,
+        thread: &str,
+        active: bool,
+        target: u64,
+        cancel: CancellationToken,
+    ) -> Result<CompactResult, ApiError> {
+        let snapshot = self.snapshot(thread, false).await?;
+        let mut estimated_removed = 0u64;
+        let ranges = policy::staged_spill_ranges(&snapshot, active)
+            .into_iter()
+            .filter(|range| {
+                let group = &snapshot.groups[range.start];
+                let before = group
+                    .sources
+                    .iter()
+                    .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+                    .fold(0u64, u64::saturating_add);
+                spill_payload(group).is_some_and(|payload| {
+                    let after = edit::projection_characters(&payload, snapshot.epoch);
+                    if after >= before || estimated_removed >= target {
+                        return false;
+                    }
+                    estimated_removed = estimated_removed.saturating_add(before - after);
+                    true
+                })
+            })
+            .collect();
+        self.spill_snapshot(snapshot, ranges, cancel, active).await
     }
 
     pub async fn spill_cancellable(
@@ -377,13 +465,14 @@ impl Compactor {
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, false).await?;
         let ranges = policy::spill_ranges(&snapshot, include_latest);
-        self.spill_snapshot(snapshot, ranges, cancel).await
+        self.spill_snapshot(snapshot, ranges, cancel, false).await
     }
     async fn spill_snapshot(
         &self,
         snapshot: Snapshot,
         ranges: Vec<Range<usize>>,
         cancel: CancellationToken,
+        drop_all_reasoning: bool,
     ) -> Result<CompactResult, ApiError> {
         range::validate(&snapshot, &ranges, range::RangeMode::Spill)?;
         let mut replacements = Vec::new();
@@ -443,6 +532,16 @@ impl Compactor {
                     &path,
                     &timestamp(),
                 )?;
+                if drop_all_reasoning {
+                    tx.execute(
+                        "UPDATE thread SET reasoning_epoch=?2 WHERE id=?1",
+                        params![snapshot.thread, snapshot.epoch + 1],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM app_meta WHERE key=?1",
+                        [history::reasoning_keep_key(&snapshot.thread)],
+                    )?;
+                }
                 tx.commit()?;
                 Ok(result)
             })
@@ -1948,6 +2047,79 @@ mod tests {
             tx.commit()?;
             Ok(())
         }).await.unwrap();
+    }
+    #[tokio::test]
+    async fn cancelled_active_spill_preserves_path_and_epoch() {
+        let (_root, db) = database().await;
+        active_turn_fixture(&db).await;
+        db.call(|db| {
+            let output = json!({"stdout":"x".repeat(20_000)}).to_string();
+            db.execute("UPDATE node SET payload_json=json_set(payload_json, '$.item.output', ?1) WHERE id='g1-result'", [output])?;
+            Ok(())
+        }).await.unwrap();
+        let before = db.call(|db| Ok(selected_path(db, "t")?)).await.unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        assert!(
+            compactor
+                .spill_staged_cancellable("t", true, u64::MAX, cancel)
+                .await
+                .is_err()
+        );
+        db.call(move |db| {
+            assert_eq!(selected_path(db, "t")?, before);
+            let epoch: i64 =
+                db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| {
+                    r.get(0)
+                })?;
+            assert_eq!(epoch, 0);
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn staged_active_spill_drops_all_prior_reasoning_atomically() {
+        let (_root, db) = database().await;
+        active_turn_fixture(&db).await;
+        db.call(|db| {
+            for group in ["g1", "g2"] {
+                let output = json!({"stdout":"x".repeat(20_000)}).to_string();
+                db.execute("UPDATE node SET payload_json=json_set(payload_json, '$.item.output', ?1) WHERE id=?2", params![output, format!("{group}-result")])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let result = compactor
+            .spill_staged_cancellable("t", true, u64::MAX, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result.spilled_groups, 2);
+        db.call(|db| {
+            let epoch: i64 =
+                db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| {
+                    r.get(0)
+                })?;
+            assert!(epoch > 0);
+            assert!(history::reasoning_keep(db, "t", epoch)?.is_empty());
+            let replay = crate::control::replay::ReplayCache::new(0)
+                .load(db, "t")?
+                .materialize();
+            assert!(
+                !replay.iter().any(
+                    |item| item["type"] == "reasoning" || crate::model::opaque::is_opaque(item)
+                )
+            );
+            let path = selected_path(db, "t")?;
+            assert!(path.contains(&"g3-call".to_owned()));
+            assert!(path.contains(&"g3-result".to_owned()));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
     }
     fn selected_path(db: &Connection, thread: &str) -> rusqlite::Result<Vec<String>> {
         db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
