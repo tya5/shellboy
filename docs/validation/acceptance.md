@@ -9612,15 +9612,17 @@ No real data, provider traffic or installed-binary change is part of validation.
 - Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.
 
 
-## Confirmed process-group output EOF (2026-11-04)
+## Ubuntu shell-output cause correction (2026-11-04)
 
-Investigation of intermittent Ubuntu integration failures on main `44acf955`
-(run `41890829643`) found that both output pumps were still subject to the
-configured `drain_timeout_ms` even after the OS confirmed the process group/Job
-empty. Under CI scheduling and DB backpressure, that elapsed-time guard aborted
-otherwise healthy pumps before they consumed bytes already in the pipes. For a
-confirmed-empty group, output drain now waits for the authoritative pipe EOF;
-the configured timeout and abort remain in force when group cleanup is
-unconfirmed. This preserves finite cleanup for escaped/incompletely cleaned
-processes without using a larger timeout to mask incomplete reads. Local
-integration and CI validation are pending.
+Exact-source Ubuntu repeats showed the first drain candidate did not fix the
+runtime output test: it inverted the timeout condition. `then_some` returns the
+provided deadline when its boolean is true, so the original expression applied
+`drain_timeout_ms` when cleanup was confirmed instead of when it was unconfirmed.
+The corrected predicate must be validated on Ubuntu.
+
+The leading-dash regression fixture also used a symlink to `/bin/echo`. On the
+Ubuntu image, this resolves to coreutils' multicall binary, which rejects the
+symlink applet name `-x` before printing; its failure was not evidence of Bash
+option parsing. The test now uses a script executable named `-x` so it isolates
+Bash command-string parsing. Corrected focused local tests and exact-SHA Ubuntu
+and cross-platform CI remain pending.

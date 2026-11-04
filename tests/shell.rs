@@ -404,9 +404,12 @@ async fn last_handle_drop_requests_cleanup_and_natural_exit_kills_term_ignoring_
 #[tokio::test]
 async fn leading_dash_command_is_a_script_not_a_bash_option() {
     let root = tempfile::tempdir().unwrap();
-    // Use an already installed native executable: this regression concerns
-    // Bash argv, not first-launch behavior of a newly written interpreter file.
-    std::os::unix::fs::symlink("/bin/echo", root.path().join("-x")).unwrap();
+    // Use a PATH command with a leading dash, not a coreutils multicall symlink:
+    // the latter rejects an argv[0] that does not match its applet name.
+    let command = root.path().join("-x");
+    std::fs::write(&command, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
     let mut config = config();
     config.shell.env.insert(
         "PATH".into(),

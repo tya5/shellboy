@@ -4572,16 +4572,22 @@ the same invocation as the delegation guide. Focused local tests and default /
 all-OS hosted CI are pending; W8 owns review and landing.
 
 
-## Confirmed output-pipe drain under backpressure (2026-11-04)
+## Ubuntu shell-output failures: cause correction in progress (2026-11-04)
 
-Investigated intermittent Ubuntu failures of the binary-tail persistence test and
-the leading-dash Bash invocation test. Both also failed on main `44acf955` in
-CI run `41890829643`, while the earlier main run `41886037207` passed; #217,
-#219 and #221 CI showed the same pair. Root cause: `IoSession::finish` applied
-`drain_timeout_ms` to the entire pump join even after OS cleanup confirmed the
-managed process group/Job empty. Under CI scheduler and DB queue pressure, the
-time budget could expire while healthy output pumps were forwarding already
-read bytes, aborting them and losing output. The fix only retains the configured
-drain timeout when process-set cleanup is unconfirmed; otherwise pumps complete
-on pipe EOF and persistence. The deadline is not increased. Focused local tests
-for both regressions passed; full-suite and exact-tip CI validation are pending.
+The earlier drain hypothesis was incomplete and its first candidate was wrong.
+Exact-source Ubuntu repeats on `main` (`44acf955`), `v0.8.0`
+(`6a0827de`), pre-instrumentation (`6f486695`) and candidate
+`17ce1d42` / diagnostic `bd4c644e` failed both tests 30/30. The candidate
+completion exposed `group_cleanup_confirmed=true` together with
+`reason="output drain incomplete"`: the new call used
+`group_confirmed.then_some(drain_timeout)`, which enables the timeout precisely
+when cleanup is confirmed. Correct predicate is the inverse. This explains the
+lost output on the runtime test.
+
+The leading-dash test had a separate invalid fixture: `/bin/echo` is a
+coreutils multicall executable on Ubuntu and rejects being invoked under the
+symlink name `-x` (`Security violation: Requested utility '-x' does not match
+executable name .../coreutils/echo`). This is not Bash option parsing. Replace
+the fixture with a small executable script named `-x` to test Bash's handling
+without coreutils applet-name behavior. Corrected fixes are being locally tested;
+Ubuntu evidence and CI for the corrected SHA are pending.
