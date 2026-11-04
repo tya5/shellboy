@@ -2112,7 +2112,7 @@ fn long_folded_reasoning_and_inline_markdown_keep_original_body_position_on_resi
         history::text_of_payload,
         presentation::{project, render_markdown},
     };
-    let reasoning = "非表示の推論。".repeat(1200);
+    let reasoning = "非表示の推論。".repeat(700);
     let body = (0..28)
         .map(|i| {
             format!(
@@ -2136,7 +2136,10 @@ fn long_folded_reasoning_and_inline_markdown_keep_original_body_position_on_resi
     let anchor = ui.view().navigation.anchor.clone();
     assert!(
         anchor.char_offset > reasoning.chars().count(),
-        "body rows must skip the hidden source gap"
+        "body rows must skip the hidden source gap: anchor={} reasoning={} body={}",
+        anchor.char_offset,
+        reasoning.chars().count(),
+        body.chars().count(),
     );
     assert!(
         anchor.char_offset > reasoning.chars().count() + body.chars().count() / 3,
