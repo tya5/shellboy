@@ -453,10 +453,7 @@ impl ShellSupervisor {
             }
             forced |= group_forced;
             let (state, reason, output_complete) = io
-                .finish(
-                    (!group_confirmed).then_some(drain_timeout),
-                    stopped_before_exit,
-                )
+                .finish(drain_timeout, group_confirmed, stopped_before_exit)
                 .await;
             let completion = ShellCompletion {
                 execution_id,
@@ -548,6 +545,7 @@ async fn pump<R: AsyncRead + Unpin>(
     mut reader: R,
     stream: OutputStream,
     sink: Arc<OutputSink>,
+    waiting_for_sink: Arc<std::sync::atomic::AtomicBool>,
 ) -> bool {
     loop {
         let mut bytes = vec![0; sink.chunk_size];
@@ -567,6 +565,7 @@ async fn pump<R: AsyncRead + Unpin>(
         bytes.truncate(n);
         // Each pipe owns one fixed read buffer outside the queued-byte budget.
         // Reserving the whole budget before read could starve the other stream.
+        waiting_for_sink.store(true, std::sync::atomic::Ordering::Relaxed);
         let permit = match sink.budget.clone().acquire_many_owned(n as u32).await {
             Ok(p) => p,
             Err(_) => return false,
@@ -584,6 +583,7 @@ async fn pump<R: AsyncRead + Unpin>(
         }
         publisher.total += bytes.len() as u64;
         if bytes.is_empty() {
+            waiting_for_sink.store(false, std::sync::atomic::Ordering::Relaxed);
             continue;
         }
         let sequence = publisher.sequence;
@@ -603,6 +603,7 @@ async fn pump<R: AsyncRead + Unpin>(
             sink.stop.cancel();
             return false;
         }
+        waiting_for_sink.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -833,7 +834,12 @@ mod output_failure_tests {
             stop: stop.clone(),
             failure: failure.clone(),
         });
-        let pump = tokio::spawn(pump(reader, OutputStream::Stdout, sink));
+        let pump = tokio::spawn(pump(
+            reader,
+            OutputStream::Stdout,
+            sink,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        ));
         let ShellEvent::Output(chunk) = events.recv().await.unwrap();
         assert_eq!(chunk.bytes, b"abcd");
         drop(chunk);

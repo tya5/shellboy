@@ -8,6 +8,31 @@ pub(super) struct IoSession {
     stdout_task: tokio::task::JoinHandle<bool>,
     stderr_task: tokio::task::JoinHandle<bool>,
     initial_task: tokio::task::JoinHandle<()>,
+    stdout_waiting: Arc<std::sync::atomic::AtomicBool>,
+    stderr_waiting: Arc<std::sync::atomic::AtomicBool>,
+}
+
+async fn pump_until_stalled(
+    task: &mut tokio::task::JoinHandle<bool>,
+    waiting_for_sink: &std::sync::atomic::AtomicBool,
+    stall_timeout: Duration,
+) -> bool {
+    let mut blocked_since = None;
+    loop {
+        tokio::select! {
+            result = &mut *task => return result.is_ok_and(|complete| complete),
+            _ = tokio::time::sleep(Duration::from_millis(5)) => {
+                if waiting_for_sink.load(std::sync::atomic::Ordering::Relaxed) {
+                    let since = blocked_since.get_or_insert_with(tokio::time::Instant::now);
+                    if since.elapsed() >= stall_timeout {
+                        return false;
+                    }
+                } else {
+                    blocked_since = None;
+                }
+            }
+        }
+    }
 }
 
 impl IoSession {
@@ -88,8 +113,20 @@ impl IoSession {
             stop: stop.clone(),
             failure: failure.clone(),
         });
-        let stdout_task = tokio::spawn(pump(stdout, OutputStream::Stdout, sink.clone()));
-        let stderr_task = tokio::spawn(pump(stderr, OutputStream::Stderr, sink.clone()));
+        let stdout_waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stderr_waiting = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stdout_task = tokio::spawn(pump(
+            stdout,
+            OutputStream::Stdout,
+            sink.clone(),
+            stdout_waiting.clone(),
+        ));
+        let stderr_task = tokio::spawn(pump(
+            stderr,
+            OutputStream::Stderr,
+            sink.clone(),
+            stderr_waiting.clone(),
+        ));
         // Only pumps retain output senders; EOF follows their final delivery.
         drop(sink);
         (
@@ -100,6 +137,8 @@ impl IoSession {
                 stdout_task,
                 stderr_task,
                 initial_task,
+                stdout_waiting,
+                stderr_waiting,
             },
             handle,
             rx,
@@ -108,13 +147,16 @@ impl IoSession {
 
     pub(super) async fn finish(
         self,
-        drain_timeout: Option<Duration>,
+        drain_timeout: Duration,
+        process_set_confirmed: bool,
         stopped_before_exit: bool,
     ) -> (ShellState, Option<String>, bool) {
         let Self {
             stdout_task,
             stderr_task,
             initial_task,
+            stdout_waiting,
+            stderr_waiting,
             finished,
             failure,
             ..
@@ -123,15 +165,19 @@ impl IoSession {
         let mut stderr_task = stderr_task;
         let mut initial_task = initial_task;
         let drain = async {
-            let (out, err, initial) =
-                tokio::join!(&mut stdout_task, &mut stderr_task, &mut initial_task);
-            out.is_ok_and(|v| v) && err.is_ok_and(|v| v) && initial.is_ok()
+            let (out, err, initial) = tokio::join!(
+                pump_until_stalled(&mut stdout_task, &stdout_waiting, drain_timeout),
+                pump_until_stalled(&mut stderr_task, &stderr_waiting, drain_timeout),
+                timeout(drain_timeout, &mut initial_task),
+            );
+            out && err && initial.is_ok_and(|result| result.is_ok())
         };
-        // With managed writers gone, let pipe EOF and downstream persistence
-        // finish; queue/scheduler delay alone must not discard already-read bytes.
-        let drained = match drain_timeout {
-            Some(limit) => timeout(limit, drain).await.unwrap_or(false),
-            None => drain.await,
+        // Confirmed process cleanup makes pipe EOF authoritative, but a pump
+        // stalled on the bounded consumer queue still needs a finite deadline.
+        let drained = if process_set_confirmed {
+            drain.await
+        } else {
+            timeout(drain_timeout, drain).await.unwrap_or(false)
         };
         if !stdout_task.is_finished() {
             stdout_task.abort();
