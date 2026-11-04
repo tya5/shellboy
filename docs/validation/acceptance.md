@@ -9610,3 +9610,9 @@ No real data, provider traffic or installed-binary change is part of validation.
 - Verified from the adopted reply design: the receiving Thread's reply body is an ordinary `user` node; its node kind is intentional. Provenance sender is being extended to expose the credential-free `reply.by` fact for replies without a delivery receipt.
 - Added `reply_received` / `message_id` to `wait --help`, plus a matching help regression test; CLI reference example now matches delegation documentation.
 - Focused provenance/help tests, doc check, standard checks, pushed-tip default CI, and pushed-tip all-OS CI remain pending.
+
+## #221 Markdown raw fallback (in progress)
+
+- Synthetic renderer tests reproduced raw Markdown for a mid-block anchor, width mismatch, and `rendered.omitted` after the metadata limit; the display regression now expects rendered content or a localized placeholder, never raw Markdown syntax.
+- Anchored reads use an 8 KiB body window, extended up to 64 KiB when needed to retain a nearby fenced-code opener; an omitted projection gets one retry per thread/generation/view-revision/node/width/anchor. The worker omission/retry case, bilingual presentation assertions, width reload, and focused regression suite pass locally.
+- One local worker measurement: 64,329-byte full body 18 ms; 4,841-byte anchored window 2 ms. Dense anchored windows can still be omitted by the metadata budget; the UI retries once and stays on the localized placeholder rather than exposing Markdown source. Verified locally: `cargo fmt -- --check`; `cargo test --lib markdown_` (11 passed), anchored-window and fence tests, monotonic rows test, and `cargo check --tests`. JA and EN assertions cover anchor/width/omission fallback. Full standard check, final diff review, and hosted CI remain pending; no hosted CI result is claimed.
