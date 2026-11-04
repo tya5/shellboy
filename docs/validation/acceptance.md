@@ -9424,7 +9424,7 @@ checks Japanese fallback equality, and requires English output to be ASCII; the
 global-argument test checks English output likewise. A new frontend regression
 checks the selected-language title under terminal separator variants.
 
-The current-source audit (main `22db1a22` plus reconcile-34 commits) classifies the 320 Japanese catalogue literals as reviewed UI-side
+The current-source audit (main `ce4310d969` plus reconcile-34 commits) classifies the 320 Japanese catalogue literals as reviewed UI-side
 strings using per-token source hashes. Counts: `a=2916, b=1576, c=0, protected=4`;
 strict audit `--check` passes; four protected records remain evidence-pinned.
 `cargo check --tests` and `cargo test --lib` pass (2,008 passed, 19 ignored),
