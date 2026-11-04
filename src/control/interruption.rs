@@ -23,11 +23,11 @@ AND (EXISTS (
         WHERE u.thread_id = t.id
         AND u.state IN ('preparing', 'running', 'waiting', 'recovery_wait'))
     OR EXISTS (
-        SELECT 1 FROM tool_group g JOIN turn u ON u.id=g.turn_id
-        WHERE u.thread_id=t.id AND (g.state<>'completed' OR EXISTS (
-            SELECT 1 FROM tool_call c WHERE c.group_id=g.id
-            AND (c.state IN ('pending','running') OR NOT EXISTS (
-                SELECT 1 FROM tool_result z WHERE z.group_id=c.group_id AND z.call_id=c.call_id)))))
+        SELECT 1
+        FROM tool_group_recovery_candidate rc
+        CROSS JOIN tool_group g ON g.id=rc.group_id
+        JOIN turn u ON u.id=g.turn_id
+        WHERE u.thread_id=t.id)
     OR EXISTS (
         SELECT 1
         FROM app_meta m
@@ -116,8 +116,12 @@ const TOOL_CALL_SNAPSHOT: &str = r"SELECT json_object(
     'result_saved', json(CASE WHEN z.node_id IS NULL THEN 'false' ELSE 'true' END),
     'repair_outcome', CASE WHEN z.node_id IS NOT NULL THEN 'preserved_result'
         WHEN c.state='pending' AND c.operation_id IS NULL THEN 'not_started' ELSE 'result_uncertain' END)
-FROM tool_group g JOIN turn u ON u.id=g.turn_id
-JOIN tool_call c ON c.group_id=g.id
+-- Start from the bounded candidate set; CROSS JOIN prevents SQLite from
+-- choosing the completed call history as the outer loop.
+FROM tool_group_recovery_candidate rc
+CROSS JOIN tool_group g ON g.id=rc.group_id
+CROSS JOIN turn u ON u.id=g.turn_id
+CROSS JOIN tool_call c ON c.group_id=g.id
 LEFT JOIN tool_result z ON z.group_id=c.group_id AND z.call_id=c.call_id
 LEFT JOIN shell_execution s ON s.id=c.operation_id AND s.owner_run_id=u.run_id
 WHERE u.thread_id=?1 AND (g.state<>'completed' OR EXISTS (
@@ -562,7 +566,39 @@ mod tool_snapshot_tests {
             INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('s','r','u','s','stopped','/','{}','UTF-8','UTF-8','closed','before');
             INSERT INTO node(id,kind,created_at,payload_json) VALUES('result','tool_result','before','{}');
             INSERT INTO tool_result VALUES('g','saved','result','completed');
+            INSERT INTO tool_group VALUES('done','a','u','completed','before');
+            INSERT INTO tool_call VALUES('done','finished',0,'shell','{}','completed',NULL);
+            INSERT INTO node(id,kind,created_at,payload_json) VALUES('done-result','tool_result','before','{}');
+            INSERT INTO tool_result VALUES('done','finished','done-result','completed');
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<256)
+                INSERT INTO tool_group SELECT printf('bulk-%03d',x),'a','u','completed','before' FROM n;
+            INSERT INTO tool_call SELECT id,'finished',0,'shell','{}','completed',NULL FROM tool_group WHERE id GLOB 'bulk-*';
+            INSERT INTO node(id,kind,created_at,payload_json) SELECT 'bulk-result-'||id,'tool_result','before','{}' FROM tool_group WHERE id GLOB 'bulk-*';
+            INSERT INTO tool_result SELECT id,'finished','bulk-result-'||id,'completed' FROM tool_group WHERE id GLOB 'bulk-*';
         "#).unwrap();
+        let legacy_candidates: Vec<String> = db
+            .prepare("SELECT g.id FROM tool_group g WHERE g.state<>'completed' OR EXISTS (SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state IN ('pending','running') OR NOT EXISTS (SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))) ORDER BY g.id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let marked_candidates: Vec<String> = db
+            .prepare("SELECT group_id FROM tool_group_recovery_candidate ORDER BY group_id")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(marked_candidates, legacy_candidates);
+        let selected_threads: Vec<String> = db
+            .prepare(THREADS_WITH_INTERRUPTED_WORK)
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(selected_threads, ["t"]);
         let tx = db.transaction().unwrap();
         capture_interrupted_context(&tx, "after", "previous_instance_interrupted", "startup")
             .unwrap();

@@ -4653,3 +4653,20 @@ all-OS CI remain pending.
 fresh schema installs the same triggers. Design and decision records document
 crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
 measurements. The 69-test `recovery_` lib filter and fresh-schema bootstrap check pass; default and all-OS CI are pending on the pushed tip.
+
+## #219 proposals 2/3 follow-up (in progress)
+
+On a single disposable read-only-source `VACUUM INTO` snapshot of the local
+schema-27 database (3.5 GiB, 60,840 groups), migration 28 was applied before
+measuring. The snapshot had nine interrupted-work Threads, one pending wait,
+zero candidate groups, and one active attempt. `THREADS_WITH_INTERRUPTED_WORK`
+with its correlated wait branch took 603 ms first / 114 ms warm median;
+`WAIT_SNAPSHOT` over those Threads took 30 / 18 ms; `TOOL_CALL_SNAPSHOT` took
+309 / 258 ms (zero rows); active-attempt cleanup took 295 / 30 ms (one row).
+Full context capture plus `interrupt_previous_work` measured 1,796 ms before
+and 881 ms after the proposed marker-backed query changes, on the same copy and
+rollback-safe Rust harness; both captures had zero failures and both repairs
+reported zero repaired/unresolved/retired groups. The copy was deleted. The
+measurement breakdown and index rationale are posted to #219 comment
+6644330052. Candidate-backed call snapshot and thread selection are implemented
+with a synthetic equivalence fixture; focused test and hosted checks pending.

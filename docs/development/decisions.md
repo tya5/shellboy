@@ -3324,3 +3324,28 @@ using the legacy full-predicate query and 37.912 ms after migration with marker
 lookup. Both reported zero repaired, unresolved, and retired groups. Timing
 excludes transaction begin/rollback and migration. The local environment was
 arm64 macOS 25.3 with SQLite 3.51.0; this observation is not a startup promise.
+
+## 2026-11-04 — Reuse recovery candidates in startup context capture
+
+With proposal 1 applied, the tool-call snapshot still walked completed groups
+because SQLite chose the call-history join as its outer loop. Start that query
+from `tool_group_recovery_candidate` and preserve that order with `CROSS JOIN`;
+use the same exact candidate set for the thread selector's group predicate.
+Migration 28's one-time backfill covers older rows and triggers maintain the
+set transactionally, so neither query may miss a group that satisfies the old
+predicate. Existing snapshot chunk writes remain in place; no latency budget is
+introduced. Do not add the tested partial wait or active-attempt indexes: their
+one-copy migration costs exceeded the measured per-startup savings for this
+observed workload.
+
+Evidence: on one 3.5 GiB read-only-source `VACUUM INTO` copy with migration 28
+applied (60,840 groups, 62,903 calls, nine interrupted-work Threads), warm
+`TOOL_CALL_SNAPSHOT` query time fell from 249 ms to 0.064 ms with the same empty
+result, and the thread selector fell from 70 ms to 8.8 ms with identical
+selected Thread IDs. A same-copy measurement of complete context capture plus
+`interrupt_previous_work` was 1,796 ms before and 881 ms after, with zero
+capture failures and zero repaired, unresolved, or retired groups in both runs.
+The separate per-step measurements and omitted-index costs are in the #219
+follow-up comment.
+This is an observed local comparison, not a startup timing promise. Status:
+implementation pending final checks and hosted CI.

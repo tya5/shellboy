@@ -144,3 +144,32 @@ undetected pre-existing corruption is not a successfully isolated Thread defect.
 Detected integrity, SQL and I/O failures remain fatal. This partially adopts review L2: isolate schema-allowed
 metadata defects, but retain the existing global integrity boundary rather than
 pretending a CHECK-violating database is healthy.
+
+## Candidate-backed startup capture follow-up
+
+Startup's interrupted-thread selector and tool-call snapshot also use the
+migration-28 recovery-candidate table. The marker was backfilled from the
+legacy unresolved predicate before startup can read it, and its triggers update
+atomically with group/call/result changes. Thus a startup thread is still
+selected for any group the legacy predicate would select, and the call snapshot
+still captures every call in every unresolved group. The candidate table is the
+outer loop of the tool-call query (`CROSS JOIN` is intentional to keep SQLite
+from reverting to a full completed-history scan). The existing snapshot writer
+continues to flush bounded chunks; this changes candidate discovery only and
+makes no wall-time promise.
+
+The follow-up snapshot measured 60,840 groups, 62,903 calls, 65,678 attempts,
+and 49,250 app_meta rows; it contained nine interrupted-work Threads, one
+pending wait, zero recovery candidates, and one active attempt. In a warm same-
+copy query comparison, the nine-Thread tool-call snapshot fell from 249 ms to
+0.064 ms, with identical empty output. Replacing the thread selector's full
+group predicate with a marker existence check reduced its warm median from 70 ms
+to 8.8 ms while returning the same nine Threads. The complete
+`capture_startup_interrupted_context` plus `interrupt_previous_work` sequence
+on that same copy was 1,796 ms before and 881 ms after; both captures had zero
+failures and both repair runs had zero repaired, unresolved, and retired groups.
+A partial wait-prefix index cost 40.9 ms to build and saved under 18 ms for
+one wait; the active-attempt partial index cost 380 ms to build for a 30 ms to
+0.16 ms one-row update. Neither index's one-time cost is justified here. The
+step-specific and full-stage readings have different boundaries; these are
+local SQLite 3.51 / arm64 macOS observations, not end-to-end startup guarantees.
