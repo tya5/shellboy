@@ -223,7 +223,7 @@ mod tests {
             shown.push('\n');
         }
         assert!(shown.contains("ARRIVED_WHILE_FROZEN"));
-        assert!(shown.contains("表示固定"));
+        assert!(shown.contains("Pinned"));
         assert!(!shown.contains("BEFORE_FREEZE"));
         assert_eq!(ui.view().draft, draft);
         assert_eq!(ui.view().navigation.follow(), follow);

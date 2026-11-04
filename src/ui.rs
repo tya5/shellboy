@@ -57,6 +57,13 @@ mod send_tests;
 pub use management::ManagementPopup;
 mod motion;
 mod operations;
+
+pub(crate) fn operation_catalogue_label(
+    id: crate::operations::OperationId,
+    language: crate::config::UiLanguage,
+) -> String {
+    operations::catalogue_label(id, language)
+}
 mod overlay;
 mod popup;
 mod popup_motion;
@@ -3982,7 +3989,12 @@ impl UiState {
                 self.management.fail_preview(
                     *attempt,
                     args.clone(),
-                    "索引previewは未受付です。P/Tで再操作してください".into(),
+                    i18n::local!(
+                        self.config.ui.language,
+                        "索引previewは未受付です。P/Tで再操作してください",
+                        "Index preview was not accepted. Retry with P/T"
+                    )
+                    .into(),
                 );
                 self.dirty = true;
             }
@@ -3992,7 +4004,12 @@ impl UiState {
             self.management.fail_preview(
                 *attempt,
                 args.clone(),
-                "索引previewは未受付です。P/Tで再操作してください".into(),
+                i18n::local!(
+                    self.config.ui.language,
+                    "索引previewは未受付です。P/Tで再操作してください",
+                    "Index preview was not accepted. Retry with P/T"
+                )
+                .into(),
             );
             self.dirty = true;
             return;
@@ -4800,7 +4817,7 @@ impl UiState {
             }
             "/received" => {
                 let Some(thread_id) = thread_id else {
-                    return self.command_error("保存済みの会話を選択してください");
+                    return self.command_error(i18n::local!(self.config.ui.language, "保存済みの会話を選択してください", "Select a saved conversation"));
                 };
                 let page = if argument.is_empty() {
                     1
@@ -4809,7 +4826,7 @@ impl UiState {
                         Ok(page) if page > 0 => page,
                         _ => {
                             return self
-                                .command_error("/received または /received 1以上のページ番号");
+                                .command_error(i18n::local!(self.config.ui.language, "/received または /received 1以上のページ番号", "/received or /received <page number> (1 or higher)"));
                         }
                     }
                 };
@@ -5333,7 +5350,11 @@ impl UiState {
             Some(argument.into())
         };
         let Some(node_id) = node_id else {
-            return self.command_error("推論テキストを含むnodeがありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "推論テキストを含むnodeがありません",
+                "No node contains reasoning text"
+            ));
         };
         let view = self.active_view_mut();
         let Some(node) = view
@@ -5341,7 +5362,11 @@ impl UiState {
             .iter()
             .find(|node| node.node_id == node_id && !node.reasoning_ranges.is_empty())
         else {
-            return self.command_error("指定nodeに表示可能な推論テキストがありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "指定nodeに表示可能な推論テキストがありません",
+                "The selected node has no displayable reasoning text"
+            ));
         };
         let offset = node.reasoning_ranges[0].0;
         let source_start = node.base_char_offset;
@@ -5373,9 +5398,11 @@ impl UiState {
         let words: Vec<_> = argument.split_whitespace().collect();
         let (space, parts) = if words.first() == Some(&"space") {
             let Some(id) = words.get(1) else {
-                return self.command_error(
+                return self.command_error(i18n::local!(
+                    self.config.ui.language,
                     "/index space SPACE-ID [all|thread|threads ID...] を指定してください",
-                );
+                    "Specify /index space SPACE-ID [all|thread|threads ID...]."
+                ));
             };
             (Some((*id).to_owned()), &words[2..])
         } else {
@@ -5398,13 +5425,19 @@ impl UiState {
                 ..Default::default()
             }),
             _ => {
-                return self.command_error(
+                return self.command_error(i18n::local!(
+                    self.config.ui.language,
                     "/index [status|all|thread|threads THREAD-ID ...] を指定してください",
-                );
+                    "Specify /index [status|all|thread|threads THREAD-ID ...]."
+                ));
             }
         };
         if parts == ["thread"] && selection.is_none() {
-            return self.command_error("未保存の下書きには索引対象会話がありません");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "未保存の下書きには索引対象会話がありません",
+                "An unsaved draft has no conversation to index"
+            ));
         }
         if let Some(space) = space {
             let args = selection.get_or_insert_default();
@@ -5589,7 +5622,11 @@ impl UiState {
                 if !matches!(&command, Command::IndexRetry(_))
                     && !management::explicit_index_targets(args)
                 {
-                    return self.command_error("索引の実行対象を明示してください");
+                    return self.command_error(i18n::local!(
+                        self.config.ui.language,
+                        "索引の実行対象を明示してください",
+                        "Specify an indexing target"
+                    ));
                 }
                 self.management.scope = Some(args.clone());
                 self.management.reset_preview();
@@ -5923,14 +5960,21 @@ impl UiState {
     }
     fn command_error(&mut self, message: &str) -> Vec<UiAction> {
         self.command_rejected = true;
-        self.active_view_mut().status = format!("コマンドエラー: {message}");
+        self.active_view_mut().status = format!(
+            "{}: {message}",
+            i18n::local!(self.config.ui.language, "コマンドエラー", "Command error")
+        );
         self.active_view_mut()
             .promote_status_notice(history_interaction::NoticeKind::Failure);
         vec![]
     }
     fn open_descendant_watch(&mut self) -> Vec<UiAction> {
         let Some(root) = self.view().thread_id.clone() else {
-            return self.command_error("子孫の監視には保存済みの会話を選んでください");
+            return self.command_error(i18n::local!(
+                self.config.ui.language,
+                "子孫の監視には保存済みの会話を選んでください",
+                "Select a saved conversation to watch descendants"
+            ));
         };
         vec![
             self.thread_browser
@@ -5951,9 +5995,15 @@ impl UiState {
             threads::ThreadOutcome::None => vec![],
             threads::ThreadOutcome::Load(action) => vec![*action],
             threads::ThreadOutcome::Open(thread) => self.select_thread(thread),
-            threads::ThreadOutcome::Info(body) => {
-                self.show_help(help::Page::info("会話の情報", "会話一覧で選んだ対象", body))
-            }
+            threads::ThreadOutcome::Info(body) => self.show_help(help::Page::info(
+                i18n::local!(self.config.ui.language, "会話の情報", "Conversation info"),
+                i18n::local!(
+                    self.config.ui.language,
+                    "会話一覧で選んだ対象",
+                    "Selected from the conversation list"
+                ),
+                body,
+            )),
         }
     }
     /// Publish derived frame geometry without changing the durable source anchor.

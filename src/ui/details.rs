@@ -1671,13 +1671,22 @@ impl Details {
                         popup::item(
                             &format!(
                                 "{}{}{}",
-                                safe(&field.label),
+                                safe(&crate::presentation::fields::display_label(
+                                    &field.key,
+                                    &field.label,
+                                    language,
+                                )),
                                 if field.key == "sender.label" && language == UiLanguage::Ja {
                                     "："
                                 } else {
                                     ": "
                                 },
-                                safe(field.displayed())
+                                safe(&crate::presentation::fields::display_value(
+                                    &field.key,
+                                    &field.value,
+                                    field.displayed(),
+                                    language,
+                                ))
                             ),
                             body.width,
                         )
