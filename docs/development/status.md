@@ -4650,3 +4650,6 @@ and 37.912 ms with marker lookup; both reported zero repaired, unresolved, and
 retired groups. Timing excludes transaction begin/rollback and migration. This
 local arm64 macOS observation is not a startup promise. Final-tip default and
 all-OS CI remain pending.
+fresh schema installs the same triggers. Design and decision records document
+crash atomicity, candidate equivalence, keyset bounds, and read-only snapshot
+measurements. Focused test and CI results are pending on the task branch.
