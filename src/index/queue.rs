@@ -302,6 +302,20 @@ fn legacy_source_tail(bytes: &[u8]) -> Option<LegacyTail> {
     serde_json::from_str(&format!("{{{}", &text[offset + 1..])).ok()
 }
 
+pub(super) fn bootstrap_recovery_query(cursor: Option<&str>) -> (&'static str, &str) {
+    // Two lower bounds can make SQLite rescan the prefix before testing cursor.
+    match cursor {
+        Some(last) if last >= IndexKeys::BOOT_PREFIX => (
+            "SELECT key,octet_length(value) FROM app_meta WHERE key>?1 AND key<'index.bootstrap/' ORDER BY key LIMIT 1",
+            last,
+        ),
+        _ => (
+            "SELECT key,octet_length(value) FROM app_meta WHERE key>=?1 AND key<'index.bootstrap/' ORDER BY key LIMIT 1",
+            IndexKeys::BOOT_PREFIX,
+        ),
+    }
+}
+
 /// One transaction per page. The in-memory cursor may be discarded on restart:
 /// already converted jobs and bootstrap records are safe to visit again.
 pub(super) fn recover_inflight_page(
@@ -318,19 +332,24 @@ pub(super) fn recover_inflight_page(
         tx.commit()?;
         return Ok((true, cursor, false));
     }
-    let mut last = cursor.unwrap_or_default();
+    let mut last = cursor;
     let mut count = 0;
     let mut bytes = 0;
     let mut modified = false;
     loop {
-        let row: Option<(String, i64)> = tx.query_row(
-            "SELECT key,octet_length(value) FROM app_meta WHERE key>='index.bootstrap.' AND key>?1 AND key<'index.bootstrap/' ORDER BY key LIMIT 1",
-            [&last], |r| Ok((r.get(0)?, r.get(1)?)),
-        ).optional()?;
+        let (sql, bound) = bootstrap_recovery_query(last.as_deref());
+        let row: Option<(String, i64)> = tx
+            .query_row(sql, [bound], |r| Ok((r.get(0)?, r.get(1)?)))
+            .optional()?;
         let Some((key, size)) = row else {
             tx.commit()?;
             return Ok((modified, None, true));
         };
+        // Defer an oversized candidate too: its prefix/tail reads need a fresh page.
+        if count == RECOVERY_ROWS || (count > 0 && size > RECOVERY_BYTES.saturating_sub(bytes)) {
+            tx.commit()?;
+            return Ok((modified, last, false));
+        }
         if size > RECOVERY_BYTES {
             if let Some((profile, _)) = key
                 .strip_prefix(IndexKeys::BOOT_PREFIX)
@@ -397,10 +416,6 @@ pub(super) fn recover_inflight_page(
             tx.commit()?;
             return Ok((true, Some(key), false));
         }
-        if count == RECOVERY_ROWS || (count > 0 && size > RECOVERY_BYTES.saturating_sub(bytes)) {
-            tx.commit()?;
-            return Ok((modified, Some(last), false));
-        }
         let value: String =
             tx.query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
                 r.get(0)
@@ -413,7 +428,7 @@ pub(super) fn recover_inflight_page(
             );
             modified |= update_json_meta(&tx, &key, &work)? > 0;
         }
-        last = key;
+        last = Some(key);
         count += 1;
         bytes += size;
     }
@@ -654,7 +669,10 @@ mod metadata_tests {
         );
         let jobs: String = db.query_row("EXPLAIN QUERY PLAN SELECT id FROM embedding_job INDEXED BY jobs_running_recovery WHERE state='running' ORDER BY id LIMIT 128", [], |r| r.get(3)).unwrap();
         assert!(jobs.contains("jobs_running_recovery"), "{jobs}");
-        let meta: String = db.query_row("EXPLAIN QUERY PLAN SELECT key,octet_length(value) FROM app_meta WHERE key>='index.bootstrap.' AND key>?1 AND key<'index.bootstrap/' ORDER BY key LIMIT 1", [""], |r| r.get(3)).unwrap();
+        let (sql, bound) = bootstrap_recovery_query(None);
+        let meta: String = db
+            .query_row(&format!("EXPLAIN QUERY PLAN {sql}"), [bound], |r| r.get(3))
+            .unwrap();
         assert!(meta.contains("SEARCH") && meta.contains("INDEX"), "{meta}");
     }
 

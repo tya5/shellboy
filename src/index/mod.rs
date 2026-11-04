@@ -1786,3 +1786,6 @@ mod display_pause_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod bootstrap_recovery_tests;

@@ -9540,3 +9540,36 @@ the underscore-normalized fallback. No source values or protocol labels are
 rewritten. Local validation is `cargo fmt --all -- --check` plus Python language
 audit tests; three-OS CI is pending.
 - #152 deletion/key-hint/count audit note is documentation evidence only. Strict language audit, physical terminal checks, and integration-tip three-OS acceptance remain separate and outstanding.
+
+### #214 bootstrap recovery cursor seek
+
+The reported synthetic input has 10,000 `index.bootstrap.000000` through
+`.009999` keys, valid pending Work values and no running embedding jobs. Check
+that cursor `.000127` seeks `.000128`, `.009998` seeks `.009999`, and `.009999`
+terminates without visiting the prefix again. The production SQL selector is
+measured on a separately opened read-only synthetic database with at most 40 VM
+steps, no sort and no fullscan steps per lookup. A negative control retains the
+old two-lower-bound SQL and must exceed 10,000 VM steps despite returning the
+right key. This is a synthetic SQLite instruction bound, not wall-clock or real
+workload performance evidence.
+
+The actual recovery page function also runs under a 20,000-instruction progress
+handler guard for early/late/exhausted inputs and all 79 pages of the pending set.
+Tests check exact 128-key progress, safe cursor discard/restart, exactly 1 MiB
+input deferral, oversized work after byte/count boundaries, and rollback of a
+corrupt page without losing prior commits. Existing interrupted-job, legacy
+oversized record, Unicode splitting and adjacent-prefix tests remain applicable.
+
+Native macOS arm64 local validation passed `cargo check --locked --tests`,
+`cargo test --locked --lib index::bootstrap_recovery_tests:: -- --nocapture`
+(5 passed) and `cargo test --locked --lib index::queue::metadata_tests::`
+(7 passed). The measured early/late lookups were both 18 VM steps; exhausted
+`.009999` was 14 with the adjacent-prefix sentinel present. The actual-page
+guard completed all 79 pages. Python 197 tests, layout/watchdog and language
+checks passed. Final strict Clippy and exact-tip CI results are recorded in the
+issue handoff rather than inferred here.
+
+No real database, embedding/provider call, automatic full
+rebuild or installed-binary change is part of these checks. Recovery is an atomic
+mutation; pure query observations use read-only connections. #203 authorization
+recovery is not reimplemented by this change.
