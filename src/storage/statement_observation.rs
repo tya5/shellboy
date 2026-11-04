@@ -212,7 +212,7 @@ fn should_sample_profile(sample_all: bool, duration_ns: u64) -> bool {
     sample_all || sample_profile(duration_ns)
 }
 
-unsafe extern "C" fn profile(
+pub(crate) unsafe extern "C" fn profile(
     event: u32,
     context: *mut c_void,
     statement: *mut c_void,
@@ -366,10 +366,10 @@ impl<'a> StatementObservation<'a> {
     }
     fn install_production(connection: &'a mut Connection) -> Self {
         Self::install_using(connection, |db, context| unsafe {
-            ffi::sqlite3_trace_v2(
+            crate::trace_slot::register(
                 db,
                 ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_ROW,
-                Some(profile),
+                Some(crate::trace_slot::observation_callback),
                 context,
             )
         })
@@ -377,10 +377,10 @@ impl<'a> StatementObservation<'a> {
     #[cfg(test)]
     pub(crate) fn install_exhaustive_for_tests(connection: &'a mut Connection) -> Self {
         let mut observation = Self::install_using(connection, |db, context| unsafe {
-            ffi::sqlite3_trace_v2(
+            crate::trace_slot::register(
                 db,
                 ffi::SQLITE_TRACE_STMT | ffi::SQLITE_TRACE_PROFILE | ffi::SQLITE_TRACE_ROW,
-                Some(profile),
+                Some(crate::trace_slot::observation_callback),
                 context,
             )
         });
@@ -437,7 +437,7 @@ impl Drop for StatementObservation<'_> {
     fn drop(&mut self) {
         if self.installed {
             unsafe {
-                ffi::sqlite3_trace_v2(self.connection.handle(), 0, None, ptr::null_mut());
+                crate::trace_slot::register(self.connection.handle(), 0, None, ptr::null_mut());
             }
         }
     }
@@ -650,7 +650,7 @@ mod tests {
                     };
                     assert_eq!(
                         unsafe {
-                            ffi::sqlite3_trace_v2(
+                            crate::trace_slot::register(
                                 raw,
                                 ffi::SQLITE_TRACE_PROFILE,
                                 Some(callback),
@@ -675,7 +675,7 @@ mod tests {
                 eprintln!("pass={pass} mode={mode} ns={}", start.elapsed().as_nanos());
                 if mode.starts_with("profile") {
                     unsafe {
-                        ffi::sqlite3_trace_v2(raw, 0, None, ptr::null_mut());
+                        crate::trace_slot::register(raw, 0, None, ptr::null_mut());
                     }
                 }
                 if mode == "progress" {
@@ -771,7 +771,12 @@ mod tests {
                 let baseline = start.elapsed();
                 let mut profile_only =
                     StatementObservation::install_using(&mut db, |db, context| unsafe {
-                        ffi::sqlite3_trace_v2(db, ffi::SQLITE_TRACE_PROFILE, Some(profile), context)
+                        crate::trace_slot::register(
+                            db,
+                            ffi::SQLITE_TRACE_PROFILE,
+                            Some(crate::trace_slot::observation_callback),
+                            context,
+                        )
                     });
                 let start = std::time::Instant::now();
                 workload(profile_only.connection(), scan);
@@ -955,6 +960,22 @@ mod tests {
             .query_row("SELECT 42", [], |row| row.get(0))
             .unwrap();
         assert_eq!(result, 42);
+    }
+
+    #[test]
+    fn fixture_and_observation_both_survive_repeated_jobs() {
+        let mut db = Connection::open_in_memory().unwrap();
+        crate::trace_slot::set_slow_commit_fixture(true);
+        for expected in 1..=2 {
+            let mut observation = StatementObservation::install_exhaustive_for_tests(&mut db);
+            observation.connection().execute_batch("BEGIN").unwrap();
+            observation.connection().execute_batch("SELECT 1").unwrap();
+            observation.connection().execute_batch("COMMIT").unwrap();
+            assert!(observation.counters().vm_steps > 0);
+            drop(observation);
+            assert_eq!(crate::trace_slot::slow_commit_fixture_hits(), expected);
+        }
+        crate::trace_slot::set_slow_commit_fixture(false);
     }
 
     #[test]

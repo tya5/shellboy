@@ -1155,28 +1155,6 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
     server.abort();
 }
 
-// Profile hooks run on the fixture DB worker, after each explicit COMMIT. This
-// models a fixed durable-write cost without changing production dependencies.
-unsafe extern "C" fn slow_fixture_commits(
-    mask: u32,
-    _context: *mut std::ffi::c_void,
-    statement: *mut std::ffi::c_void,
-    _elapsed: *mut std::ffi::c_void,
-) -> i32 {
-    if mask == rusqlite::ffi::SQLITE_TRACE_PROFILE && !statement.is_null() {
-        // SQLite guarantees a live sqlite3_stmt pointer during PROFILE.
-        let sql = unsafe { rusqlite::ffi::sqlite3_sql(statement.cast()) };
-        if !sql.is_null()
-            && unsafe { std::ffi::CStr::from_ptr(sql) }
-                .to_bytes()
-                .eq_ignore_ascii_case(b"COMMIT")
-        {
-            std::thread::sleep(Duration::from_millis(2));
-        }
-    }
-    0
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_tail() {
     let (url, mut requests, server) = proxy().await;
@@ -1195,8 +1173,8 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     let request = incoming(&mut requests).await;
     control.store.database.call(|db| {
         db.execute_batch("CREATE TABLE fixture_output_batch(chunks INTEGER,bytes INTEGER); CREATE TRIGGER fixture_saved_batch AFTER UPDATE OF saved_sequence ON shell_execution WHEN NEW.saved_sequence>OLD.saved_sequence BEGIN INSERT INTO fixture_output_batch SELECT COUNT(*),SUM(length(bytes)) FROM output_chunk WHERE execution_id=NEW.id AND sequence>=OLD.saved_sequence AND sequence<NEW.saved_sequence; END;")?;
-        // No callback state/pointers escape the connection. It is removed below.
-        assert_eq!(unsafe { rusqlite::ffi::sqlite3_trace_v2(db.handle(), rusqlite::ffi::SQLITE_TRACE_PROFILE, Some(slow_fixture_commits), std::ptr::null_mut()) }, rusqlite::ffi::SQLITE_OK);
+        // The fixed fixture remains active on the worker until disabled below.
+        shellboy::trace_slot::set_slow_commit_fixture(true);
         Ok(())
     }).await.unwrap();
     request
@@ -1293,7 +1271,8 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         .map(|item| serde_json::from_str(item["output"].as_str().unwrap()).unwrap())
         .unwrap();
     control.store.database.call(move |db| {
-        assert_eq!(unsafe { rusqlite::ffi::sqlite3_trace_v2(db.handle(), 0, None, std::ptr::null_mut()) }, rusqlite::ffi::SQLITE_OK);
+        assert!(shellboy::trace_slot::slow_commit_fixture_hits() > 0, "fixture must observe later worker COMMITs");
+        shellboy::trace_slot::set_slow_commit_fixture(false);
         let rows = db.prepare("SELECT sequence,stream,stream_offset,bytes FROM output_chunk ORDER BY sequence")?.query_map([], |row| Ok((row.get::<_,i64>(0)?, row.get::<_,String>(1)?, row.get::<_,i64>(2)?, row.get::<_,Vec<u8>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
         let (mut out,mut err)=(Vec::new(),Vec::new());
         for (i,(sequence,stream,offset,bytes)) in rows.iter().enumerate() {

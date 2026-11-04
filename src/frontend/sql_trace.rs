@@ -26,7 +26,7 @@ impl<'a> Statements<'a> {
         // SAFETY: this fixture owns the connection; callback context remains at
         // a stable boxed address until the hook is explicitly removed in Drop.
         let result = unsafe {
-            rusqlite::ffi::sqlite3_trace_v2(
+            crate::trace_slot::register(
                 db.handle(),
                 rusqlite::ffi::SQLITE_TRACE_STMT,
                 Some(trace),
@@ -44,7 +44,7 @@ impl Drop for Statements<'_> {
     fn drop(&mut self) {
         // SAFETY: connection outlives this guard; unregister before count drops.
         unsafe {
-            rusqlite::ffi::sqlite3_trace_v2(self.db.handle(), 0, None, std::ptr::null_mut());
+            crate::trace_slot::register(self.db.handle(), 0, None, std::ptr::null_mut());
         }
     }
 }

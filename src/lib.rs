@@ -42,6 +42,8 @@ pub mod status;
 pub mod storage;
 pub mod terminal_links;
 pub(crate) mod tool_description;
+#[doc(hidden)]
+pub mod trace_slot;
 pub mod ui;
 
 mod usage;

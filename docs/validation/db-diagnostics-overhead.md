@@ -31,7 +31,7 @@ Repository source audit: `grep -RInE` over Rust files in `src`, `tests`, and `ex
 - `src/frontend/sql_trace.rs` installs and removes a STMT trace in test fixtures on their own connections. Benchmark-only raw trace registrations also occur in the observation module.
 - No update, preupdate, or authorizer registrations were found in those source trees. The RAG read connection (`src/index/search/reader.rs`) has no registration found by this audit.
 
-SQLite provides no API to retrieve the callback and context currently registered with `sqlite3_trace_v2`. A managed registration boundary is needed to chain known owners; uncontrolled raw installations cannot be transparently preserved. This is an unresolved design issue, not a claim that the candidate enforces exclusivity.
+SQLite provides no API to retrieve the callback and context currently registered with `sqlite3_trace_v2`. Uncontrolled raw installations cannot be transparently preserved. The follow-up implementation routes registrations through `src/trace_slot.rs` and dispatches the fixed worker fixture alongside observation; the source guard restricts known registration sites. The audit is static and cannot prove the behavior of downstream code or dynamically loaded extensions.
 
 ## Release worker comparison
 
