@@ -176,6 +176,11 @@ pub enum ThreadCommand {
     Create(ThreadCreateOptions),
     Fork(ThreadForkOptions),
     Delete(ThreadDeleteOptions),
+    /// Release this Thread's hold on originals of summaries and spills adopted before a node (irreversible).
+    #[command(
+        after_help = "Explicit only; nothing prunes automatically. Preview first, then run:\n  shellboy thread prune --thread THREAD_ID --before NODE_ID --dry-run\n  shellboy thread prune --thread THREAD_ID --before NODE_ID\n  shellboy storage collect --category history   # optional: reclaim now and read the counts\n\nOmitting --thread targets the calling Thread. Originals still held by another live Thread (a fork) are kept. After the history GC reclaims them, a summary restore, original search and `history get` of those nodes report them as pruned. GC frees pages inside the database file but does not shrink it (no automatic VACUUM). Use `history get` to read what you need before pruning."
+    )]
+    Prune(ThreadPruneOptions),
     /// Inspect deletion blockers and direct references without deleting anything.
     DeletePreview(ThreadDeleteOptions),
     Set(ThreadSetOptions),
@@ -430,6 +435,18 @@ pub struct ThreadDeleteOptions {
     pub thread_id: String,
     #[arg(long)]
     pub descendants: bool,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ThreadPruneOptions {
+    /// Target Thread; omitted means the calling Thread.
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    /// Node on the selected path; summaries and spills adopted before it are pruned.
+    #[arg(long = "before")]
+    pub before_node_id: String,
+    /// Report what would be pruned without changing anything.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadSetOptions {
@@ -842,6 +859,11 @@ impl Cli {
                     preview_marker: None,
                     thread_id: a.thread_id,
                     descendants: a.descendants,
+                }),
+                ThreadCommand::Prune(a) => C::ThreadPrune(wire::ThreadPruneArgs {
+                    thread_id: a.thread_id,
+                    before_node_id: a.before_node_id,
+                    dry_run: a.dry_run,
                 }),
                 ThreadCommand::Set(a) => C::ThreadSet(wire::ThreadSetArgs {
                     agents: path_option(a.agents)?,

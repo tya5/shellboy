@@ -13,7 +13,13 @@ pub use list::list_nodes;
 pub(crate) mod payload;
 mod raw_witness;
 pub(crate) use node_row::NodeRow;
+pub mod prune;
 pub(crate) mod reachability;
+/// Integration-test hook for read visibility.
+#[doc(hidden)]
+pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<bool> {
+    reachability::searchable(db, id)
+}
 mod relations;
 mod thread;
 pub(crate) use raw_witness::{RawWitness, RetainedExecutionFacts, RetainedExecutionRequest};
@@ -648,6 +654,18 @@ pub fn read_node(
     let row = NodeRow::load_payload(connection, &args.node_id)
         .map_err(sql_error)?
         .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "history node not found"))?;
+    // Released by `thread prune` and not held elsewhere: not retained, even
+    // before the history GC has removed the body (#235).
+    if row.deleted_reason.as_deref() == Some(prune::PRUNED_REASON)
+        || (row.payload.is_some()
+            && reachability::released_by_prune(connection, &args.node_id).map_err(sql_error)?)
+    {
+        return Err(ApiError::new(
+            ErrorCode::TargetUnavailable,
+            "node was pruned (thread prune) and is not retained",
+        )
+        .hint("its summary or spill placeholder is still readable; the original was released on purpose"));
+    }
     let encoding = if args.encoding.eq_ignore_ascii_case("utf-8")
         || args.encoding.eq_ignore_ascii_case("utf8")
     {

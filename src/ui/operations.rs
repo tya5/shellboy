@@ -51,6 +51,7 @@ ThreadList,
     ThreadCreate,
     ThreadFork,
     ThreadDelete,
+    ThreadPrune,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -1235,6 +1236,25 @@ impl Form {
                     }))
                 },
             ),
+            OpKind::ThreadPrune => (
+                vec![
+                    thread(),
+                    f(
+                        "before",
+                        "この履歴ノードより前（選択パス上）",
+                        c.node.clone(),
+                        Text,
+                    ),
+                    f("dry_run", "実行対象だけを確認", "true".into(), Boolean),
+                ],
+                |form, _cwd| {
+                    Ok(Command::ThreadPrune(ThreadPruneArgs {
+                        thread_id: Some(form.owned("thread")?),
+                        before_node_id: form.owned("before")?,
+                        dry_run: form.boolean("dry_run")?,
+                    }))
+                },
+            ),
             OpKind::ThreadDelete => (
                 vec![
                     thread(),
@@ -2277,6 +2297,11 @@ mod tests {
                 json!({"thread_id":id(1),"descendants":false}),
             ),
             (
+                OpKind::ThreadPrune,
+                "thread.prune",
+                json!({"thread_id":id(1),"before_node_id":id(2),"dry_run":true}),
+            ),
+            (
                 OpKind::ThreadSet,
                 "thread.set",
                 json!({"thread_id":id(1),"model":"model"}),
@@ -2436,6 +2461,7 @@ mod tests {
             "thread.create",
             "thread.fork",
             "thread.delete",
+            "thread.prune",
             "thread.set",
             "message.send",
             "message.reply",
@@ -3127,10 +3153,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 59);
+        assert_eq!(rows.len(), 60);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            59
+            60
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3142,7 +3168,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 59);
+        assert_eq!(operations.rows().len(), 60);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

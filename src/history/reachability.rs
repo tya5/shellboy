@@ -1,18 +1,32 @@
 //! Current roots shared by GC and history visibility.
 // One current-root rule for mark scanning and destructive-time validation.
-pub(crate) const ROOT_PREDICATE: &str = "EXISTS(SELECT 1 FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE p.node_id=n.id AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=n.turn_id AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id IN (n.id,CASE WHEN n.id GLOB 'reply-*' THEN substr(n.id,7) ELSE n.id END) AND (r.message_node_id=n.id OR json_extract(r.result_json,'$.reply.node_id')=n.id) AND (t.deleted_at IS NULL OR json_extract(r.result_json,'$.reply.state')='pending' OR EXISTS(SELECT 1 FROM thread sender WHERE sender.id=json_extract(r.sender_json,'$.thread_id') AND json_extract(r.sender_json,'$.kind')='model' AND sender.deleted_at IS NULL))) OR EXISTS(SELECT 1 FROM attachment_delivery d JOIN thread t ON t.id=d.thread_id WHERE d.node_id=n.id AND d.status IN ('accepted','held') AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind IN ('node','history_node','source_node') AND resource_id=n.id) OR EXISTS(SELECT 1 FROM replacement r JOIN thread_replacement tr ON tr.replacement_id=r.id JOIN thread t ON t.id=tr.thread_id WHERE r.output_node_id=n.id AND t.deleted_at IS NULL)";
+pub(crate) const ROOT_PREDICATE: &str = "EXISTS(SELECT 1 FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE p.node_id=n.id AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=n.turn_id AND t.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM replacement_source ps INDEXED BY replacement_source_reverse JOIN replacement pr ON pr.id=ps.replacement_id AND pr.state='pruned' JOIN thread_replacement ptr ON ptr.replacement_id=pr.id AND ptr.thread_id=t.id WHERE ps.source_node_id=n.id)) OR EXISTS(SELECT 1 FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id IN (n.id,CASE WHEN n.id GLOB 'reply-*' THEN substr(n.id,7) ELSE n.id END) AND (r.message_node_id=n.id OR json_extract(r.result_json,'$.reply.node_id')=n.id) AND (t.deleted_at IS NULL OR json_extract(r.result_json,'$.reply.state')='pending' OR EXISTS(SELECT 1 FROM thread sender WHERE sender.id=json_extract(r.sender_json,'$.thread_id') AND json_extract(r.sender_json,'$.kind')='model' AND sender.deleted_at IS NULL))) OR EXISTS(SELECT 1 FROM attachment_delivery d JOIN thread t ON t.id=d.thread_id WHERE d.node_id=n.id AND d.status IN ('accepted','held') AND t.deleted_at IS NULL) OR EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind IN ('node','history_node','source_node') AND resource_id=n.id) OR EXISTS(SELECT 1 FROM replacement r JOIN thread_replacement tr ON tr.replacement_id=r.id JOIN thread t ON t.id=tr.thread_id WHERE r.output_node_id=n.id AND t.deleted_at IS NULL)";
 
 // Negative ownership evidence is intentionally narrower than GC eligibility:
 // ownerless imported/legacy sources remain searchable until ordinary GC removes
 // their payload. A live GC root always takes precedence over a deleted owner.
 const DELETED_OWNER: &str = "EXISTS(SELECT 1 FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE p.node_id=n.id AND t.deleted_at IS NOT NULL) OR EXISTS(SELECT 1 FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=n.turn_id AND t.deleted_at IS NOT NULL) OR EXISTS(SELECT 1 FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.message_node_id=n.id AND t.deleted_at IS NOT NULL) OR EXISTS(SELECT 1 FROM attachment_delivery d JOIN thread t ON t.id=d.thread_id WHERE d.node_id=n.id AND t.deleted_at IS NOT NULL) OR EXISTS(SELECT 1 FROM replacement r JOIN thread_replacement tr ON tr.replacement_id=r.id JOIN thread t ON t.id=tr.thread_id WHERE r.output_node_id=n.id AND t.deleted_at IS NOT NULL)";
 
+// The node is a source of a replacement that `thread prune` marked (#235).
+const PRUNE_SOURCE: &str = "EXISTS(SELECT 1 FROM replacement_source ps INDEXED BY replacement_source_reverse JOIN replacement pr ON pr.id=ps.replacement_id WHERE ps.source_node_id=n.id AND pr.state='pruned')";
+
+/// The node was released by `thread prune` and nothing else currently holds it
+/// (path, another Thread's Turn, receipt, pin, adopted unpruned consumer). Its
+/// body may still be present until the history GC runs; readers treat it as
+/// not retained so a fetch fails the same way before and after collection.
+pub(crate) fn released_by_prune(db: &rusqlite::Connection, id: &str) -> rusqlite::Result<bool> {
+    let sql = format!(
+        "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id AND r.state<>'pruned') SELECT EXISTS(SELECT 1 FROM node n WHERE n.id=?1 AND {PRUNE_SOURCE}) AND NOT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE})"
+    );
+    db.prepare_cached(&sql)?.query_row([id], |row| row.get(0))
+}
+
 /// Read-only current visibility. Reverse replacement traversal preserves live
 /// summary/spill provenance even when the original node left every selected path.
 /// UNION terminates cycles; source reverse indexes bound each adjacency lookup.
 pub(crate) fn searchable(db: &rusqlite::Connection, id: &str) -> rusqlite::Result<bool> {
     let sql = format!(
-        "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id) SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE}) OR NOT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {DELETED_OWNER})"
+        "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id AND r.state<>'pruned') SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE}) OR (NOT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {DELETED_OWNER}) AND NOT EXISTS(SELECT 1 FROM node n WHERE n.id=?1 AND {PRUNE_SOURCE}))"
     );
     db.prepare_cached(&sql)?.query_row([id], |row| row.get(0))
 }

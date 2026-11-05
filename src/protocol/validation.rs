@@ -176,6 +176,13 @@ impl ThreadForkArgs {
     }
 }
 
+impl ThreadPruneArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
+        nonempty(&self.before_node_id, "before_node_id")
+    }
+}
+
 impl ThreadSetArgs {
     fn validate(&self) -> Result<(), ApiError> {
         optional_nonempty(self.connection.as_deref(), "connection")?;
@@ -430,6 +437,7 @@ impl Command {
             Self::CompactPreview(a) => a.validate(),
             Self::ThreadCreate(a) => a.validate(),
             Self::ThreadFork(a) => a.validate(),
+            Self::ThreadPrune(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
                 if let Some(marker) = &a.preview_marker

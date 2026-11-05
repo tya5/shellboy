@@ -167,6 +167,8 @@ mod terminal_links;
 mod thread_browser;
 #[path = "../thread_exit_marker.rs"]
 mod thread_exit_marker;
+#[path = "../thread_prune.rs"]
+mod thread_prune;
 #[path = "../thread_titles.rs"]
 mod thread_titles;
 #[path = "../tool_cancel_reasons.rs"]

@@ -177,6 +177,7 @@ impl Compactor {
         let marker = marker.id.clone();
         let thread = snapshot.thread.clone();
         self.database.call(move|db| {
+            ensure_not_pruned(db,&marker)?;
             let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,s.source_revision,s.source_hash FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 AND r.state='completed' ORDER BY s.ordinal LIMIT ?2")?.query_map(params![marker,(TURN_BOUNDARY_IDS+1) as i64],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,i64>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,i64>(4)?,row.get::<_,String>(5)?)))?.collect::<Result<Vec<_>,_>>()?;
             if rows.is_empty()||rows.len()>TURN_BOUNDARY_IDS {return Err(StorageError::from(invalid("Context marker source list is unavailable or exceeds the bounded provenance budget")));}
             let mut sources=Vec::new();let mut completed=HashSet::new();let mut seen=HashSet::new();
@@ -454,6 +455,7 @@ impl Compactor {
         if excluded_attachments > 0 {
             warnings.push(format!("Restored text only: {excluded_attachments} excluded attachment references remain excluded; attach again with new IDs if needed"));
         }
+        let marker_id = marker.id.clone();
         let result = ContextEditResult {
             compact: CompactResult {
                 source_nodes: validation
@@ -479,6 +481,7 @@ impl Compactor {
                         "Context restore cancelled before adoption",
                     )));
                 }
+                ensure_not_pruned(&tx, &marker_id)?;
                 validate(&tx, &snapshot)?;
                 validate(&tx, &validation)?;
                 history::select_path(
@@ -493,6 +496,39 @@ impl Compactor {
             })
             .await
             .map_err(storage_error)
+    }
+}
+
+/// A summary whose originals were released by `thread prune` (#235) cannot be restored.
+fn ensure_not_pruned(db: &rusqlite::Connection, marker: &str) -> Result<(), StorageError> {
+    let pruned: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM replacement WHERE output_node_id=?1 AND state='pruned')",
+        [marker],
+        |row| row.get(0),
+    )?;
+    if pruned {
+        return Err(StorageError::from(invalid(
+            "This summary's originals were pruned (thread prune) and are not retained; it cannot be restored or re-summarized",
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod prune_guard_tests {
+    use super::ensure_not_pruned;
+
+    #[test]
+    fn restore_of_a_pruned_summary_is_refused_with_a_clear_reason() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE replacement(id TEXT, output_node_id TEXT, state TEXT);
+             INSERT INTO replacement VALUES('r1','kept','completed'),('r2','gone','pruned');",
+        )
+        .unwrap();
+        assert!(ensure_not_pruned(&db, "kept").is_ok());
+        let message = format!("{:?}", ensure_not_pruned(&db, "gone").unwrap_err());
+        assert!(message.contains("pruned"), "{message}");
     }
 }
 

@@ -1352,6 +1352,19 @@ impl Store {
                 }
                 result
             }
+            Command::ThreadPrune(args) => {
+                let id = target(args.thread_id.as_deref(), caller)?;
+                let value =
+                    history::prune::prune_thread(tx, &id, &args.before_node_id, args.dry_run)?;
+                if !args.dry_run && value["gc_job_id"].is_string() {
+                    // Same signal as thread delete: wake the existing history GC
+                    // (and its derived-data followers). No timing is promised.
+                    self.database
+                        .signals()
+                        .mark_all(&crate::maintenance::Work::DELETION);
+                }
+                MutationResult::value(value)
+            }
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }

@@ -135,6 +135,16 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::ThreadPrune,
+        &["thread", "prune"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("before_node_id", FieldId::Before),
+            ("dry_run", FieldId::DryRun),
+        ],
+        None,
+    ),
+    (
         OperationId::ThreadSet,
         &["thread", "set"],
         &[

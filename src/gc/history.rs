@@ -206,7 +206,7 @@ fn provenance_step(
         }
         *candidate.lock().expect("history candidate") = Some(node.clone());
         let replacement: Option<(i64,String)> = tx.query_row(
-            "SELECT rowid,id FROM replacement WHERE output_node_id=?1 AND rowid>?2 ORDER BY rowid LIMIT 1",
+            "SELECT rowid,id FROM replacement WHERE output_node_id=?1 AND rowid>?2 AND state<>'pruned' ORDER BY rowid LIMIT 1",
             params![node,replacement_cursor], |r| Ok((r.get(0)?,r.get(1)?)),
         ).optional().map_err(sql_error)?;
         let Some((replacement_rowid, replacement_id)) = replacement else {
@@ -261,7 +261,13 @@ fn tombstone_node(
     turn: &Option<String>,
 ) -> Result<()> {
     crate::index::delete_source_vectors_tx(tx, node)?;
-    tx.execute("UPDATE node SET payload_json=NULL,payload_bytes=0,payload_revision=payload_revision+1,deleted_reason='thread_deleted_unreachable' WHERE id=?1",[node]).map_err(sql_error)?;
+    // A node released by `thread prune` records that reason (#235); the rest keep the thread-deletion reason.
+    let reason = if crate::history::reachability::released_by_prune(tx, node).map_err(sql_error)? {
+        crate::history::prune::PRUNED_REASON
+    } else {
+        "thread_deleted_unreachable"
+    };
+    tx.execute("UPDATE node SET payload_json=NULL,payload_bytes=0,payload_revision=payload_revision+1,deleted_reason=?2 WHERE id=?1",params![node,reason]).map_err(sql_error)?;
     // Once the payload is a tombstone, search can no longer expose
     // it; release deleted-owner evidence in this same transaction.
     release_deleted_ownership(tx, node)?;
@@ -269,8 +275,7 @@ fn tombstone_node(
         "UPDATE output_item SET payload_json=?2 WHERE node_id=?1",
         params![
             node,
-            json!({"type":"shellboy_tombstone","reason":"thread_deleted_unreachable","node_id":node})
-                .to_string()
+            json!({"type":"shellboy_tombstone","reason":reason,"node_id":node}).to_string()
         ],
     )
     .map_err(sql_error)?;
@@ -296,7 +301,7 @@ fn sweep_step(
     progress.revalidate_roots = true;
     let rows=tx.prepare("SELECT n.rowid,n.id,COALESCE(length(CAST(n.payload_json AS BLOB)),0),n.kind,n.turn_id FROM node n WHERE n.rowid>?1 AND n.rowid<=?3 ORDER BY n.rowid LIMIT ?2").map_err(sql_error)?.query_map(params![progress.last_rowid,batch as i64,horizon],|row|Ok((row.get::<_,i64>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)? as u64,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?))).map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
     let reachability_sql = format!(
-        "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id) SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE})"
+        "WITH RECURSIVE consumers(id) AS(SELECT ?1 UNION SELECT r.output_node_id FROM consumers c JOIN replacement_source s ON s.source_node_id=c.id JOIN replacement r ON r.id=s.replacement_id AND r.state<>'pruned') SELECT EXISTS(SELECT 1 FROM consumers c JOIN node n ON n.id=c.id WHERE {ROOT_PREDICATE})"
     );
     let mut current_roots = if progress.revalidate_roots {
         Some(tx.prepare_cached(&reachability_sql).map_err(sql_error)?)

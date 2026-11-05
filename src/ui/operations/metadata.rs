@@ -37,6 +37,7 @@ impl Form {
             "turn" => FieldId::Turn,
             "attempt" => FieldId::Attempt,
             "node" => FieldId::Node,
+            "before" => FieldId::Before,
             "parent" => FieldId::Parent,
             "message" => FieldId::Message,
             "messages" => FieldId::Messages,
@@ -576,6 +577,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "会話 · 削除影響",
             "Conversation · Deletion impact"
         ),
+        OperationId::ThreadPrune => local!(
+            language,
+            "会話 · 原文の解放",
+            "Conversation · Prune originals"
+        ),
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
         OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
@@ -723,6 +729,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Threadと選択した子孫の削除を妨げる作業・参照・回収見込みを表示します。",
             "Show work and references blocking deletion and expected reclamation for the specified Thread and selected descendants."
+        ),
+        OperationId::ThreadPrune => local!(
+            language,
+            "指定ノードより前で採用済みの要約・spillの原文を、このThreadの保持から外します。回収は既存の到達性GCが行い、元に戻せません。",
+            "Release this Thread's hold on originals of summaries and spills adopted before the node. The existing reachability GC reclaims them; this cannot be undone."
         ),
         OperationId::ThreadSet => local!(
             language,
@@ -988,6 +999,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         ),
         FieldId::Turn => local!(language, "応答処理ID（Turn）", "Turn ID"),
         FieldId::Node => local!(language, "履歴ノードID", "History node ID"),
+        FieldId::Before => local!(language, "この履歴ノードより前", "Before this history node"),
         FieldId::Parent => local!(language, "親の会話ID", "Parent Thread ID"),
         FieldId::Message => local!(language, "入力ID", "Message ID"),
         FieldId::Messages => local!(language, "取消対象の入力ID", "Message IDs to cancel"),
@@ -1156,6 +1168,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "原文または関係を調べる保存ノードIDを指定します。",
             "Specify the saved node ID whose original or relationships to inspect."
+        ),
+        FieldId::Before => local!(
+            language,
+            "選択パス上のノードIDです。これより前で採用済みの要約・spillの原文をこのThreadの保持から外します。",
+            "A node ID on the selected path. Releases this Thread's hold on originals of summaries and spills adopted before it."
         ),
         FieldId::Parent => local!(
             language,
