@@ -1,5 +1,9 @@
 # Development status
 
+## History GC budget resumption (#225; in progress)
+
+Adaptive history stages and conservative retention of oversized indivisible nodes are under validation. Index deletion remains atomic with tombstoning because retry-fee observations do not filter tombstoned jobs. The GC diagnostics UI, final focused tests, sustained-write measurement, and CI remain pending.
+
 ## Startup timing CLI (#212)
 
 Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. W8 review found the SemVer prerelease comparison defect (`0.7.2-rc.1` to `0.7.2`); a follow-up now uses SemVer ordering and adds RC/final, reverse-direction, and build-metadata regression cases. On macOS via `rust-slot`, formatting, all 15 startup-related unit tests, the synthetic-log CLI integration test, strict all-target Clippy, `cargo check --locked --tests`, test-layout, and diff checks pass. Regression cases cover RC-to-final, reverse direction, and build metadata. Default CI `41756884318` and all-OS CI `41758068617` pass on source-code tip `3b3c2e3d2fbc5bc2a40244abda4ae086ae7ed643`; a later documentation-only validation note is being checked on its own final tip.
