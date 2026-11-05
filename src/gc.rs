@@ -12,7 +12,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Duration};
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{Mutex, Notify, watch};
 use tokio_util::sync::CancellationToken;
 
 mod event_retention;
@@ -26,6 +26,19 @@ type Result<T> = std::result::Result<T, ApiError>;
 const BATCH: usize = 128;
 const RAW_BATCH_BYTES: u64 = 1024 * 1024;
 const RAW_PREFIX: &str = "raw_tombstone.";
+
+/// Bounded, content-free observation of the most recent history pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GcDiagnostics {
+    pub stage: String,
+    pub scanned: u64,
+    pub deferrals: u64,
+    pub restarts: u64,
+    pub kept_over_budget: u64,
+    pub started: std::time::Instant,
+    pub last_advance: std::time::Instant,
+    pub completed: Option<std::time::Instant>,
+}
 
 #[derive(Clone)]
 pub struct GcService {
@@ -41,6 +54,8 @@ pub struct GcService {
     history_discovery: Arc<std::sync::Mutex<i64>>,
     history_candidate: Arc<std::sync::Mutex<Option<String>>>,
     history_keep: Arc<std::sync::Mutex<Option<String>>>,
+    history_diagnostics: watch::Sender<Option<GcDiagnostics>>,
+    history_diagnostics_job: Arc<std::sync::Mutex<String>>,
     /// Round-robin position of dead-delivery/shell-event retention (#170).
     event_cursor: Arc<std::sync::Mutex<event_retention::Cursor>>,
     // One coalesced permit for the existing frontend; never raw data or a task.
@@ -187,6 +202,8 @@ impl GcService {
             history_discovery: Arc::default(),
             history_candidate: Arc::default(),
             history_keep: Arc::default(),
+            history_diagnostics: watch::channel(None).0,
+            history_diagnostics_job: Arc::default(),
             event_cursor: Arc::default(),
             database,
             files: BlockingFiles::new(config.workers.control_file),
@@ -790,8 +807,39 @@ impl GcService {
             .map_err(crate::app::storage_error)?
         {
             Background::Done(result) => {
-                let (job, cursor, more) = result?;
+                let (job, cursor, more, restarted) = result?;
                 *self.history_discovery.lock().expect("history discovery") = cursor;
+                if let Some(id) = &job {
+                    let now = std::time::Instant::now();
+                    let mut current_job = self
+                        .history_diagnostics_job
+                        .lock()
+                        .expect("GC diagnostics job");
+                    if current_job.as_str() != id || restarted {
+                        let mut snapshot = if current_job.as_str() == id {
+                            self.history_diagnostics.borrow().clone()
+                        } else {
+                            None
+                        }
+                        .unwrap_or_else(|| GcDiagnostics {
+                            stage: "starting".into(),
+                            scanned: 0,
+                            deferrals: 0,
+                            restarts: 0,
+                            kept_over_budget: 0,
+                            started: now,
+                            last_advance: now,
+                            completed: None,
+                        });
+                        *current_job = id.clone();
+                        if restarted {
+                            snapshot.restarts = snapshot.restarts.saturating_add(1);
+                            snapshot.stage = "reset".into();
+                            snapshot.last_advance = now;
+                        }
+                        self.history_diagnostics.send_replace(Some(snapshot));
+                    }
+                }
                 if more {
                     Ok(Background::Deferred)
                 } else {
@@ -801,6 +849,10 @@ impl GcService {
             Background::Deferred => Ok(Background::Deferred),
         }
     }
+    pub(crate) fn subscribe_history_diagnostics(&self) -> watch::Receiver<Option<GcDiagnostics>> {
+        self.history_diagnostics.subscribe()
+    }
+
     async fn history_step_held(
         &self,
         requester: &mut BackgroundRequester,
@@ -854,6 +906,46 @@ impl GcService {
         } else {
             *self.history_keep.lock().expect("history keep") = None;
         }
+        let now = std::time::Instant::now();
+        let mut diagnostic_job = self
+            .history_diagnostics_job
+            .lock()
+            .expect("GC diagnostics job");
+        let mut diagnostic = if diagnostic_job.as_str() == job_id {
+            self.history_diagnostics.borrow().clone()
+        } else {
+            *diagnostic_job = job_id.to_owned();
+            None
+        }
+        .unwrap_or_else(|| GcDiagnostics {
+            stage: "starting".into(),
+            scanned: 0,
+            deferrals: 0,
+            restarts: 0,
+            kept_over_budget: 0,
+            started: now,
+            last_advance: now,
+            completed: None,
+        });
+        if step.deferred {
+            diagnostic.deferrals = diagnostic.deferrals.saturating_add(1);
+        } else {
+            if step.scanned > 0 || diagnostic.stage != step.stage || step.restarted || step.complete
+            {
+                diagnostic.last_advance = now;
+            }
+            diagnostic.stage.clone_from(&step.stage);
+            diagnostic.scanned = diagnostic.scanned.saturating_add(step.scanned);
+            diagnostic.restarts = diagnostic
+                .restarts
+                .saturating_add(u64::from(step.restarted));
+            diagnostic.kept_over_budget = step.kept_over_budget;
+            if step.complete {
+                diagnostic.completed = Some(now);
+            }
+        }
+        self.history_diagnostics.send_replace(Some(diagnostic));
+        drop(diagnostic_job);
         if step.nodes_tombstoned > 0 {
             self.availability_changed.notify_one();
         }
@@ -1021,7 +1113,7 @@ fn reset(tx: &Transaction<'_>, job: &str, root: i64) -> Result<()> {
     tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Reset,last_rowid:0,horizon,revalidate_roots:false,retain_all:false,kept_count:0,kept_receipts:0,kept_marks:0,kept_ids:Vec::new(),job_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM gc_job",[],|r|r.get(0)).map_err(sql_error)?,receipt_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt",[],|r|r.get(0)).map_err(sql_error)?}).unwrap()]).map_err(sql_error)?;
     Ok(())
 }
-fn start_history(db: &mut Connection, after: i64) -> Result<(Option<String>, i64, bool)> {
+fn start_history(db: &mut Connection, after: i64) -> Result<(Option<String>, i64, bool, bool)> {
     work_tables(db)?;
     let rows = db
         .prepare("SELECT rowid,id,kind,state FROM gc_job WHERE rowid>?1 ORDER BY rowid LIMIT ?2")
@@ -1046,6 +1138,8 @@ fn start_history(db: &mut Connection, after: i64) -> Result<(Option<String>, i64
     );
     let more = found.is_none() && rows.len() == BATCH;
     let job = found.map(|row| row.1.clone());
+    let was_running = found.is_some_and(|row| row.3 == "running");
+    let mut restarted = false;
     if let Some(job) = &job {
         let tx = db.transaction().map_err(sql_error)?;
         let cursor: Option<String> = tx.query_row(
@@ -1056,12 +1150,18 @@ fn start_history(db: &mut Connection, after: i64) -> Result<(Option<String>, i64
             .and_then(|body| serde_json::from_str::<Progress>(&body).ok())
             .is_some();
         if !resumable {
+            restarted = was_running;
             let root = revision(&tx)?;
             reset(&tx, job, root)?;
         }
         tx.commit().map_err(sql_error)?;
     }
-    Ok((job, if more || found.is_some() { next } else { 0 }, more))
+    Ok((
+        job,
+        if more || found.is_some() { next } else { 0 },
+        more,
+        restarted,
+    ))
 }
 use crate::history::reachability::ROOT_PREDICATE;
 
@@ -1094,6 +1194,54 @@ mod tests {
     use super::INDEX_SOURCES_PAGE;
     use rusqlite::{Connection, params};
     use std::time::Instant;
+
+    #[tokio::test]
+    async fn history_diagnostics_observe_progress_and_restart_without_db_reads() {
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("fixture.db"))
+            .await
+            .unwrap();
+        let config = crate::config::Config::default();
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        let mut rx = gc.subscribe_history_diagnostics();
+        assert!(rx.borrow_and_update().is_none());
+        db.call(|db| {
+            db.execute(
+                "INSERT INTO gc_job VALUES('job','history',0,NULL,'pending',NULL)",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let job = gc.start_history().await.unwrap().unwrap();
+        assert!(rx.borrow_and_update().is_some());
+        gc.history_step(&job).await.unwrap();
+        assert_eq!(rx.borrow_and_update().as_ref().unwrap().stage, "receipts");
+        db.call(|db| {
+            db.execute("UPDATE gc_job SET cursor_json='invalid' WHERE id='job'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        gc.start_history().await.unwrap().unwrap();
+        let snapshot = rx.borrow_and_update().clone().unwrap();
+        assert_eq!(snapshot.stage, "reset");
+        assert_eq!(snapshot.restarts, 1);
+        db.shutdown().await.unwrap();
+    }
 
     fn fixture(live: usize, deleted: usize, jobs: usize, chunks: usize) -> Connection {
         let db = Connection::open_in_memory().unwrap();

@@ -370,7 +370,7 @@ impl UiState {
             return self.overlay_key(owner, key);
         }
         if key.code == KeyCode::F(1) {
-            return self.show_help(help::Page::guide(&self.config));
+            return self.show_help(self.general_help(Instant::now()));
         }
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             match key.code {
@@ -535,7 +535,7 @@ impl UiState {
                 return Some(vec![]);
             }
             let above = self.top_overlay().is_some();
-            let actions = self.show_help(help::Page::guide(&self.config));
+            let actions = self.show_help(self.general_help(Instant::now()));
             self.help_above_popups = above;
             return Some(actions);
         }
