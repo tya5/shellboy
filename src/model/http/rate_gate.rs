@@ -19,7 +19,7 @@ struct Feedback {
     counted_generation: Option<u64>,
     next_ticket: u64,
     queued: VecDeque<u64>,
-    probe: bool,
+    probe: Option<u64>,
 }
 #[derive(Clone)]
 pub(super) struct RateGate {
@@ -28,7 +28,7 @@ pub(super) struct RateGate {
     max_backoff: Duration,
 }
 pub(crate) struct Lease {
-    _permit: Option<()>,
+    _permit: Option<u64>,
     generation: u64,
     gate: RateGate,
 }
@@ -55,9 +55,12 @@ impl Drop for Waiter {
 }
 impl Drop for Lease {
     fn drop(&mut self) {
-        if self._permit.is_some() {
+        if let Some(token) = self._permit {
             let mut state = self.gate.feedback.lock().expect("rate gate poisoned");
-            state.probe = false;
+            // A probe released at response headers must not clear a later probe.
+            if state.probe == Some(token) {
+                state.probe = None;
+            }
             drop(state);
             self.gate.changed.notify_waiters();
         }
@@ -79,7 +82,7 @@ impl RateGate {
                 "Connection cooldown exceeds the monotonic clock range",
             ));
         }
-        if state.until.is_none() && !state.probe && state.queued.is_empty() {
+        if state.until.is_none() && state.probe.is_none() && state.queued.is_empty() {
             return Ok(Reservation::Ready(Lease {
                 _permit: None,
                 generation: state.generation,
@@ -117,6 +120,21 @@ impl RateGate {
     }
     pub(super) fn generation(&self) -> u64 {
         self.feedback.lock().expect("rate gate poisoned").generation
+    }
+    /// A success status at response headers ends the probe: clear the cooldown
+    /// generation and release the probe permit without waiting for the body.
+    /// Stale successes (older generation) and non-probe requests do nothing.
+    pub(super) fn probe_succeeded(&self, request_generation: u64) {
+        let mut state = self.feedback.lock().expect("rate gate poisoned");
+        if state.probe.is_none() || state.generation != request_generation {
+            return;
+        }
+        state.probe = None;
+        state.consecutive = 0;
+        state.counted_generation = None;
+        state.until = None;
+        drop(state);
+        self.changed.notify_waiters();
     }
     pub(super) fn throttle(&self, header: Option<Duration>, request_generation: u64) {
         let mut state = self.feedback.lock().expect("rate gate poisoned");
@@ -173,7 +191,7 @@ impl Waiter {
                     ));
                 }
                 if state.queued.front() == self.id.as_ref()
-                    && !state.probe
+                    && state.probe.is_none()
                     && state.until.is_none_or(|until| until <= now)
                 {
                     state.queued.pop_front();
@@ -190,9 +208,11 @@ impl Waiter {
                             gate: self.gate.clone(),
                         });
                     }
-                    state.probe = true;
+                    let token = state.next_ticket;
+                    state.next_ticket = state.next_ticket.wrapping_add(1);
+                    state.probe = Some(token);
                     return Ok(Lease {
-                        _permit: Some(()),
+                        _permit: Some(token),
                         generation,
                         gate: self.gate.clone(),
                     });
@@ -232,6 +252,44 @@ mod tests {
         lease.complete(500);
         drop(lease);
         assert!(matches!(gate.reserve(), Ok(Reservation::Ready(_))));
+    }
+    #[tokio::test(start_paused = true)]
+    async fn probe_success_at_headers_admits_waiters_while_the_body_streams() {
+        let gate = RateGate::new(60_000);
+        let token = CancellationToken::new();
+        gate.throttle(Some(Duration::from_secs(2)), gate.generation());
+        let generation = gate.generation();
+        let Reservation::Waiting(first) = gate.reserve().unwrap() else {
+            panic!("expected waiter")
+        };
+        let Reservation::Waiting(second) = gate.reserve().unwrap() else {
+            panic!("expected waiter")
+        };
+        let queued = tokio::spawn({
+            let token = token.clone();
+            async move { second.wait(&token).await }
+        });
+        tokio::time::advance(Duration::from_secs(2)).await;
+        // The probe holds its lease for the whole (long) streamed response.
+        let probe = first.wait(&token).await.unwrap();
+        assert!(probe._permit.is_some());
+        tokio::task::yield_now().await;
+        assert!(!queued.is_finished());
+        // A stale generation's success changes nothing.
+        gate.probe_succeeded(generation.wrapping_sub(1));
+        tokio::task::yield_now().await;
+        assert!(!queued.is_finished());
+        // Success headers arrive; the body continues far past the waiter limit.
+        gate.probe_succeeded(generation);
+        let admitted = queued.await.unwrap().expect("queued request is admitted");
+        assert!(admitted._permit.is_none(), "no second probe is needed");
+        tokio::time::advance(MAX_WAIT + Duration::from_secs(60)).await;
+        assert!(matches!(gate.reserve(), Ok(Reservation::Ready(_))));
+        // Dropping the long-lived probe does not disturb a later cooldown.
+        gate.throttle(Some(Duration::from_secs(5)), gate.generation());
+        drop(probe);
+        assert!(matches!(gate.reserve(), Ok(Reservation::Waiting(_))));
+        drop(admitted);
     }
     #[tokio::test(start_paused = true)]
     async fn dropped_probe_keeps_cooldown_and_unblocks_next_waiter() {

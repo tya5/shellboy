@@ -772,7 +772,7 @@ impl Compactor {
                 } else {
                     wait.await
                 };
-                let lease = result.map_err(|error| {
+                let lease = client.admission_after_wait(result, None).map_err(|error| {
                     if error.kind == "cancelled" {
                         invalid("Summary cancelled; original path retained")
                     } else {
@@ -790,10 +790,7 @@ impl Compactor {
                     })
                     .await
                     .map_err(storage_error)?;
-                (
-                    crate::model::http::RateAdmission::Lease(lease),
-                    elapsed.as_millis().min(u64::MAX as u128) as u64,
-                )
+                (lease, elapsed.as_millis().min(u64::MAX as u128) as u64)
             }
         };
         Ok(admission)

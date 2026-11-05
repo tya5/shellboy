@@ -137,7 +137,11 @@ pub(super) async fn http_error_observed(
             usage_limit: std::str::from_utf8(&body)
                 .ok()
                 .and_then(|text| {
-                    crate::model::usage_limit::UsageLimit::text(text, chrono::Utc::now())
+                    crate::model::usage_limit::UsageLimit::text_for_status(
+                        text,
+                        chrono::Utc::now(),
+                        Some(status),
+                    )
                 })
                 .map(Box::new),
         },
