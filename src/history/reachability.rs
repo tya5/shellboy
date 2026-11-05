@@ -51,9 +51,9 @@ mod batch_equivalence_tests {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,deleted_at) VALUES('live-a','/','/a','p','m','now',NULL),('live-b','/','/a','p','m','now',NULL),('deleted','/','/a','p','m','now','now');
-            INSERT INTO node(id,kind,created_at,payload_json,body_hash,deleted_reason) VALUES('root-a','user','now','{}','h',NULL),('root-b','user','now','{}','h',NULL),('shared','user','now','{}','h',NULL),('hidden','user','now','{}','h',NULL),('ownerless','user','now','{}','h',NULL),('pending-only','user','now','{}','h',NULL),('summary','summary','now','{}','h',NULL),('dead-summary','summary','now','{}','h',NULL),('cycle-a','user','now','{}','h',NULL),('cycle-b','user','now','{}','h',NULL),('tombstone','user','now',NULL,'h','collected');
-            INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('live-a',0,'root-a'),('live-a',1,'summary'),('live-b',0,'root-b'),('live-b',1,'shared'),('deleted',0,'hidden'),('deleted',1,'dead-summary'),('deleted',2,'shared');
-            INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('replace-live','summary','k','1','1','completed','now'),('replace-dead','dead-summary','k2','1','1','completed','now'),('unfinished','root-a','k3','1','1','pending','now'),('cycle-ab','cycle-b','k4','1','1','completed','now'),('cycle-ba','cycle-a','k5','1','1','completed','now');
+            INSERT INTO node(id,kind,created_at,payload_json,body_hash,deleted_reason) VALUES('root-a','user','now','{}','h',NULL),('root-b','user','now','{}','h',NULL),('shared','user','now','{}','h',NULL),('hidden','user','now','{}','h',NULL),('ownerless','user','now','{}','h',NULL),('pending-only','user','now','{}','h',NULL),('summary','summary','now','{}','h',NULL),('dead-summary','summary','now','{}','h',NULL),('pending-output','summary','now','{}','h',NULL),('cycle-a','user','now','{}','h',NULL),('cycle-b','user','now','{}','h',NULL),('tombstone','user','now',NULL,'h','collected');
+            INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('live-a',0,'root-a'),('live-a',1,'summary'),('live-b',0,'root-b'),('live-b',1,'shared'),('deleted',0,'hidden'),('deleted',1,'dead-summary'),('deleted',2,'shared'),('deleted',3,'pending-output');
+            INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('replace-live','summary','k','1','1','completed','now'),('replace-dead','dead-summary','k2','1','1','completed','now'),('unfinished','pending-output','k3','1','1','pending','now'),('cycle-ab','cycle-b','k4','1','1','completed','now'),('cycle-ba','cycle-a','k5','1','1','completed','now');
             INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) VALUES('replace-live',0,'shared',0),('replace-dead',0,'hidden',0),('unfinished',0,'pending-only',0),('cycle-ab',0,'cycle-a',0),('cycle-ba',0,'cycle-b',0);
             INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at) VALUES('pin','instance','node','ownerless',0,'now');").unwrap();
         let ids = [
@@ -89,7 +89,7 @@ mod batch_equivalence_tests {
         assert_eq!(
             expected,
             [
-                true, true, true, false, true, true, true, false, true, true, true, true
+                true, true, true, false, true, false, true, false, true, true, true, true
             ]
         );
         let batched = searchable_many(&db, &ids).unwrap();
