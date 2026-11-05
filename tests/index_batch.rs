@@ -26,6 +26,7 @@ struct Replies {
     invalid_multi: bool,
     auth: bool,
     rate_once: bool,
+    rate_seconds: u64,
     split_word: Option<String>,
 }
 struct Proxy {
@@ -105,9 +106,13 @@ impl Proxy {
                 };
                 let body = body.to_string();
                 let retry_after = if status == 429 {
-                    "Retry-After: 5\r\n"
+                    let seconds = response.lock().unwrap().rate_seconds;
+                    format!(
+                        "Retry-After: {}\r\n",
+                        if seconds == 0 { 5 } else { seconds }
+                    )
                 } else {
-                    ""
+                    String::new()
                 };
                 socket.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{retry_after}Connection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
             }
@@ -661,6 +666,35 @@ async fn index_state_changed_during_cooldown(pause: bool) {
                 "space_changed_during_admission"
             }
         )
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn long_provider_delay_returns_typed_deferred_history_search_without_a_send() {
+    let f = Fixture::new(1, 64, 64).await;
+    f.nodes(&[("long-rate", "rate")]).await;
+    {
+        let mut rules = f.proxy.replies.lock().unwrap();
+        rules.rate_once = true;
+        rules.rate_seconds = 601;
+    }
+    assert!(
+        f.service
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.proxy.requests().len(), 2);
+    let error = f.service.search_detailed("query", 1).await.unwrap_err();
+    assert_eq!(
+        error.details.unwrap()["failure_kind"],
+        "rate_limit_deferred"
+    );
+    assert_eq!(
+        f.proxy.requests().len(),
+        2,
+        "deferred query must not reach the provider"
     );
     f.close().await;
 }
