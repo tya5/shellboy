@@ -17,13 +17,11 @@ struct Pending {
     marker: String,
     reply: oneshot::Sender<Reply>,
 }
-/// A loopback provider whose replies the test controls (or, with a delay,
-/// answers by itself for measurement).
+/// A loopback provider whose replies the test controls.
 struct Fake {
     url: String,
     arrivals: mpsc::UnboundedReceiver<Pending>,
     stash: Vec<Pending>,
-    requests: Arc<std::sync::atomic::AtomicUsize>,
     server: tokio::task::JoinHandle<()>,
 }
 impl Drop for Fake {
@@ -77,25 +75,16 @@ async fn write_response(stream: &mut tokio::net::TcpStream, status: u16, body: &
         .await;
 }
 impl Fake {
-    /// `auto`: answer every request after this many milliseconds.
-    async fn start(auto: Option<u64>) -> Self {
+    async fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let (tx, arrivals) = mpsc::unbounded_channel();
-        let requests = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counter = requests.clone();
         let server = tokio::spawn(async move {
             loop {
                 let (mut stream, _) = listener.accept().await.unwrap();
-                let (tx, counter) = (tx.clone(), counter.clone());
+                let tx = tx.clone();
                 tokio::spawn(async move {
                     let body = read_request(&mut stream).await;
-                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    if let Some(delay) = auto {
-                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
-                        write_response(&mut stream, 200, &completed("map summary")).await;
-                        return;
-                    }
                     let (reply, wait) = oneshot::channel();
                     let _ = tx.send(Pending {
                         marker: marker_of(&body),
@@ -117,7 +106,6 @@ impl Fake {
             url,
             arrivals,
             stash: Vec::new(),
-            requests,
             server,
         }
     }
@@ -229,6 +217,16 @@ async fn run(
     budget: &mut SummaryBudget<'_>,
     cancel: &CancellationToken,
 ) -> Result<parallel::JobParts, ApiError> {
+    run_split(rig, kind, jobs, budget, cancel, None).await
+}
+async fn run_split(
+    rig: &Rig,
+    kind: Kind,
+    jobs: Vec<Job>,
+    budget: &mut SummaryBudget<'_>,
+    cancel: &CancellationToken,
+    split: Option<parallel::Split<'_>>,
+) -> Result<parallel::JobParts, ApiError> {
     let client = rig.compactor.clients.get("fixture").unwrap();
     let connection = &rig.compactor.config.connections["fixture"];
     rig.compactor
@@ -239,7 +237,7 @@ async fn run(
                 connection,
                 client: &client,
                 cancel,
-                split: None,
+                split,
             },
             jobs,
             budget,
@@ -283,7 +281,7 @@ async fn guarded<T: Send + 'static>(
 async fn requests_launch_together_and_return_in_original_order() {
     guarded("parallel order", async {
         for kind in [Kind::Map, Kind::Reduce] {
-            let mut fake = Fake::start(None).await;
+            let mut fake = Fake::start().await;
             let rig = rig(&fake.url).await;
             let mut ledger = usage::UsageLedger::new(&rig.snapshot);
             let cancel = CancellationToken::new();
@@ -316,7 +314,7 @@ async fn requests_launch_together_and_return_in_original_order() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_429_is_retried_inside_the_budget_and_a_cached_part_is_not_requested_again() {
     guarded("retry on 429", async {
-        let mut fake = Fake::start(None).await;
+        let mut fake = Fake::start().await;
         let rig = rig(&fake.url).await;
         let mut ledger = usage::UsageLedger::new(&rig.snapshot);
         let cancel = CancellationToken::new();
@@ -351,7 +349,7 @@ async fn a_429_is_retried_inside_the_budget_and_a_cached_part_is_not_requested_a
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_never_exceeds_the_existing_budget() {
     guarded("retry budget", async {
-        let mut fake = Fake::start(None).await;
+        let mut fake = Fake::start().await;
         let rig = rig(&fake.url).await;
         let mut ledger = usage::UsageLedger::new(&rig.snapshot);
         let mut budget = budget(&mut ledger, 1, 1);
@@ -374,7 +372,7 @@ async fn retry_never_exceeds_the_existing_budget() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_usage_limit_is_not_retried() {
     guarded("usage limit", async {
-        let mut fake = Fake::start(None).await;
+        let mut fake = Fake::start().await;
         let rig = rig(&fake.url).await;
         let mut ledger = usage::UsageLedger::new(&rig.snapshot);
         let mut budget = budget(&mut ledger, 5, 5);
@@ -401,7 +399,7 @@ async fn a_usage_limit_is_not_retried() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn after_a_429_the_others_wait_in_the_gate_and_all_complete() {
     guarded("gate wait", async {
-        let mut fake = Fake::start(None).await;
+        let mut fake = Fake::start().await;
         let rig = rig(&fake.url).await;
         throttle(&rig, &mut fake).await;
         let mut ledger = usage::UsageLedger::new(&rig.snapshot);
@@ -426,7 +424,7 @@ async fn after_a_429_the_others_wait_in_the_gate_and_all_complete() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn another_threads_request_is_queued_between_the_summarys_requests() {
     guarded("interleaving", async {
-        let mut fake = Fake::start(None).await;
+        let mut fake = Fake::start().await;
         let rig = rig(&fake.url).await;
         throttle(&rig, &mut fake).await;
         let client = rig.compactor.clients.get("fixture").unwrap();
@@ -482,7 +480,7 @@ async fn another_threads_request_is_queued_between_the_summarys_requests() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cancellation_with_requests_in_flight_adopts_nothing() {
     guarded("cancellation", async {
-        let mut fake = Fake::start(None).await;
+        let mut fake = Fake::start().await;
         let (_root, db) = database().await;
         seed_895(&db).await;
         let compactor = Compactor::new(db.clone(), config(&fake.url));
@@ -529,35 +527,84 @@ async fn cancellation_with_requests_in_flight_adopts_nothing() {
     .await;
 }
 
-/// Measurement, not a check: `cargo test --lib parallel_tests::measure -- --ignored --nocapture`.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore]
-async fn measure_serial_versus_parallel_on_the_synthetic_895_shape() {
-    for serial in [true, false] {
-        for run in 1..=3 {
-            let fake = Fake::start(Some(100)).await;
-            let (_root, db) = database().await;
-            seed_895(&db).await;
-            let compactor = Compactor::new(db.clone(), config(&fake.url));
-            compactor
-                .map_test
-                .serial
-                .store(serial, std::sync::atomic::Ordering::SeqCst);
-            let snapshot = compactor.snapshot("t", true).await.unwrap();
-            let range = policy::unsummarized_prefix(&snapshot).unwrap();
-            let started = std::time::Instant::now();
-            let result = compactor
-                .summarize_snapshot(snapshot, range, CancellationToken::new(), None, None)
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_fatal_failure_cancels_and_drains_the_request_in_flight() {
+    guarded("fatal sibling", async {
+        let mut fake = Fake::start().await;
+        let rig = rig(&fake.url).await;
+        let mut ledger = usage::UsageLedger::new(&rig.snapshot);
+        let mut budget = budget(&mut ledger, 8, 8);
+        let cancel = CancellationToken::new();
+        let drive = async {
+            let (bad, _sibling) = (fake.take("SEG0").await, fake.take("SEG1").await);
+            // The sibling is never answered: only cancellation can end it.
+            bad.status(400, json!({"error":{"message":"bad request"}}));
+            _sibling
+        };
+        let (result, _sibling) =
+            tokio::join!(run(&rig, Kind::Map, jobs(2), &mut budget, &cancel), drive);
+        assert!(result.is_err());
+        assert_eq!(budget.map_requests, 2);
+        let ledger: Value = serde_json::from_str(
+            &rig.db
+                .call(|db| {
+                    Ok(db.query_row(
+                        "SELECT value FROM app_meta WHERE key LIKE 'summary.usage.t.%'",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?)
+                })
                 .await
-                .unwrap();
-            println!(
-                "measure mode={} run={run} wall_ms={} requests={} model_requests={:?}",
-                if serial { "serial" } else { "parallel" },
-                started.elapsed().as_millis(),
-                fake.requests.load(std::sync::atomic::Ordering::SeqCst),
-                result.model_requests
+                .unwrap(),
+        )
+        .unwrap();
+        // Both requests were accounted before the run returned (drained).
+        let observations = ledger["rate_observations"].as_array().unwrap();
+        assert_eq!(observations.len(), 2, "{ledger}");
+        assert!(observations.iter().all(|o| !o.is_null()), "{ledger}");
+        rig.db.shutdown().await.unwrap();
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_context_limit_split_keeps_the_original_order_with_out_of_order_replies() {
+    guarded("split order", async {
+        let mut fake = Fake::start().await;
+        let mut rig = rig(&fake.url).await;
+        // "t" would be redacted from the error text as a session header secret.
+        rig.snapshot.thread = "thread-long-id".into();
+        let mut ledger = usage::UsageLedger::new(&rig.snapshot);
+        let mut budget = budget(&mut ledger, 8, 8);
+        let cancel = CancellationToken::new();
+        let build = |span: (usize, usize, u8), path: Vec<usize>| {
+            Job::new(
+                path,
+                CompactionKeys::summary_part(&format!("split-test-{}-{}", span.0, span.1)),
+                request(&format!("SEG{}x{}", span.0, span.1)),
+                vec![format!("n{}", span.0)],
+                span,
+            )
+        };
+        let jobs = vec![build((0, 2, 0), vec![0]), build((2, 3, 0), vec![1])];
+        let drive = async {
+            let (whole, b) = (fake.take("SEG0x2").await, fake.take("SEG2x3").await);
+            whole.status(
+                400,
+                json!({"error":{"code":"context_length_exceeded","message":"too long"}}),
             );
-            db.shutdown().await.unwrap();
-        }
-    }
+            b.ok("B");
+            let (h1, h2) = (fake.take("SEG0x1").await, fake.take("SEG1x2").await);
+            h2.ok("H2");
+            h1.ok("H1");
+        };
+        let (parts, ()) = tokio::join!(
+            run_split(&rig, Kind::Map, jobs, &mut budget, &cancel, Some(&build)),
+            drive
+        );
+        let texts: Vec<_> = parts.unwrap().parts.into_iter().map(|p| p.text).collect();
+        assert_eq!(texts, ["H1", "H2", "B"]);
+        rig.db.shutdown().await.unwrap();
+    })
+    .await;
 }

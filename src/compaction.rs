@@ -73,8 +73,6 @@ const SUMMARY_PROMPT: &str = "Summarize the following conversation as Markdown w
 pub struct Compactor {
     #[cfg(test)]
     pub(crate) fail_remeasurement: Arc<std::sync::atomic::AtomicBool>,
-    #[cfg(test)]
-    map_test: parallel::TestHooks,
     clients: Arc<HttpClients>,
     database: DbWorker,
     config: Arc<Config>,
@@ -318,8 +316,6 @@ impl Compactor {
             clients,
             #[cfg(test)]
             fail_remeasurement: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            #[cfg(test)]
-            map_test: Default::default(),
         }
     }
 

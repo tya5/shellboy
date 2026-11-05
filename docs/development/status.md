@@ -4842,4 +4842,11 @@ cover retry, budget, usage limit, ordering, gate waiting, interleaving and
 cancellation. Measurement (fake provider, fixed 100 ms per request, macOS
 arm64 debug, synthetic 895 s shape, 11 requests in both modes, three runs):
 serial 1352/1343/1365 ms, parallel 336/337/338 ms. This says nothing about a
-real provider. Review, exact-tip CI and landing remain pending.
+real provider. The measurement test and its test-only serial switch were
+removed after these numbers were recorded; the figures are not reproducible
+from the tree. Review follow-ups applied on `issue224-stage3-v2` (rebased on
+origin/main 46ce2f06, migration 29): single budget check, reduce failures
+carry the same hint as maps, committed tests for a fatal failure with a
+sibling in flight and for split ordering, design text states which failures
+cancel in-flight requests. Resume point: exact-tip default and all-OS CI, then
+integration; no live-provider behavior is claimed.

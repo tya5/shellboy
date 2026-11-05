@@ -51,7 +51,7 @@ impl Job {
     }
 }
 
-type Split<'a> = &'a (dyn Fn((usize, usize, u8), Vec<usize>) -> Job + Sync);
+pub(super) type Split<'a> = &'a (dyn Fn((usize, usize, u8), Vec<usize>) -> Job + Sync);
 pub(super) struct JobContext<'a> {
     pub(super) kind: Kind,
     pub(super) snapshot: &'a Snapshot,
@@ -80,13 +80,21 @@ impl JobContext<'_> {
             Kind::Reduce => budget.error("Summary cancelled; original path retained"),
         }
     }
+    fn ensure_slot(&self, budget: &SummaryBudget<'_>) -> Result<(), ApiError> {
+        match self.kind {
+            Kind::Map => budget.ensure_map(),
+            Kind::Reduce => budget.ensure_reduce(),
+        }
+    }
     fn failed(&self, budget: &SummaryBudget<'_>, failure: &AttemptFailure, note: &str) -> ApiError {
         match self.kind {
             Kind::Map => ApiError::new(ErrorCode::IoFailed, failure.error.to_string()).hint(note),
-            Kind::Reduce => budget.error(&format!(
-                "Summary reduction failed: {}; original path retained",
-                failure.error
-            )),
+            Kind::Reduce => budget
+                .error(&format!(
+                    "Summary reduction failed: {}; original path retained",
+                    failure.error
+                ))
+                .hint(note),
         }
     }
 }
@@ -108,14 +116,7 @@ impl Compactor {
         let (mut created, mut reused) = (0usize, 0usize);
         let mut failure: Option<ApiError> = None;
         loop {
-            #[cfg(test)]
-            let serial = self
-                .map_test
-                .serial
-                .load(std::sync::atomic::Ordering::SeqCst);
-            #[cfg(not(test))]
-            let serial = false;
-            while failure.is_none() && !queue.is_empty() && !(serial && !tasks.is_empty()) {
+            while failure.is_none() && !queue.is_empty() {
                 if ctx.cancel.is_cancelled() {
                     failure = Some(ctx.cancelled(budget));
                     break;
@@ -202,10 +203,7 @@ impl Compactor {
                 return Ok(Some((job.path, part)));
             }
         }
-        match ctx.kind {
-            Kind::Map => budget.ensure_map()?,
-            Kind::Reduce => budget.ensure_reduce()?,
-        }
+        ctx.ensure_slot(budget)?;
         self.summary_backoff(ctx.snapshot, job.delay, ctx.cancel, boundary.as_deref_mut())
             .await?;
         let admission = self
@@ -302,7 +300,7 @@ impl Compactor {
                     return Ok(());
                 }
                 return match super::retry::retry_delay(ctx.connection, &failure, job.retries) {
-                    Some(delay) if self.slots_remain(ctx.kind, budget) => {
+                    Some(delay) if ctx.ensure_slot(budget).is_ok() => {
                         job.retries += 1;
                         job.delay = delay;
                         queue.push_front(job);
@@ -361,18 +359,4 @@ impl Compactor {
         *created += 1;
         Ok(())
     }
-
-    fn slots_remain(&self, kind: Kind, budget: &SummaryBudget<'_>) -> bool {
-        match kind {
-            Kind::Map => budget.map_requests < budget.map_limit,
-            Kind::Reduce => budget.reduce_requests < budget.reduce_limit,
-        }
-    }
-}
-
-/// Test-only switch that pins the run to one request (the serial baseline).
-#[cfg(test)]
-#[derive(Clone, Default)]
-pub(super) struct TestHooks {
-    pub(super) serial: Arc<std::sync::atomic::AtomicBool>,
 }

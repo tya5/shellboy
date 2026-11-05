@@ -314,7 +314,7 @@ rather than add one silently. Awaiters exist only for bounded existing work,
 not durable queued jobs. At W=1, long requests may still delay other callers;
 no latency guarantee or preemption is implied.
 
-## Stage 3: Adopted Summary Retry And Adaptive Map Concurrency
+## Stage 3: Adopted Summary Retry And Parallel Summary Requests
 
 Adopted 2026-11-05. The two proposal sections above are background; where they
 differ, these rules govern.
@@ -332,8 +332,9 @@ differ, these rules govern.
   it is sent, successful or not. There is no separate retry count and no nested
   budget. When the slots are exhausted the summary fails with the original
   failure retained as the cause. Preflight is unchanged.
-- Every attempt, including a retry, reserves a FIFO ticket in the profile's
-  gate, so a retry waits in arrival order behind earlier callers. After a 429
+- Every attempt, including a retry, passes the profile's gate: it is admitted
+  at once when the gate is idle, and otherwise takes a FIFO ticket and waits in
+  arrival order behind earlier callers. After a 429
   the gate cooldown is the wait; for other transient failures the sleep is the
   conversation schedule (`1 s << retries`, capped by
   `response_retry_max_delay_ms`, or the response's Retry-After), cancellable.
@@ -350,7 +351,7 @@ differ, these rules govern.
   request budget, which is reserved (slot and usage `begin` fact) before each
   dispatch. The adaptive-concurrency idea (additive growth, halving on 429) was
   dropped as unnecessary: throttling is left entirely to the stage-2 gate.
-- Each request takes its own gate ticket. The summary requests admission one
+- Each request passes the gate on its own. The summary requests admission one
   at a time on its own task and yields to the runtime after launching each
   request, so a ready conversation request of another Thread can take a ticket
   between the summary's tickets. The gate itself is unchanged (plain FIFO).
@@ -364,9 +365,16 @@ differ, these rules govern.
 - Results are collected by position (a path of indexes, extended by a
   context-limit split) and passed on in original order whatever the completion
   order. A failed request is retried by re-queuing only that job.
-- A fatal failure, or cancellation, stops launching, cancels the in-flight
-  requests with a child of the same token, and drains them. A late success is
-  cached by its content key only; nothing is adopted. The #226 provisional
+- Stopping on failure depends on where it is found. Cancellation, a fatal
+  failure of a finished request (not retryable, retry slots exhausted, a
+  refused or empty response, or a storage error while accounting it) and a
+  failed request task stop launching, cancel the in-flight requests with a
+  child of the same token, and drain them. A failure found while launching
+  (budget exhausted for a context-limit split or a new job, history changed
+  during a gate wait, admission deferred, or a storage error) stops launching
+  but does not cancel the requests already in flight: they finish, are
+  accounted, and a success is cached. In both cases a late success is cached by
+  its content key only and nothing is adopted. The #226 provisional
   record and stage facts are written only at adoption and are untouched.
 - Measurements on a synthetic fixture with a fake provider are in the
   development status; they make no claim about a real provider.
