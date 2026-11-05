@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import platform
 import subprocess
+import shutil
 import sys
 
 TESTS = (
@@ -19,6 +20,11 @@ def main():
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--count', type=int, default=30)
+    parser.add_argument('--binary', type=Path, help='reuse an already-built integration test executable')
+    parser.add_argument('--test-threads', type=int, default=4,
+                        help='parallel test threads for the concurrent suite (default: 4)')
+    parser.add_argument('--suite-load', action='store_true',
+                        help='run the full integration suite concurrently with repetitions')
     args = parser.parse_args()
     if not 1 <= args.count <= 100:
         parser.error('--count must be 1..100')
@@ -32,33 +38,52 @@ def main():
         'sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip(),
         'runner': {key: os.environ.get(key) for key in ('ImageOS', 'ImageVersion', 'RUNNER_ARCH')},
         'results': {test: [] for test in TESTS},
+        'suite_load': args.suite_load,
     }
 
     def save():
         (args.output / 'results.json').write_text(json.dumps(record, indent=2) + '\n')
 
     save()
-    with (args.output / 'build.jsonl').open('w') as output, (args.output / 'build.log').open('w') as errors:
-        built = subprocess.run(
-            ['cargo', 'test', '--locked', '--test', 'integration', '--no-run', '--message-format=json'],
-            cwd=source, stdout=output, stderr=errors, check=False,
-        )
-    if built.returncode:
-        record['build_exit'] = built.returncode
-        save()
-        return built.returncode
+    if args.binary:
+        binary = args.binary.resolve(strict=True)
+    else:
+        with (args.output / 'build.jsonl').open('w') as output, (args.output / 'build.log').open('w') as errors:
+            built = subprocess.run(
+                ['cargo', 'test', '--locked', '--test', 'integration', '--no-run', '--message-format=json'],
+                cwd=source, stdout=output, stderr=errors, check=False,
+            )
+        if built.returncode:
+            record['build_exit'] = built.returncode
+            save()
+            return built.returncode
 
-    binaries = [
-        entry['executable']
-        for line in (args.output / 'build.jsonl').read_text().splitlines()
-        if (entry := json.loads(line)).get('reason') == 'compiler-artifact'
-        and entry.get('executable')
-        and entry['target']['name'] == 'integration'
-        and entry.get('profile', {}).get('test')
-    ]
-    if len(binaries) != 1:
-        raise ValueError(f'Expected one integration executable, found {binaries}')
-    binary = binaries[0]
+        binaries = [
+            entry['executable']
+            for line in (args.output / 'build.jsonl').read_text().splitlines()
+            if (entry := json.loads(line)).get('reason') == 'compiler-artifact'
+            and entry.get('executable')
+            and entry['target']['name'] == 'integration'
+            and entry.get('profile', {}).get('test')
+        ]
+        if len(binaries) != 1:
+            raise ValueError(f'Expected one integration executable, found {binaries}')
+        binary = binaries[0]
+
+    isolated_binary = args.output / 'integration'
+    if Path(binary) != isolated_binary:
+        shutil.copy2(binary, isolated_binary)
+    binary = str(isolated_binary)
+
+    suite = None
+    if args.suite_load:
+        suite_log = (args.output / 'suite-load.log').open('w')
+        suite = subprocess.Popen(
+            [binary, f'--test-threads={args.test_threads}'], cwd=source,
+            stdout=suite_log, stderr=subprocess.STDOUT,
+        )
+        record['suite_load_pid'] = suite.pid
+        save()
 
     for test in TESTS:
         listed = subprocess.check_output([binary, test, '--exact', '--list'], cwd=source, text=True)
@@ -79,6 +104,10 @@ def main():
             save()
             failures = sum(item['exit_code'] != 0 for item in record['results'][test])
             print(f'{record["sha"]} {test} {index + 1}/{args.count}: exit={code}; failures={failures}', flush=True)
+
+    if suite is not None:
+        record['suite_load_exit'] = suite.wait()
+        suite_log.close()
 
     record['failures'] = {
         test: sum(item['exit_code'] != 0 for item in results)

@@ -10,8 +10,7 @@ pub(super) struct IoSession {
     initial_task: tokio::task::JoinHandle<()>,
     stdout_waiting: Arc<std::sync::atomic::AtomicBool>,
     stderr_waiting: Arc<std::sync::atomic::AtomicBool>,
-    stdout_progress: Arc<std::sync::atomic::AtomicU64>,
-    stderr_progress: Arc<std::sync::atomic::AtomicU64>,
+    progress: Arc<std::sync::atomic::AtomicU64>,
 }
 
 async fn pump_until_stalled(
@@ -106,8 +105,9 @@ impl IoSession {
                 guard.take();
             }
         });
-        let stdout_progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let stderr_progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        // Both pumps share a sink budget and consumer; progress on either stream
+        // proves the shared output consumer is advancing.
+        let progress = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let sink = Arc::new(OutputSink {
             publisher: Mutex::new(Publisher {
                 tx,
@@ -131,14 +131,14 @@ impl IoSession {
             OutputStream::Stdout,
             sink.clone(),
             stdout_waiting.clone(),
-            stdout_progress.clone(),
+            progress.clone(),
         ));
         let stderr_task = tokio::spawn(pump(
             stderr,
             OutputStream::Stderr,
             sink.clone(),
             stderr_waiting.clone(),
-            stderr_progress.clone(),
+            progress.clone(),
         ));
         // Only pumps retain output senders; EOF follows their final delivery.
         drop(sink);
@@ -152,8 +152,7 @@ impl IoSession {
                 initial_task,
                 stdout_waiting,
                 stderr_waiting,
-                stdout_progress,
-                stderr_progress,
+                progress,
             },
             handle,
             rx,
@@ -171,8 +170,7 @@ impl IoSession {
             initial_task,
             stdout_waiting,
             stderr_waiting,
-            stdout_progress,
-            stderr_progress,
+            progress,
             finished,
             failure,
             ..
@@ -182,18 +180,8 @@ impl IoSession {
         let mut initial_task = initial_task;
         let drain = async {
             let (out, err, initial) = tokio::join!(
-                pump_until_stalled(
-                    &mut stdout_task,
-                    &stdout_waiting,
-                    &stdout_progress,
-                    drain_timeout
-                ),
-                pump_until_stalled(
-                    &mut stderr_task,
-                    &stderr_waiting,
-                    &stderr_progress,
-                    drain_timeout
-                ),
+                pump_until_stalled(&mut stdout_task, &stdout_waiting, &progress, drain_timeout),
+                pump_until_stalled(&mut stderr_task, &stderr_waiting, &progress, drain_timeout),
                 timeout(drain_timeout, &mut initial_task),
             );
             out && err && initial.is_ok_and(|result| result.is_ok())
