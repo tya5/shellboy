@@ -1228,8 +1228,15 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     let f = Fixture::new(Config::default()).await;
     f.db.call(|db| {
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('oversized-source','user','now','{}',2)", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    // Later consumers exercise current reverse reachability without adding
+    // thousands of nodes to this pass's already-fixed sweep horizon.
+    f.db.call(|db| {
         let tx = db.transaction()?;
-        tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('oversized-source','user','now','{}',2)", [])?;
         for i in 0..5000 {
             let id = format!("consumer-{i}");
             tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'summary','now','{}',2)", [&id])?;
@@ -1238,12 +1245,15 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
         }
         tx.commit()?; Ok(())
     }).await.unwrap();
-    f.job().await;
-    let job = f.gc.start_history().await.unwrap().unwrap();
     let setup_deadline = crate::test_watchdog::Deadline::new("history GC reverse-check setup");
     while f.gc.history_step(&job).await.unwrap().stage != "sweep" {
         setup_deadline.check();
     }
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(cursor_json,'$.horizon')=(SELECT rowid FROM node WHERE id='oversized-source') AND json_type(cursor_json,'$.kept_count')='integer'")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM replacement_source WHERE source_node_id='oversized-source'")?, 5000);
+        Ok(())
+    }).await.unwrap();
     // The reverse query has no trigger. Force it to be prepared afresh and
     // queue foreground work from the SQLite authorizer before it executes.
     let worker = f.db.clone();

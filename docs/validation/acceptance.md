@@ -26,10 +26,11 @@ remeasurement failure paths.
 On macOS via `rust-slot`, the focused GC/index suite passed 31 tests with one
 ignored. With continuous foreground root-revision writes and test-only queued
 foreground noops, the four-thread synthetic pass completed in 2,747 steps,
-with 5 budget deferrals, 40,001 scanned, 340 writes, and 10,317 ms elapsed.
-An oversized reverse-reachability candidate remained intact with 8 deferrals,
-5,013 sweep steps, 9,918 writes, and 5,503 ms elapsed (root/mark setup excluded).
-These synthetic measurements are not production-data performance bounds.
+with 5 budget deferrals, 40,001 scanned, 478 writes, and 10,315 ms elapsed.
+With the shortened sweep horizon, a 5,000-reverse-reference candidate remained
+intact and the pass completed in 13 steps with 8 deferrals and 24 writes in
+190 ms (fixture and root/mark setup excluded). These synthetic measurements are
+not production-data performance bounds.
 
 A synthetic cursor-update interruption verifies rollback and candidate
 retention; a forced provenance interruption, with a seeded prior retained count,
@@ -40,9 +41,14 @@ The fixture had not guaranteed foreground demand during its costly SQL; the
 failure is consistent with the documented quiet-worker behavior, but the queue
 timing was not observed directly. Test-only triggers now enqueue foreground
 noops before costly SQL, and the reverse-check fixture uses an authorizer and
-statement-cache flush to establish demand before SELECT. Production budget
-behavior is unchanged. Earlier v2 default CI passed; final-SHA default and
-all-OS CI remain pending.
+statement-cache flush to establish demand before SELECT. In v3 Windows CI run
+41963033042, that candidate was retained after 8 deferrals and the cursor kept
+advancing, but the 60-second watchdog expired after 2,559 steps and 4,919 writes
+while scanning the 5,000 synthetic consumers. The fixture now inserts those
+consumers after the fixed sweep horizon: the current reverse check still sees all
+5,000, but the pass need not sweep them. The separate 10,000-node fixture measures
+full-pass liveness. Production budget behavior is unchanged. Earlier default CI
+passed; final-SHA default and all-OS CI remain pending.
 
 The in-memory GC restart observation and bilingual F1 screen unit tests pass.
 Current-root and pin changes are covered by focused GC tests. These tests do not
