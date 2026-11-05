@@ -6585,17 +6585,17 @@
   },
   "src/ui/presentation.rs:7f044afa4082814f:1": {
     "category": "protected",
-    "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
-    "source_tokens_sha256": "8fc24fd6a8a184a81cc60ff70f7856e0df2513aad69e4fbb3814436be5a953a9",
+    "reason": "Internal empty tool-result marker; only generated empty-result blocks are suppressed, while source-exact output remains visible.",
+    "source_tokens_sha256": "d79a833bb86bfae5b98af553d4adef8408c69670629eab865f5c24875e2864cd",
     "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
-    "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
+    "projection_evidence": "The exact marker is skipped only in the tool-result block branch before plain/Markdown body display; tests verify non-empty source text is preserved."
   },
   "src/ui/presentation.rs:25b59e2e47cb2413:1": {
     "category": "protected",
-    "reason": "Internal no-output sentinel consumed by the UI tool-result branch to suppress a duplicate empty result heading; not displayed to the user.",
-    "source_tokens_sha256": "8fc24fd6a8a184a81cc60ff70f7856e0df2513aad69e4fbb3814436be5a953a9",
+    "reason": "Internal empty tool-result marker; only generated empty-result blocks are suppressed, while source-exact output remains visible.",
+    "source_tokens_sha256": "d79a833bb86bfae5b98af553d4adef8408c69670629eab865f5c24875e2864cd",
     "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
-    "projection_evidence": "src/ui/presentation.rs skips these exact marker strings after the compact tool header, so no Japanese marker is rendered in either language."
+    "projection_evidence": "The exact marker is skipped only in the tool-result block branch before plain/Markdown body display; tests verify non-empty source text is preserved."
   },
   "src/presentation/messages.rs:68938f9d1e4cc943:1": {
     "category": "a",

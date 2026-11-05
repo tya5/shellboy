@@ -193,10 +193,11 @@ fn bounded_markdown_fallback(text: &str, anchor: usize, byte_limit: usize) -> St
         return String::new();
     }
     let content_budget = byte_limit - marker.len() - suffix.len();
-    let preferred_start = text
+    let anchor_byte = text
         .char_indices()
-        .nth(anchor.saturating_sub(512))
+        .nth(anchor)
         .map_or(text.len(), |(byte, _)| byte);
+    let preferred_start = anchor_byte.saturating_sub(content_budget / 2);
     let start = preferred_start.min(text.len().saturating_sub(content_budget));
     let start = text.ceil_char_boundary(start);
     let end = text.floor_char_boundary((start + content_budget).min(text.len()));
