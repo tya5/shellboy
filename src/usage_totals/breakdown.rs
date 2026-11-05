@@ -5,6 +5,8 @@ use chrono::{Duration, FixedOffset, Local, Utc};
 use sha2::{Digest, Sha256};
 
 const ROW_LIMIT: usize = 10_000;
+// A page may hold at most this much summary JSON plus one lookahead row.
+const COMPACTION_PAGE_BYTES: usize = 4 * 1024 * 1024;
 const GROUP_LIMIT: u32 = 168;
 fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidArgument, message)
@@ -327,11 +329,9 @@ fn bucket(row: &Row, group: &str, zone: Option<FixedOffset>) -> Option<String> {
 }
 fn compaction_query() -> String {
     format!(
-        "WITH candidates AS MATERIALIZED (
-            SELECT rowid scan_id,key FROM app_meta WHERE rowid>?1 AND rowid<=?2
-            ORDER BY rowid LIMIT {}
-        ) SELECT c.scan_id,c.key,CASE WHEN octet_length(m.value)<=?3 THEN m.value END
-        FROM candidates c JOIN app_meta m ON m.rowid=c.scan_id ORDER BY c.scan_id",
+        "SELECT rowid,CASE WHEN octet_length(key)<=?3 THEN key ELSE '' END,
+         CASE WHEN octet_length(value)<=?3 THEN value END
+         FROM app_meta WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT {}",
         ROW_LIMIT + 1
     )
 }
@@ -438,26 +438,56 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     let scanned = rows.len();
     let tail = rows.last().map(|r| r.key);
     let mut compaction_statement = db.prepare(&compaction_query()).map_err(error)?;
-    let mut compaction_rows = compaction_statement
-        .query_map(
-            params![
-                scan.compaction_after,
-                scan.compaction_watermark,
-                crate::compaction::SUMMARY_USAGE_MAX_BYTES
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
-        .map_err(error)?
-        .collect::<rusqlite::Result<Vec<_>>>()
+    let mut candidate_rows = compaction_statement
+        .query(params![
+            scan.compaction_after,
+            scan.compaction_watermark,
+            crate::compaction::SUMMARY_USAGE_MAX_BYTES
+        ])
         .map_err(error)?;
-    let compaction_row_more = compaction_rows.len() > ROW_LIMIT;
-    compaction_rows.truncate(ROW_LIMIT);
+    let mut compaction_rows = Vec::new();
+    let mut compaction_bytes = 0usize;
+    let mut compaction_row_more = false;
+    while let Some(row) = candidate_rows.next().map_err(error)? {
+        let id: i64 = row.get(0).map_err(error)?;
+        let key_bytes = row
+            .get_ref(1)
+            .map_err(error)?
+            .as_bytes()
+            .map_err(|e| {
+                error(rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                ))
+            })?
+            .len();
+        let body_bytes = match row.get_ref(2).map_err(error)? {
+            rusqlite::types::ValueRef::Null => 0,
+            value => value
+                .as_bytes()
+                .map_err(|e| {
+                    error(rusqlite::Error::FromSqlConversionFailure(
+                        2,
+                        rusqlite::types::Type::Text,
+                        Box::new(e),
+                    ))
+                })?
+                .len(),
+        };
+        let bytes = key_bytes.saturating_add(body_bytes);
+        if compaction_rows.len() == ROW_LIMIT
+            || (!compaction_rows.is_empty()
+                && compaction_bytes.saturating_add(bytes) > COMPACTION_PAGE_BYTES)
+        {
+            compaction_row_more = true;
+            break;
+        }
+        compaction_bytes = compaction_bytes.saturating_add(bytes);
+        let key: String = row.get(1).map_err(error)?;
+        let body: Option<String> = row.get(2).map_err(error)?;
+        compaction_rows.push((id, key, body));
+    }
     let compaction_scanned = compaction_rows.len();
     let compaction_tail = compaction_rows.last().map(|row| row.0);
     let zone = offset(a.timezone.as_deref().unwrap_or("local"))?;
@@ -630,7 +660,7 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     Ok(
         json!({"thread_id":selection.as_ref().and_then(|s|s.threads.first()).filter(|id|id.len()<=512),"group_by":group_by,"timezone":a.timezone.as_deref().unwrap_or("local"),"requested_period":w.json(),
         "items":items,"more":more,"next_cursor":next_cursor,"scanned_candidates":scanned,"matched_attempts":matched,
-        "scanned_compaction_candidates":compaction_scanned,"matched_compactions":matched_compactions,
+        "scanned_compaction_candidates":compaction_scanned,"scanned_compaction_bytes":compaction_bytes,"compaction_byte_limit":COMPACTION_PAGE_BYTES,"matched_compactions":matched_compactions,
         "malformed_compaction_records":malformed_compactions,"unknown_time_compaction_records":unknown_time_compactions,
         "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || compaction_row_more || continued,
         "scope_complete":selection.as_ref().is_none_or(|s|s.complete),"statistics_scope":"current_candidate_window",

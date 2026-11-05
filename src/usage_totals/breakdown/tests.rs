@@ -644,16 +644,22 @@ fn compaction_without_requests_stays_unknown_and_pagination_scans_bounded_window
     a.limit = Some(1);
     let first = read(&db, &a, "fixture").unwrap();
     assert_eq!(first["more"], true);
-    assert_eq!(first["scanned_compaction_candidates"], 10_000);
-    assert_eq!(first["items"][0]["compaction"]["requests"], 9_998);
+    let first_count = first["items"][0]["compaction"]["requests"]
+        .as_u64()
+        .unwrap();
+    assert!(first_count > 0 && first_count < 10_001);
+    assert!(first["scanned_compaction_bytes"].as_u64().unwrap() <= COMPACTION_PAGE_BYTES as u64);
     a.cursor = first["next_cursor"].as_str().map(Into::into);
     let second = read(&db, &a, "fixture").unwrap();
     assert_eq!(second["more"], false);
-    assert_eq!(second["items"][0]["compaction"]["requests"], 3);
+    let second_count = second["items"][0]["compaction"]["requests"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(first_count + second_count, 10_001);
     assert!(second["items"][0]["total"]["cached_tokens"]["known_sum"].is_null());
     assert_eq!(
         second["items"][0]["total"]["cached_tokens"]["unknown_count"],
-        3
+        second_count
     );
 
     let empty = fixture();
@@ -694,4 +700,77 @@ fn grouped_connection_rates_follow_candidate_window() {
     assert_eq!(rates["applied_wait_ms"], 42);
     assert_eq!(rates["status_unknown"], 1);
     assert_eq!(rates["wait_unknown"], 1);
+}
+
+#[test]
+fn large_compaction_records_are_byte_bounded_and_resume_without_loss() {
+    let db = fixture();
+    for i in 0..7 {
+        insert_summary(
+            &db,
+            "t1",
+            &format!("large{i}"),
+            "2026-10-31T00:30:00Z",
+            json!({
+                "requests":1,"map_requests":1,"reduce_requests":0,
+                "input_tokens":{"known_sum":1,"unknown_count":0,"overflow":false},
+                "cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},
+                "cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},
+                "output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}
+            }),
+        );
+        let key = format!("{}t1.large{i}", crate::compaction::SUMMARY_USAGE_PREFIX);
+        let original: String = db
+            .query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let mut padded = original;
+        padded.push_str(
+            &" ".repeat(crate::compaction::SUMMARY_USAGE_MAX_BYTES as usize - padded.len()),
+        );
+        db.execute(
+            "UPDATE app_meta SET value=?2 WHERE key=?1",
+            params![key, padded],
+        )
+        .unwrap();
+    }
+    let plan = db
+        .prepare(&format!("EXPLAIN QUERY PLAN {}", compaction_query()))
+        .unwrap()
+        .query_map(
+            params![0, i64::MAX, crate::compaction::SUMMARY_USAGE_MAX_BYTES],
+            |row| row.get::<_, String>(3),
+        )
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join(" ");
+    assert!(
+        !plan.contains("TEMP B-TREE"),
+        "large values must not be materialized for sorting: {plan}"
+    );
+    let mut a = args("thread");
+    let mut total = 0u64;
+    let mut pages = 0;
+    loop {
+        let value = read(&db, &a, "fixture").unwrap();
+        let matched = value["matched_compactions"].as_u64().unwrap();
+        assert!(
+            value["scanned_compaction_bytes"].as_u64().unwrap() <= COMPACTION_PAGE_BYTES as u64
+        );
+        assert!(
+            matched <= 1,
+            "a page must honor the 4 MiB key and body budget"
+        );
+        total += matched;
+        pages += 1;
+        assert!(pages <= 8, "cursor must make progress");
+        if !value["more"].as_bool().unwrap() {
+            break;
+        }
+        a.cursor = value["next_cursor"].as_str().map(Into::into);
+    }
+    assert_eq!(total, 7);
+    assert!(pages >= 4);
 }

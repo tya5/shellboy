@@ -305,7 +305,10 @@ that update leaves it unknown. Wait totals are sums of caller wait durations,
 not unioned connection wall time; saturation sets the associated overflow flag.
 The explicit `usage get` scoped aggregation
 reads the selected attempt and summary records; grouped results cover only each
-bounded candidate window. Thread-detail refresh does not run the extra scan.
+bounded candidate window. Each grouped page admits at most 4 MiB of summary
+record keys and bodies, plus one bounded lookahead, and continues from the last
+admitted row without discarding the next one. Thread-detail refresh does not run
+the extra scan.
 
 The broader draft below, including endpoint counters and connection/day indexing,
 remains proposed rather than part of the owner's stage 1 instruction.
