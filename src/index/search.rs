@@ -137,13 +137,40 @@ impl IndexService {
             .clients
             .get(&space.profile)
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
+        let lease = client
+            .acquire_rate(&cancel)
+            .await
+            .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
+        let expected = space.clone();
+        let target = args.thread_id.clone();
+        self.database
+            .call(move |db| {
+                reader::check_space(db, &expected).map_err(StorageError::from)?;
+                if let Some(thread) = target {
+                    let exists: bool = db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+                        [thread],
+                        |row| row.get(0),
+                    )?;
+                    if !exists {
+                        return Err(StorageError::from(err(
+                            ErrorCode::ThreadNotFound,
+                            "Search Thread does not exist",
+                        )));
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .map_err(db_error)?;
         let response = client
-            .embeddings(
+            .embeddings_admitted(
                 &space.model,
                 std::slice::from_ref(&args.query),
                 Some(space.dimension),
                 space.requested_dimensions,
                 cancel.clone(),
+                lease,
             )
             .await
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;

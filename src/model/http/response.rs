@@ -1,5 +1,5 @@
 //! Responses reception preserves bounded recovery data and reports facts only.
-use super::body::{http_error, read_json, redact};
+use super::body::{http_error_observed, read_json, redact};
 use super::*;
 use crate::config::Api;
 use crate::model::{MAX_RESPONSE_BYTES, ModelResponse, ResponseStream, dialect};
@@ -24,6 +24,8 @@ pub struct ResponseFacts {
     /// A terminal SSE event or a fully parsed JSON response document arrived.
     /// Validation failure after that boundary is distinct from interrupted transport.
     pub terminal_received: bool,
+    /// A bounded non-success HTTP error body reached EOF.
+    pub http_error_complete: bool,
     /// Transport observations do not establish peer receipt or processing.
     pub http_observation: Option<HttpObservation>,
 }
@@ -380,7 +382,13 @@ impl HttpModelClient {
                 error.status = Some(429);
                 return Err(error.into());
             }
-            return Err(http_error(response, &mut context).await.into());
+            return Err(http_error_observed(
+                response,
+                &mut context,
+                &mut facts.http_error_complete,
+            )
+            .await
+            .into());
         }
         let content_type = response
             .headers()
