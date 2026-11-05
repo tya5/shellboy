@@ -1830,7 +1830,7 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
         let limit = &reason["details"]["usage_limit"];
         assert!(limit["resets_at_utc"].as_str().is_some());
         assert_eq!(limit["locally_blocked"], false);
-        if shape < 2 || shape >= 6 {
+        if !(2..6).contains(&shape) {
             assert_eq!(limit["resets_at"], resets_at);
             assert_eq!(limit["limit_window_minutes"], 10080);
         }
