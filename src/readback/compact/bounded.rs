@@ -130,6 +130,7 @@ pub(in crate::readback) fn read_display(
             at: budget.text(row, 1, false)?,
             format: budget.text(row, 2, false)?,
             raw: budget.text(row, 3, true)?,
+            inherited: row.get(4)?,
         });
     }
     // Spill provenance matching can itself inspect lifetime-sized source sets.

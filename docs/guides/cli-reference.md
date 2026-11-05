@@ -538,8 +538,8 @@ events carry the two keys; spill, range-omission and summary-less attempts omit
 them (not applicable), while `null` on a summary means no later request yet or no
 reported input (including a request that has not yet finished). Several
 adoptions before one request share the same attempt ID, and that input reflects
-all of them, so do not sum effects. A fork's first request is not attributed to
-inherited summaries (null). Compare it with
+all of them, so do not sum effects. A summary a fork inherited from its parent omits
+both keys (not applicable): the fork's first request was not caused by it. Compare it with
 `trigger.input_tokens` and `trigger.auto_at_tokens` (automatic events) to see
 the effect of a compaction setting. Each summarizing event has `metrics.summary_usage`:
 `requests`, `map_requests`, `reduce_requests` and `input_tokens`,

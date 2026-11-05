@@ -42,7 +42,9 @@ pub struct MarkerFacts {
     /// A spill was adopted but its summary was rejected.
     pub summary_rejected: bool,
     pub cost: Option<(Amount, Amount)>,
-    pub after: After,
+    /// None when the item omits the linkage keys (not applicable, e.g. a summary
+    /// a fork inherited).
+    pub after: Option<After>,
 }
 fn amount(value: &Value) -> Amount {
     Amount {
@@ -73,14 +75,16 @@ impl MarkerFacts {
             }
         };
         let usage = &metrics["summary_usage"];
-        let after = match (
-            event["post_compaction_attempt_id"].is_string(),
-            event["post_compaction_input_tokens"].as_u64(),
-        ) {
-            (_, Some(tokens)) => After::Tokens(tokens),
-            (true, None) => After::Unreported,
-            (false, None) => After::Pending,
-        };
+        let after = event.get("post_compaction_attempt_id").map(|id| {
+            match (
+                id.is_string(),
+                event["post_compaction_input_tokens"].as_u64(),
+            ) {
+                (_, Some(tokens)) => After::Tokens(tokens),
+                (true, None) => After::Unreported,
+                (false, None) => After::Pending,
+            }
+        });
         Some(Self {
             automatic,
             outcome,
@@ -184,8 +188,8 @@ impl MarkerFacts {
             (None, true) => "cost unknown".into(),
         });
         // A spill-only attempt has no summary to compare, so no later input.
-        if self.has_summary {
-            parts.push(match (self.after, en) {
+        if let (true, Some(after)) = (self.has_summary, self.after) {
+            parts.push(match (after, en) {
                 (After::Tokens(n), false) => format!("要約後の入力 {}", k(n)),
                 (After::Unreported, false) => "要約後の入力 未報告または未完了".into(),
                 (After::Pending, false) => "要約後の入力 次の要求待ち".into(),
@@ -311,6 +315,16 @@ mod tests {
         );
         assert!(render(&event, UiLanguage::Ja, true).contains("要約は失敗または不採用"));
         assert!(!text.contains("input after"));
+    }
+    #[test]
+    fn absent_linkage_keys_omit_the_later_input_part() {
+        let mut event = adopted("summary");
+        let object = event.as_object_mut().unwrap();
+        object.remove("post_compaction_attempt_id");
+        object.remove("post_compaction_input_tokens");
+        let text = render(&event, UiLanguage::En, true);
+        assert!(!text.contains("input after"), "{text}");
+        assert!(!render(&event, UiLanguage::Ja, true).contains("要約後の入力"));
     }
     #[test]
     fn non_marker_kinds_are_ignored() {

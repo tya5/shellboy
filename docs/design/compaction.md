@@ -1119,6 +1119,6 @@ and range-omission events and attempts without a summary do not carry them (the
 keys are absent, which is not-applicable, as distinct from null on a summary,
 which means no later request yet or no reported input). Several adoptions before
 one request share the same `post_compaction_attempt_id`; that input reflects all
-of them, so do not sum effects. A fork inherits its parent's replacements and its
-first request is not attributed to them (null). Only the latest 200 events are
+of them, so do not sum effects. A fork inherits its parent's replacements; for those
+the keys are omitted (not applicable) and the marker shows no later-input part. Only the latest 200 events are
 searched for the conversation marker.

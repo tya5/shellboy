@@ -6705,92 +6705,92 @@
   "src/presentation/compaction_marker.rs:678459f3e97eacfd:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:1781fd6c599be9e5:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:a7957186d0f8731a:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:5e4b2de5a8ad9731:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:242195375d75c73f:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:2ca78d832676e4ef:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:44bf1dc82cd99c6d:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:cae90a7d4c76e16c:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:e7921c55363d1dc8:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:7ff790be813dfc6c:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:2bffd9b7aa566f90:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:df9bb5f0e9b08f7a:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:a917ce99dc5561c8:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:0e19dfe33511df7e:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:4c40880973ea7246:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:4c8219c654052a13:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:aefc721cab6ef761:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:2e7a8ea2fa03c7f9:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:88ff7833bcd1895e:1": {
     "category": "a",
@@ -6840,12 +6840,12 @@
   "src/presentation/compaction_marker.rs:687746d1c9a5b3df:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:cc0d1a12a038ab51:1": {
     "category": "a",
     "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
-    "source_tokens_sha256": "a04f408131d94337147b2a57160f3687fc4f414c196a5e6feee27a94a402c852"
+    "source_tokens_sha256": "440994cc420d8db3b33beb01cb6896fe1927d81ddd26715cc0b84e4025829a7c"
   },
   "src/presentation/compaction_marker.rs:264340f04bb5e193:1": {
     "category": "a",

@@ -3533,5 +3533,5 @@ guess. Impact: text only. Revisit if a growth rule is added. The row keeps the
 existing `⬦`/`⁂` marks and the separator rule instead of a `──` rule line, to
 reuse existing presentation parts; the spilled count is shown only when known and
 above zero. Review follow-ups: the render stamp now covers the note and marker
-facts; a fork's inherited replacements get null linkage; a spill-only attempt
+facts; a fork's inherited replacements omit the linkage keys (v3); a spill-only attempt
 shows a rejected summary and no later-input part.

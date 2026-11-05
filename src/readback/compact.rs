@@ -115,7 +115,7 @@ fn replacement_source_query(w: &Window, display: bool) -> String {
         "(SELECT count(*) FROM replacement_source q WHERE q.replacement_id=r.id)"
     };
     format!(
-        "SELECT r.output_node_id,r.created_at,r.format_version,json_object('source_nodes',{source_count},'first_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal LIMIT 1),'last_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal DESC LIMIT 1),'before_characters',json_extract(n.payload_json,'$.context_trim.history_characters'),'omitted_nodes',json_extract(n.payload_json,'$.context_trim.omitted_nodes'),'after_current_request_nodes',json_extract(n.payload_json,'$.context_trim.after_current_request_nodes'),'summary_characters',CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END,'summary_parts',json_array_length(n.payload_json,'$.summary_part_keys'),'summary_usage',json(CASE WHEN n.kind='summary' THEN json_extract(n.payload_json,'$.summary_usage') END),'reason',json_extract(n.payload_json,'$.context_trim.reason')) FROM thread_replacement tr {join} replacement r ON r.id=tr.replacement_id {join} node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND {} ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?2",
+        "SELECT r.output_node_id,r.created_at,r.format_version,json_object('source_nodes',{source_count},'first_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal LIMIT 1),'last_node_id',(SELECT source_node_id FROM replacement_source q WHERE q.replacement_id=r.id ORDER BY ordinal DESC LIMIT 1),'before_characters',json_extract(n.payload_json,'$.context_trim.history_characters'),'omitted_nodes',json_extract(n.payload_json,'$.context_trim.omitted_nodes'),'after_current_request_nodes',json_extract(n.payload_json,'$.context_trim.after_current_request_nodes'),'summary_characters',CASE WHEN n.kind='summary' THEN readback_chars(json_extract(n.payload_json,'$.item.content[0].text')) END,'summary_parts',json_array_length(n.payload_json,'$.summary_part_keys'),'summary_usage',json(CASE WHEN n.kind='summary' THEN json_extract(n.payload_json,'$.summary_usage') END),'reason',json_extract(n.payload_json,'$.context_trim.reason')),EXISTS(SELECT 1 FROM main.thread f JOIN main.thread_replacement p ON p.thread_id=f.parent_thread_id WHERE f.id=?1 AND p.replacement_id=r.id) FROM thread_replacement tr {join} replacement r ON r.id=tr.replacement_id {join} node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND {} ORDER BY usage_saved_start(r.created_at) DESC,r.id DESC LIMIT ?2",
         w.sql("r.created_at")
     )
 }
@@ -197,7 +197,7 @@ pub(crate) struct RawCompactions {
     replacements: Vec<ReplacementRow>,
     covered_spills: std::collections::HashSet<String>,
     /// Replacement ID -> first model request started after that adoption (#230).
-    post_input: std::collections::HashMap<String, PostInput>,
+    post_input: std::collections::HashMap<String, Option<PostInput>>,
     display_latest_complete: Option<bool>,
 }
 struct ReceiptRow {
@@ -228,25 +228,23 @@ struct PostInput {
 /// The first model request of the Thread that started after the replacement was
 /// adopted, read from saved attempts (no stored link). Turns are walked in
 /// `ended_at` order so the first match ends the scan; an open Turn is the
-/// fallback. A fork's inherited replacements (also in the parent's
-/// `thread_replacement`) match nothing: its first request was not caused by them. Input tokens are the provider-reported value or None, never an
+/// fallback. Input tokens are the provider-reported value or None, never an
 /// estimate.
 fn post_adoption_input(
     db: &Connection,
     thread: &str,
-    replacement: &str,
     adopted_at: &str,
 ) -> Result<Option<PostInput>, crate::storage::StorageError> {
     let projection = crate::usage::sql_projection("a.usage_json");
     let ended = format!(
-        "SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 AND NOT EXISTS(SELECT 1 FROM thread f JOIN thread_replacement p ON p.thread_id=f.parent_thread_id WHERE f.id=?1 AND p.replacement_id=?3) ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1"
+        "SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1"
     );
     let open = format!(
-        "SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND u.state IN ('preparing','running','waiting','recovery_wait') AND a.started_at>?2 AND octet_length(a.id)<=512 AND NOT EXISTS(SELECT 1 FROM thread f JOIN thread_replacement p ON p.thread_id=f.parent_thread_id WHERE f.id=?1 AND p.replacement_id=?3) ORDER BY a.started_at,a.rowid LIMIT 1"
+        "SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND u.state IN ('preparing','running','waiting','recovery_wait') AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY a.started_at,a.rowid LIMIT 1"
     );
     for sql in [ended, open] {
         let found = db
-            .query_row(&sql, params![thread, adopted_at, replacement], |row| {
+            .query_row(&sql, params![thread, adopted_at], |row| {
                 Ok(PostInput {
                     attempt_id: row.get(0)?,
                     input_tokens: crate::usage::StandardUsage::read(row, 1)?.input_tokens,
@@ -264,15 +262,19 @@ fn post_inputs(
     thread: &str,
     replacements: &[ReplacementRow],
     limit: usize,
-) -> Result<std::collections::HashMap<String, PostInput>, crate::storage::StorageError> {
+) -> Result<std::collections::HashMap<String, Option<PostInput>>, crate::storage::StorageError> {
+    // None marks a replacement a fork inherited from its parent: its first
+    // request was not caused by it, so the item omits the linkage fields.
     let mut found = std::collections::HashMap::new();
     // Replacements are newest first and the page keeps the newest `limit` events,
     // so a summary that survives is among the first `limit` replacement rows.
     for row in replacements.iter().take(limit) {
-        if row.format != "spill-v1"
-            && let Some(input) = post_adoption_input(db, thread, &row.id, &row.at)?
+        if row.inherited {
+            found.insert(row.id.clone(), None);
+        } else if row.format != "spill-v1"
+            && let Some(input) = post_adoption_input(db, thread, &row.at)?
         {
-            found.insert(row.id.clone(), input);
+            found.insert(row.id.clone(), Some(input));
         }
     }
     Ok(found)
@@ -282,6 +284,7 @@ struct ReplacementRow {
     at: String,
     format: String,
     raw: String,
+    inherited: bool,
 }
 pub(crate) fn list(
     db: &Connection,
@@ -440,6 +443,7 @@ pub(super) fn collect_tx(
             at: budget.text(row, 1, false)?,
             format: budget.text(row, 2, false)?,
             raw: budget.text(row, 3, true)?,
+            inherited: row.get(4)?,
         });
     }
     let post_input = post_inputs(db, thread, &replacements, a.limit as usize)?;
@@ -556,6 +560,10 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
             .as_str()
             .or(item["event_id"].as_str());
         let found = node.and_then(|id| post_input.get(id));
+        if found.is_some_and(Option::is_none) {
+            continue;
+        }
+        let found = found.and_then(Option::as_ref);
         item["post_compaction_attempt_id"] = json!(found.map(|f| f.attempt_id.as_str()));
         item["post_compaction_input_tokens"] = json!(found.and_then(|f| f.input_tokens));
     }

@@ -708,8 +708,8 @@ fn forked_thread_does_not_attribute_its_first_request_to_inherited_summaries() {
         let item = &fork["items"][0];
         assert_eq!(item["event_id"], "sum");
         assert!(
-            item["post_compaction_attempt_id"].is_null()
-                && item["post_compaction_input_tokens"].is_null(),
+            item.get("post_compaction_attempt_id").is_none()
+                && item.get("post_compaction_input_tokens").is_none(),
             "{item}"
         );
         let parent = compactions(&c, "t", &comp_args()).unwrap();
