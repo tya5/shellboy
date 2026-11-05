@@ -17,20 +17,38 @@ pub struct UsageLimit {
     pub locally_blocked: bool,
 }
 impl UsageLimit {
+    #[cfg(test)]
     pub(crate) fn parse(value: &Value, now: DateTime<Utc>) -> Option<Self> {
+        Self::parse_for_status(value, now, Some(429))
+    }
+    /// The wrapped `litellm.RateLimitError` text form is accepted only for
+    /// HTTP 429; a different status may merely echo pasted text.
+    pub(crate) fn parse_for_status(
+        value: &Value,
+        now: DateTime<Utc>,
+        status: Option<u16>,
+    ) -> Option<Self> {
         let error = value.get("error").filter(|v| !v.is_null()).unwrap_or(value);
         if let Some(text) = error.as_str() {
-            return Self::text(text, now);
+            return Self::text_for_status(text, now, status);
         }
         Self::object(error, now).or_else(|| {
             let text = error.get("message")?.as_str()?;
-            Self::text(text, now)
+            Self::text_for_status(text, now, status)
         })
     }
     /// Recognizes a bare JSON fact or a `litellm.RateLimitError` message that
     /// embeds one. LiteLLM may append diagnostic text after the embedded JSON,
     /// so only the first JSON value at a candidate brace is read.
+    #[cfg(test)]
     pub(crate) fn text(text: &str, now: DateTime<Utc>) -> Option<Self> {
+        Self::text_for_status(text, now, Some(429))
+    }
+    pub(crate) fn text_for_status(
+        text: &str,
+        now: DateTime<Utc>,
+        status: Option<u16>,
+    ) -> Option<Self> {
         const MAX_CANDIDATES: usize = 16;
         if text.len() > 65_536 {
             return None;
@@ -39,6 +57,9 @@ impl UsageLimit {
         let rest = if text.starts_with('{') {
             text
         } else {
+            if status != Some(429) {
+                return None;
+            }
             // The marker may follow a short label such as "provider: ".
             let marker = "litellm.RateLimitError";
             let at = text.find(marker)?;
@@ -187,6 +208,40 @@ mod tests {
             assert!(UsageLimit::parse(&value, now).is_none(), "{value}");
         }
         assert!(UsageLimit::text("provider says usage_limit_reached", now).is_none());
+        // A non-429 status that echoes the wrapped text sets no usage limit.
+        let echoed = format!(
+            "litellm.RateLimitError: x - {}",
+            json!({"error":{"type":"usage_limit_reached","resets_at":at}})
+        );
+        assert!(UsageLimit::text_for_status(&echoed, now, Some(400)).is_none());
+        assert!(UsageLimit::text_for_status(&echoed, now, None).is_none());
+        assert!(
+            UsageLimit::parse_for_status(
+                &json!({"error":{"message":echoed.clone()}}),
+                now,
+                Some(400)
+            )
+            .is_none()
+        );
+        assert!(UsageLimit::text_for_status(&echoed, now, Some(429)).is_some());
+        let body = json!({"error":{"message":echoed.clone()}});
+        assert!(ModelError::provider(Some(400), &body).usage_limit.is_none());
+        // ModelError::provider uses the wall clock, so build a live reset.
+        let live = Utc::now().timestamp() + 3600;
+        let live_body = json!({"error":{"message":format!(
+            "litellm.RateLimitError: x - {}",
+            json!({"error":{"type":"usage_limit_reached","resets_at":live}})
+        )}});
+        assert!(
+            ModelError::provider(Some(429), &live_body)
+                .usage_limit
+                .is_some_and(|fact| fact.resets_at == live)
+        );
+        assert!(
+            ModelError::provider(Some(400), &live_body)
+                .usage_limit
+                .is_none()
+        );
         // Exact provider text reported by the owner (HTTP 429), fixed clock.
         let real_now = DateTime::from_timestamp(1_793_860_000, 0).unwrap();
         let real = "provider: litellm.RateLimitError: RateLimitError: ChatgptException - {\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\",\"plan_type\":\"prolite\",\"resets_at\":1794265668,\"eligible_promo\":null,\"limit_window_minutes\":10080,\"resets_in_seconds\":408856}}. Received Model Group=gpt-6.1-terra\nAvailable Model Group Fallbacks=None";

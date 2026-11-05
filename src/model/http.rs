@@ -164,6 +164,26 @@ impl HttpModelClient {
         })
     }
 
+    /// Converts a finished admission wait into an admission. A waiter deferred
+    /// because a usage-limit 429 arrived while it was queued reports that
+    /// usage limit, as a new reservation would, instead of a generic deferral.
+    pub(crate) fn admission_after_wait(
+        &self,
+        result: Result<RateLease, ModelError>,
+        bypass_usage_limit: Option<super::usage_limit::UsageLimit>,
+    ) -> Result<RateAdmission, ModelError> {
+        match result {
+            Ok(lease) => Ok(RateAdmission::Lease(lease)),
+            Err(error) if error.kind == "rate_limit_deferred" => {
+                match self.blocking_usage_limit(bypass_usage_limit) {
+                    Some(active) => Ok(RateAdmission::QuotaBlocked(active)),
+                    None => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn active_usage_limit(&self) -> Option<super::usage_limit::UsageLimit> {
         let mut slot = self.usage_limit.lock().expect("usage limit lock poisoned");
         if slot
@@ -422,6 +442,8 @@ impl HttpModelClient {
                         .and_then(|value| value.to_str().ok())
                         .and_then(response::parse_retry_after);
                     self.rate_gate.throttle(retry_after, rate_generation);
+                } else if response.status().is_success() {
+                    self.rate_gate.probe_succeeded(rate_generation);
                 }
                 observation.phase = HttpPhase::BodyReceive;
                 observation.header_elapsed_ms =

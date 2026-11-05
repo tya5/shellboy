@@ -212,10 +212,11 @@ pub(super) async fn drive(
                 drop(boundary_guard);
                 let wait_started = tokio::time::Instant::now();
                 let rate_result = match pending {
-                    Ok(model::http::RateReservation::Waiting(waiter)) => waiter
-                        .wait(&turn_binding.cancel)
-                        .await
-                        .map(model::http::RateAdmission::Lease),
+                    Ok(model::http::RateReservation::Waiting(waiter)) => {
+                        let waited = waiter.wait(&turn_binding.cancel).await;
+                        rate_client
+                            .admission_after_wait(waited, retry_budget.usage_limit_retry_bypass())
+                    }
                     Err(error) => Err(error),
                     Ok(model::http::RateReservation::Ready(_)) => unreachable!(),
                 };

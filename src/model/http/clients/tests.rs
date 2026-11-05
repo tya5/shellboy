@@ -973,6 +973,100 @@ async fn catalog_wait_is_shared_by_profile_but_isolated_from_other_profiles() {
 }
 
 #[tokio::test]
+async fn success_headers_release_the_probe_while_the_body_is_still_streaming() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = Connection {
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        ..Default::default()
+    };
+    let client = HttpModelClient::for_connection("fixture", connection).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut body = [0u8; 8192];
+        let _ = stream.read(&mut body).await.unwrap();
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 9999\r\n\r\n{").await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    client
+        .rate_gate
+        .throttle(None, client.rate_gate.generation());
+    let cancel = CancellationToken::new();
+    let probe = tokio::spawn({
+        let client = client.clone();
+        let cancel = cancel.clone();
+        async move { client.models(cancel).await }
+    });
+    // Ready means the cooldown cleared and the probe permit was released even
+    // though the probe response body never finishes.
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            if matches!(
+                client.reserve_rate_admission(None),
+                Ok(super::super::RateReservation::Ready(_))
+            ) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("probe permit was not released at success headers");
+    assert!(!probe.is_finished(), "probe body must still be streaming");
+    cancel.cancel();
+    let _ = probe.await;
+    server.abort();
+}
+
+#[tokio::test]
+async fn queued_waiter_deferred_by_usage_limit_reports_the_limit() {
+    let connection = Connection {
+        base_url: "http://127.0.0.1:1/v1".into(),
+        ..Default::default()
+    };
+    let client = HttpModelClient::for_connection("fixture", connection).unwrap();
+    client.rate_gate.throttle(
+        Some(std::time::Duration::from_secs(30)),
+        client.rate_gate.generation(),
+    );
+    let Ok(super::super::RateReservation::Waiting(waiter)) = client.reserve_rate_admission(None)
+    else {
+        panic!("expected a queued waiter")
+    };
+    let queued = tokio::spawn(async move { waiter.wait(&CancellationToken::new()).await });
+    tokio::task::yield_now().await;
+    // The usage-limit 429 arrives while the request is queued.
+    let fact = crate::model::usage_limit::UsageLimit::parse(
+        &json!({"error":{"type":"usage_limit_reached","resets_in_seconds":3600}}),
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    client.remember_usage_limit(fact);
+    client.rate_gate.throttle(
+        Some(std::time::Duration::from_secs(3600)),
+        client.rate_gate.generation(),
+    );
+    let result = queued.await.unwrap();
+    assert_eq!(result.as_ref().err().unwrap().kind, "rate_limit_deferred");
+    match client.admission_after_wait(result, None).unwrap() {
+        super::super::RateAdmission::QuotaBlocked(blocked) => {
+            assert_eq!(blocked.resets_at, fact.resets_at)
+        }
+        super::super::RateAdmission::Lease(_) => panic!("deferred waiter must not hold a lease"),
+    }
+    // Without an active usage limit the generic deferral is preserved.
+    let plain = HttpModelClient::for_connection(
+        "plain",
+        Connection {
+            base_url: "http://127.0.0.1:1/v1".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let error = ModelError::new("rate_limit_deferred", "x");
+    assert!(plain.admission_after_wait(Err(error), None).is_err());
+}
+
+#[tokio::test]
 async fn catalog_429_long_retry_after_defers_next_call_without_a_send() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let connection = Connection {

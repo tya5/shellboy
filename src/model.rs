@@ -142,7 +142,12 @@ impl ModelError {
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
             http_observation: None,
-            usage_limit: usage_limit::UsageLimit::parse(value, chrono::Utc::now()).map(Box::new),
+            usage_limit: usage_limit::UsageLimit::parse_for_status(
+                value,
+                chrono::Utc::now(),
+                status,
+            )
+            .map(Box::new),
         }
     }
 }
