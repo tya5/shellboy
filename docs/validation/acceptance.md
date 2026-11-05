@@ -9958,6 +9958,11 @@ live-provider behavior or production quota is established by those checks.
 
 ## #224 stage 2 shared connection admission (in progress)
 
+A synthetic LiteLLM-wrapped usage limit (nested exception names, trailing
+diagnostic text, string `error`) is covered by the parser unit test and by
+shape 6 of the explicit usage-limit integration test: one request, no automatic
+retry, reset time in the recovery reason.
+
 Focused local synthetic fixtures exercise real loopback 429 headers and stalled
 error bodies, long provider delays, FIFO reservations polled out of order,
 cancellation and dropped probes, bounded queue overflow, profile isolation and
