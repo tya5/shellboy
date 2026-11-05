@@ -20,6 +20,11 @@ impl HttpClients {
                 .collect(),
         }
     }
+    pub(crate) fn set_diagnostics(&self, diagnostics: crate::diagnostics::Diagnostics) {
+        for client in self.entries.values().flatten() {
+            let _ = client.diagnostics.set(diagnostics.clone());
+        }
+    }
     pub(crate) fn get(&self, name: &str) -> Result<HttpModelClient, ModelError> {
         self.entries.get(name).cloned().unwrap_or_else(|| {
             Err(ModelError::new(

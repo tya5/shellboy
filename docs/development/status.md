@@ -4749,3 +4749,10 @@ rendered a 64,329-byte full body in 18 ms and its 4,841-byte anchor window in
 remains undiagnosed. Regression coverage includes long and multiple blocks,
 anchor selection, metadata omission, width changes, and the retained resize
 worker request. Focused tests and full validation are in progress.
+
+## #224 Stage 1 observability (in progress)
+
+Stage 1 is owner-adopted; implementation and synthetic checks are in progress.
+No landing or CI success is claimed. Connection-wide waiting (stage 2) and
+budgeted summary retry with adaptive map concurrency (stage 3) remain separate
+future changes and landings.

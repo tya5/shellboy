@@ -542,7 +542,16 @@ async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff(
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0].0, "failed");
         assert_eq!(attempts[1].0, "completed");
-        let retry = &attempts[0].1.as_ref().unwrap()["automatic_retry"];
+        let first_error = attempts[0].1.as_ref().unwrap();
+        assert_eq!(first_error["rate_observation"]["status"], status);
+        assert_eq!(first_error["rate_observation"]["retry_after_present"], true);
+        assert!(first_error["rate_observation"]["retry_after_ms"].is_null());
+        assert!(
+            first_error["rate_observation"]["applied_wait_ms"]
+                .as_u64()
+                .is_some()
+        );
+        let retry = &first_error["automatic_retry"];
         assert_eq!(retry["number"], 1);
         assert_eq!(retry["limit"], 2);
         assert_eq!(retry["delay_ms"], 10);
@@ -568,14 +577,14 @@ async fn transient_http_errors_retry_consumed_error_bodies_with_bounded_backoff(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_budget_is_exact_and_zero_disables_retries() {
-    for limit in [0, 2] {
+    for (limit, status) in [(0, 503), (2, 503), (0, 429), (2, 429)] {
         let mut fixture = Fixture::new(limit, 10, 5_000).await;
         for _ in 0..=limit {
             fixture
                 .incoming()
                 .await
                 .reply
-                .send(Reply::error(503, ""))
+                .send(Reply::error(status, ""))
                 .ok()
                 .unwrap();
         }
@@ -593,6 +602,9 @@ async fn retry_budget_is_exact_and_zero_disables_retries() {
         assert_eq!(state, "incomplete");
         let error = error.as_ref().unwrap();
         assert!(error.get("automatic_retry").is_none());
+        assert_eq!(error["rate_observation"]["status"], status);
+        assert_eq!(error["rate_observation"]["retry_after_present"], false);
+        assert_eq!(error["rate_observation"]["applied_wait_ms"], 0);
         if limit > 0 {
             assert_eq!(error["automatic_retry_exhausted"]["retries"], limit);
             assert_eq!(error["automatic_retry_exhausted"]["limit"], limit);
@@ -943,7 +955,12 @@ async fn stop_cancels_a_persisted_retry_wait_without_another_request() {
     .await
     .expect("stop did not finish within fixture watchdog");
     assert_eq!(fixture.settled().await, "stopped");
-    assert_eq!(fixture.attempts().await.len(), 1);
+    let attempts = fixture.attempts().await;
+    assert_eq!(attempts.len(), 1);
+    let rate = &attempts[0].1.as_ref().unwrap()["rate_observation"];
+    assert_eq!(rate["status"], 429);
+    assert_eq!(rate["retry_after_ms"], 30_000);
+    assert!(rate["applied_wait_ms"].as_u64().is_some());
     fixture.no_more_requests().await;
     fixture.close().await;
 }
@@ -1982,4 +1999,81 @@ async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorde
         assert_eq!(epoch, 1);
         f.close().await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn concurrent_threads_record_independent_429_observations() {
+    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    let first = fixture.incoming().await;
+    let thread = request(
+        &fixture.control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let second_accepted: MessageAccepted = serde_json::from_value(
+        request(
+            &fixture.control,
+            Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread),
+                text: "second synthetic thread".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    let second = fixture.incoming().await;
+    first
+        .reply
+        .send(Reply::error(429, "Retry-After: 0\r\n"))
+        .ok()
+        .unwrap();
+    // Keep both requests in flight but serialize their log enqueue, because
+    // the owner logger deliberately drops events on concurrent lock contention.
+    let log = fixture.owner.loaded.data_dir.join("logs/shellboy.log");
+    crate::test_watchdog::watchdog("first 429 log event", async {
+        loop {
+            let body = std::fs::read_to_string(&log).unwrap_or_default();
+            if body.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .any(|event| event["event"] == "model_rate_limited") { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("first 429 event must be logged");
+    second.reply.send(Reply::error(429, "")).ok().unwrap();
+    let turn1 = fixture.accepted.turn_id.clone().unwrap();
+    let turn2 = second_accepted.turn_id.unwrap();
+    let database = fixture.control.store.database.clone();
+    crate::test_watchdog::watchdog("concurrent 429 observations", async {
+        loop {
+            let turns = [turn1.clone(), turn2.clone()];
+            let count = database.call(move |db| {
+                Ok(db.query_row("SELECT count(*) FROM model_attempt WHERE turn_id IN (?1,?2) AND json_extract(input_manifest_json,'$.rate_observation.status')=429", rusqlite::params![turns[0], turns[1]], |row| row.get::<_, i64>(0))?)
+            }).await.unwrap();
+            if count == 2 { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.expect("both concurrent attempts must persist their own 429");
+    crate::test_watchdog::watchdog("two 429 log events", async {
+        loop {
+            let body = std::fs::read_to_string(&log).unwrap_or_default();
+            let count = body.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|event| event["event"] == "model_rate_limited").count();
+            if count >= 2 { assert_eq!(count, 2); break; }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await.unwrap_or_else(|error| panic!("exactly two 429 events must be logged: {error}; log={:?}; dropped={}", std::fs::read_to_string(&log), fixture.owner.diagnostics.pending_dropped()));
+    fixture.no_more_requests().await;
+    fixture.close().await;
 }

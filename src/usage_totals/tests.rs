@@ -629,7 +629,7 @@ fn requested_periods_use_saved_start_boundaries_and_keep_whole_lifetimes() {
         assert_eq!(v["attempt_period"]["unknown_start_count"], 0);
         assert_eq!(c.total_changes(), before);
         let mut trace = Trace::default();
-        inspect_period(&c, &scope, &mut trace, &w).unwrap();
+        inspect_period(&c, &scope, &mut trace, &w, false).unwrap();
         for (sql, _) in trace.statements {
             let mut st = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
             let parameter = if sql.contains("json_each(?1)") {
@@ -776,4 +776,104 @@ fn saved_request_bytes_are_read_beside_reported_tokens_and_invalid_is_unknown() 
     )
     .unwrap();
     assert!(read_attempt(&db, "a1-99").unwrap()["input_bytes"].is_null());
+}
+
+#[test]
+fn connection_rates_keep_legacy_and_missing_waits_unknown() {
+    let mut db = db();
+    seed(&mut db, 1, false);
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a0-0'",
+        [json!({"rate_observation":{"status":429,"applied_wait_ms":123}}).to_string()],
+    )
+    .unwrap();
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a0-1'",
+        [json!({"rate_observation":{"status":503}}).to_string()],
+    )
+    .unwrap();
+    let result = read_period_logged(
+        &db,
+        &Scope::Turn("u0".into()),
+        ReadContext::default(),
+        None,
+        &Default::default(),
+    )
+    .unwrap();
+    let rates = &result["connection_rates"]["by_connection"]["fixture"];
+    assert_eq!(rates["http_429"], 1);
+    assert_eq!(rates["http_5xx"], 1);
+    assert_eq!(rates["applied_wait_ms"], 123);
+    assert_eq!(rates["status_unknown"], 98);
+    assert_eq!(rates["wait_unknown"], 99);
+}
+
+#[test]
+fn connection_rates_survive_database_reopen_and_group_summary_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("usage.sqlite");
+    {
+        let mut db = Connection::open(&path).unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        seed(&mut db, 2, true);
+        db.execute(
+            "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='a0-0'",
+            [json!({"rate_observation":{"status":429,"applied_wait_ms":12}}).to_string()],
+        )
+        .unwrap();
+        let mut usage = crate::compaction::SummaryUsage::default();
+        usage.requests = 2;
+        usage.map_requests = 2;
+        let mut record = json!(usage);
+        for (key, value) in [
+            ("id", json!("summary")),
+            ("thread_id", json!("t0")),
+            ("turn_id", json!("u0")),
+            ("run_id", json!("r0")),
+            ("profile_id", json!("fixture")),
+            ("model_id", json!("fixture")),
+            ("started_at", json!(START)),
+            ("updated_at", json!(END)),
+            (
+                "rate_observations",
+                json!([{"status":429,"applied_wait_ms":0}, null, {"status":429,"applied_wait_ms":9}]),
+            ),
+        ] {
+            record[key] = value;
+        }
+        db.execute(
+            "INSERT INTO app_meta(key,value) VALUES('summary.usage.t0.summary',?1)",
+            [record.to_string()],
+        )
+        .unwrap();
+    }
+    let db = Connection::open(&path).unwrap();
+    let result = read_period_logged(
+        &db,
+        &Scope::Thread {
+            id: "t0".into(),
+            children: true,
+        },
+        ReadContext::default(),
+        None,
+        &Default::default(),
+    )
+    .unwrap();
+    let rates = &result["connection_rates"]["by_connection"]["fixture"];
+    assert_eq!(rates["http_429"], 2);
+    assert_eq!(rates["applied_wait_ms"], 12);
+    assert_eq!(rates["status_unknown"], 200);
+    assert_eq!(rates["wait_unknown"], 200);
+}
+
+#[test]
+fn connection_rate_wait_saturation_reports_overflow() {
+    let mut rates = RateCounts::default();
+    rates.add(Some(429), Some(u64::MAX));
+    rates.add(Some(503), Some(1));
+    let value = json!(rates);
+    assert_eq!(value["applied_wait_ms"], u64::MAX);
+    assert_eq!(value["overflow"], true);
+    assert_eq!(value["http_429"], 1);
+    assert_eq!(value["http_5xx"], 1);
 }

@@ -102,6 +102,12 @@ pub(super) fn fail_attempt(
                     AND u.state IN ('preparing','running','waiting') AND r.state='live')",
         params![attempt, error.to_string(), at, usage.map(|u| u.to_value().to_string()), diagnostic_json(&error["raw_response"])],
     )?;
+    if changed == 1 && error.get("rate_observation").is_some() {
+        db.execute(
+            "UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1",
+            params![attempt, error["rate_observation"].to_string()],
+        )?;
+    }
     attempt_outcome(db, attempt, AttemptState::Failed, changed)
 }
 pub(super) fn complete_attempt(
@@ -184,6 +190,12 @@ pub(super) fn incomplete_attempt(
                     AND u.state IN ('preparing','running','waiting','recovery_wait') AND r.state='live')",
         params![attempt, error.to_string(), at, permitted_failure, usage.map(|u| u.to_value().to_string()), diagnostic_json(&error["raw_response"])],
     )?;
+    if changed == 1 && error.get("rate_observation").is_some() {
+        db.execute(
+            "UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1",
+            params![attempt, error["rate_observation"].to_string()],
+        )?;
+    }
     attempt_outcome(db, attempt, AttemptState::Incomplete, changed)
 }
 fn attempt_outcome(

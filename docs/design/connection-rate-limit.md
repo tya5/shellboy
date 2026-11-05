@@ -286,17 +286,26 @@ no latency guarantee or preemption is implied.
 
 ## Stage 1: Adopted Observability And Usage Get
 
-Record bounded typed observations at headers/send completion, separately from
-retry decisions. Attribute actual HTTP call identity, UTC observation day, saved
-profile and request kind (conversation/map/reduce/embedding/catalog). Shared
-aliases retain per-profile counts; a domain total must deduplicate actual calls.
-Persist through existing attempt error/usage and summary usage app_meta records,
-not a new table. Propose new fixed-schema connection/day counters under the
-existing `app_meta` for endpoints without attempt records; such counters do not
-exist today. Define retention with existing GC
-before implementation, and never add a record per wait wakeup.
+Stage 1 records status, Retry-After presence and parsed duration, and actual
+wait in existing conversation attempt and summary usage records, without a new
+table. Observations use saved connection profile identity, not the currently
+selected profile; missing or interrupted facts remain unknown. The owner log
+uses bounded allowlisted metadata and may drop events under the existing logger's
+explicit backpressure policy. Legacy records have unknown coverage. Summary
+records are limited by the existing map/reduce budgets (at most 8,192 requests
+per compaction), with a 2 MiB read bound, and remain subject to the existing
+summary usage retention rules. A retry wait is initially unknown and becomes a
+measured monotonic duration when the wait ends or is cancelled; a crash before
+that update leaves it unknown. Wait totals are sums of caller wait durations,
+not unioned connection wall time; saturation sets the associated overflow flag.
+The explicit `usage get` scoped aggregation
+reads the selected attempt and summary records; grouped results cover only each
+bounded candidate window. Thread-detail refresh does not run the extra scan.
 
-Expose additive `usage get` fields: observed 429/5xx, structured usage-limit
+The broader draft below, including endpoint counters and connection/day indexing,
+remains proposed rather than part of the owner's stage 1 instruction.
+
+For later stages, propose additive `usage get` fields: observed 429/5xx, structured usage-limit
 provider facts versus local rejections, missing-status observations, retries
 planned/sent, gate deferrals, valid/absent/invalid Retry-After counts, bounded
 numeric retry-delay/header min/max or fixed buckets, current shared deadline
@@ -309,7 +318,7 @@ conversation recovery and summary failure; a local guard failure is not another
 provider429. Usage metadata must remain bounded/indexable by connection/day,
 not scan raw response bodies or all history for each refresh.
 
-Diagnostics should add allowlisted status, Retry-After validity/parsed duration,
+Later-stage diagnostics should add allowlisted status, Retry-After validity/parsed duration,
 request kind, profile, applied shared wait and feedback generation to existing
 bounded events; no raw error/header/key/body. Persist observed fact before
 returning a summary failure, with interruption/DB-failure unknown coverage

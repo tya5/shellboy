@@ -92,12 +92,17 @@ pub(crate) struct UsageRecord {
     pub model_id: String,
     pub started_at: String,
     pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rate_observations: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_observation_pending: Option<u64>,
     #[serde(flatten)]
     pub usage: SummaryUsage,
 }
 pub(crate) const RECORD_PREFIX: &str = "summary.usage.";
-/// Saved records stay far below this; larger values are not trusted.
-pub(crate) const RECORD_MAX_BYTES: i64 = 16 * 1024;
+/// Bounds the request observations as well as the token counters. The configured
+/// map and reduce request budgets permit at most 8192 observations per ledger.
+pub(crate) const RECORD_MAX_BYTES: i64 = 2 * 1024 * 1024;
 pub(crate) fn record_key(thread: &str, id: &str) -> String {
     format!("{RECORD_PREFIX}{thread}.{id}")
 }
@@ -127,6 +132,8 @@ impl UsageLedger {
                 model_id: snapshot.model.clone(),
                 started_at: now.clone(),
                 updated_at: now,
+                rate_observations: Vec::new(),
+                rate_observation_pending: None,
                 usage: SummaryUsage::default(),
             },
         }
@@ -145,6 +152,8 @@ impl UsageLedger {
             self.record.started_at = timestamp();
         }
         self.record.usage.begin(reduce);
+        self.record.rate_observation_pending = Some(self.record.usage.requests - 1);
+        self.record.rate_observations.push(Value::Null);
         self.save(database).await
     }
     pub(super) async fn observe(
@@ -156,6 +165,20 @@ impl UsageLedger {
             return Ok(());
         }
         self.record.usage.observe(usage);
+        self.save(database).await
+    }
+    pub(super) async fn observe_http(
+        &mut self,
+        database: &DbWorker,
+        facts: crate::model::http::ResponseFacts,
+    ) -> Result<(), ApiError> {
+        let mut observation = facts.rate_metadata();
+        observation["applied_wait_ms"] = json!(0);
+        if let Some(index) = self.record.rate_observation_pending.take()
+            && let Some(slot) = self.record.rate_observations.get_mut(index as usize)
+        {
+            *slot = observation;
+        }
         self.save(database).await
     }
     async fn save(&mut self, database: &DbWorker) -> Result<(), ApiError> {

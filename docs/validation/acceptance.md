@@ -9831,3 +9831,9 @@ boundaries differ. The one snapshot was deleted after measurement.
 
 - Metadata omission after the one bounded anchored rerender now keeps readable plain source text instead of replacing the body with an updating-only placeholder. Fallback output is capped at 8 KiB total per node, centered near source anchors, and marks omitted prefix/suffix.
 - Regression coverage exercises a long omitted block, multiple Markdown blocks, an internal anchor, the metadata cap, and width changes; normal rendered Markdown still wins when matching metadata is available. Raw Markdown in real-history incidents remains undiagnosed.
+
+## #224 Stage 1 observability (not yet accepted)
+
+The in-progress implementation still needs focused synthetic 429, cancellation,
+restart and concurrent-thread coverage, independent review, and exact-tip default
+and all-OS CI. No live provider behavior or production quota is established.

@@ -99,7 +99,10 @@ fn query() -> String {
         ORDER BY rowid LIMIT {}
         ) SELECT c.scan_id,a.id,a.turn_id,u.run_id,u.thread_id,t.deleted_at,
             a.state,a.started_at,a.ended_at,
-            CASE WHEN a.started_at>=?1 AND a.started_at<?2 THEN 1 ELSE 0 END,{}
+            CASE WHEN a.started_at>=?1 AND a.started_at<?2 THEN 1 ELSE 0 END,{},
+            a.profile_id,
+            CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.status')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.status'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.status') END,
+            CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.applied_wait_ms')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms') END
         FROM candidates c JOIN model_attempt a ON a.id=c.id
         JOIN turn u ON u.id=a.turn_id JOIN thread t ON t.id=u.thread_id
         ORDER BY c.scan_id",
@@ -129,6 +132,9 @@ struct Row {
     ended: Option<String>,
     in_range: bool,
     usage: usage::StandardUsage,
+    profile: String,
+    rate_status: Option<u64>,
+    rate_wait: Option<u64>,
 }
 #[derive(Default, Serialize)]
 struct Combined {
@@ -146,6 +152,7 @@ struct Group {
     attempts: BTreeMap<String, Attempts>,
     compaction: crate::compaction::SummaryUsage,
     compactions: u64,
+    rates: BTreeMap<String, RateCounts>,
     combined: Combined,
     inputs: Vec<u64>,
     unknown_inputs: u64,
@@ -157,6 +164,10 @@ struct Group {
 }
 impl Group {
     fn add(&mut self, row: Row) {
+        self.rates
+            .entry(row.profile.clone())
+            .or_default()
+            .add(row.rate_status, row.rate_wait);
         let terminal = matches!(row.state.as_str(), "completed" | "failed" | "incomplete");
         let group = self.attempts.entry(row.state.clone()).or_default();
         group.count += 1;
@@ -285,6 +296,7 @@ impl Group {
             target.extend(fields);
         }
         json!({"key":key,"model_attempts":self.attempts,"compaction":compaction,
+            "connection_rates":{"by_connection":self.rates,"coverage":"current candidate window; unknown facts excluded from counts"},
             "total":self.combined,
             "input_per_request":{"states":["completed","failed","incomplete"],"known_count":n,"unknown_count":self.unknown_inputs,
             "mean":mean,"max":self.inputs.last(),"p50":percentile(50),"p95":percentile(95),
@@ -409,6 +421,13 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
                 ended: r.get(8)?,
                 in_range: r.get(9)?,
                 usage: usage::StandardUsage::read(r, 10)?,
+                profile: r.get(15)?,
+                rate_status: r
+                    .get::<_, Option<i64>>(16)?
+                    .and_then(|v| u64::try_from(v).ok()),
+                rate_wait: r
+                    .get::<_, Option<i64>>(17)?
+                    .and_then(|v| u64::try_from(v).ok()),
             })
         })
         .map_err(error)?
@@ -561,10 +580,19 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
             bucket_time(at, group_by, zone)
         };
         matched_compactions = matched_compactions.saturating_add(1);
-        groups
-            .entry(group_key)
-            .or_default()
-            .add_compaction(&record.usage);
+        let group = groups.entry(group_key).or_default();
+        group.add_compaction(&record.usage);
+        let entry = group.rates.entry(record.profile_id).or_default();
+        let observed = (record.rate_observations.len() as u64).min(record.usage.requests);
+        for fact in record.rate_observations.into_iter().take(observed as usize) {
+            entry.add(
+                fact.get("status").and_then(Value::as_u64),
+                fact.get("applied_wait_ms").and_then(Value::as_u64),
+            );
+        }
+        let unknown = record.usage.requests.saturating_sub(observed);
+        entry.status_unknown = entry.status_unknown.saturating_add(unknown);
+        entry.wait_unknown = entry.wait_unknown.saturating_add(unknown);
     }
     let group_more = groups.len() > scan.group_offset + a.limit.unwrap_or(GROUP_LIMIT) as usize;
     let items = groups

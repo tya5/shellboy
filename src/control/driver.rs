@@ -201,9 +201,32 @@ pub(super) async fn drive(
             &turn_binding.cancel,
         )
         .await;
-        // The request has ended, including failure/cancellation. Compaction or
-        // shutdown can wait independently and must not retain its replay pin.
+        // The request ended; release its replay pin before any DB wait.
         snapshot.input.take();
+        // Persist received metadata independently of later adoption or stop.
+        // A missing wait remains unknown until the retry wait is resolved.
+        let facts = match &outcome {
+            Ok(response) => response.response_facts,
+            Err(failure) => failure.facts,
+        };
+        if facts.status.is_some() {
+            let mut observation = facts.rate_metadata();
+            if outcome.is_ok() {
+                observation["applied_wait_ms"] = json!(0);
+            }
+            let saved_attempt = attempt.clone();
+            let observation = observation.to_string();
+            let result = control.store.database.call(move |db| {
+                db.execute("UPDATE model_attempt SET input_manifest_json=json_set(input_manifest_json,'$.rate_observation',json(?2)) WHERE id=?1", params![saved_attempt, observation])?;
+                Ok(())
+            }).await;
+            if let Err(error) = result {
+                if slot.stop.is_cancelled() {
+                    drain_and_stop(&control, &slot.run_id, Some(&thread)).await?;
+                }
+                return Err(storage_error(error));
+            }
+        }
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }

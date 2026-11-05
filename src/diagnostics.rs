@@ -24,6 +24,7 @@ pub enum DiagnosticEvent {
     Shutdown,
     DatabaseFailure,
     ModelFailure,
+    ModelRateLimited,
     ModelStreamDifference,
     AutomaticCompactionStarted,
     AutomaticCompactionFinished,
@@ -338,6 +339,16 @@ struct Entry {
     startup_stage: Option<StartupStageTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     shell_unknown_parameter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rate_limit: Option<RateLimitTrace>,
+}
+#[derive(Clone, Serialize)]
+struct RateLimitTrace {
+    connection: String,
+    status: u16,
+    retry_after_present: bool,
+    retry_after_ms: Option<u64>,
+    applied_wait_ms: Option<u64>,
 }
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -421,6 +432,7 @@ struct Record {
     automatic_compaction_counts: Option<AutomaticCompactionCounts>,
     startup_stage: Option<StartupStageTrace>,
     shell_unknown_parameter: Option<String>,
+    rate_limit: Option<RateLimitTrace>,
 }
 struct Health {
     failed: AtomicBool,
@@ -465,6 +477,7 @@ impl Diagnostics {
                     automatic_compaction_counts,
                     startup_stage,
                     shell_unknown_parameter,
+                    rate_limit,
                 }) = receiver.recv()
                 {
                     if let Some(DbJobTrace::Slow(trace)) = db_job.as_mut()
@@ -492,6 +505,7 @@ impl Diagnostics {
                         automatic_compaction_counts,
                         startup_stage,
                         shell_unknown_parameter,
+                        rate_limit,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
                         Ok(value) => value,
@@ -587,6 +601,7 @@ impl Diagnostics {
             }),
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     /// Log only a bounded parameter name, never its value.
@@ -617,6 +632,39 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: Some(name),
+            rate_limit: None,
+        });
+    }
+    pub(crate) fn record_rate_limit(
+        &self,
+        connection: &str,
+        facts: crate::model::http::ResponseFacts,
+    ) {
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::ModelRateLimited,
+            ids: DiagnosticIds::default(),
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: None,
+            index_discard: None,
+            automatic_compaction_counts: None,
+            startup_stage: None,
+            shell_unknown_parameter: None,
+            rate_limit: Some(RateLimitTrace {
+                connection: sanitize_id(connection),
+                status: 429,
+                retry_after_present: facts.retry_after_present,
+                retry_after_ms: facts
+                    .retry_after
+                    .map(|d| d.as_millis().min(u64::MAX as u128) as u64),
+                applied_wait_ms: None,
+            }),
         });
     }
     pub fn record(&self, event: DiagnosticEvent, ids: DiagnosticIds) {
@@ -725,6 +773,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     pub(crate) fn record_tool_repair_failure(&self, mut failure: ToolRepairFailure) {
@@ -749,6 +798,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     /// No fast-path diagnostic at any level; only fixed non-content fields enter the writer.
@@ -777,6 +827,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     #[cfg(test)]
@@ -826,6 +877,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     /// An active DB job crossed the display threshold. Fixed fields only;
@@ -862,6 +914,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
 
@@ -911,6 +964,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     pub(crate) fn record_startup_stage(
@@ -934,6 +988,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
             startup_stage: Some(StartupStageTrace {
                 stage,
                 elapsed_ms: millis(elapsed),
@@ -975,6 +1030,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     /// Caller supplies monotonic elapsed time; writer latency is not included.
@@ -1058,6 +1114,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            rate_limit: None,
         });
     }
     fn enqueue_record(&self, record: Record) {
@@ -1077,6 +1134,7 @@ impl Diagnostics {
             automatic_compaction_counts,
             startup_stage,
             shell_unknown_parameter,
+            rate_limit,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
@@ -1112,6 +1170,7 @@ impl Diagnostics {
                     automatic_compaction_counts,
                     startup_stage,
                     shell_unknown_parameter,
+                    rate_limit,
                 })
                 .is_err()
         }) {
@@ -1750,5 +1809,35 @@ mod shell_unknown_parameter_tests {
             64
         );
         assert!(rows.iter().all(|row| row.get("value").is_none()));
+    }
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::*;
+    #[tokio::test]
+    async fn event_contains_only_allowlisted_rate_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        diagnostics.record_rate_limit(
+            "fixture",
+            crate::model::http::ResponseFacts {
+                status: Some(429),
+                retry_after_present: true,
+                retry_after: Some(std::time::Duration::from_secs(2)),
+                ..Default::default()
+            },
+        );
+        diagnostics.shutdown().await;
+        let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let lines: Vec<_> = body.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let event: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event["event"], "model_rate_limited");
+        assert_eq!(event["rate_limit"]["connection"], "fixture");
+        assert_eq!(event["rate_limit"]["status"], 429);
+        assert_eq!(event["rate_limit"]["retry_after_ms"], 2000);
+        assert!(event["rate_limit"]["applied_wait_ms"].is_null());
+        assert!(event.get("body").is_none());
     }
 }

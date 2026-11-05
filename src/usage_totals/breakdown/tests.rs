@@ -670,3 +670,17 @@ fn compaction_without_requests_stays_unknown_and_pagination_scans_bounded_window
     assert!(result["items"][0]["compaction"]["input_tokens"]["known_sum"].is_null());
     assert_eq!(result["items"][0]["total"]["input_tokens"]["known_sum"], 7);
 }
+
+#[test]
+fn grouped_connection_rates_follow_candidate_window() {
+    let db = fixture();
+    insert(&db, "limited", "t1", "2026-10-31T00:30:00Z", "failed", None);
+    insert(&db, "unknown", "t1", "2026-10-31T00:30:01Z", "completed", None);
+    db.execute("UPDATE model_attempt SET input_manifest_json=?1 WHERE id='limited'", [json!({"rate_observation":{"status":429,"applied_wait_ms":42}}).to_string()]).unwrap();
+    let result = read(&db, &args("thread"), "fixture").unwrap();
+    let rates = &result["items"][0]["connection_rates"]["by_connection"]["p"];
+    assert_eq!(rates["http_429"], 1);
+    assert_eq!(rates["applied_wait_ms"], 42);
+    assert_eq!(rates["status_unknown"], 1);
+    assert_eq!(rates["wait_unknown"], 1);
+}
