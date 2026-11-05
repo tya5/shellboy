@@ -1755,7 +1755,7 @@ fn usage_limit_log_lines(f: &Fixture) -> usize {
 
 #[tokio::test]
 async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_expires() {
-    for shape in 0..7 {
+    for shape in 0..8 {
         eprintln!("synthetic usage-limit shape {shape}");
         let mut f = Fixture::new(8, 60_000, 120_000).await;
         let first = f.incoming().await;
@@ -1776,6 +1776,12 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
                 "litellm.RateLimitError: RateLimitError: ChatgptException - {}\nReceived Model Group=m\nAvailable Model Group Fallbacks=None",
                 json!({"error":{"type":"usage_limit_reached","plan_type":"prolite","resets_at":resets_at,"limit_window_minutes":10080,"resets_in_seconds":3600}})
             ),"type":null,"code":"429"}})
+            .to_string(),
+            // Exact provider text reported by the owner, with the reset moved
+            // to a fixed offset from now so the test does not expire.
+            7 => json!({"error":{"message":format!(
+                "provider: litellm.RateLimitError: RateLimitError: ChatgptException - {{\"error\":{{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\",\"plan_type\":\"prolite\",\"resets_at\":{resets_at},\"eligible_promo\":null,\"limit_window_minutes\":10080,\"resets_in_seconds\":408856}}}}. Received Model Group=gpt-6.1-terra\nAvailable Model Group Fallbacks=None"
+            )}})
             .to_string(),
             _ => {
                 json!({"error":{"type":"rate_limit_error","message":"temporary limit"}}).to_string()
@@ -1824,7 +1830,7 @@ async fn explicit_usage_limit_recovers_without_resend_blocks_other_thread_and_ex
         let limit = &reason["details"]["usage_limit"];
         assert!(limit["resets_at_utc"].as_str().is_some());
         assert_eq!(limit["locally_blocked"], false);
-        if shape < 2 || shape == 6 {
+        if shape < 2 || shape >= 6 {
             assert_eq!(limit["resets_at"], resets_at);
             assert_eq!(limit["limit_window_minutes"], 10080);
         }

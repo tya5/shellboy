@@ -39,7 +39,10 @@ impl UsageLimit {
         let rest = if text.starts_with('{') {
             text
         } else {
-            let rest = text.strip_prefix("litellm.RateLimitError")?;
+            // The marker may follow a short label such as "provider: ".
+            let marker = "litellm.RateLimitError";
+            let at = text.find(marker)?;
+            let rest = &text[at + marker.len()..];
             if !rest.starts_with(':') && !rest.starts_with(char::is_whitespace) {
                 return None;
             }
@@ -184,6 +187,12 @@ mod tests {
             assert!(UsageLimit::parse(&value, now).is_none(), "{value}");
         }
         assert!(UsageLimit::text("provider says usage_limit_reached", now).is_none());
+        // Exact provider text reported by the owner (HTTP 429), fixed clock.
+        let real_now = DateTime::from_timestamp(1_793_860_000, 0).unwrap();
+        let real = "provider: litellm.RateLimitError: RateLimitError: ChatgptException - {\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\",\"plan_type\":\"prolite\",\"resets_at\":1794265668,\"eligible_promo\":null,\"limit_window_minutes\":10080,\"resets_in_seconds\":408856}}. Received Model Group=gpt-6.1-terra\nAvailable Model Group Fallbacks=None";
+        let fact = UsageLimit::parse(&json!({"error":{"message":real}}), real_now).unwrap();
+        assert_eq!(fact.resets_at, 1_794_265_668);
+        assert_eq!(fact.kind, LimitKind::UsageLimitReached);
         // Observed shape: LiteLLM wraps a ChatGPT plan limit in a 429 and may
         // append diagnostic text after the embedded JSON.
         let wrapped = format!(
