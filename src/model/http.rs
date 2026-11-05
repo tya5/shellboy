@@ -6,7 +6,17 @@ mod clients;
 pub(crate) use clients::HttpClients;
 mod deadline;
 mod observation;
+mod rate_gate;
 pub use observation::{ConnectionReuse, HttpObservation, HttpPhase};
+pub(crate) use rate_gate::Lease as RateLease;
+pub(crate) enum RateAdmission {
+    Lease(RateLease),
+    QuotaBlocked(super::usage_limit::UsageLimit),
+}
+pub(crate) enum RateReservation {
+    Ready(RateAdmission),
+    Waiting(rate_gate::Waiter),
+}
 mod response;
 use body::read_json;
 use deadline::{Deadline, transport_error};
@@ -80,6 +90,7 @@ pub struct HttpModelClient {
     connection: Connection,
     connection_name: String,
     usage_limit: Arc<std::sync::Mutex<Option<TimedUsageLimit>>>,
+    rate_gate: rate_gate::RateGate,
     diagnostics: Arc<std::sync::OnceLock<crate::diagnostics::Diagnostics>>,
 }
 impl HttpModelClient {
@@ -110,6 +121,7 @@ impl HttpModelClient {
             .validate()
             .map_err(|e| ModelError::new("config_invalid", e.to_string()))?;
         let client = Self::build_client(&connection)?;
+        let rate_gate = rate_gate::RateGate::new(connection.response_retry_max_delay_ms);
         Ok(Self {
             pool: Arc::new(RwLock::new(ClientPool {
                 client: Some(client),
@@ -119,9 +131,39 @@ impl HttpModelClient {
             connection,
             connection_name: name.into(),
             usage_limit: Arc::new(std::sync::Mutex::new(None)),
+            rate_gate,
             diagnostics: Arc::new(std::sync::OnceLock::new()),
         })
     }
+    fn blocking_usage_limit(
+        &self,
+        bypass_usage_limit: Option<super::usage_limit::UsageLimit>,
+    ) -> Option<super::usage_limit::UsageLimit> {
+        self.active_usage_limit().filter(|active| {
+            !bypass_usage_limit.is_some_and(|expected| {
+                active.kind == expected.kind
+                    && active.resets_at == expected.resets_at
+                    && active.limit_window_minutes == expected.limit_window_minutes
+            })
+        })
+    }
+
+    pub(crate) fn reserve_rate_admission(
+        &self,
+        bypass_usage_limit: Option<super::usage_limit::UsageLimit>,
+    ) -> Result<RateReservation, ModelError> {
+        // Preserve #76: a local quota rejection must not wait behind the gate.
+        if let Some(active) = self.blocking_usage_limit(bypass_usage_limit) {
+            return Ok(RateReservation::Ready(RateAdmission::QuotaBlocked(active)));
+        }
+        Ok(match self.rate_gate.reserve()? {
+            rate_gate::Reservation::Ready(lease) => {
+                RateReservation::Ready(RateAdmission::Lease(lease))
+            }
+            rate_gate::Reservation::Waiting(waiter) => RateReservation::Waiting(waiter),
+        })
+    }
+
     fn active_usage_limit(&self) -> Option<super::usage_limit::UsageLimit> {
         let mut slot = self.usage_limit.lock().expect("usage limit lock poisoned");
         if slot
@@ -345,6 +387,7 @@ impl HttpModelClient {
                 .body(reqwest::Body::wrap_stream(stream));
         }
         let started = std::time::Instant::now();
+        let rate_generation = self.rate_gate.generation();
         let mut connection_failed = false;
         let outcome = deadline
             .wait_headers(cancel, outgoing.send())
@@ -372,6 +415,14 @@ impl HttpModelClient {
         };
         match outcome {
             Ok(response) => {
+                if response.status().as_u16() == 429 {
+                    let retry_after = response
+                        .headers()
+                        .get(reqwest::header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(response::parse_retry_after);
+                    self.rate_gate.throttle(retry_after, rate_generation);
+                }
                 observation.phase = HttpPhase::BodyReceive;
                 observation.header_elapsed_ms =
                     Some(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
@@ -394,14 +445,16 @@ impl HttpModelClient {
     /// Fetch the configured proxy's catalog without embedding a product-specific model list.
     /// The deadline includes both response headers and the complete bounded body.
     pub async fn models(&self, cancel: CancellationToken) -> Result<Vec<String>, ModelError> {
+        let lease = self.rate_gate.acquire(&cancel).await?;
         let mut deadline =
             Deadline::new(ApiEndpoint::Models, &self.connection, &self.connection_name)?;
-        self.models_request(&cancel, &mut deadline).await
+        self.models_request(&cancel, &mut deadline, &lease).await
     }
     async fn models_request(
         &self,
         cancel: &CancellationToken,
         deadline: &mut Deadline,
+        lease: &rate_gate::Lease,
     ) -> Result<Vec<String>, ModelError> {
         let (response, secrets, _observation) = self
             .send(
@@ -414,6 +467,25 @@ impl HttpModelClient {
             )
             .await?;
         deadline.received();
+        let status = response.status().as_u16();
+        if !response.status().is_success() {
+            let mut complete = false;
+            let error = body::http_error_observed(
+                response,
+                &mut RequestContext {
+                    cancel,
+                    deadline,
+                    events: None,
+                    secrets: &secrets,
+                },
+                &mut complete,
+            )
+            .await;
+            if complete {
+                lease.complete(status);
+            }
+            return Err(error);
+        }
         let raw = read_json(
             response,
             MAX_MODEL_CATALOG_BYTES,
@@ -426,8 +498,9 @@ impl HttpModelClient {
             },
             None,
         )
-        .await?
-        .into_result()?;
+        .await?;
+        lease.complete(status);
+        let raw = raw.into_result()?;
         let data = raw
             .get("data")
             .and_then(Value::as_array)
@@ -465,25 +538,36 @@ impl HttpModelClient {
         requested_dimensions: Option<usize>,
         cancel: CancellationToken,
     ) -> Result<EmbeddingResponse, ModelError> {
-        if model.trim().is_empty()
-            || input.is_empty()
-            || expected_dimension == Some(0)
-            || requested_dimensions == Some(0)
-        {
-            return Err(ModelError::new(
-                "input_invalid",
-                "Embedding model/input must be nonempty and dimension positive",
-            ));
-        }
-        if expected_dimension
-            .zip(requested_dimensions)
-            .is_some_and(|(expected, requested)| expected != requested)
-        {
-            return Err(ModelError::new(
-                "input_invalid",
-                "Requested embedding dimension conflicts with expected dimension",
-            ));
-        }
+        validate_embedding_input(model, input, expected_dimension, requested_dimensions)?;
+        let lease = self.acquire_rate(&cancel).await?;
+        self.embeddings_admitted(
+            model,
+            input,
+            expected_dimension,
+            requested_dimensions,
+            cancel,
+            lease,
+        )
+        .await
+    }
+
+    pub(crate) async fn acquire_rate(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<RateLease, ModelError> {
+        self.rate_gate.acquire(cancel).await
+    }
+
+    pub(crate) async fn embeddings_admitted(
+        &self,
+        model: &str,
+        input: &[String],
+        expected_dimension: Option<usize>,
+        requested_dimensions: Option<usize>,
+        cancel: CancellationToken,
+        lease: RateLease,
+    ) -> Result<EmbeddingResponse, ModelError> {
+        validate_embedding_input(model, input, expected_dimension, requested_dimensions)?;
         let mut deadline = Deadline::new(
             ApiEndpoint::Embeddings,
             &self.connection,
@@ -504,6 +588,25 @@ impl HttpModelClient {
             )
             .await?;
         deadline.received();
+        let status = response.status().as_u16();
+        if !response.status().is_success() {
+            let mut complete = false;
+            let error = body::http_error_observed(
+                response,
+                &mut RequestContext {
+                    cancel: &cancel,
+                    deadline: &mut deadline,
+                    events: None,
+                    secrets: &secrets,
+                },
+                &mut complete,
+            )
+            .await;
+            if complete {
+                lease.complete(status);
+            }
+            return Err(error);
+        }
         let raw = read_json(
             response,
             MAX_EMBEDDING_BYTES,
@@ -516,8 +619,9 @@ impl HttpModelClient {
             },
             None,
         )
-        .await?
-        .into_result()?;
+        .await?;
+        lease.complete(status);
+        let raw = raw.into_result()?;
         let data = raw
             .get("data")
             .and_then(Value::as_array)
@@ -581,6 +685,26 @@ impl HttpModelClient {
             usage: raw.get("usage").cloned(),
         })
     }
+}
+fn validate_embedding_input(
+    model: &str,
+    input: &[String],
+    expected: Option<usize>,
+    requested: Option<usize>,
+) -> Result<(), ModelError> {
+    if model.trim().is_empty() || input.is_empty() || expected == Some(0) || requested == Some(0) {
+        return Err(ModelError::new(
+            "input_invalid",
+            "Embedding model/input must be nonempty and dimension positive",
+        ));
+    }
+    if expected.zip(requested).is_some_and(|(a, b)| a != b) {
+        return Err(ModelError::new(
+            "input_invalid",
+            "Requested embedding dimension conflicts with expected dimension",
+        ));
+    }
+    Ok(())
 }
 fn cancelled() -> ModelError {
     ModelError::new("cancelled", "Model request was cancelled")

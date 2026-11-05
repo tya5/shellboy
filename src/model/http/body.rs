@@ -78,6 +78,15 @@ async fn bounded_body(
     }
 }
 pub(super) async fn http_error(response: Response, context: &mut RequestContext<'_>) -> ModelError {
+    let mut complete = false;
+    http_error_observed(response, context, &mut complete).await
+}
+
+pub(super) async fn http_error_observed(
+    response: Response,
+    context: &mut RequestContext<'_>,
+    complete: &mut bool,
+) -> ModelError {
     let status = response.status().as_u16();
     let mut stream = response.bytes_stream();
     let mut body = Vec::new();
@@ -95,6 +104,7 @@ pub(super) async fn http_error(response: Response, context: &mut RequestContext<
             }
         };
         let Some(chunk) = next else {
+            *complete = true;
             break;
         };
         let Ok(chunk) = chunk else {

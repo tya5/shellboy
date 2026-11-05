@@ -10,7 +10,7 @@ mod tools;
 mod trim;
 use adoption::adopt_response;
 use overflow::OverflowBudget;
-use request::{AdmittedRequest, Instructions, prepare_attempt, stream_response};
+use request::{AdmittedRequest, Instructions, model_client, prepare_attempt, stream_response};
 pub(crate) use request::{ContextLine, context_item, last_saved_context, leading_items};
 use tools::run_tool_group;
 
@@ -173,6 +173,70 @@ pub(super) async fn drive(
         let Some(mut snapshot) = refreshed? else {
             continue;
         };
+        let rate_client = match model_client(&control, &snapshot) {
+            Ok(client) => client,
+            Err(error) => return fail_turn(&control, &snapshot, error).await,
+        };
+        let (mut snapshot, boundary_guard, rate_lease) = match rate_client
+            .reserve_rate_admission(retry_budget.usage_limit_retry_bypass())
+        {
+            Ok(model::http::RateReservation::Ready(lease)) => (snapshot, boundary_guard, lease),
+            pending => {
+                // Waiting must not hold the Thread boundary or a pinned replay snapshot.
+                let witness = (
+                    snapshot.turn.clone(),
+                    snapshot.generation,
+                    snapshot.selection,
+                    snapshot.profile_revision,
+                );
+                snapshot.input.take();
+                drop(boundary_guard);
+                let rate_result = match pending {
+                    Ok(model::http::RateReservation::Waiting(waiter)) => waiter
+                        .wait(&turn_binding.cancel)
+                        .await
+                        .map(model::http::RateAdmission::Lease),
+                    Err(error) => Err(error),
+                    Ok(model::http::RateReservation::Ready(_)) => unreachable!(),
+                };
+                if slot.stop.is_cancelled() {
+                    return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+                }
+                if turn_binding.cancel.is_cancelled() {
+                    continue;
+                }
+                let boundary_guard = tokio::select! { biased;
+                    _ = slot.stop.cancelled() => return drain_and_stop(&control, &slot.run_id, Some(&thread)).await,
+                    _ = turn_binding.cancel.cancelled() => continue,
+                    guard = boundary.lock() => guard,
+                };
+                let Next::Ready(refreshed) = next(&control, &thread, &slot.run_id).await? else {
+                    continue;
+                };
+                if (
+                    refreshed.turn.clone(),
+                    refreshed.generation,
+                    refreshed.selection,
+                    refreshed.profile_revision,
+                ) != witness
+                {
+                    continue;
+                }
+                let lease = match rate_result {
+                    Ok(lease) => lease,
+                    Err(error) => {
+                        return fail_turn(
+                            &control,
+                            &refreshed,
+                            ApiError::new(ErrorCode::IoFailed, "Connection admission deferred")
+                                .details(json!({"kind": error.kind})),
+                        )
+                        .await;
+                    }
+                };
+                (refreshed, boundary_guard, lease)
+            }
+        };
         let admitted =
             prepare_attempt(&control, &mut snapshot, &request_slot, instructions.body()).await;
         if turn_binding.cancel.is_cancelled() {
@@ -191,16 +255,36 @@ pub(super) async fn drive(
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }
-        let outcome = stream_response(
-            &control,
-            &thread,
-            &attempt,
-            &client,
-            request,
-            retry_budget.usage_limit_retry_bypass(),
-            &turn_binding.cancel,
-        )
-        .await;
+        let outcome = match &rate_lease {
+            model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
+            model::http::RateAdmission::Lease(_) => {
+                stream_response(
+                    &control,
+                    &thread,
+                    &attempt,
+                    &client,
+                    request,
+                    retry_budget.usage_limit_retry_bypass(),
+                    &turn_binding.cancel,
+                )
+                .await
+            }
+        };
+        if let model::http::RateAdmission::Lease(lease) = &rate_lease {
+            let facts = match &outcome {
+                Ok(response) => Some(response.response_facts),
+                Err(failure)
+                    if failure.facts.terminal_received || failure.facts.http_error_complete =>
+                {
+                    Some(failure.facts)
+                }
+                Err(_) => None,
+            };
+            if let Some(status) = facts.and_then(|facts| facts.status) {
+                lease.complete(status);
+            }
+        }
+        drop(rate_lease);
         // The request ended; release its replay pin before any DB wait.
         snapshot.input.take();
         // Persist received metadata independently of later adoption or stop.

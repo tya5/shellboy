@@ -25,6 +25,7 @@ struct Replies {
     reject_multi: bool,
     invalid_multi: bool,
     auth: bool,
+    rate_once: bool,
     split_word: Option<String>,
 }
 struct Proxy {
@@ -72,8 +73,11 @@ impl Proxy {
                 captured.lock().unwrap().push(request.clone());
                 let inputs = request["input"].as_array().unwrap();
                 let (status, body) = {
-                    let rules = response.lock().unwrap();
-                    if rules.auth {
+                    let mut rules = response.lock().unwrap();
+                    if rules.rate_once {
+                        rules.rate_once = false;
+                        (429, json!({"error":{"message":"synthetic rate limit"}}))
+                    } else if rules.auth {
                         (
                             401,
                             json!({"error":{"code":"invalid_api_key","message":"synthetic authorization failure"}}),
@@ -100,7 +104,12 @@ impl Proxy {
                     }
                 };
                 let body = body.to_string();
-                socket.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+                let retry_after = if status == 429 {
+                    "Retry-After: 5\r\n"
+                } else {
+                    ""
+                };
+                socket.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{retry_after}Connection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
             }
         });
         Self {
@@ -532,5 +541,57 @@ async fn retry_preview_matches_current_targets_and_reports_unread_admissions() {
         assert_eq!(boot_pending, 2);
         Ok(())
     }).await.unwrap();
+    f.close().await;
+}
+
+#[tokio::test]
+async fn source_deleted_during_shared_cooldown_is_not_sent_to_provider() {
+    let f = Fixture::new(1, 64, 64).await;
+    f.nodes(&[("first-rate-limit", "rate")]).await;
+    f.proxy.replies.lock().unwrap().rate_once = true;
+    assert!(
+        f.service
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.proxy.requests().len(), 2);
+    f.nodes(&[("deleted-while-waiting", "private")]).await;
+    let service = f.service.clone();
+    let pending = tokio::spawn(async move { service.process_one(CancellationToken::new()).await });
+    crate::test_watchdog::watchdog("index claim waits for connection admission", async {
+        loop {
+            let running = f.db.call(|db| Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id='deleted-while-waiting' AND state='running')", [], |r| r.get::<_, bool>(0))?)).await.unwrap();
+            if running { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    f.db.call(|db| {
+        db.execute("UPDATE node SET payload_json=NULL,payload_revision=payload_revision+1,deleted_reason='collected' WHERE id='deleted-while-waiting'", [])?;
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        crate::test_watchdog::watchdog("index waits and checks source", pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    );
+    assert_eq!(
+        f.proxy.requests().len(),
+        2,
+        "stale input must not reach the provider"
+    );
+    let state =
+        f.db.call(|db| {
+            Ok(db.query_row(
+                "SELECT state FROM embedding_job WHERE source_node_id='deleted-while-waiting'",
+                [],
+                |r| r.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(state, "failed");
     f.close().await;
 }

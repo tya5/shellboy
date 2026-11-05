@@ -14,7 +14,9 @@ which remain proposals. Each configured connection profile owns independent
 in-memory feedback and FIFO wait state; aliases are not merged by provider or
 credential. Two profiles sharing an upstream quota can each receive 429s. No
 credential fingerprint is computed or stored. Current #76 and #188 rules and
-summary adoption/cache fences remain unchanged.
+summary adoption/cache fences remain unchanged. Each profile permits at most
+1,024 pending admission waiters; an additional waiter receives a typed deferred
+error without sending. Cancellation removes its waiter and releases capacity.
 
 ## Measurement And Limits
 
