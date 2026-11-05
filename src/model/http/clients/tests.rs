@@ -998,7 +998,7 @@ async fn success_headers_release_the_probe_while_the_body_is_still_streaming() {
     });
     // Ready means the cooldown cleared and the probe permit was released even
     // though the probe response body never finishes.
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+    crate::test_watchdog::watchdog("probe permit released at success headers", async {
         loop {
             if matches!(
                 client.reserve_rate_admission(None),
