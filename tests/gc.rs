@@ -1379,3 +1379,50 @@ async fn history_gc_discovers_pending_job_after_many_done_jobs_in_batches() {
     assert_eq!(f.gc.start_history().await.unwrap().as_deref(), Some("job"));
     f.db.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('cursor-expensive','user','now','{}',2)", [])?;
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'cursor-fixture-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_gc_cursor AFTER UPDATE OF cursor_json ON gc_job WHEN EXISTS(SELECT 1 FROM node WHERE id='cursor-expensive' AND payload_json IS NULL) BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let deadline = crate::test_watchdog::Deadline::new("history GC cursor interruption");
+    let (mut deferred, mut complete) = (0, false);
+    while !deadline.expired() {
+        let step = f.gc.history_step(&job).await.unwrap();
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='cursor-expensive' AND payload_json IS NOT NULL AND deleted_reason IS NULL")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_ids[0]')='cursor-expensive'")?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+    assert!(
+        complete && deferred > 0,
+        "complete={complete}, deferred={deferred}"
+    );
+}
