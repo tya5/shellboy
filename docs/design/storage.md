@@ -62,6 +62,19 @@ activity it shows nothing. The display updates through the existing UI clock,
 adds no row or setting, and may truncate lower-priority footer facts while
 visible. This is observability, not a wall-clock completion guarantee.
 
+## History GC diagnostics (#225)
+
+The existing GC service publishes one content-free in-memory watch snapshot for
+the current or most recent history pass. It contains the stage, cumulative
+scanned work, budget deferrals, restarts, retained-over-budget node count, pass
+start and last committed cursor advance. The frontend coalesces updates; the UI
+never queries the writer to display them. When no higher-priority DB activity is shown, the footer identifies an active
+GC and points to F1; the DB / GC section at the top of the F1 or `/help` guide displays
+the full details in English or Japanese, updating its clock once a second.
+The elapsed pass clock freezes on completion; age since the last cursor advance
+continues. These are observational counters, not a completion guarantee. The
+snapshot is one bounded current-pass value and is discarded at process exit.
+
 ## DB writer occupancy: requester contract and backend safety net (#171)
 
 Status: adopted (revision 2, approved 2026-11-02) and implemented on

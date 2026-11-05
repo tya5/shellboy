@@ -17,6 +17,11 @@ cost estimate.
 
 ## UI language and diagnostics
 
+When history GC has run, F1 or `/help` shows a DB / GC section with its stage,
+scanned work, deferrals, restarts, elapsed time, time since the last committed
+cursor advance, and nodes retained because they exceeded the budget. This is a
+live in-memory observation, not a completion-time guarantee.
+
 The TUI defaults to English. Set the display language in your configuration
 before starting it, then restart an already running TUI to apply the change:
 
