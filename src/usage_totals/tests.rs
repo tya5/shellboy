@@ -821,9 +821,11 @@ fn connection_rates_survive_database_reopen_and_group_summary_records() {
             [json!({"rate_observation":{"status":429,"applied_wait_ms":12}}).to_string()],
         )
         .unwrap();
-        let mut usage = crate::compaction::SummaryUsage::default();
-        usage.requests = 2;
-        usage.map_requests = 2;
+        let usage = crate::compaction::SummaryUsage {
+            requests: 2,
+            map_requests: 2,
+            ..Default::default()
+        };
         let mut record = json!(usage);
         for (key, value) in [
             ("id", json!("summary")),
