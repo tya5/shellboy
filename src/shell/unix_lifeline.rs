@@ -352,7 +352,8 @@ unsafe fn close_listed(first: i32) -> bool {
                 entries.as_mut_ptr().cast(),
                 bytes,
             );
-            if listed < 0 {
+            // proc_pidinfo reports errors as 0, never -1; fd 0 is always open here.
+            if listed <= 0 {
                 return false;
             }
             let mut closed = false;
@@ -365,6 +366,8 @@ unsafe fn close_listed(first: i32) -> bool {
             if listed < bytes {
                 return true;
             }
+            // A full buffer with nothing to close means every listed fd is below
+            // `first`; more may follow, so walk instead of looping on the same page.
             if !closed {
                 return false;
             }
@@ -507,7 +510,7 @@ mod tests {
         // An unbounded limit makes the fallback walk effectively endless, so
         // returning proves the direct path (close_range / listed descriptors).
         let (a, _b) = UnixStream::pair().unwrap();
-        let fd = unsafe { libc::fcntl(a.as_raw_fd(), libc::F_DUPFD, 40) };
+        let fd = unsafe { libc::fcntl(a.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 40) };
         assert!(fd >= 40);
         let child = unsafe { libc::fork() };
         if child == 0 {
