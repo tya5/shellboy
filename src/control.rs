@@ -105,9 +105,18 @@ struct LiveShell {
     last_committed_output: Option<std::time::Instant>,
 }
 
+#[cfg(test)]
+struct AutomaticFault {
+    stage: &'static str,
+    kind: u8,
+    reached: Arc<AtomicBool>,
+}
+
 pub struct Control {
     #[cfg(test)]
     memory_samples: AtomicUsize,
+    #[cfg(test)]
+    automatic_fault: std::sync::Mutex<Option<AutomaticFault>>,
     pub store: Store,
     pub attachments: Arc<crate::attachments::AttachmentService>,
     pub index: Arc<crate::index::IndexService>,
@@ -273,6 +282,8 @@ impl Control {
         Arc::new(Self {
             #[cfg(test)]
             memory_samples: AtomicUsize::new(0),
+            #[cfg(test)]
+            automatic_fault: std::sync::Mutex::new(None),
             store,
             attachments,
             gc,

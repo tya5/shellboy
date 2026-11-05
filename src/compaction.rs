@@ -62,6 +62,8 @@ const SUMMARY_PROMPT: &str = "Summarize the following conversation as Markdown w
 
 #[derive(Clone)]
 pub struct Compactor {
+    #[cfg(test)]
+    pub(crate) fail_remeasurement: Arc<std::sync::atomic::AtomicBool>,
     clients: Arc<HttpClients>,
     database: DbWorker,
     config: Arc<Config>,
@@ -303,6 +305,8 @@ impl Compactor {
             database,
             config,
             clients,
+            #[cfg(test)]
+            fail_remeasurement: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -628,6 +632,23 @@ impl Compactor {
     }
     /// Exact replay projection, used only to measure a completed local edit.
     pub(crate) async fn proactive_history_characters(&self, thread: &str) -> Result<u64, ApiError> {
+        #[cfg(test)]
+        if self
+            .fail_remeasurement
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            return self
+                .database
+                .call(|db| {
+                    Ok(
+                        db.query_row("SELECT 'injected remeasurement read failure'", [], |row| {
+                            row.get::<_, i64>(0)
+                        })? as u64,
+                    )
+                })
+                .await
+                .map_err(storage_error);
+        }
         let snapshot = self.snapshot(thread, false).await?;
         Ok(edit::history_characters(&snapshot))
     }

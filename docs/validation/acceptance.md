@@ -9853,3 +9853,52 @@ boundaries differ. The one snapshot was deleted after measurement.
 
 - Metadata omission after the one bounded anchored rerender now keeps readable plain source text instead of replacing the body with an updating-only placeholder. Fallback output is capped at 8 KiB total per node, centered near source anchors, and marks omitted prefix/suffix.
 - Regression coverage exercises a long omitted block, multiple Markdown blocks, an internal anchor, the metadata cap, and width changes; normal rendered Markdown still wins when matching metadata is available. Raw Markdown in real-history incidents remains undiagnosed.
+
+## #215 post-commit data-safety boundary matrix
+
+The library `proactive_postcommit_` filter uses per-Control, single-use cfg(test)
+checkpoints after the completed adoption future (including epoch and COMMIT),
+before the next stage. Across closed spill, closed summary, active spill and
+active summary, it injects:
+
+- Synchronous cancellation of the actual driver token, confirmed at the checkpoint.
+- A failing SQLite TEMP-table write, propagated through a new test-only error
+  edge. This proves independent post-commit storage-error propagation, NOT failure
+  at a production next-stage write site.
+- A typed DB read failure in the next target-character measurement method.
+- Separately, a trigger rejecting the actual production automatic-active cleanup
+  DELETE. A synthetic non-storage boundary error first routes to unconditional
+  cleanup; the DELETE callback proves it is reached and the witness is retained.
+  Neither this setup nor the independent write case sets stopping or cancels a token.
+
+Tests compare pre-adoption originals and committed immutable nodes/replacements/
+ordered provenance after driver join, owner reopen and the next compaction.
+Selected replacement groups must be complete, source revisions and payload source
+order must match, and the committed epoch must survive. The selected prefix is
+exact; the only allowed suffix consists of validated shutdown/startup interruption
+contexts and their fully referenced detail nodes. Revision must equal the captured
+revision plus exactly those validated append commits. Foreign keys and integrity
+are checked. Ordinary Control ContextEdit admission, queue, Thread boundary and
+durable downstream completion must adopt a new summary and shrink projection;
+a direct Compactor call or a no-target result does not establish this gate.
+Startup must remove the stale automatic-active witness.
+
+The protected synthetic user exceeds the existing 64K summary segment baseline,
+so the next manual command selects one replacement whole group. No original user,
+existing assertion, limit or watchdog is weakened. This does not establish
+unrestricted whole-history summary of oversized groups, live providers, OS disk
+failures, or automatic resume after the fault. Historical combined stopping plus
+cleanup-rejection characterization is separate evidence, not the independent
+checkpoint/cleanup matrix. Missing attempt/stage diagnostics after failed writes
+are follow-up work; pending-target/guard recovery is not claimed by these tests.
+
+On macOS via rust-slot, `cargo test --locked --lib proactive_postcommit_ --
+--nocapture` passes all four matrix tests/sixteen cases (5.52 s), including actual
+cleanup DELETE rejection, Control manual completion and strict suffix/revision
+checks. `cargo test --locked --test integration proactive_ -- --nocapture` passes
+all sixteen original proactive regressions (3.09 s), including real RunStop while
+summary HTTP is pending and fresh-usage verification; those tests are unchanged.
+`cargo check --locked --tests`, formatting, strict all-target Clippy, integration
+registration/watchdog policy and diff checks pass. Exact-tip native CI is pending.
+No production inconsistency is observed in this synthetic sample; this does not
+prove all storage-failure modes or missing-bookkeeping recovery.

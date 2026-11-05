@@ -4763,3 +4763,21 @@ rendered a 64,329-byte full body in 18 ms and its 4,841-byte anchor window in
 remains undiagnosed. Regression coverage includes long and multiple blocks,
 anchor selection, metadata omission, width changes, and the retained resize
 worker request. Focused tests and full validation are in progress.
+
+## #215 post-commit data-safety owner scope
+
+The owner narrows the gate to retained path/originals/provenance, committed
+reasoning epoch, complete adoption and usable subsequent automatic or manual
+compaction. No journal is adopted. Per-instance cfg(test) checkpoints inject
+actual token cancellation after COMMIT and before the next stage, independent
+storage error propagation, and target remeasurement failure. A separate case
+rejects the production cleanup DELETE after a synthetic non-storage boundary
+error. All four automatic boundaries are covered. Ordinary builds have no hooks.
+On macOS through rust-slot, all sixteen boundary cases (four matrix tests), the
+unchanged sixteen proactive integration regressions, cargo check with locked
+tests, formatting and strict all-target Clippy pass. This includes normal Control
+ContextEdit queue/boundary/downstream completion after owner reopen and validated
+interruption-only suffix/revision accounting. Exact-tip native CI is pending.
+Best-effort diagnostics are follow-up work, not a promise of successful writes
+to failing storage. No production inconsistency was exposed in this synthetic
+sample, and no production recovery fix or journal is claimed.

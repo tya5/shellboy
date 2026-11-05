@@ -2,6 +2,8 @@
 //! Uses ordinary safe boundaries, recording partial spill adoption separately.
 use super::*;
 
+#[cfg(test)]
+mod fault_tests;
 mod target;
 
 pub(super) const REASON: &str = "proactive_threshold";
@@ -396,6 +398,10 @@ pub(super) async fn maybe_compact(
     };
     stages["closed_spill"] = json!({"ran":target_plan.is_some() || (spill_new && !open_loop), "remaining_before":target_plan.map(|p|p.remove_characters), "adopted_groups":spill.as_ref().ok().map_or(0, |r| r.spilled_groups), "outcome":match &spill { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) => "rejected" }});
     if let Ok(spill) = &spill { committed.push(spill.clone()); }
+    #[cfg(test)]
+    if spill.as_ref().is_ok_and(|r| !r.no_target) {
+        fault_tests::checkpoint(control, slot, "closed_spill").await?;
+    }
     let after_spill = if target_plan.is_some() {
         Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
@@ -802,6 +808,10 @@ async fn active_after_spill(
         }
     };
     committed.push(spill.clone());
+    #[cfg(test)]
+    if !spill.no_target {
+        fault_tests::checkpoint(control, slot, "active_spill").await?;
+    }
     stages["active_spill"]["adopted_groups"] = json!(spill.spilled_groups);
     stages["active_spill"]["outcome"] = json!(if spill.no_target {
         "no_target"
@@ -841,6 +851,10 @@ async fn active_after_spill(
         }
     };
     committed.push(summary.clone());
+    #[cfg(test)]
+    if !summary.no_target {
+        fault_tests::checkpoint(control, slot, "active_summary").await?;
+    }
     stages["active_summary"]["outcome"] = json!(if summary.no_target {
         "no_target"
     } else {
@@ -908,6 +922,10 @@ async fn summarize_once(
         };
         if let Ok(summary) = &prefix {
             committed.push(summary.clone());
+        }
+        #[cfg(test)]
+        if prefix.as_ref().is_ok_and(|r| !r.no_target) {
+            fault_tests::checkpoint(control, slot, "closed_summary").await?;
         }
         stages["closed_summary"]["outcome"] = json!(match &prefix {
             Ok(r) if r.no_target => "no_target",

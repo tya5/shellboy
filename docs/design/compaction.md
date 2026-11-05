@@ -729,3 +729,15 @@ request, user-instruction, unreflected or incomplete fences. Its adoption
 atomically advances the reasoning epoch and clears the kept set. Record the
 remaining need before and after. The prior #182 all-round scope is superseded
 for this automatic path; manual and overflow contracts are unchanged.
+
+### #215 owner amendment: post-commit data safety
+
+Each automatic stage may commit independently. A later storage error,
+cancellation or target remeasurement failure must retain the committed selected
+path, original nodes, replacement/source provenance and reasoning epoch without
+partial adoption. After the fault is removed, a normal automatic or manual
+compaction must remain possible. Missing best-effort attempt/diagnostic records
+after storage failure are follow-up work, not this data-safety gate. This decision
+does not adopt the proposed recovery journal or guarantee bookkeeping writes
+when storage rejects them. The fault matrix and its synthetic-fault limitations
+are recorded in the validation record.
