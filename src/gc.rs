@@ -893,15 +893,14 @@ impl GcService {
         if step.deferred {
             let mut state = self.history_batch.lock().expect("history batch");
             state.1 = (batch / 2).max(1);
-            if batch == 1 {
-                if let Some(id) = self
+            if batch == 1
+                && let Some(id) = self
                     .history_candidate
                     .lock()
                     .expect("history candidate")
                     .clone()
-                {
-                    *self.history_keep.lock().expect("history keep") = Some(id);
-                }
+            {
+                *self.history_keep.lock().expect("history keep") = Some(id);
             }
         } else {
             *self.history_keep.lock().expect("history keep") = None;
