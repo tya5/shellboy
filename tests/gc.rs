@@ -1500,6 +1500,58 @@ async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_batch_regrows_to_full_size_after_a_transient_deferral_streak() {
+    let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
+    f.db.call(|db| {
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<2000) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'regrow-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    // Root marking is expensive only while the test-owned pressure row exists.
+    f.db.call(|db| {
+        db.execute_batch("CREATE TEMP TABLE gc_pressure(x); INSERT INTO gc_pressure VALUES(1); CREATE TEMP TRIGGER gc_transient_pressure AFTER INSERT ON shellboy_gc_mark WHEN EXISTS(SELECT 1 FROM gc_pressure) BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        Ok(())
+    }).await.unwrap();
+    let deadline = crate::test_watchdog::Deadline::new("history GC batch regrowth");
+    let mut deferred = 0;
+    while deferred < 3 && !deadline.expired() {
+        let step = f.gc.history_step(&job).await.unwrap();
+        assert!(!step.complete, "pass completed during the pressure streak");
+        deferred += usize::from(step.deferred);
+    }
+    assert_eq!(deferred, 3, "fixture did not trigger the VM-step budget");
+    f.db.call(|db| {
+        db.execute("DELETE FROM gc_pressure", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    // After three halvings (128 -> 16) committed roots units double back.
+    let mut root_batches = Vec::new();
+    let mut complete = false;
+    while !deadline.expired() {
+        let step = f.gc.history_step(&job).await.unwrap();
+        assert!(!step.deferred, "deferred without pressure");
+        if step.stage == "roots" {
+            root_batches.push(step.scanned);
+        }
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    f.db.shutdown().await.unwrap();
+    assert!(complete, "pass did not complete");
+    assert_eq!(root_batches[..4], [16, 32, 64, 128], "{root_batches:?}");
+    assert!(
+        root_batches[4..].iter().all(|&n| n == 128),
+        "{root_batches:?}"
+    );
+}
+
 #[tokio::test]
 async fn history_gc_discovers_pending_job_after_many_done_jobs_in_batches() {
     let f = Fixture::new(Config::default()).await;

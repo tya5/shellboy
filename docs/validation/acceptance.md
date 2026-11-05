@@ -59,7 +59,15 @@ result and the F1 snapshot, not only in the finished job's `error_json`; a new
 receipt fixture and the mark fixture assert both, and the restored cursor
 decoding unit test covers every stage. Integration tests matching `gc` passed 53
 with 2 ignored; `--lib gc` passed 28 with 2 ignored; fmt and all-target strict
-Clippy passed. Final-SHA default and all-OS CI results are reported on #225. These tests do not
+Clippy passed. Batch regrowth follow-up (macOS, `rust-slot`): the sustained-writes
+measurement went from 2,747 steps, 5 deferrals, 9.2 s (no regrowth, two runs)
+to 5,244 steps, 2,503 deferrals, 18.9 s with plain doubling after every commit
+(alternation under constant demand), and to 2,772 steps, 30 deferrals,
+10.9-11.0 s with the adopted growth backoff (two runs each; unoptimized test
+build, not isolated benchmarks). A transient-pressure fixture now returns roots
+batches 16, 32, 64, 128 and completes; without regrowth it stayed at 16. A unit
+test covers halving, regrowth, backoff and stage reset. Final-SHA default and
+all-OS CI results are reported on #225. These tests do not
 reproduce or explain the unavailable original Windows workload.
 
 ## Startup timing CLI (#212; SemVer review follow-up in progress)

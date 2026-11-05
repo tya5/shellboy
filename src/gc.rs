@@ -42,6 +42,58 @@ pub struct GcDiagnostics {
     pub completed: Option<std::time::Instant>,
 }
 
+/// In-memory history batch size for the current job. A budget deferral halves
+/// it (down to one). After committed units of the same stage it doubles back
+/// to `BATCH`; a growth step that is itself deferred doubles the number of
+/// commits required before the next growth (capped at `BATCH`), so sustained
+/// pressure settles instead of alternating. A committed growth step resets
+/// that wait. Each new job or stage starts again at `BATCH`.
+#[derive(Debug)]
+struct HistoryBatch {
+    job: String,
+    stage: String,
+    size: usize,
+    commits: usize,
+    wait: usize,
+    grew: bool,
+}
+impl HistoryBatch {
+    fn new(job: String) -> Self {
+        Self {
+            job,
+            stage: String::new(),
+            size: BATCH,
+            commits: 0,
+            wait: 1,
+            grew: false,
+        }
+    }
+    fn deferred(&mut self) {
+        if self.grew {
+            self.wait = self.wait.saturating_mul(2).min(BATCH);
+        }
+        self.size = (self.size / 2).max(1);
+        (self.commits, self.grew) = (0, false);
+    }
+    fn committed(&mut self, stage: &str) {
+        if self.stage != stage {
+            let job = std::mem::take(&mut self.job);
+            *self = Self::new(job);
+            self.stage = stage.to_owned();
+            return;
+        }
+        if self.grew {
+            self.wait = 1;
+        }
+        self.grew = false;
+        self.commits += 1;
+        if self.size < BATCH && self.commits >= self.wait {
+            self.size = self.size.saturating_mul(2).min(BATCH);
+            (self.commits, self.grew) = (0, true);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct GcService {
     database: DbWorker,
@@ -52,7 +104,7 @@ pub struct GcService {
     /// The GC background requester: one outstanding unit (storage design #171).
     requester: Arc<Mutex<BackgroundRequester>>,
     raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
-    history_batch: Arc<std::sync::Mutex<(String, usize)>>,
+    history_batch: Arc<std::sync::Mutex<HistoryBatch>>,
     history_discovery: Arc<std::sync::Mutex<i64>>,
     history_candidate: Arc<std::sync::Mutex<Option<String>>>,
     history_keep: Arc<std::sync::Mutex<Option<String>>>,
@@ -202,7 +254,7 @@ impl GcService {
         Self {
             requester: Arc::new(Mutex::new(BackgroundRequester::new(database.clone()))),
             raw_cursor: Arc::default(),
-            history_batch: Arc::new(std::sync::Mutex::new((String::new(), BATCH))),
+            history_batch: Arc::new(std::sync::Mutex::new(HistoryBatch::new(String::new()))),
             history_discovery: Arc::default(),
             history_candidate: Arc::default(),
             history_keep: Arc::default(),
@@ -866,11 +918,11 @@ impl GcService {
     ) -> Result<HistoryStep> {
         let batch = {
             let mut state = self.history_batch.lock().expect("history batch");
-            if state.0 != job_id {
-                *state = (job_id.to_owned(), BATCH);
+            if state.job != job_id {
+                *state = HistoryBatch::new(job_id.to_owned());
                 *self.history_keep.lock().expect("history keep") = None;
             }
-            state.1
+            state.size
         };
         let candidate = self.history_candidate.clone();
         *candidate.lock().expect("history candidate") = None;
@@ -899,8 +951,7 @@ impl GcService {
             },
         };
         if step.deferred {
-            let mut state = self.history_batch.lock().expect("history batch");
-            state.1 = (batch / 2).max(1);
+            self.history_batch.lock().expect("history batch").deferred();
             if batch == 1
                 && let Some(id) = self
                     .history_candidate
@@ -912,6 +963,10 @@ impl GcService {
             }
         } else {
             *self.history_keep.lock().expect("history keep") = None;
+            self.history_batch
+                .lock()
+                .expect("history batch")
+                .committed(&step.stage);
         }
         let now = std::time::Instant::now();
         let mut diagnostic_job = self
@@ -1205,6 +1260,48 @@ mod tests {
     use super::INDEX_SOURCES_PAGE;
     use rusqlite::{Connection, params};
     use std::time::Instant;
+
+    #[test]
+    fn history_batch_halves_regrows_and_backs_off_failed_growth() {
+        let mut b = super::HistoryBatch::new("job".into());
+        b.committed("roots");
+        for _ in 0..3 {
+            b.deferred();
+        }
+        assert_eq!(b.size, 16);
+        // Transient pressure: each commit doubles back to the full batch.
+        for expected in [32, 64, 128, 128] {
+            b.committed("roots");
+            assert_eq!(b.size, expected);
+        }
+        // Sustained pressure at 4: failed growth waits longer each time.
+        for _ in 0..5 {
+            b.deferred();
+        }
+        assert_eq!(b.size, 4);
+        let mut deferrals = 0;
+        for _ in 0..1000 {
+            if b.size > 4 {
+                b.deferred();
+                deferrals += 1;
+            } else {
+                b.committed("roots");
+            }
+        }
+        assert!(deferrals <= 20, "{deferrals}");
+        assert_eq!(b.wait, super::BATCH);
+        // Pressure ends: one committed growth resets the wait.
+        while b.size == 4 {
+            b.committed("roots");
+        }
+        for expected in [8, 16, 32, 64, 128] {
+            assert_eq!(b.size, expected);
+            b.committed("roots");
+        }
+        b.deferred();
+        b.committed("sweep");
+        assert_eq!((b.size, b.wait), (super::BATCH, 1));
+    }
 
     #[tokio::test]
     async fn history_diagnostics_observe_progress_and_restart_without_db_reads() {

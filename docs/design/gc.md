@@ -145,7 +145,13 @@ idempotency records, whose existing independent retention policy still applies.
 ## Budget-resumable history GC (#225)
 
 Each history stage persists its cursor with its data changes. Deferred batches
-are halved to one, and provenance uses replacement-rowid and source-ordinal
+are halved to one; after committed units in the same stage the batch doubles
+back up to the original 128, and each new stage or job starts at 128, so
+transient pressure does not leave the rest of the pass slow. If a growth step
+is itself deferred, the number of commits required before the next growth
+doubles (at most 128) and a committed growth resets it, so sustained pressure
+settles near the largest size that fits instead of alternating. The batch
+size and wait are in-memory only. Provenance uses replacement-rowid and source-ordinal
 subcursors. TEMP marks are cleared in bounded reset and cleanup stages; the
 finite original job horizon is closed in bounded batches. Each destructive
 node decision revalidates current reverse reachability and pins in the same
