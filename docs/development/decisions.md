@@ -3485,3 +3485,26 @@ set of interruptible attempt states changes (the index predicate must follow the
 statement). Not reproduced: the exact 3.3 s cold figure on the copy (the page
 cache was warm for the copy), so the real startup gain is to be confirmed on the
 owner's machine after release.
+
+## D-224-3: Summary retry and parallel summary requests (2026-11-05)
+
+Decision: summary map and reduce requests retry transient failures with the
+shared conversation classifier inside the existing request budgets, through the
+profile gate; usage limits are never retried; successful parts are cached and
+never re-requested. All uncached map requests of one summary, and all batches of
+one reduce round, are launched together with no concurrency counter; the gate
+alone throttles. Reason: one transient failure discarded the whole summary, and
+serial requests dominated its wall time. Adaptive growth/halving was considered
+and dropped: the budget already bounds the number and the stage-2 gate already
+holds every request of a cooling profile. Fairness: the gate stays plain FIFO;
+the summary takes one ticket at a time and yields after each launch so another
+Thread's ready request can enqueue between them (a round-robin gate was
+considered and rejected as more mechanism than needed). Impact: no new setting,
+table, worker or queue. The classifier moved to `model::retry_class` unchanged.
+The usage ledger records the rate observation by request index instead of one
+pending slot. A retry that finds the budget exhausted fails with the original
+cause. A budget error while launching a reduce round no longer happens after
+earlier batches ran serially; those in flight still finish and are cached.
+Unverified: behaviour against a real provider, in particular a provider with a
+low concurrency quota (the first 429 queues the rest in the gate, the probe
+releases them). Revisit if measured 429s per summary increase.

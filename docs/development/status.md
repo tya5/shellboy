@@ -4810,8 +4810,8 @@ sample, and no production recovery fix or journal is claimed.
 
 Stage 1 landed on main at ab1a7197f7981875b9bbe9939964cf96efb15b75, with
 independent review and successful exact-tip default and all-OS CI. Connection
-waiting (stage 2) is separate; budgeted summary retries and adaptive map
-concurrency (stage 3) remain an unadopted proposal.
+waiting (stage 2) is separate; budgeted summary retries and parallel summary
+requests (stage 3) are described below.
 
 ## #224 stage 2 connection-scoped waiting (in progress)
 
@@ -4822,10 +4822,24 @@ is fenced so stale completions cannot clear newer 429s. Actual admission waits a
 recorded in existing attempt and summary observations. The state is in memory,
 not shared across configured profiles, and is forgotten on restart. Each index
 claim and selected search space is revalidated after waiting. Stage 3 summary
-retry and adaptive map concurrency remain unadopted.
+retry and parallel summary requests are described below.
 
 Synthetic macOS focused checks pass for shared and isolated profiles, FIFO and
 cancellation, long waits, no-send embedding/source fences, summary wait and
 selection changes, proactive post-spill cancellation, #76/#188 regressions and
 #215 fault cases. Independent review, exact-tip native CI and integration handoff
 remain pending; no live-provider behavior is claimed.
+
+## #224 stage 3 summary retry and parallel summary requests (in progress)
+
+Summary map and reduce requests retry 429 and transient failures inside the
+existing request budgets through the stage-2 gate (shared classifier in
+`model::retry_class`; usage limits never retried; cached parts never
+re-requested). The uncached map requests of one summary, and the batches of one
+reduce round, are launched together with no concurrency counter; results return
+in original order. Adaptive concurrency was dropped. Synthetic focused tests
+cover retry, budget, usage limit, ordering, gate waiting, interleaving and
+cancellation. Measurement (fake provider, fixed 100 ms per request, macOS
+arm64 debug, synthetic 895 s shape, 11 requests in both modes, three runs):
+serial 1352/1343/1365 ms, parallel 336/337/338 ms. This says nothing about a
+real provider. Review, exact-tip CI and landing remain pending.

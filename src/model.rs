@@ -6,6 +6,7 @@ pub mod dialect;
 pub mod http;
 pub mod opaque;
 mod reconcile;
+pub(crate) mod retry_class;
 pub mod usage_limit;
 pub mod wire_bytes;
 

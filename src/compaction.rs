@@ -19,6 +19,10 @@ use tokio_util::sync::CancellationToken;
 pub(crate) mod boundary;
 mod bounded;
 pub(crate) mod context_usage;
+mod parallel;
+#[cfg(test)]
+mod parallel_tests;
+mod retry;
 use bounded::SummaryBudget;
 mod attempt;
 pub(crate) use attempt::{
@@ -69,6 +73,8 @@ const SUMMARY_PROMPT: &str = "Summarize the following conversation as Markdown w
 pub struct Compactor {
     #[cfg(test)]
     pub(crate) fail_remeasurement: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)]
+    map_test: parallel::TestHooks,
     clients: Arc<HttpClients>,
     database: DbWorker,
     config: Arc<Config>,
@@ -312,6 +318,8 @@ impl Compactor {
             clients,
             #[cfg(test)]
             fail_remeasurement: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(test)]
+            map_test: Default::default(),
         }
     }
 
@@ -981,7 +989,7 @@ impl Compactor {
             .clients
             .get(&snapshot.profile)
             .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
-        let mut segments = segments(groups, snapshot.epoch)?;
+        let segments = segments(groups, snapshot.epoch)?;
         let mut uncached = 0usize;
         for (start, end, _) in &segments {
             let sources: Vec<Source> = groups[*start..*end]
@@ -1010,33 +1018,12 @@ impl Compactor {
             );
             return Err(error.hint("Narrow the range or raise compaction.summary_map_max_requests; no model request was sent"));
         }
-        segments.reverse();
-        let mut parts = Vec::new();
-        let mut created = 0;
-        let mut reused = 0;
-        while let Some((start, end, depth)) = segments.pop() {
-            if cancel.is_cancelled() {
-                return Err(invalid("Compaction cancelled; original path retained"));
-            }
+        let connection = &self.config.connections[&snapshot.profile];
+        let build = |(start, end, depth): (usize, usize, u8), path: Vec<usize>| {
             let sources: Vec<Source> = groups[start..end]
                 .iter()
                 .flat_map(|g| g.sources.clone())
                 .collect();
-            let cache_key = summary_key(&snapshot, &sources);
-            let lookup = CompactionKeys::summary_part(&cache_key);
-            let cached = self
-                .database
-                .call(move |db| CachedPart::load(db, &lookup))
-                .await
-                .map_err(storage_error)?;
-            if let Some(part) = cached.filter(CachedPart::reusable) {
-                budget.summary_characters = budget
-                    .summary_characters
-                    .saturating_add(part.text.chars().count() as u64);
-                parts.push(part);
-                reused += 1;
-                continue;
-            }
             let text = sources
                 .iter()
                 .map(|s| render(s, snapshot.epoch))
@@ -1051,82 +1038,38 @@ impl Compactor {
                 snapshot.effort.as_deref(),
                 false,
             );
-            budget.ensure_map()?;
-            let admission = self
-                .summary_admission(&client, &snapshot, &cancel, boundary.as_deref_mut())
-                .await?;
-            budget.request_map()?;
-            budget.usage.begin(&self.database, false).await?;
-            let response = match Self::summary_response(
-                &client,
-                &snapshot.thread,
+            parallel::Job::new(
+                path,
+                CompactionKeys::summary_part(&summary_key(&snapshot, &sources)),
                 request,
-                cancel.clone(),
-                admission,
+                sources.iter().map(|s| s.id.clone()).collect(),
+                (start, end, depth),
             )
-            .await
-            {
-                Ok(response) => {
-                    budget
-                        .usage
-                        .observe_http(&self.database, response.response_facts)
-                        .await?;
-                    budget
-                        .usage
-                        .observe(&self.database, usage::usage_of(Some(&response.raw)))
-                        .await?;
-                    response
-                }
-                Err(failure) => {
-                    budget
-                        .usage
-                        .observe_http(&self.database, failure.facts)
-                        .await?;
-                    budget
-                        .usage
-                        .observe(
-                            &self.database,
-                            usage::usage_of(failure.raw_response.as_ref()),
-                        )
-                        .await?;
-                    if failure.error.is_context_limit() && end - start > 1 && depth < 8 {
-                        let middle = start + (end - start) / 2;
-                        segments.push((middle, end, depth + 1));
-                        segments.push((start, middle, depth + 1));
-                        continue;
-                    }
-                    return Err(ApiError::new(ErrorCode::IoFailed,failure.error.to_string()).hint("Original history and successful summary parts were retained; retry explicitly"));
-                }
-            };
-            let refused = summary_refused(&response.output);
-            let text = response.text;
-            let empty = text.trim().is_empty();
-            let part = CachedPart {
-                text,
-                sources: sources.iter().map(|s| s.id.clone()).collect(),
-                cache_key: Some(CompactionKeys::summary_part(&cache_key)),
-                raw_response: Some(response.raw),
-            };
-            part.save(&self.database, CompactionKeys::summary_part(&cache_key))
-                .await?;
-            if refused {
-                return Err(invalid(
-                    "Summary response contained a refusal; original history retained",
-                )
-                .details(json!({"summary_part_key":part.cache_key})));
-            }
-            if empty {
-                return Err(invalid(
-                    "Summary returned no assistant text; original history retained",
-                )
-                .details(json!({"summary_part_key":part.cache_key})));
-            }
-            budget.summary_characters = budget
-                .summary_characters
-                .saturating_add(part.text.chars().count() as u64);
-            parts.push(part);
-            created += 1;
-        }
+        };
+        let jobs = segments
+            .iter()
+            .enumerate()
+            .map(|(index, span)| build(*span, vec![index]))
+            .collect();
+        let parallel::JobParts {
+            parts,
+            created,
+            reused,
+        } = self
+            .run_jobs(
+                &parallel::JobContext {
+                    kind: parallel::Kind::Map,
+                    snapshot: &snapshot,
+                    connection,
+                    client: &client,
+                    cancel: &cancel,
+                    split: Some(&build),
+                },
+                jobs,
+                budget,
+                boundary.as_deref_mut(),
+            )
+            .await?;
         if cancel.is_cancelled() {
             return Err(invalid("Compaction cancelled; original path retained"));
         }
@@ -2048,7 +1991,7 @@ mod tests {
         assert!(old_bytes - new_bytes > 100_000);
     }
 
-    async fn database() -> (tempfile::TempDir, DbWorker) {
+    pub(super) async fn database() -> (tempfile::TempDir, DbWorker) {
         let root = tempfile::tempdir().unwrap();
         let db = DbWorker::open(root.path().join("test.db")).await.unwrap();
         let cwd = root.path().to_string_lossy().into_owned();
@@ -2272,10 +2215,8 @@ mod tests {
         );
         config
     }
-    /// Synthetic measurement only: no user history or paid provider.
-    #[tokio::test]
-    async fn synthetic_895_shape_spill_and_summary_measurement() {
-        let (_root, db) = database().await;
+    /// The synthetic 895 s-shaped history: 85 tool groups and 148 messages.
+    pub(super) async fn seed_895(db: &DbWorker) {
         db.call(|db| {
             let tx = db.transaction()?;
             tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old','t','r','completed','now'),('last','t','r','completed','now'),('current','t','r','running','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','old',0,0,'fixture','fixture',0,'completed','{}','now');")?;
@@ -2300,6 +2241,12 @@ mod tests {
             tx.commit()?;
             Ok(())
         }).await.unwrap();
+    }
+    /// Synthetic measurement only: no user history or paid provider.
+    #[tokio::test]
+    async fn synthetic_895_shape_spill_and_summary_measurement() {
+        let (_root, db) = database().await;
+        seed_895(&db).await;
         let baseline = Compactor::new(db.clone(), Arc::new(Config::default()));
         let snapshot = baseline.snapshot("t", true).await.unwrap();
         let range = policy::unsummarized_prefix(&snapshot).unwrap();
@@ -2431,7 +2378,8 @@ mod tests {
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
-    async fn summary_http_429_is_recorded_with_retry_after_without_resend() {
+    async fn summary_http_429_is_recorded_with_retry_after_and_an_exhausted_budget_does_not_resend()
+    {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
@@ -2464,17 +2412,16 @@ mod tests {
         })
         .await
         .unwrap();
-        let compactor = Compactor::new(
-            db.clone(),
-            Arc::new(summary_config(format!("http://{address}/v1"))),
-        );
+        // One map request in the budget: the 429 is retryable but no slot is left.
+        let mut config = summary_config(format!("http://{address}/v1"));
+        config.compaction.summary_map_max_requests = 1;
+        let compactor = Compactor::new(db.clone(), Arc::new(config));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
-        assert!(
-            compactor
-                .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
-                .await
-                .is_err()
-        );
+        let error = compactor
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
+            .await
+            .unwrap_err();
+        assert!(error.hint.as_deref().unwrap().contains("budget exhausted"));
         server.await.unwrap();
         let saved: String = db
             .call(|db| {
@@ -2644,7 +2591,7 @@ mod tests {
         .unwrap();
         db.shutdown().await.unwrap();
     }
-    fn selected_path(db: &Connection, thread: &str) -> rusqlite::Result<Vec<String>> {
+    pub(super) fn selected_path(db: &Connection, thread: &str) -> rusqlite::Result<Vec<String>> {
         db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
             .query_map([thread], |row| row.get(0))?
             .collect()
@@ -3004,7 +2951,11 @@ mod tests {
         let (_root, db) = database().await;
         active_turn_fixture(&db).await;
         let before = db.call(|db| Ok(selected_path(db, "t")?)).await.unwrap();
-        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        // The oversized summary needs a reduce request that no server answers:
+        // one slot, so the failed request is not retried.
+        let mut config = summary_config(url);
+        config.compaction.summary_reduce_max_requests = 1;
+        let compactor = Compactor::new(db.clone(), Arc::new(config));
         let error = compactor
             .summarize_active_turn("t", CancellationToken::new())
             .await

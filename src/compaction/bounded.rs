@@ -79,6 +79,11 @@ impl Compactor {
                 )
             })
             .collect();
+        let connection = &self.config.connections[&snapshot.profile];
+        let client = self
+            .clients
+            .get(&snapshot.profile)
+            .map_err(|e| budget.error(&e.to_string()))?;
         for round in 0..=REDUCE_ROUNDS {
             budget.summary_characters = texts.iter().map(|t| t.chars().count() as u64).sum();
             if texts.len() == 1 && budget.summary_characters <= budget.limit {
@@ -94,11 +99,8 @@ impl Compactor {
                 .usage
                 .record_oversized_parts(&self.database, oversized)
                 .await?;
-            let mut reduced = Vec::new();
-            for text in batches {
-                if cancel.is_cancelled() {
-                    return Err(budget.error("Summary cancelled; original path retained"));
-                }
+            let mut jobs = Vec::new();
+            for (position, text) in batches.into_iter().enumerate() {
                 let prompt = budget.prompt(&format!(
                     "reduce round {}; consolidate chronological summaries, newest last. Aim for at most {} characters; each further round must remove more repetition and obsolete detail",
                     round + 1, (budget.limit / (round as u64 + 1)).max(1)
@@ -109,20 +111,6 @@ impl Compactor {
                     &prompt,
                     &text,
                 )));
-                let lookup = cache_key.clone();
-                let cached = self
-                    .database
-                    .call(move |db| CachedPart::load(db, &lookup))
-                    .await
-                    .map_err(storage_error)?;
-                if let Some(part) = cached.filter(CachedPart::reusable) {
-                    reduced.push(part.text);
-                    continue;
-                }
-                let client = self
-                    .clients
-                    .get(&snapshot.profile)
-                    .map_err(|e| budget.error(&e.to_string()))?;
                 let request = model::response_request(
                     &snapshot.model,
                     vec![
@@ -132,51 +120,31 @@ impl Compactor {
                     snapshot.effort.as_deref(),
                     false,
                 );
-                budget.ensure_reduce()?;
-                let admission = self
-                    .summary_admission(&client, snapshot, cancel, boundary.as_deref_mut())
-                    .await?;
-                budget.request_reduce()?;
-                budget.usage.begin(&self.database, true).await?;
-                let response = Self::summary_response(
-                    &client,
-                    &snapshot.thread,
+                jobs.push(super::parallel::Job::new(
+                    vec![position],
+                    cache_key,
                     request,
-                    cancel.clone(),
-                    admission,
-                )
-                .await;
-                let facts = match &response {
-                    Ok(response) => response.response_facts,
-                    Err(failure) => failure.facts,
-                };
-                budget.usage.observe_http(&self.database, facts).await?;
-                let reported = match &response {
-                    Ok(response) => super::usage::usage_of(Some(&response.raw)),
-                    Err(failure) => super::usage::usage_of(failure.raw_response.as_ref()),
-                };
-                budget.usage.observe(&self.database, reported).await?;
-                let response = response.map_err(|e| {
-                    budget.error(&format!(
-                        "Summary reduction failed: {}; original path retained",
-                        e.error
-                    ))
-                })?;
-                let refused = summary_refused(&response.output);
-                let part = CachedPart {
-                    text: response.text,
-                    sources: vec![],
-                    cache_key: Some(cache_key.clone()),
-                    raw_response: Some(response.raw),
-                };
-                part.save(&self.database, cache_key).await?;
-                budget.summary_characters = part.text.chars().count() as u64;
-                if refused || part.text.trim().is_empty() {
-                    return Err(budget
-                        .error("Summary reduction was refused or empty; original path retained"));
-                }
-                reduced.push(part.text);
+                    vec![],
+                    (0, 0, 0),
+                ));
             }
+            // The whole round runs together; its results return in batch order.
+            let outcome = self
+                .run_jobs(
+                    &super::parallel::JobContext {
+                        kind: super::parallel::Kind::Reduce,
+                        snapshot,
+                        connection,
+                        client: &client,
+                        cancel,
+                        split: None,
+                    },
+                    jobs,
+                    budget,
+                    boundary.as_deref_mut(),
+                )
+                .await?;
+            let reduced: Vec<String> = outcome.parts.into_iter().map(|p| p.text).collect();
             texts = reduced;
         }
         unreachable!("finite reduction rounds")

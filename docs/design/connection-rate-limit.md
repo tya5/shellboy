@@ -1,6 +1,6 @@
 # Connection-Wide Rate Feedback (#224)
 
-## Status: Stages 1 and 2 Adopted; Stage 3 Proposed
+## Status: Stages 1, 2 and 3 Adopted
 
 2026-11-05. The owner adopted stage 1 observability: record HTTP status,
 Retry-After and actual applied wait in existing conversation attempt and summary
@@ -10,7 +10,7 @@ for older records and interrupted observations. Do not introduce a new table.
 
 Stage 1 landed at ab1a7197. The owner adopts stage 2 connection-scoped waiting
 on 2026-11-05, separately from stage 3 summary retry and adaptive parallel map,
-which remain proposals. Each configured connection profile owns independent
+which the owner adopted next (see Stage 3). Each configured connection profile owns independent
 in-memory feedback and FIFO wait state; aliases are not merged by provider or
 credential. Two profiles sharing an upstream quota can each receive 429s. No
 credential fingerprint is computed or stored. Current #76 and #188 rules and
@@ -248,7 +248,7 @@ state from old logs. If the owner requires cross-restart cooldown enforcement,
 that is a separate adopted change (could use bounded existing app_meta, no new
 table); not assumed in this draft.
 
-## Proposed Summary Retry And Cache Reuse
+## Summary Retry Background (superseded where Stage 3 differs)
 
 Use the same pure transient classifier / header interpretation as conversation,
 with summary-specific caller policy. Retry 429 and eligible 5xx only before a
@@ -277,7 +277,7 @@ budget/defer/cancel retain original history and successful parts. Adoption is
 still one atomic fenced operation; no partial spill or stale-summary adoption.
 No replay eligibility or opaque/signed reasoning policy changes from #215.
 
-## Proposed Fairness And Adaptive Parallel Map (#215)
+## Adaptive Parallel Map Background (superseded where Stage 3 differs)
 
 Do not hard-code a map parallel count or create an independent summary executor.
 All existing request futures acquire a connection admission lease; future map
@@ -313,6 +313,63 @@ that cannot be implemented without an unbounded side queue, return to review
 rather than add one silently. Awaiters exist only for bounded existing work,
 not durable queued jobs. At W=1, long requests may still delay other callers;
 no latency guarantee or preemption is implied.
+
+## Stage 3: Adopted Summary Retry And Adaptive Map Concurrency
+
+Adopted 2026-11-05. The two proposal sections above are background; where they
+differ, these rules govern.
+
+### Summary retry
+
+- Map and reduce requests use `classify_retry` (now shared in
+  `model::retry_class`) with the profile's `response_retry_partial`. A retry is
+  taken only for `Retry`; `Ineligible` and `Deferred` fail the summary. Context
+  limits keep the existing splitting and are never retried unchanged.
+- Any failure carrying a usage limit (including the wrapped LiteLLM
+  `usage_limit_reached` form recognised for HTTP 429, and a local quota block)
+  is never retried: the summary fails and the original path is retained.
+- Each attempt is a new POST and reserves one existing map or reduce slot before
+  it is sent, successful or not. There is no separate retry count and no nested
+  budget. When the slots are exhausted the summary fails with the original
+  failure retained as the cause. Preflight is unchanged.
+- Every attempt, including a retry, reserves a FIFO ticket in the profile's
+  gate, so a retry waits in arrival order behind earlier callers. After a 429
+  the gate cooldown is the wait; for other transient failures the sleep is the
+  conversation schedule (`1 s << retries`, capped by
+  `response_retry_max_delay_ms`, or the response's Retry-After), cancellable.
+- A successful part is saved through the existing durable per-part cache before
+  anything else advances and is never requested again. Only the failed segment
+  or reduce group is retried. Adoption stays one atomic fenced operation.
+
+### Parallel requests (simple form)
+
+- All uncached map requests of one summary are launched together, and all
+  reduce batches of one reduce round are launched together. Reduce rounds stay
+  sequential. There is no concurrency counter, window, grow or halve rule: the
+  number is bounded by the segments or batches and by the existing map / reduce
+  request budget, which is reserved (slot and usage `begin` fact) before each
+  dispatch. The adaptive-concurrency idea (additive growth, halving on 429) was
+  dropped as unnecessary: throttling is left entirely to the stage-2 gate.
+- Each request takes its own gate ticket. The summary requests admission one
+  at a time on its own task and yields to the runtime after launching each
+  request, so a ready conversation request of another Thread can take a ticket
+  between the summary's tickets. The gate itself is unchanged (plain FIFO).
+  After a 429 every request of the profile, summary requests included, waits in
+  the FIFO and the probe releases them.
+- Only the HTTP exchange runs in a spawned task, owning the client clone, the
+  request body, the cancel token and the lease. Database writes, cache saves,
+  the usage ledger and the post-wait snapshot revalidation stay on the
+  summary's task, so the boundary pause rules are unchanged. The ledger records
+  each request's rate observation by the index returned from `begin`.
+- Results are collected by position (a path of indexes, extended by a
+  context-limit split) and passed on in original order whatever the completion
+  order. A failed request is retried by re-queuing only that job.
+- A fatal failure, or cancellation, stops launching, cancels the in-flight
+  requests with a child of the same token, and drains them. A late success is
+  cached by its content key only; nothing is adopted. The #226 provisional
+  record and stage facts are written only at adoption and are untouched.
+- Measurements on a synthetic fixture with a fake provider are in the
+  development status; they make no claim about a real provider.
 
 ## Stage 1: Adopted Observability And Usage Get
 

@@ -152,14 +152,16 @@ impl UsageLedger {
         &mut self,
         database: &DbWorker,
         reduce: bool,
-    ) -> Result<(), ApiError> {
+    ) -> Result<usize, ApiError> {
         if self.record.usage.requests == 0 {
             self.record.started_at = timestamp();
         }
         self.record.usage.begin(reduce);
-        self.record.rate_observation_pending = Some(self.record.usage.requests - 1);
+        let index = self.record.rate_observations.len();
+        self.record.rate_observation_pending = Some(index as u64);
         self.record.rate_observations.push(Value::Null);
-        self.save(database).await
+        self.save(database).await?;
+        Ok(index)
     }
     pub(super) async fn record_oversized_parts(
         &mut self,
@@ -190,14 +192,16 @@ impl UsageLedger {
     pub(super) async fn observe_http(
         &mut self,
         database: &DbWorker,
+        index: usize,
         facts: crate::model::http::ResponseFacts,
     ) -> Result<(), ApiError> {
         let mut observation = facts.rate_metadata();
         observation["applied_wait_ms"] = json!(facts.admission_wait_ms.unwrap_or(0));
-        if let Some(index) = self.record.rate_observation_pending.take()
-            && let Some(slot) = self.record.rate_observations.get_mut(index as usize)
-        {
+        if let Some(slot) = self.record.rate_observations.get_mut(index) {
             *slot = observation;
+        }
+        if self.record.rate_observations.iter().all(|o| !o.is_null()) {
+            self.record.rate_observation_pending = None;
         }
         self.save(database).await
     }
