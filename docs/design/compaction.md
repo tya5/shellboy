@@ -347,7 +347,7 @@ Thread override (#229): `thread.auto_compact_at` (nullable integer, migration 30
 `thread set --auto-compact-at N|0|''` (N sets, 0 disables for the Thread, `''` clears) and
 wins over the connection and `[compaction]` values (`Compaction::auto_at_tokens_for`). The
 driver reads it at each request-boundary check, so a change applies from the next check and
-never to an in-flight request; the retry growth gate uses the value in effect at that check.
+never to an in-flight request.
 Children and forks copy it at creation; a connection change keeps it; `compact list`
 `trigger.auto_at_tokens` stays the value that fired. `thread get` returns `auto_compact_at`
 (null if none) and `effective_auto_compact_at`; the TUI `/200K` shows the effective value.

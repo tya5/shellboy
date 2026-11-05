@@ -737,8 +737,7 @@ that Thread, `''` returns it to the connection / `[compaction]` value). The Thre
 value wins over the configured ones, applies from the next request-boundary check
 (never to a request already sent), stays when the Thread's connection changes and
 is inherited by child Threads; `thread get` shows it as `auto_compact_at` beside
-the value in use, `effective_auto_compact_at`. The 10% retry-growth rule above
-uses the value in effect at each check.
+the value in use, `effective_auto_compact_at`.
 
 ### Unknown shell arguments
 
