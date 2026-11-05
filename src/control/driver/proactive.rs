@@ -380,6 +380,8 @@ pub(super) async fn maybe_compact(
     }
     let mut summary_scope = "";
     let mut selection_shortfall = None;
+    // At most one result per stage; keep provenance until the audit is durable.
+    let mut committed = Vec::new();
     let mut stages = json!({"closed_spill":{"ran":false,"skipped":"not_reached"},"closed_summary":{"ran":false,"skipped":"not_reached"},"active_spill":{"ran":false,"skipped":"not_reached"},"active_summary":{"ran":false,"skipped":"not_reached"}});
     let result: Result<Value, ApiError> = async {
     let before_characters = if target_plan.is_some() {
@@ -393,6 +395,7 @@ pub(super) async fn maybe_compact(
         Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
     };
     stages["closed_spill"] = json!({"ran":target_plan.is_some() || (spill_new && !open_loop), "remaining_before":target_plan.map(|p|p.remove_characters), "adopted_groups":spill.as_ref().ok().map_or(0, |r| r.spilled_groups), "outcome":match &spill { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) => "rejected" }});
+    if let Ok(spill) = &spill { committed.push(spill.clone()); }
     let after_spill = if target_plan.is_some() {
         Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
@@ -411,7 +414,7 @@ pub(super) async fn maybe_compact(
             "summary": spill,
             "summary_deferred": true,
         }),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages).await
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed).await
         {
             Ok(mut summary) => {
                 if summary_scope == "prefix" && (middle_new || active_spill_new) && !slot.stop.is_cancelled()
@@ -419,7 +422,7 @@ pub(super) async fn maybe_compact(
                 {
                     let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
                     if before.saturating_sub(after) < plan.remove_characters {
-                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages).await {
+                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed).await {
                             Ok(active) if !active.no_target => {
                                 summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
                                 summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
@@ -459,8 +462,8 @@ pub(super) async fn maybe_compact(
                 summary.no_target = summary.no_target && spill.no_target;
                 json!({"outcome":if summary.no_target {"no_safe_reduction"} else {"adopted"},"summary":summary})
             }
-            Err(error) if error.is_storage_failure() => return Err(error),
-            Err(error) if (!spill.no_target || stages["active_spill"]["outcome"] == "adopted") && !slot.stop.is_cancelled() => {
+            Err(error) if error.is_storage_failure() || slot.stop.is_cancelled() => return Err(error),
+            Err(error) if !spill.no_target || stages["active_spill"]["outcome"] == "adopted" => {
                 let mut summary = json!(spill);
                 summary["spilled_groups"] = json!(summary["spilled_groups"].as_u64().unwrap_or(0).saturating_add(stages["active_spill"]["adopted_groups"].as_u64().unwrap_or(0)));
                 summary["summary_rejected"] = json!(true);
@@ -505,7 +508,36 @@ pub(super) async fn maybe_compact(
     );
     control.changed(&snapshot.thread);
     cleanup?;
+    // Cancellation still fails the caller, but cannot undo committed path edits.
+    let mut cancellation = None;
     let mut observation = match result {
+        Err(error) if slot.stop.is_cancelled() && !error.is_storage_failure() => {
+            let summary = committed_result(&committed);
+            let observation = if summary.no_target {
+                json!({"outcome":"rejected", "error":error, "cancelled":true})
+            } else {
+                let mut summary = json!(summary);
+                summary["summary_rejected"] = json!(true);
+                if let Some(details) = &error.details {
+                    for field in [
+                        "summary_usage",
+                        "source_characters",
+                        "summary_characters",
+                        "summary_limit",
+                        "model_requests",
+                        "map_requests",
+                        "reduce_requests",
+                    ] {
+                        if let Some(value) = details.get(field) {
+                            summary[field] = value.clone();
+                        }
+                    }
+                }
+                json!({"outcome":"adopted", "summary":summary, "summary_error":error, "cancelled":true})
+            };
+            cancellation = Some(error);
+            observation
+        }
         Ok(observation) => observation,
         Err(error) => {
             spill_counts.spilled = stages["closed_spill"]["adopted_groups"]
@@ -703,9 +735,37 @@ pub(super) async fn maybe_compact(
         .await
         .map_err(storage_error)?;
     control.changed(&snapshot.thread);
+    if let Some(error) = cancellation {
+        return Err(error);
+    }
     Ok(true)
 }
 
+fn committed_result(
+    committed: &[crate::compaction::CompactResult],
+) -> crate::compaction::CompactResult {
+    let mut result = crate::compaction::CompactResult {
+        no_target: true,
+        ..Default::default()
+    };
+    for stage in committed.iter().filter(|stage| !stage.no_target) {
+        result.no_target = false;
+        result.spilled_groups += stage.spilled_groups;
+        result.source_nodes += stage.source_nodes;
+        result.created_parts += stage.created_parts;
+        result.reused_parts += stage.reused_parts;
+        result
+            .original_node_ids
+            .extend(stage.original_node_ids.iter().cloned());
+        if stage.summary_node_id.is_some() {
+            result.summary_node_id.clone_from(&stage.summary_node_id);
+            result.summary_usage.clone_from(&stage.summary_usage);
+        }
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn active_after_spill(
     control: &Arc<Control>,
     thread: &str,
@@ -713,6 +773,7 @@ async fn active_after_spill(
     remaining: Option<u64>,
     allow_summary: bool,
     stages: &mut Value,
+    committed: &mut Vec<crate::compaction::CompactResult>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let Some(need) = remaining else {
         return control
@@ -740,6 +801,7 @@ async fn active_after_spill(
             return Err(error);
         }
     };
+    committed.push(spill.clone());
     stages["active_spill"]["adopted_groups"] = json!(spill.spilled_groups);
     stages["active_spill"]["outcome"] = json!(if spill.no_target {
         "no_target"
@@ -778,6 +840,7 @@ async fn active_after_spill(
             return Err(error);
         }
     };
+    committed.push(summary.clone());
     stages["active_summary"]["outcome"] = json!(if summary.no_target {
         "no_target"
     } else {
@@ -819,6 +882,7 @@ async fn summarize_once(
     remaining: Option<u64>,
     shortfall: &mut Option<u64>,
     stages: &mut Value,
+    committed: &mut Vec<crate::compaction::CompactResult>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let compactor = &control.compactor;
     if !order.prefer_active && order.ordinary_new {
@@ -842,18 +906,28 @@ async fn summarize_once(
                 .summarize_unsummarized_prefix(thread, slot.stop.clone())
                 .await
         };
+        if let Ok(summary) = &prefix {
+            committed.push(summary.clone());
+        }
         stages["closed_summary"]["outcome"] = json!(match &prefix {
             Ok(r) if r.no_target => "no_target",
             Ok(_) => "adopted",
+            Err(_) if slot.stop.is_cancelled() => "cancelled",
             Err(_) => "rejected",
         });
+        // Do not replace a summary error with a later cancelled snapshot read.
+        if prefix.is_err() {
+            *midturn = json!({"skipped":"prefix_first"});
+            *scope = "prefix";
+            return prefix;
+        }
         let after = if remaining.is_some() {
             Some(compactor.proactive_history_characters(thread).await?)
         } else {
             None
         };
         let removed = before.zip(after).map(|(a, b)| a.saturating_sub(b));
-        stages["closed_summary"] = json!({"ran":true,"remaining_before":remaining,"remaining_after":remaining.zip(removed).map(|(n,r)|n.saturating_sub(r)),"removed_characters":removed,"projected_shortfall":*shortfall,"outcome":match &prefix { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) => "rejected" }});
+        stages["closed_summary"] = json!({"ran":true,"remaining_before":remaining,"remaining_after":remaining.zip(removed).map(|(n,r)|n.saturating_sub(r)),"removed_characters":removed,"projected_shortfall":*shortfall,"outcome":match &prefix { Ok(r) if r.no_target => "no_target", Ok(_) => "adopted", Err(_) if slot.stop.is_cancelled() => "cancelled", Err(_) => "rejected" }});
         if !matches!(&prefix, Ok(result) if result.no_target) {
             *midturn = json!({"skipped":"prefix_first"});
             *scope = "prefix";
@@ -864,8 +938,16 @@ async fn summarize_once(
         let remaining = stages["closed_summary"]["remaining_after"]
             .as_u64()
             .or(remaining);
-        let active =
-            active_after_spill(control, thread, slot, remaining, order.middle_new, stages).await;
+        let active = active_after_spill(
+            control,
+            thread,
+            slot,
+            remaining,
+            order.middle_new,
+            stages,
+            committed,
+        )
+        .await;
         if !matches!(&active, Ok(result) if result.no_target) {
             *midturn = json!({"scope":"active_turn"});
             *scope = "active_turn";

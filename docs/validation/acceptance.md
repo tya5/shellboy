@@ -1,5 +1,27 @@
 # Validation record
 
+## Partial-spill summary cancellation (#215 review follow-up)
+
+Added loopback-owner regressions for closed spill then cancelled summary and
+active spill then cancelled summary. Each stops only after a summary HTTP request
+proves the prior spill is selected, retaining the response until the cancellation
+record is durable. Assertions cover adopted outcome, summary rejection/cancellation,
+exact spill counts/source IDs against replacement provenance, unchanged selected
+spills, no adopted summary, durable guard/pending target, cleared in-flight witness
+and no request continuation before explicit resume. After resuming, a fresh
+100-token report verifies the saved 160-token target and consumes its pending key.
+The original HTTP cancellation stays `io_failed`, not a later stopping-snapshot
+error. No sleeps or deadlines were added or enlarged.
+On macOS through `rust-slot`, `cargo test --locked --test integration
+spill_then_cancelled_summary -- --nocapture` passes both regressions (2.26 s),
+`cargo check --locked --tests` passes, and the broader `proactive_` integration
+filter passes all 16 cases (3.16 s). Formatting, integration layout (105 suites
+registered once), language classification, record retention and diff checks pass.
+`cargo clippy --locked --all-targets -- -D warnings` also passes (43.40 s).
+Final same-tip default/three-OS CI results are reported with the follow-up SHA
+on #215. These fixtures do not validate live provider behavior or the separately reported storage and
+remeasurement failure paths.
+
 ## Startup timing CLI (#212; SemVer review follow-up in progress)
 
 Synthetic logs cover multiple launches, migration versions, app-version increase, rotation, missing stages, and malformed lines; the CLI subprocess verifies no owner is started, no database is created, and unrelated log fields are not emitted. The initial implementation and CI evidence are superseded for final acceptance by the follow-up below. W8 review identified that comparing only numeric core components missed `0.7.2-rc.1` -> `0.7.2`. The correction parses SemVer and compares precedence, including prerelease ordering; invalid app-version strings are omitted, and build metadata does not affect precedence. A synthetic regression input covers RC -> final (`true`), final -> RC (`false`), and `0.7.2+ci.1` -> `0.7.2+ci.2` (`false`). macOS via `rust-slot`: `cargo test --lib startup::tests --no-fail-fast` passed (15 passed, 0 failed). The first attempt exposed `Version::Ord` including build metadata; the correction uses `Version::cmp_precedence`. `cargo fmt --all -- --check`, the standalone CLI integration test (1 passed), `cargo clippy --locked --all-targets -- -D warnings`, integration layout (104 suites), `cargo check --locked --tests`, and `git diff --check` passed on the rebased branch. Default CI `41756884318` and all-OS CI `41758068617` both succeeded on source-code tip `3b3c2e3d2fbc5bc2a40244abda4ae086ae7ed643`. A documentation-only follow-up records those results; CI for its final tip is being run separately.

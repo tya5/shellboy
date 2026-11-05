@@ -1,5 +1,19 @@
 # Development status
 
+## Partial-spill summary cancellation (#215 review follow-up)
+
+An additive fix on top of the author tip preserves committed spill/source metadata
+when a later summary is cancelled. The attempt records adoption, summary rejection
+and cancellation, persists the usual guard and pending calibrated target, then
+returns the original cancellation error. Deterministic closed- and active-spill
+regressions hold the summary HTTP response pending while stopping the Run.
+On macOS through `rust-slot`, both cancellation regressions, all 16 proactive
+integration cases, `cargo check --locked --tests`, formatting and strict
+all-target Clippy pass. Exact-tip default/three-OS CI results are reported
+separately on #215; no live provider, installed binary or owner data is used.
+Storage-failure/remeasurement recovery is a separate
+unverified risk, not claimed fixed by this follow-up.
+
 ## Startup timing CLI (#212)
 
 Implemented read-only `shellboy startup [--last N]` over bounded owner diagnostics, with no owner startup or new storage/workers. W8 review found the SemVer prerelease comparison defect (`0.7.2-rc.1` to `0.7.2`); a follow-up now uses SemVer ordering and adds RC/final, reverse-direction, and build-metadata regression cases. On macOS via `rust-slot`, formatting, all 15 startup-related unit tests, the synthetic-log CLI integration test, strict all-target Clippy, `cargo check --locked --tests`, test-layout, and diff checks pass. Regression cases cover RC-to-final, reverse direction, and build metadata. Default CI `41756884318` and all-OS CI `41758068617` pass on source-code tip `3b3c2e3d2fbc5bc2a40244abda4ae086ae7ed643`; a later documentation-only validation note is being checked on its own final tip.

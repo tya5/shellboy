@@ -351,10 +351,14 @@ incomplete groups and protected nodes remain fenced. Spills commit before the
 summary request. If summary subsequently fails for a non-storage reason, an
 already committed spill is recorded as `adopted` with `summary_rejected: true`,
 the original summary error, its provider-reported summary usage and the spill
-counts. No spill plus summary failure remains `rejected`. Storage failures
-propagate; cancellation keeps its existing error behavior. Manual compact keeps
-its existing contract. Replay character reduction is not a guarantee of provider
-token reduction.
+counts. This includes cancellation of a following closed- or active-Turn summary:
+record `cancelled: true`, the cancelled summary stage and original summary error,
+while retaining the exact committed source IDs/counts. Save the partial-adoption
+guard and calibrated pending target for the next provider measurement before
+returning that original cancellation error; cancellation never means the prior
+spill was rolled back. No spill plus summary failure remains `rejected`. Storage
+failures propagate. Manual compact keeps its existing contract. Replay character
+reduction is not a guarantee of provider token reduction.
 
 Progress gate (#180): crossing the provider threshold, or verifying a #209
 target shortfall, is necessary but not sufficient. Before starting, a bounded read-only forecast applies the same

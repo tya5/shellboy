@@ -1,4 +1,5 @@
 //! Cross-service operation boundaries using a real owner and loopback proxy.
+use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use shellboy::{
     app::DataOwner,
@@ -3442,7 +3443,17 @@ async fn proactive_events(control: &Arc<Control>, thread: &str) -> Vec<Value> {
         .cloned()
         .collect()
 }
-async fn proactive_partial_spill_fixture(oversized: bool) {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_closed_spill_then_cancelled_summary_preserves_adoption() {
+    proactive_partial_spill_fixture(true, Some(false)).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_active_spill_then_cancelled_summary_preserves_adoption() {
+    proactive_partial_spill_fixture(true, Some(true)).await;
+}
+
+async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<bool>) {
     crate::test_watchdog::watchdog("proactive partial spill adoption", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
@@ -3454,7 +3465,7 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         let owner = proactive_owner(root.path(), &url, options).await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
-        for text in ["hi", "yo"] {
+        for text in ["hi", "yo"].into_iter().take(if cancel_active == Some(true) { 0 } else { 2 }) {
             send(&control, &target, text).await;
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
             settled(&control, &target).await;
@@ -3473,13 +3484,98 @@ async fn proactive_partial_spill_fixture(oversized: bool) {
         let before = incoming(&control, &mut receive).await;
         let before_size = before.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
         assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
-        // This fixture reports the threshold only on the final answer, so
-        // the next Turn observes the older closed-Turn spill candidates.
-        before.reply.send((200, tool_response(2, 100))).unwrap();
-        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
-        settled(&control, &target).await;
-        send(&control, &target, "next turn").await;
+        // Active cancellation triggers at this tool boundary; the other cases
+        // report the threshold on the final answer for a closed-Turn attempt.
+        before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { 100 }))).unwrap();
+        if cancel_active != Some(true) {
+            incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
+            settled(&control, &target).await;
+            send(&control, &target, "next turn").await;
+        }
         let summary = incoming(&control, &mut receive).await;
+        if let Some(active) = cancel_active {
+            assert_eq!(summary.body["tools"], json!([]), "cancel at the summary HTTP boundary, after spill commit");
+            let details = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await;
+            let run = details["run_id"].as_str().unwrap().to_owned();
+            let stage = if active { "active_spill" } else { "closed_spill" };
+            let summary_stage = if active { "active_summary" } else { "closed_summary" };
+            let path_target = target.clone();
+            let adopted_ids = control.store.database.call(move |db| {
+                Ok(db.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill' ORDER BY p.ordinal")?.query_map([path_target], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?)
+            }).await.unwrap();
+            assert_eq!(adopted_ids.len(), 2, "both older large groups are selected spills before cancelling summary");
+            request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
+            // Keep the HTTP response pending until the cancellation record is durable.
+            let record = loop {
+                let thread = target.clone();
+                let record = control.store.database.call(move |db| {
+                    Ok(db.query_row("SELECT a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1", [thread], |row| row.get::<_,String>(0)).optional()?)
+                }).await.unwrap();
+                if let Some(record) = record { break serde_json::from_str::<Value>(&record).unwrap()["automatic_trim_attempt"].clone(); }
+                tokio::task::yield_now().await;
+            };
+            assert_eq!(record["outcome"], "adopted", "{record:#?}");
+            assert_eq!(record["cancelled"], true);
+            assert_eq!(record["summary"]["summary_rejected"], true);
+            assert_eq!(record["summary_error"]["code"], "io_failed");
+            assert!(record["summary_error"]["message"].as_str().unwrap().to_lowercase().contains("cancel"));
+            assert_eq!(record["stages"][stage]["outcome"], "adopted");
+            assert_eq!(record["stages"][summary_stage]["outcome"], "cancelled");
+            assert_eq!(record["summary"]["spilled_groups"], adopted_ids.len());
+            assert_eq!(record["spill_counts"]["spilled"], adopted_ids.len());
+            assert_eq!(record["stages"][stage]["adopted_groups"], adopted_ids.len());
+            assert_eq!(record["summary"]["source_nodes"], record["summary"]["original_node_ids"].as_array().unwrap().len());
+            assert!(record["summary"]["source_nodes"].as_u64().unwrap() > 0);
+            let path_target = target.clone();
+            control.store.database.call(move |db| {
+                let path = db.prepare("SELECT n.id,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&path_target], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(path.iter().filter(|(_, kind)| kind == "spill").map(|(id, _)| id.clone()).collect::<Vec<_>>(), adopted_ids);
+                assert!(!path.iter().any(|(_, kind)| kind == "summary"));
+                let sources = db.prepare("SELECT s.source_node_id FROM thread_path p JOIN replacement r ON r.output_node_id=p.node_id JOIN replacement_source s ON s.replacement_id=r.id WHERE p.thread_id=?1 AND r.format_version='spill-v1' ORDER BY p.ordinal,s.ordinal")?.query_map([&path_target], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+                assert_eq!(record["summary"]["original_node_ids"], json!(sources), "audit provenance must match only the adopted spill sources");
+                for kind in ["automatic_target", "automatic_guard"] {
+                    let key = format!("compact.{kind}.{path_target}");
+                    let value: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
+                    let saved: Value = serde_json::from_str(&value).unwrap();
+                    assert!(saved.is_object());
+                    if kind == "automatic_target" {
+                        assert_eq!(saved["target_tokens"], 160);
+                        assert_eq!(saved["scope"], if active { "active_turn" } else { "prefix" });
+                        assert!(saved["verified"].is_null(), "retain verification for the next fresh provider report");
+                    }
+                }
+                let active: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [format!("compact.automatic_active.{path_target}")], |row| row.get(0))?;
+                assert_eq!(active, 0);
+                Ok(())
+            }).await.unwrap();
+            settled(&control, &target).await;
+            assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: run })).await["state"], "stopped");
+            let _ = summary.reply.send((200, answer("late cancelled summary")));
+            assert!(receive.try_recv().is_err(), "cancel must not continue to a conversation request");
+            send(&control, &target, "resume after cancelled summary").await;
+            let resumed = incoming(&control, &mut receive).await;
+            assert_ne!(resumed.body["tools"], json!([]), "no summary retry from stale pre-spill usage");
+            resumed.reply.send((200, answer_with_usage("fresh post-spill measurement", 100))).unwrap();
+            settled(&control, &target).await;
+            send(&control, &target, "verify partial adoption").await;
+            let verified = incoming(&control, &mut receive).await;
+            assert_ne!(verified.body["tools"], json!([]));
+            let path_target = target.clone();
+            control.store.database.call(move |db| {
+                let verification: String = db.query_row("SELECT json_extract(a.error_json,'$.automatic_trim_attempt.target_verification') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.cancelled')=1", [&path_target], |row| row.get(0))?;
+                let verification: Value = serde_json::from_str(&verification).unwrap();
+                assert_eq!(verification["outcome"], "met");
+                assert_eq!(verification["input_tokens"], 100);
+                assert_eq!(verification["target_tokens"], 160);
+                let pending: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [format!("compact.automatic_target.{path_target}")], |row| row.get(0))?;
+                assert_eq!(pending, 0, "the resumed fresh measurement consumed the saved target");
+                Ok(())
+            }).await.unwrap();
+            verified.reply.send((200, answer_with_usage("verified", 100))).unwrap();
+            settled(&control, &target).await;
+            control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+            return;
+        }
         if !oversized {
             assert_ne!(summary.body["tools"], json!([]), "spill alone meets the calibrated target; no summary request");
             let after_size = summary.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
@@ -3649,12 +3745,12 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
 
 #[tokio::test]
 async fn proactive_spill_alone_meets_calibrated_target() {
-    proactive_partial_spill_fixture(false).await;
+    proactive_partial_spill_fixture(false, None).await;
 }
 
 #[tokio::test]
 async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary() {
-    proactive_partial_spill_fixture(true).await;
+    proactive_partial_spill_fixture(true, None).await;
 }
 
 /// Two completed Turns (input 50 then `second`), then a third request. Returns
