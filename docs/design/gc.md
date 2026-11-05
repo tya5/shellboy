@@ -165,7 +165,7 @@ Threads' Turns, pins, receipts, attachment deliveries and unpruned consumers kee
 their effect, so shared originals survive. A job that already marked the nodes is
 conservative; the prune's own job reclaims them. Tombstones record
 `pruned_unreachable`. Replacement outputs, edges and `replacement_source` rows
-stay. Closure bound: 65,536 replacements or sources, else `input_limit`. Spills
+stay. Closure bound: 65,536 replacements or sources, checked while sources are read so an oversized prune fails early with `input_limit`. Messages with a receipt to a live Thread stay roots (rule 3); the result reports them as `kept_receipt_messages`, apart from the candidates. A hidden-marker re-summary also revalidates `state<>'pruned'` in its adoption transaction. Spills
 are included in the one rule. See [thread prune study](thread-prune-rewind-branches.md).
 
 ## Budget-resumable history GC (#225)

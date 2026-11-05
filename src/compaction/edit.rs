@@ -500,7 +500,10 @@ impl Compactor {
 }
 
 /// A summary whose originals were released by `thread prune` (#235) cannot be restored.
-fn ensure_not_pruned(db: &rusqlite::Connection, marker: &str) -> Result<(), StorageError> {
+pub(super) fn ensure_not_pruned(
+    db: &rusqlite::Connection,
+    marker: &str,
+) -> Result<(), StorageError> {
     let pruned: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM replacement WHERE output_node_id=?1 AND state='pruned')",
         [marker],

@@ -583,3 +583,57 @@ async fn command_prunes_the_caller_by_default_and_signals_the_existing_gc() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn messages_with_a_live_receipt_are_reported_apart_and_survive() {
+    let script = [
+        nodes(&[("a", "message"), ("msg", "message"), ("s1", "summary"), ("tail", "message")]),
+        path("live", &["s1", "tail"]),
+        replacement("r1", "s1", &["a", "msg"], &["live"]),
+        "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('rc','op','{\"kind\":\"human\"}','live','msg','applied','now');".to_string(),
+    ]
+    .concat();
+    let f = Fixture::new(Box::leak(script.into_boxed_str())).await;
+    let value = f.prune("tail", true).await.unwrap();
+    assert_eq!(value["source_nodes"], 1);
+    assert_eq!(value["kept_receipt_messages"], 1);
+    let expected =
+        f.db.call(|db| {
+            Ok(scalar(
+                db,
+                "SELECT octet_length(payload_json) FROM node WHERE id='a'",
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(value["candidate_payload_bytes"], expected);
+    f.prune("tail", false).await.unwrap();
+    f.collect().await;
+    assert_eq!(f.alive(&["a", "msg"]).await, [false, true]);
+}
+
+#[tokio::test]
+async fn closure_limit_trips_with_input_limit_and_writes_nothing() {
+    let script = "
+WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<65537)
+INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'm'||x,'turn','message','1900','{}',2 FROM n;
+INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('s1','turn','summary','1900','{}',2),('tail','turn','message','1900','{}',2);
+INSERT INTO thread_path VALUES('live',0,'s1'),('live',1,'tail');
+INSERT INTO replacement VALUES('r1','s1','k','1','1','completed','now');
+INSERT INTO thread_replacement VALUES('live','r1');
+WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<65537)
+INSERT INTO replacement_source SELECT 'r1',x,'m'||x,0,NULL FROM n;";
+    let f = Fixture::new(script).await;
+    let error = f.prune("tail", false).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::InputLimit);
+    f.db.call(|db| {
+        assert_eq!(
+            scalar(db, "SELECT count(*) FROM replacement WHERE state='pruned'")?,
+            0
+        );
+        assert_eq!(scalar(db, "SELECT count(*) FROM gc_job")?, 0);
+        Ok(())
+    })
+    .await
+    .unwrap();
+}

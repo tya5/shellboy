@@ -82,6 +82,8 @@ pub fn prune_thread(
     let mut chosen: Vec<Candidate> = Vec::new();
     let (mut shared_summaries, mut shared_spills) = (0u64, 0u64);
     let mut nested = false;
+    // source id -> (payload bytes, kept by a live receipt, on another live path)
+    let mut facts: HashMap<String, (u64, bool, bool)> = HashMap::new();
     while !level.is_empty() {
         level.retain(|(id, _, _)| visited.insert(id.clone()));
         if visited.len() > CLOSURE_LIMIT {
@@ -98,16 +100,32 @@ pub fn prune_thread(
                 }
                 continue;
             }
-            let mut sources = tx
-                .prepare_cached(
-                    "SELECT source_node_id FROM replacement_source WHERE replacement_id=?1",
-                )
-                .map_err(sql_error)?;
-            let sources = sources
-                .query_map([&id], |r| r.get::<_, String>(0))
-                .map_err(sql_error)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(sql_error)?;
+            // Facts and closure in one pass; the limit trips as sources arrive.
+            let rows = {
+                let mut statement = tx
+                    .prepare_cached("SELECT s.source_node_id,COALESCE(octet_length(n.payload_json),0),EXISTS(SELECT 1 FROM receipt rc JOIN thread rt ON rt.id=rc.target_thread_id WHERE rc.message_node_id=s.source_node_id AND rt.deleted_at IS NULL),EXISTS(SELECT 1 FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE p.node_id=s.source_node_id AND p.thread_id<>?2 AND t.deleted_at IS NULL) FROM replacement_source s JOIN node n ON n.id=s.source_node_id WHERE s.replacement_id=?1")
+                    .map_err(sql_error)?;
+                statement
+                    .query_map(params![id, thread], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, bool>(2)?,
+                            r.get::<_, bool>(3)?,
+                        ))
+                    })
+                    .map_err(sql_error)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(sql_error)?
+            };
+            let mut sources = Vec::with_capacity(rows.len());
+            for (source, bytes, receipt, elsewhere) in rows {
+                if facts.len() >= CLOSURE_LIMIT && !facts.contains_key(&source) {
+                    return Err(too_large());
+                }
+                facts.insert(source.clone(), (bytes.max(0) as u64, receipt, elsewhere));
+                sources.push(source);
+            }
             for source in sources {
                 // A source that is itself an adopted replacement output of this
                 // Thread (a nested summary) is part of the same closure.
@@ -129,32 +147,13 @@ pub fn prune_thread(
         level = next;
     }
 
-    // Facts about the covered sources (bounded by CLOSURE_LIMIT).
-    let mut sources: HashMap<String, (u64, bool)> = HashMap::new();
-    for candidate in &chosen {
-        let mut statement = tx
-            .prepare_cached("SELECT s.source_node_id,COALESCE(octet_length(n.payload_json),0),EXISTS(SELECT 1 FROM thread_path p JOIN thread t ON t.id=p.thread_id WHERE p.node_id=s.source_node_id AND p.thread_id<>?2 AND t.deleted_at IS NULL) FROM replacement_source s JOIN node n ON n.id=s.source_node_id WHERE s.replacement_id=?1")
-            .map_err(sql_error)?;
-        let rows = statement
-            .query_map(params![candidate.id, thread], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, bool>(2)?,
-                ))
-            })
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
-        for (id, bytes, elsewhere) in rows {
-            sources.insert(id, (bytes.max(0) as u64, elsewhere));
-            if sources.len() > CLOSURE_LIMIT {
-                return Err(too_large());
-            }
-        }
-    }
-    let payload_bytes: u64 = sources.values().map(|(bytes, _)| *bytes).sum();
-    let on_other_paths = sources.values().filter(|(_, elsewhere)| *elsewhere).count();
+    // A message with a receipt to a live Thread stays a root (rule 3): prune
+    // never releases it, so it is reported apart from the candidates.
+    let kept_receipt = facts.values().filter(|f| f.1).count();
+    let candidates = facts.values().filter(|f| !f.1);
+    let payload_bytes: u64 = candidates.clone().map(|f| f.0).sum();
+    let source_count = candidates.clone().count();
+    let on_other_paths = candidates.filter(|f| f.2).count();
     let summaries = chosen.iter().filter(|c| !c.spill).count();
     let spills = chosen.iter().filter(|c| c.spill).count();
     let nested_count = chosen.iter().filter(|c| c.nested).count();
@@ -200,7 +199,8 @@ pub fn prune_thread(
         "replacements": {"summaries": summaries, "spills": spills, "nested": nested_count},
         "shared_replacements_kept": {"summaries": shared_summaries, "spills": shared_spills},
         "already_pruned_replacements": already_pruned,
-        "source_nodes": sources.len(),
+        "source_nodes": source_count,
+        "kept_receipt_messages": kept_receipt,
         "source_nodes_on_other_live_paths": on_other_paths,
         "candidate_payload_bytes": payload_bytes,
         "reclaimable_bytes": null,

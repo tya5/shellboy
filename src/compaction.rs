@@ -1419,6 +1419,11 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
             )));
         }
     }
+    // A hidden-marker re-summary started before `thread prune` must not
+    // re-protect the originals the prune released (#235).
+    for marker in &s.extra_sources {
+        edit::ensure_not_pruned(tx, &marker.id)?;
+    }
     Ok(())
 }
 fn store_replacement(
