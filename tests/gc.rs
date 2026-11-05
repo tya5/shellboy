@@ -585,6 +585,40 @@ async fn summary_parts_count_toward_quota_and_explicitly_deleted_sources_invalid
 }
 
 #[tokio::test]
+async fn summary_parts_without_traceable_sources_are_collected_as_stale() {
+    let f = Fixture::new(Config::default()).await;
+    f.node("shared", None).await;
+    f.db.call(|db| {
+        db.execute_batch("INSERT INTO thread_path VALUES('live',0,'shared');")?;
+        db.execute(
+            "INSERT INTO app_meta VALUES('summary.part.traced',?1),('summary.part.empty',?2),('summary.part.missing',?3),('summary.part.invalid','not json')",
+            params![
+                serde_json::json!({"text":"t","sources":["shared"]}).to_string(),
+                serde_json::json!({"text":"t","sources":[]}).to_string(),
+                serde_json::json!({"text":"t"}).to_string()
+            ],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.job().await;
+    let result = f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    assert_eq!(result.summary_cache_parts_collected, 3);
+    f.db.call(|db| {
+        let kept: Vec<String> = db
+            .prepare("SELECT key FROM app_meta WHERE key LIKE 'summary.part.%'")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        assert_eq!(kept, vec!["summary.part.traced".to_string()]);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn pending_wait_metadata_counts_toward_logical_history_until_observer_release() {
     let f = Fixture::new(Config::default()).await;
     let before = f.gc.details().await.unwrap().status.logical_live_bytes;

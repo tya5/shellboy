@@ -22,6 +22,7 @@ raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内�
 
 成功済み要約partの `summary.part.*` 本文もlogical history bytesへ計上する。cacheは保持rootを追加しない。部分成功は参照元本文が有効な間は再利用用に保存し、明示削除GC後に一つでもsourceがtombstone/不存在になれば、そのexact入力版へ一致できないcacheを128件ずつ回収する。共有prefixが残っていても、一緒に生成された削除branch本文の派生cacheを永久保持しない。
 
+`sources` が無い・空・不正JSONの `summary.part.*` は元をたどれないcacheとして、同じ走査で古いものとして回収する（一度きりの移行は設けない。同じ入力のやり直しで作り直される）。統合段のpartは入力partの`sources`の順序つき和集合を保存するため、元会話の削除で回収される。
 要約要求のusage記録 `app_meta summary.usage.*`（#133）もlogical history bytesへ計上する。会話attemptのusageと同じく通算の事実として保持し、回収しない。
 
 未完了waitの `app_meta wait.pending.*` も保存byte数をlogical historyへ加算する。成立・取消しで解放し、前instance分はstartupで履歴metadata nodeへ移すため、以後は通常のnode payload accountingと到達可能性に従う。

@@ -1042,8 +1042,10 @@ const RAW_UNIT: NonZeroU32 = NonZeroU32::new(32).unwrap();
 
 /// One window of terminal executions in retention order (`shell_terminal_time`).
 const RAW_PAGE: &str = "SELECT s.id,s.state,s.ended_at,s.started_at,s.rowid,COALESCE(s.ended_at,s.started_at),EXISTS(SELECT 1 FROM app_meta WHERE key='raw_tombstone.'||s.id AND json_extract(value,'$.state')='deleting'),EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind='shell_output' AND resource_id=s.id),COALESCE((SELECT SUM(length(bytes)) FROM output_chunk WHERE execution_id=s.id),0) FROM shell_execution s INDEXED BY shell_terminal_time WHERE s.state IN ('exited','failed','stopped') AND COALESCE(s.ended_at,s.started_at)>=?1 AND (COALESCE(s.ended_at,s.started_at)>?1 OR s.rowid>?2) ORDER BY COALESCE(s.ended_at,s.started_at),s.rowid LIMIT ?3";
-/// One key-range page of summary parts with their staleness.
-const SUMMARY_PAGE: &str = "SELECT cache.key,length(CAST(cache.value AS BLOB)),EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(cache.value) THEN cache.value ELSE '{}' END,'$.sources') s LEFT JOIN node n ON n.id=s.value WHERE n.id IS NULL OR (n.payload_json IS NULL AND n.deleted_reason IS NOT NULL)) FROM app_meta cache WHERE cache.key>?1 AND cache.key<'summary.part/' ORDER BY cache.key LIMIT ?2";
+/// One key-range page of summary parts with their staleness. A part whose
+/// `sources` is missing, empty or invalid cannot be traced to a conversation
+/// and counts as stale; the same input rebuilds it on retry.
+const SUMMARY_PAGE: &str = "SELECT cache.key,length(CAST(cache.value AS BLOB)),COALESCE(json_array_length(CASE WHEN json_valid(cache.value) THEN cache.value ELSE '{}' END,'$.sources'),0)=0 OR EXISTS(SELECT 1 FROM json_each(CASE WHEN json_valid(cache.value) THEN cache.value ELSE '{}' END,'$.sources') s LEFT JOIN node n ON n.id=s.value WHERE n.id IS NULL OR (n.payload_json IS NULL AND n.deleted_reason IS NOT NULL)) FROM app_meta cache WHERE cache.key>?1 AND cache.key<'summary.part/' ORDER BY cache.key LIMIT ?2";
 /// One keyset page of payload-less/deleted nodes (`nodes_index_gc`) with
 /// whether each still owns index rows; ownership probes are seeks (#164).
 const INDEX_SOURCES_PAGE: &str = "SELECT n.id,EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id=n.id) OR EXISTS(SELECT 1 FROM embedding_chunk WHERE source_node_id=n.id) FROM node n INDEXED BY nodes_index_gc WHERE (n.payload_json IS NULL OR n.deleted_reason IS NOT NULL) AND n.id>?1 ORDER BY n.id LIMIT ?2";
