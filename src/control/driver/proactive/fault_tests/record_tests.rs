@@ -20,8 +20,42 @@ macro_rules! record_test {
 record_test!(record_after_storage_fault, Fault::Storage);
 record_test!(record_after_cancellation, Fault::Cancellation);
 record_test!(record_after_remeasurement_fault, Fault::Remeasurement);
-record_test!(record_after_cleanup_fault, Fault::Cleanup);
-record_test!(record_after_persistent_fault, Fault::Persistent);
+// The two longest faults run each boundary as its own test with its own watchdog.
+macro_rules! boundary_tests {
+    ($fault:expr, $closed_spill:ident, $closed_summary:ident, $active_spill:ident, $active_summary:ident) => {
+        boundary_test!($closed_spill, $fault, false, false);
+        boundary_test!($closed_summary, $fault, false, true);
+        boundary_test!($active_spill, $fault, true, false);
+        boundary_test!($active_summary, $fault, true, true);
+    };
+}
+macro_rules! boundary_test {
+    ($name:ident, $fault:expr, $active:expr, $summary:expr) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn $name() {
+            crate::test_watchdog::watchdog(
+                "automatic attempt record boundary",
+                record_boundary($fault, $active, $summary),
+            )
+            .await
+            .unwrap();
+        }
+    };
+}
+boundary_tests!(
+    Fault::Cleanup,
+    record_after_cleanup_fault_closed_spill,
+    record_after_cleanup_fault_closed_summary,
+    record_after_cleanup_fault_active_spill,
+    record_after_cleanup_fault_active_summary
+);
+boundary_tests!(
+    Fault::Persistent,
+    record_after_persistent_fault_closed_spill,
+    record_after_persistent_fault_closed_summary,
+    record_after_persistent_fault_active_spill,
+    record_after_persistent_fault_active_summary
+);
 record_test!(
     record_after_rejected_exception_write,
     Fault::RejectException
