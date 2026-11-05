@@ -2,62 +2,62 @@
   "src/presentation/messages.rs:0bff270c09be9c78:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Summary replacement/source counts; English singular and plural arms. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:0c8bd08fbeb8fe7a:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: CommandNotice background None; English Background request not recorded. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:2d85efb0da176a01:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: IndexPause; English Pause recorded at. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:2ee12a032677caa4:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SourceWindow live ASCII-width fallback; English live window singular/plural. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:389f767af5a90d85:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: RetryError refresh; English Refresh failed. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:3e7a697a9be63ac3:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Hint; English Action. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:62a142b415a31d33:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: IndexPause reason fallback; English Reason unavailable. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:64e9d98e1b8291cf:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Reasoning; English singular/plural Reasoning. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:66389b2695f5dccb:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Exit; English Exit. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:6a7b140150cb0e91:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Summary source count; English singular/plural source count. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:6fde8b967c304887:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: DetailCount; English singular/plural item. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:84d027ce84868593:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: WaitCount; English singular/plural wait condition. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/fields.rs:cf3c793ba104a057:1": {
     "category": "a",
@@ -92,67 +92,67 @@
   "src/presentation/messages.rs:850486352b42fc11:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SourceWindow original ASCII-width fallback; English original window singular/plural. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:a0cb0c2efd5aa53f:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SectionTitle; English Previous saved record. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:a11d38283bd0d638:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: IndexPause time fallback; English Time unavailable. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:a22a6d4826ea9101:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: RetryError output; English Output retrieval failed. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:a7cf2cdf54017602:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Source count; English singular/plural original count. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:ab5c381a330c4429:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: BodyOmitted; English singular/plural body/output characters. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:ac169d556eefae57:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: CommandNotice background false; English Background not requested. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:b057652dd4bf22f3:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: CommandNotice background true; English Background requested. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:d1df57e28c5bfa57:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: UnknownTitle; English Unsupported item. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:d52f11044f4b193b:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Reclaimed; English Original reclaimed. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:d6165bfb6d8626d0:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: SectionCount; English count. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:e90446cae41655cf:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: ThreadNotice; English Current name. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:ea4d36dfd460f0c0:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged. Re-reviewed after #157: Excerpt; English singular/plural output excerpt. Japanese fallback remains in the non-English arm; interpolated values remain opaque.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/events.rs:ada8b376f754ec68:1": {
     "category": "a",
@@ -4617,92 +4617,92 @@
   "src/presentation/messages.rs:66fbd21bcc455dfc:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:2a002cd4e0fc0802:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:a593f7ae5457885f:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:e9920c5843da5ff8:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:9bb038c004056f05:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:ebe02102c4b96aa9:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:3f255e7012ff2914:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:f0804e5148e3034f:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:3529ab2a1e9aad0f:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:579eefde6c08dfb9:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:3d2c1598a96cc94c:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:31f7b49353e52bb6:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:8d8a29066395dd13:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:80891c8af30ce09d:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:2042a39f0cac802f:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:fd0a0aeb0fb703ee:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:2de7a99234bd2781:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/presentation/messages.rs:73b5698667456f76:1": {
     "category": "a",
     "reason": "Reviewed Message::render Japanese branch: en is language == UiLanguage::En; this literal is in the !en/else or (false, ...) arm. English branches are separate; interpolated source values remain unchanged.",
-    "source_tokens_sha256": "2a4010ed7db418013b677556df1ca6ff00b1d478bbab83362b62f8447755ea54"
+    "source_tokens_sha256": "86ab4e5f0c65e20ad95fa6a68a99d4fa4bfd88b7dc722b296f849bc50e03954f"
   },
   "src/ui/db_activity.rs:498e42207efa6a79:1": {
     "category": "a",
@@ -6586,14 +6586,14 @@
   "src/ui/presentation.rs:7f044afa4082814f:1": {
     "category": "protected",
     "reason": "Internal empty tool-result marker; only generated empty-result blocks are suppressed, while source-exact output remains visible.",
-    "source_tokens_sha256": "d79a833bb86bfae5b98af553d4adef8408c69670629eab865f5c24875e2864cd",
+    "source_tokens_sha256": "441fe7c883ed1f6db70e77acb86a97cedc658a50ceccfa71fe93b6d3cdc5bb13",
     "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
     "projection_evidence": "The exact marker is skipped only in the tool-result block branch before plain/Markdown body display; tests verify non-empty source text is preserved."
   },
   "src/ui/presentation.rs:25b59e2e47cb2413:1": {
     "category": "protected",
     "reason": "Internal empty tool-result marker; only generated empty-result blocks are suppressed, while source-exact output remains visible.",
-    "source_tokens_sha256": "d79a833bb86bfae5b98af553d4adef8408c69670629eab865f5c24875e2864cd",
+    "source_tokens_sha256": "441fe7c883ed1f6db70e77acb86a97cedc658a50ceccfa71fe93b6d3cdc5bb13",
     "canonical_evidence": "Generated only when a tool-result envelope has no output; it is not copied from saved/provider text.",
     "projection_evidence": "The exact marker is skipped only in the tool-result block branch before plain/Markdown body display; tests verify non-empty source text is preserved."
   },
@@ -6701,5 +6701,150 @@
     "category": "a",
     "reason": "Added grouped-usage Japanese group label; group_label() selects the matching English section label by UI language without modifying canonical field keys or values.",
     "source_tokens_sha256": "4c5fabe6fbb6d1b7d72a149f0fdf73a0b6e3354b32651927e2b5e80f353c3a1d"
+  },
+  "src/presentation/compaction_marker.rs:678459f3e97eacfd:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:1781fd6c599be9e5:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:a7957186d0f8731a:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:5e4b2de5a8ad9731:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:242195375d75c73f:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:2ca78d832676e4ef:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:44bf1dc82cd99c6d:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:cae90a7d4c76e16c:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:e7921c55363d1dc8:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:7ff790be813dfc6c:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:2bffd9b7aa566f90:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:df9bb5f0e9b08f7a:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:a917ce99dc5561c8:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:0e19dfe33511df7e:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:4c40880973ea7246:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:4c8219c654052a13:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:aefc721cab6ef761:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:ce459424cefcb89a:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:2e7a8ea2fa03c7f9:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "70b66d6fd47625bec12a8a6d3489168a26e20f06f6105fa88a779cb44b8d0a1f"
+  },
+  "src/presentation/compaction_marker.rs:88ff7833bcd1895e:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:3073677ad71dd3b4:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:d8beb3bfed856f88:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:23e4f08a0e028d43:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:8b58f672db2dff1e:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:0e19dfe33511df7e:2": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:84cf9be32f4bd400:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:bd14361dcb3fce00:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:90a45d2554612b8f:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
+  },
+  "src/presentation/compaction_marker.rs:0bd9d6d1d4427000:1": {
+    "category": "a",
+    "reason": "Reviewed MarkerFacts::render Japanese branch (#230): the literal is in the !en arm or the explicit Ja side of a (language, value) match; the English text is the separate en arm of the same match. Interpolated values are saved counts formatted by compact_tokens and stay opaque.",
+    "source_tokens_sha256": "2daff40e22dc6aa59e4abd802090b626334abe2fda3fe1e1d3b9960cd2cc6874"
   }
 }
