@@ -680,6 +680,14 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
         transport["request_body_bytes"],
         transport["body_source_bytes_consumed"]
     );
+    let rate = completed_request
+        .as_object_mut()
+        .unwrap()
+        .remove("rate_observation")
+        .expect("successful attempt must retain rate observations");
+    assert_eq!(rate["status"], 200);
+    assert_eq!(rate["retry_after_present"], false);
+    assert_eq!(rate["applied_wait_ms"], 0);
     assert_eq!(
         completed_request, retried,
         "completion only adds transport observations; the sent request/attachment evidence is immutable"

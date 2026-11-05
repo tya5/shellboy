@@ -289,9 +289,14 @@ no latency guarantee or preemption is implied.
 Stage 1 records status, Retry-After presence and parsed duration, and actual
 wait in existing conversation attempt and summary usage records, without a new
 table. Observations use saved connection profile identity, not the currently
-selected profile; missing or interrupted facts remain unknown. The owner log
-uses bounded allowlisted metadata and may drop events under the existing logger's
-explicit backpressure policy. Legacy records have unknown coverage. Summary
+selected profile; missing or interrupted facts remain unknown. The authoritative
+record is the DB attempt or summary record, not the owner log: `usage get`
+counts are derived from those records. Each completed observation is persisted
+with its attempt or summary request; interrupted or legacy observations remain
+explicitly unknown rather than being represented as zero. The owner-log 429 event
+is best effort: the existing bounded non-blocking logger can drop it under
+contention or backpressure, and reports the number dropped in the `dropped`
+field of the next successfully written event. Legacy records have unknown coverage. Summary
 records are limited by the existing map/reduce budgets (at most 8,192 requests
 per compaction), with a 2 MiB read bound, and remain subject to the existing
 summary usage retention rules. A retry wait is initially unknown and becomes a

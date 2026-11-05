@@ -165,6 +165,13 @@ CLI `ok:true` means that the operation succeeded, not that a sent request has be
 
 If a connection drops and the result is uncertain, first query your saved `operation_id` with `shellboy operation get --operation OPERATION_ID`. After a post-send connection failure, even an automatically generated ID remains in the returned JSON's `operation_id` / `error.details.operation_id`. A missing receipt is not proof that the operation never executed. Do not unconditionally repeat the same side effect with a new operation ID; inspect the target's state and original text. get/list/search/preview/status do not persist receipts and observe again even with the same query ID. History semantic search may incur query-embedding cost again. Retain the original operation IDs of mutations and `wait` requests to correlate their results. See [Recovery](recovery-and-storage.md) and [CLI reference](cli-reference.md).
 
+Rate observations in `usage get` come from the authoritative saved attempt and
+summary records, not the owner log. Completed request observations are recorded
+in the DB; legacy or interrupted facts are unknown, not zero. The owner-log 429
+event is best effort: the bounded non-blocking logger may drop it under
+contention or backpressure, with the number dropped shown in the `dropped` field
+of the next event successfully written. Log absence is not evidence of no 429.
+
 To inspect your own saved usage, run `shellboy usage get`; add
 `--thread THREAD_ID --include-children` for a bounded conversation-family total.
 These are saved usage/duration facts, not a bill; unknown/unrecorded is not zero.
