@@ -37,6 +37,10 @@ pub struct GcService {
     /// The GC background requester: one outstanding unit (storage design #171).
     requester: Arc<Mutex<BackgroundRequester>>,
     raw_cursor: Arc<std::sync::Mutex<RawCursor>>,
+    history_batch: Arc<std::sync::Mutex<(String, usize)>>,
+    history_discovery: Arc<std::sync::Mutex<i64>>,
+    history_candidate: Arc<std::sync::Mutex<Option<String>>>,
+    history_keep: Arc<std::sync::Mutex<Option<String>>>,
     /// Round-robin position of dead-delivery/shell-event retention (#170).
     event_cursor: Arc<std::sync::Mutex<event_retention::Cursor>>,
     // One coalesced permit for the existing frontend; never raw data or a task.
@@ -103,6 +107,7 @@ pub struct HistoryStep {
     pub root_revision: i64,
     pub scanned: u64,
     pub nodes_tombstoned: u64,
+    pub kept_over_budget: u64,
     pub bytes_collected: u64,
     pub restarted: bool,
     pub complete: bool,
@@ -117,23 +122,41 @@ struct Progress {
     horizon: i64,
     revalidate_roots: bool,
     #[serde(default)]
+    retain_all: bool,
+    #[serde(default)]
     receipt_horizon: i64,
+    #[serde(default)]
+    job_horizon: i64,
+    #[serde(default)]
+    kept_count: u64,
+    #[serde(default)]
+    kept_receipts: u64,
+    #[serde(default)]
+    kept_marks: u64,
+    #[serde(default)]
+    kept_ids: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum Stage {
+    Reset,
     Receipts,
     Roots,
     Provenance,
     Sweep,
+    Cleanup,
+    Finish,
 }
 impl Stage {
     fn as_str(self) -> &'static str {
         match self {
+            Self::Reset => "reset",
             Self::Receipts => "receipts",
             Self::Roots => "roots",
             Self::Provenance => "provenance",
             Self::Sweep => "sweep",
+            Self::Cleanup => "cleanup",
+            Self::Finish => "finish",
         }
     }
 }
@@ -160,6 +183,10 @@ impl GcService {
         Self {
             requester: Arc::new(Mutex::new(BackgroundRequester::new(database.clone()))),
             raw_cursor: Arc::default(),
+            history_batch: Arc::new(std::sync::Mutex::new((String::new(), BATCH))),
+            history_discovery: Arc::default(),
+            history_candidate: Arc::default(),
+            history_keep: Arc::default(),
             event_cursor: Arc::default(),
             database,
             files: BlockingFiles::new(config.workers.control_file),
@@ -756,12 +783,21 @@ impl GcService {
         &self,
         requester: &mut BackgroundRequester,
     ) -> Result<Background<Option<String>>> {
+        let after = *self.history_discovery.lock().expect("history discovery");
         match requester
-            .unit(UNIT, |db, _| Ok(start_history(db)))
+            .unit(UNIT, move |db, _| Ok(start_history(db, after)))
             .await
             .map_err(crate::app::storage_error)?
         {
-            Background::Done(job) => Ok(Background::Done(job?)),
+            Background::Done(result) => {
+                let (job, cursor, more) = result?;
+                *self.history_discovery.lock().expect("history discovery") = cursor;
+                if more {
+                    Ok(Background::Deferred)
+                } else {
+                    Ok(Background::Done(job))
+                }
+            }
             Background::Deferred => Ok(Background::Deferred),
         }
     }
@@ -770,9 +806,22 @@ impl GcService {
         requester: &mut BackgroundRequester,
         job_id: &str,
     ) -> Result<HistoryStep> {
+        let batch = {
+            let mut state = self.history_batch.lock().expect("history batch");
+            if state.0 != job_id {
+                *state = (job_id.to_owned(), BATCH);
+                *self.history_keep.lock().expect("history keep") = None;
+            }
+            state.1
+        };
+        let candidate = self.history_candidate.clone();
+        *candidate.lock().expect("history candidate") = None;
+        let keep = self.history_keep.lock().expect("history keep").clone();
         let job = job_id.to_owned();
         let step = match requester
-            .unit(UNIT, move |db, _| Ok(history_step(db, &job)))
+            .unit(UNIT, move |db, _| {
+                Ok(history_step(db, &job, batch, &candidate, keep.as_deref()))
+            })
             .await
             .map_err(crate::app::storage_error)?
         {
@@ -782,12 +831,29 @@ impl GcService {
                 root_revision: 0,
                 scanned: 0,
                 nodes_tombstoned: 0,
+                kept_over_budget: 0,
                 bytes_collected: 0,
                 restarted: false,
                 complete: false,
                 deferred: true,
             },
         };
+        if step.deferred {
+            let mut state = self.history_batch.lock().expect("history batch");
+            state.1 = (batch / 2).max(1);
+            if batch == 1 {
+                if let Some(id) = self
+                    .history_candidate
+                    .lock()
+                    .expect("history candidate")
+                    .clone()
+                {
+                    *self.history_keep.lock().expect("history keep") = Some(id);
+                }
+            }
+        } else {
+            *self.history_keep.lock().expect("history keep") = None;
+        }
         if step.nodes_tombstoned > 0 {
             self.availability_changed.notify_one();
         }
@@ -927,7 +993,7 @@ fn raw_step(db: &mut Connection, execution: &str) -> Result<(u64, bool, bool)> {
 }
 
 fn work_tables(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TEMP TABLE IF NOT EXISTS shellboy_gc_session(job_id TEXT PRIMARY KEY); CREATE TEMP TABLE IF NOT EXISTS shellboy_gc_mark(job_id TEXT NOT NULL,node_id TEXT NOT NULL,expanded INTEGER NOT NULL DEFAULT 0,next_source_rowid INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(job_id,node_id)); CREATE INDEX IF NOT EXISTS temp.shellboy_gc_unexpanded ON shellboy_gc_mark(job_id,expanded,node_id);").map_err(sql_error)
+    db.execute_batch("CREATE TEMP TABLE IF NOT EXISTS shellboy_gc_session(job_id TEXT PRIMARY KEY); CREATE TEMP TABLE IF NOT EXISTS shellboy_gc_mark(job_id TEXT NOT NULL,node_id TEXT NOT NULL,expanded INTEGER NOT NULL DEFAULT 0,next_source_rowid INTEGER NOT NULL DEFAULT 0,next_replacement_rowid INTEGER NOT NULL DEFAULT 0,next_ordinal INTEGER NOT NULL DEFAULT -1,PRIMARY KEY(job_id,node_id)); CREATE INDEX IF NOT EXISTS temp.shellboy_gc_unexpanded ON shellboy_gc_mark(job_id,expanded,node_id);").map_err(sql_error)
 }
 fn revision(db: &Connection) -> Result<i64> {
     let value: String = db
@@ -942,8 +1008,6 @@ fn revision(db: &Connection) -> Result<i64> {
         .map_err(|_| error("root revision metadata is malformed"))
 }
 fn reset(tx: &Transaction<'_>, job: &str, root: i64) -> Result<()> {
-    tx.execute("DELETE FROM shellboy_gc_mark WHERE job_id=?1", [job])
-        .map_err(sql_error)?;
     tx.execute(
         "INSERT OR IGNORE INTO shellboy_gc_session VALUES(?1)",
         [job],
@@ -954,12 +1018,34 @@ fn reset(tx: &Transaction<'_>, job: &str, root: i64) -> Result<()> {
             row.get(0)
         })
         .map_err(sql_error)?;
-    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Receipts,last_rowid:0,horizon,revalidate_roots:false,receipt_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt",[],|r|r.get(0)).map_err(sql_error)?}).unwrap()]).map_err(sql_error)?;
+    tx.execute("UPDATE gc_job SET root_revision=?2,cursor_json=?3,state='running',error_json=NULL WHERE id=?1",params![job,root,serde_json::to_string(&Progress{stage:Stage::Reset,last_rowid:0,horizon,revalidate_roots:false,retain_all:false,kept_count:0,kept_receipts:0,kept_marks:0,kept_ids:Vec::new(),job_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM gc_job",[],|r|r.get(0)).map_err(sql_error)?,receipt_horizon:tx.query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt",[],|r|r.get(0)).map_err(sql_error)?}).unwrap()]).map_err(sql_error)?;
     Ok(())
 }
-fn start_history(db: &mut Connection) -> Result<Option<String>> {
+fn start_history(db: &mut Connection, after: i64) -> Result<(Option<String>, i64, bool)> {
     work_tables(db)?;
-    let job:Option<String>=db.query_row("SELECT id FROM gc_job WHERE kind='history' AND state IN ('pending','running') ORDER BY rowid LIMIT 1",[],|row|row.get(0)).optional().map_err(sql_error)?;
+    let rows = db
+        .prepare("SELECT rowid,id,kind,state FROM gc_job WHERE rowid>?1 ORDER BY rowid LIMIT ?2")
+        .map_err(sql_error)?
+        .query_map(params![after, BATCH as i64], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(sql_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(sql_error)?;
+    let found = rows.iter().find(|(_, _, kind, state)| {
+        kind == "history" && (state == "pending" || state == "running")
+    });
+    let next = found.map_or_else(
+        || rows.last().map_or(0, |row| row.0),
+        |row| row.0.saturating_sub(1),
+    );
+    let more = found.is_none() && rows.len() == BATCH;
+    let job = found.map(|row| row.1.clone());
     if let Some(job) = &job {
         let tx = db.transaction().map_err(sql_error)?;
         let cursor: Option<String> = tx.query_row(
@@ -975,7 +1061,7 @@ fn start_history(db: &mut Connection) -> Result<Option<String>> {
         }
         tx.commit().map_err(sql_error)?;
     }
-    Ok(job)
+    Ok((job, if more || found.is_some() { next } else { 0 }, more))
 }
 use crate::history::reachability::ROOT_PREDICATE;
 
