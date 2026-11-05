@@ -1426,3 +1426,59 @@ async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
         "complete={complete}, deferred={deferred}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('root','turn','user','now','{}',2)", [])?;
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) SELECT 'retained-'||i,'user','now','{}',2 FROM n", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let setup_deadline = crate::test_watchdog::Deadline::new("history GC provenance setup");
+    while f.gc.history_step(&job).await.unwrap().stage != "provenance" {
+        setup_deadline.check();
+    }
+    f.db.call(|db| {
+        db.execute("UPDATE gc_job SET cursor_json=json_set(cursor_json,'$.kept_count',1,'$.kept_ids',json_array('root')) WHERE id='job'", [])?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_expansion BEFORE UPDATE OF expanded ON shellboy_gc_mark WHEN OLD.node_id='root' BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        Ok(())
+    }).await.unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let deadline = crate::test_watchdog::Deadline::new("history GC full retention fallback");
+    let (mut deferred, mut complete) = (0, false);
+    while !deadline.expired() {
+        let step = f.gc.history_step(&job).await.unwrap();
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE payload_json IS NOT NULL")?, 501);
+        assert_eq!(scalar(db, "SELECT CAST(json_extract(error_json,'$.kept_over_budget') AS INTEGER) FROM gc_job WHERE id='job'")?, 501);
+        assert_eq!(scalar(db, "SELECT COUNT(*)=COUNT(DISTINCT value) AND COUNT(*)=8 FROM gc_job,json_each(error_json,'$.kept_ids') WHERE gc_job.id='job'")?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+    assert!(
+        complete && deferred > 0,
+        "complete={complete}, deferred={deferred}"
+    );
+}
