@@ -527,7 +527,15 @@ and retained replacements, newest first. Automatic records carry `reason`:
 `failure` (failure-driven reduction) or `proactive_threshold` (#125, with
 `trigger.auto_at_tokens` and the reported `trigger.input_tokens`). Replacement creation is the timestamp
 when available; otherwise operation completion or attempt end/start is identified
-by timestamp_basis. Each summarizing event has `metrics.summary_usage`:
+by timestamp_basis. Each adopted summary event (manual or automatic) also has
+`post_compaction_input_tokens` and `post_compaction_attempt_id` (#230): the
+provider-reported input tokens of the first model request of the Thread that
+started after the adoption, and that request's ID. Both are read from saved
+attempts, not stored; the tokens are `null` while that request has no reported
+input (not yet finished, failed, or not reported by the provider) and both are
+`null` before any later request exists. Never estimated. Compare it with
+`trigger.input_tokens` and `trigger.auto_at_tokens` (automatic events) to see
+the effect of a compaction setting. Each summarizing event has `metrics.summary_usage`:
 `requests`, `map_requests`, `reduce_requests` and `input_tokens`,
 `cached_tokens`, `cache_creation_tokens`, `output_tokens` as
 `{known_sum, unknown_count, overflow}` (provider-reported only; `requests: 0`

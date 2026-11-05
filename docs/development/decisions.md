@@ -3508,3 +3508,16 @@ earlier batches ran serially; those in flight still finish and are cached.
 Unverified: behaviour against a real provider, in particular a provider with a
 low concurrency quota (the first 429 queues the rest in the gate, the probe
 releases them). Revisit if measured 429s per summary increase.
+
+## D-230-1: Post-compaction input is derived at read time (2026-11-06)
+
+Decision: the link from an adopted summary to the input tokens of the next model
+request is computed when `compact list` is read, from the saved replacement
+`created_at` and the Thread's attempts (`usage_json`), not stored. Reason: both
+facts are already saved and retained for the same lifetime; an index-ordered
+lookup ends at the first match, so the read is bounded by one seek per retained
+replacement row. Storing would add a write after the next request and a race with
+cancellation and late arrival. Impact: no table, column, event or worker. Limit:
+ordering rests on timestamp string comparison like `next_request_pending`; a
+clock step backwards could pair the wrong attempt. Revisit if a measured read
+cost or timestamp anomaly appears.

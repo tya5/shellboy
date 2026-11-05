@@ -245,6 +245,8 @@ contract in [compaction](compaction.md).
 `compact list --thread T [--since TIME --until TIME] [--limit N]` reads saved
 compaction operations, automatic-failure observations and retained replacements,
 newest first. Unknown legacy metrics remain null and retention gaps are explicit.
+Adopted summaries add `post_compaction_input_tokens` / `post_compaction_attempt_id`
+(#230), derived at read time ([compaction](compaction.md#post-compaction-input-230)).
 `thread get` includes its latest retained compaction observation.
 
 `usage get` accepts a half-open RFC3339 interval [since,until), selecting model

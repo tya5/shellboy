@@ -1087,3 +1087,22 @@ earlier target. A rejected stage fact leaves the epoch, replacements and path
 as they were. Two direct tests drive the uncalibrated active-Turn summary and
 the late prefix summary through a real history with the fault checkpoint. A
 database unit test covers witness removal on Thread deletion.
+
+## Post-compaction input (#230)
+
+`compact list` shows, for each adopted summary (automatic or manual), the
+provider-reported input tokens of the first model request of the Thread that
+started after the replacement's `created_at`, as `post_compaction_input_tokens`
+with that request's `post_compaction_attempt_id`. Both are null when no later
+request exists; the tokens are also null when that request has no reported input
+(unfinished, failed, unreported). The first request is used even if it failed:
+the next request's value would describe a different context. Nothing is
+estimated. The parameters in effect stay on the event (`trigger.auto_at_tokens`,
+`trigger.input_tokens`).
+
+Derivation is read-time and stores nothing: `turns_by_thread_end` walks the
+Thread's Turns by `ended_at >= adoption` in order and `attempts_by_turn` finds the
+first attempt after the adoption, so the first match ends the scan; an open Turn
+is the fallback. One such lookup runs per retained replacement row (at most the
+page candidate cap; 5 for the latest-compaction display). Failed or rejected
+proactive attempts have no replacement and show null.

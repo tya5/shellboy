@@ -196,6 +196,12 @@ This reports provider usage, not cost.
 Use `compact list --thread THREAD_ID --limit 20` for retained compaction facts
 and `thread get` for the latest observation. Failed/no-target records do not prove
 input changed; missing legacy metrics/collected history stay unknown.
+To tune compaction cost, observe -> change a setting -> re-measure: each adopted
+summary in `compact list` carries `post_compaction_input_tokens` (provider-
+reported input of the first later request, `null` if unknown), next to
+`trigger.auto_at_tokens` / `trigger.input_tokens` and `metrics.summary_usage`
+(summary request cost). Compare before/after across events, and revert a
+setting that did not help. Null means unknown, not zero.
 Use `shell list --command-contains TEXT --limit 50` across conversations, adding
 `--thread`, time, state or exit-code filters as needed. Follow next_cursor even on
 an empty filtered page until it is absent. Keep filters unchanged and restart the

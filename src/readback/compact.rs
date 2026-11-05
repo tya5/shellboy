@@ -1,4 +1,5 @@
 use super::*;
+use rusqlite::OptionalExtension;
 use std::collections::BTreeMap;
 mod bounded;
 pub(super) use bounded::read_display;
@@ -195,6 +196,8 @@ pub(crate) struct RawCompactions {
     automatic: Vec<AutomaticRow>,
     replacements: Vec<ReplacementRow>,
     covered_spills: std::collections::HashSet<String>,
+    /// Replacement ID -> first model request started after that adoption (#230).
+    post_input: std::collections::HashMap<String, PostInput>,
     display_latest_complete: Option<bool>,
 }
 struct ReceiptRow {
@@ -217,6 +220,53 @@ struct AutomaticRow {
     failures: Option<i64>,
     reason: Option<String>,
     trigger: Option<String>,
+}
+struct PostInput {
+    attempt_id: String,
+    input_tokens: Option<u64>,
+}
+/// The first model request of the Thread that started after the replacement was
+/// adopted, read from saved attempts (no stored link). Turns are walked in
+/// `ended_at` order so the first match ends the scan; an open Turn is the
+/// fallback. Input tokens are the provider-reported value or None, never an
+/// estimate.
+fn post_adoption_input(
+    db: &Connection,
+    thread: &str,
+    adopted_at: &str,
+) -> Result<Option<PostInput>, crate::storage::StorageError> {
+    let projection = crate::usage::sql_projection("a.usage_json");
+    let ended = format!("SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1");
+    let open = format!("SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY a.started_at,a.rowid LIMIT 1");
+    for sql in [ended, open] {
+        let found = db
+            .query_row(&sql, params![thread, adopted_at], |row| {
+                Ok(PostInput {
+                    attempt_id: row.get(0)?,
+                    input_tokens: crate::usage::StandardUsage::read(row, 1)?.input_tokens,
+                })
+            })
+            .optional()?;
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    Ok(None)
+}
+fn post_inputs(
+    db: &Connection,
+    thread: &str,
+    replacements: &[ReplacementRow],
+) -> Result<std::collections::HashMap<String, PostInput>, crate::storage::StorageError> {
+    let mut found = std::collections::HashMap::new();
+    for row in replacements {
+        if row.format != "spill-v1"
+            && let Some(input) = post_adoption_input(db, thread, &row.at)?
+        {
+            found.insert(row.id.clone(), input);
+        }
+    }
+    Ok(found)
 }
 struct ReplacementRow {
     id: String,
@@ -383,6 +433,7 @@ pub(super) fn collect_tx(
             raw: budget.text(row, 3, true)?,
         });
     }
+    let post_input = post_inputs(db, thread, &replacements)?;
     let saturated = included_receipts == cap || automatic.len() == cap || replacements.len() == cap;
     Ok(RawCompactions {
         thread: thread.into(),
@@ -394,6 +445,7 @@ pub(super) fn collect_tx(
         automatic,
         replacements,
         covered_spills,
+        post_input,
         display_latest_complete: None,
     })
 }
@@ -408,6 +460,7 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
         automatic,
         replacements,
         covered_spills,
+        post_input,
         display_latest_complete,
     } = raw;
     let mut events = BTreeMap::new();
@@ -481,6 +534,17 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
         );
     }
     let mut items = events.into_values().collect::<Vec<_>>();
+    // #230: adopted summaries link to the provider-reported input of the next
+    // request. Null means not yet known or not reported, never an estimate.
+    for item in &mut items {
+        if !matches!(item["kind"].as_str(), Some("summary" | "automatic_reduction" | "compact")) {
+            continue;
+        }
+        let node = item["metrics"]["summary_node_id"].as_str().or(item["event_id"].as_str());
+        let found = node.and_then(|id| post_input.get(id));
+        item["post_compaction_attempt_id"] = json!(found.map(|f| f.attempt_id.as_str()));
+        item["post_compaction_input_tokens"] = json!(found.and_then(|f| f.input_tokens));
+    }
     items.sort_by(|a, b| {
         let ak = crate::usage_totals::start_key(a["at"].as_str());
         let bk = crate::usage_totals::start_key(b["at"].as_str());
