@@ -129,6 +129,7 @@ impl HttpModelClient {
         (admission, elapsed): (RateAdmission, u64),
     ) -> Result<ModelResponse, AttemptFailure> {
         let mut result = match &admission {
+            _ if cancel.is_cancelled() => Err(cancelled().into()),
             RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             RateAdmission::Lease(_) => {
                 self.response_inner(request, cancel, events, thread, None)
@@ -751,4 +752,42 @@ pub(super) fn parse_retry_after(value: &str) -> Option<std::time::Duration> {
                 .to_std()
                 .unwrap_or_default()
         })
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use crate::model::usage_limit::{LimitKind, UsageLimit};
+
+    #[tokio::test]
+    async fn cancelled_request_wins_over_captured_local_quota_without_sending() {
+        let client = HttpModelClient::for_connection(
+            "fixture",
+            Connection {
+                base_url: "http://127.0.0.1:9/v1".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let fact = UsageLimit {
+            kind: LimitKind::UsageLimitReached,
+            resets_at: 4_000_000_000,
+            limit_window_minutes: None,
+            locally_blocked: true,
+        };
+        let error = client
+            .response_with_admission(
+                json!({}),
+                cancel,
+                None,
+                None,
+                (RateAdmission::QuotaBlocked(fact), 0),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.error.kind, "cancelled");
+        assert!(error.facts.status.is_none());
+    }
 }

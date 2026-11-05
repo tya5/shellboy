@@ -808,6 +808,11 @@ impl Compactor {
         (admission, elapsed): (crate::model::http::RateAdmission, u64),
     ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
         let mut response = match &admission {
+            _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
+                "cancelled",
+                "Model request was cancelled",
+            )
+            .into()),
             crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             crate::model::http::RateAdmission::Lease(_) => {
                 client
