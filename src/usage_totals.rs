@@ -420,14 +420,99 @@ fn compaction_usage(
     }
     Ok(value)
 }
+#[derive(Default, Serialize)]
+struct RateCounts {
+    http_429: u64,
+    http_5xx: u64,
+    status_unknown: u64,
+    applied_wait_ms: u64,
+    wait_unknown: u64,
+    overflow: bool,
+}
+impl RateCounts {
+    fn add(&mut self, status: Option<u64>, wait: Option<u64>) {
+        match status {
+            Some(429) => self.http_429 = self.http_429.saturating_add(1),
+            Some(500..=599) => self.http_5xx = self.http_5xx.saturating_add(1),
+            None => self.status_unknown = self.status_unknown.saturating_add(1),
+            _ => {}
+        }
+        if let Some(wait) = wait {
+            let (total, overflow) = self.applied_wait_ms.overflowing_add(wait);
+            self.overflow |= overflow;
+            self.applied_wait_ms = if overflow { u64::MAX } else { total };
+        } else {
+            self.wait_unknown = self.wait_unknown.saturating_add(1);
+        }
+    }
+}
+fn connection_rates(db: &Connection, scope: &Scope, s: &Selection) -> rusqlite::Result<Value> {
+    let mut counts = BTreeMap::<String, RateCounts>::new();
+    let sql = format!(
+        "SELECT a.profile_id,CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.status')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.status'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.status') END,CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.applied_wait_ms')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms') END FROM model_attempt a INDEXED BY attempts_by_turn WHERE a.turn_id IN ({}) AND {}",
+        turn_source(s),
+        s.window.sql("a.started_at")
+    );
+    let mut statement = db.prepare(&sql)?;
+    let mut rows = statement.query([&s.parameter])?;
+    while let Some(row) = rows.next()? {
+        let profile: String = row.get(0)?;
+        let status: Option<i64> = row.get(1)?;
+        let wait: Option<i64> = row.get(2)?;
+        counts.entry(profile).or_default().add(
+            status.and_then(|v| u64::try_from(v).ok()),
+            wait.and_then(|v| u64::try_from(v).ok()),
+        );
+    }
+    let threads = serde_json::to_string(&s.threads).expect("IDs serialize");
+    let mut statement = db.prepare(COMPACTION_USAGE_SQL)?;
+    let mut rows = statement.query(params![
+        threads,
+        crate::compaction::SUMMARY_USAGE_PREFIX,
+        crate::compaction::SUMMARY_USAGE_MAX_BYTES
+    ])?;
+    while let Some(row) = rows.next()? {
+        let thread: String = row.get(0)?;
+        let body: String = row.get(1)?;
+        let Ok(record) = serde_json::from_str::<crate::compaction::SummaryUsageRecord>(&body)
+        else {
+            continue;
+        };
+        let selected = record.thread_id == thread
+            && match scope {
+                Scope::Turn(id) => record.turn_id.as_ref() == Some(id),
+                Scope::Run(id) => record.run_id.as_ref() == Some(id),
+                Scope::Thread { .. } => true,
+            }
+            && s.window.includes(Some(&record.started_at));
+        if !selected {
+            continue;
+        }
+        let entry = counts.entry(record.profile_id).or_default();
+        let observed = (record.rate_observations.len() as u64).min(record.usage.requests);
+        for fact in record.rate_observations.into_iter().take(observed as usize) {
+            entry.add(
+                fact.get("status").and_then(Value::as_u64),
+                fact.get("applied_wait_ms").and_then(Value::as_u64),
+            );
+        }
+        let unknown = record.usage.requests.saturating_sub(observed);
+        entry.status_unknown = entry.status_unknown.saturating_add(unknown);
+        entry.wait_unknown = entry.wait_unknown.saturating_add(unknown);
+    }
+    Ok(
+        json!({"by_connection":counts,"coverage":"recorded_observations; missing or interrupted facts are unknown"}),
+    )
+}
 fn inspect(db: &Connection, scope: &Scope, trace: &mut Trace) -> Result<Value, ApiError> {
-    inspect_period(db, scope, trace, &Default::default())
+    inspect_period(db, scope, trace, &Default::default(), false)
 }
 fn inspect_period(
     db: &Connection,
     scope: &Scope,
     trace: &mut Trace,
     window: &crate::readback::Window,
+    include_connection_rates: bool,
 ) -> Result<Value, ApiError> {
     register(db).map_err(error)?;
     let mut s = selection(db, scope, trace)?;
@@ -529,6 +614,11 @@ fn inspect_period(
         None
     };
     let compaction = compaction_usage(db, scope, &s, trace).map_err(error)?;
+    let connection_rates = if include_connection_rates {
+        Some(connection_rates(db, scope, &s).map_err(error)?)
+    } else {
+        None
+    };
     let scope_id = match scope {
         Scope::Turn(id) | Scope::Run(id) | Scope::Thread { id, .. } => id,
     };
@@ -544,9 +634,11 @@ fn inspect_period(
     } else {
         None
     };
-    Ok(
-        json!({"scope":s.kind,"scope_id":scope_id,"thread_id":s.threads.first(),"include_children":matches!(scope,Scope::Thread{children:true,..}),"turn_lifetime_ms":own_turn_lifetime,"attempt_period":{"first_known_started_at":start_value(first),"last_known_started_at":start_value(last),"unknown_start_count":unknown_starts},"selected_threads":s.threads.len(),"coverage":{"scope_complete":s.complete,"descendants":if s.complete{"complete"}else{"thread_limit"},"summary":"recorded","embedding":"out_of_scope","rag":"out_of_scope","excluded_attempt_states":["cancelled"]},"model_attempts":attempts,"compaction":compaction,"model_duration_ms":total_model_time,"run":run,"shell":shell,"active":{"observed_at":active_observed,"model_attempts":active,"run":active_run,"shell":active_shell}}),
-    )
+    let mut result = json!({"scope":s.kind,"scope_id":scope_id,"thread_id":s.threads.first(),"include_children":matches!(scope,Scope::Thread{children:true,..}),"turn_lifetime_ms":own_turn_lifetime,"attempt_period":{"first_known_started_at":start_value(first),"last_known_started_at":start_value(last),"unknown_start_count":unknown_starts},"selected_threads":s.threads.len(),"coverage":{"scope_complete":s.complete,"descendants":if s.complete{"complete"}else{"thread_limit"},"summary":"recorded","embedding":"out_of_scope","rag":"out_of_scope","excluded_attempt_states":["cancelled"]},"model_attempts":attempts,"compaction":compaction,"model_duration_ms":total_model_time,"run":run,"shell":shell,"active":{"observed_at":active_observed,"model_attempts":active,"run":active_run,"shell":active_shell}});
+    if let Some(rates) = connection_rates {
+        result["connection_rates"] = rates;
+    }
+    Ok(result)
 }
 
 /// One saved snapshot on the owner DB worker; no provider calls, writes or receipt.
@@ -575,9 +667,9 @@ fn logged(
         Some(w) => {
             if db.is_autocommit() {
                 let tx = db.unchecked_transaction().map_err(error)?;
-                inspect_period(&tx, scope, &mut Trace::default(), w)
+                inspect_period(&tx, scope, &mut Trace::default(), w, true)
             } else {
-                inspect_period(db, scope, &mut Trace::default(), w)
+                inspect_period(db, scope, &mut Trace::default(), w, true)
             }
         }
         None => read(db, scope),

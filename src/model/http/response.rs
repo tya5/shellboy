@@ -20,6 +20,7 @@ pub struct ResponseFacts {
     pub received: ResponseReceived,
     pub status: Option<u16>,
     pub retry_after: Option<std::time::Duration>,
+    pub retry_after_present: bool,
     /// A terminal SSE event or a fully parsed JSON response document arrived.
     /// Validation failure after that boundary is distinct from interrupted transport.
     pub terminal_received: bool,
@@ -27,6 +28,10 @@ pub struct ResponseFacts {
     pub http_observation: Option<HttpObservation>,
 }
 impl ResponseFacts {
+    pub(crate) fn rate_metadata(self) -> Value {
+        json!({"status": self.status, "retry_after_present": self.status.map(|_| self.retry_after_present),
+            "retry_after_ms": self.retry_after.map(|d| d.as_millis().min(u64::MAX as u128) as u64)})
+    }
     fn observe_stream(&mut self, parsed: &ResponseStream) {
         if parsed.has_output() {
             self.received = ResponseReceived::Output;
@@ -158,38 +163,43 @@ impl HttpModelClient {
         {
             self.clear_usage_limit_if(expected);
         }
-        result.map_err(|mut failure| {
-            if let Some(fact) = failure.error.usage_limit.as_deref().copied() {
-                self.remember_usage_limit(fact);
-            }
-            if let Some(raw) = &mut failure.raw_response {
-                crate::usage::normalize_response(raw);
-                crate::model::cache_diagnostics::normalize_response(raw);
-            }
-            if let Some(observation) = facts
-                .http_observation
-                .or_else(|| failure.error.http_observation.as_deref().copied())
-            {
-                if failure.error.http_observation.is_none() {
-                    // A complete provider/protocol failure is not stalled
-                    // reception. Keep its original message while attaching
-                    // transport facts independently.
-                    if matches!(failure.error.kind.as_str(), "timeout" | "transport")
-                        || (failure.error.kind == "incomplete" && !facts.terminal_received)
-                    {
-                        failure.error.message.push_str("; ");
-                        failure.error.message.push_str(observation.hint());
+        result
+            .map(|mut response| {
+                response.response_facts = facts;
+                response
+            })
+            .map_err(|mut failure| {
+                if let Some(fact) = failure.error.usage_limit.as_deref().copied() {
+                    self.remember_usage_limit(fact);
+                }
+                if let Some(raw) = &mut failure.raw_response {
+                    crate::usage::normalize_response(raw);
+                    crate::model::cache_diagnostics::normalize_response(raw);
+                }
+                if let Some(observation) = facts
+                    .http_observation
+                    .or_else(|| failure.error.http_observation.as_deref().copied())
+                {
+                    if failure.error.http_observation.is_none() {
+                        // A complete provider/protocol failure is not stalled
+                        // reception. Keep its original message while attaching
+                        // transport facts independently.
+                        if matches!(failure.error.kind.as_str(), "timeout" | "transport")
+                            || (failure.error.kind == "incomplete" && !facts.terminal_received)
+                        {
+                            failure.error.message.push_str("; ");
+                            failure.error.message.push_str(observation.hint());
+                        }
+                        failure.error.http_observation = Some(Box::new(observation));
                     }
-                    failure.error.http_observation = Some(Box::new(observation));
+                    facts.http_observation = Some(observation);
+                    if Self::retires_response_pool(&failure.error, facts.terminal_received) {
+                        self.retire_pool(observation.pool_generation);
+                    }
                 }
-                facts.http_observation = Some(observation);
-                if Self::retires_response_pool(&failure.error, facts.terminal_received) {
-                    self.retire_pool(observation.pool_generation);
-                }
-            }
-            failure.facts = facts;
-            failure
-        })
+                failure.facts = facts;
+                failure
+            })
     }
     fn prepare_session(
         &self,
@@ -338,12 +348,17 @@ impl HttpModelClient {
         let status = response.status();
         facts.status = Some(status.as_u16());
         facts.received = ResponseReceived::Metadata;
+        let retry_after = response.headers().get(reqwest::header::RETRY_AFTER);
+        facts.retry_after_present = retry_after.is_some();
+        facts.retry_after = retry_after
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_retry_after);
+        if status.as_u16() == 429
+            && let Some(diagnostics) = self.diagnostics.get()
+        {
+            diagnostics.record_rate_limit(&self.connection_name, *facts);
+        }
         if !status.is_success() {
-            facts.retry_after = response
-                .headers()
-                .get(reqwest::header::RETRY_AFTER)
-                .and_then(|value| value.to_str().ok())
-                .and_then(parse_retry_after);
             let limit = (status.as_u16() == 429)
                 .then(|| {
                     response

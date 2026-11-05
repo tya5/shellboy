@@ -119,13 +119,15 @@ async fn thinking_binding_retry(
     used: u32,
     limit: u32,
 ) -> Result<bool, ApiError> {
-    let body = json!({"error":failure.error,"partial_text":failure.partial_text,
+    let mut body = json!({"error":failure.error,"partial_text":failure.partial_text,
         "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
         "raw_response":failure.raw_response,"attempt_id":attempt,
         "automatic_retry":{"number":used+1,"limit":limit,"delay_ms":0,
             "partial_response_discarded":false,"possible_duplicate_charge":false,
             "reason":"thinking_binding"},
         "thinking_binding_retry":{"reasoning_dropped":true}});
+    body["rate_observation"] = failure.facts.rate_metadata();
+    body["rate_observation"]["applied_wait_ms"] = json!(0);
     let (saved_attempt, thread) = (attempt.to_owned(), snapshot.thread.clone());
     let applied = control
         .store
@@ -383,6 +385,7 @@ pub(super) async fn retry_or_recover(
             "automatic_retry":{"number":budget.used+1,"limit":limit,
                 "delay_ms":delay.as_millis() as u64,"partial_response_discarded":partial,
                 "possible_duplicate_charge":true}});
+        body["rate_observation"] = failure.facts.rate_metadata();
         if let Some(observation) = trim_not_applied {
             if observation["outcome"] == "adopted" && observation.get("result").is_some() {
                 body["automatic_trim"] = observation["result"].clone();
@@ -417,11 +420,18 @@ pub(super) async fn retry_or_recover(
         // Admission is released while waiting; ordinary boundaries are checked
         // again before the next POST. Stop/shutdown wins over even a zero delay.
         drop(boundary_guard);
+        let wait_started = tokio::time::Instant::now();
         tokio::select! {
             biased;
             _ = slot.stop.cancelled() => {},
             _ = tokio::time::sleep(delay) => {},
         }
+        let applied_ms = wait_started.elapsed().as_millis().min(i64::MAX as u128) as i64;
+        let saved_attempt = attempt.clone();
+        control.store.database.call(move |db| {
+            db.execute("UPDATE model_attempt SET error_json=json_set(error_json, '$.rate_observation.applied_wait_ms', ?2), input_manifest_json=json_set(input_manifest_json, '$.rate_observation.applied_wait_ms', ?2) WHERE id=?1 AND json_valid(error_json)", params![saved_attempt, applied_ms])?;
+            Ok(())
+        }).await.map_err(storage_error)?;
         return Ok(());
     }
     if let RetryPolicy::Deferred(delay) = policy {
@@ -582,6 +592,7 @@ mod tests {
                                 received,
                                 terminal_received,
                                 retry_after: None,
+                                retry_after_present: false,
                                 http_observation: None,
                             };
                             let error = model::ModelError::new(kind, "fixture");

@@ -53,6 +53,8 @@ GitHub Actionsの定義はローカル成功とは別です。pushしていな�
 
 開発用dev profileでは固定版 `encoding_rs` のみ `opt-level=2` とし、testも継承します。stateful decoderの非最適化処理が大量raw出力の機能試験を支配するのを避ける設定です。製品のdecoder・依存版・機能試験の期限は変えません。cache予算をプロセスRSS上限と混同しません。
 
+通常のdev/test buildはdebug infoを保存しません。panicのsource lineが必要な一時buildでは、たとえば `CARGO_PROFILE_DEV_DEBUG=line-tables-only cargo test --locked --no-run` として実行します。
+
 通常試験は一時DBとloopback mockを使い、API資格情報を要求しません。ignoredの性能・実OS・実API試験は個別の明示実行であり、通常テスト成功に含めません。[端末fixture](../validation/manual-terminal.md) はAPIなしで操作を確認できます。実機がない項目は未実施と記録し、mockで代用合格にしません。
 
 ## One local build directory for all worktrees

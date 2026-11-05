@@ -128,6 +128,11 @@ impl Compactor {
                 let response = client
                     .response_for_thread(&snapshot.thread, request, cancel.clone(), None)
                     .await;
+                let facts = match &response {
+                    Ok(response) => response.response_facts,
+                    Err(failure) => failure.facts,
+                };
+                budget.usage.observe_http(&self.database, facts).await?;
                 let reported = match &response {
                     Ok(response) => super::usage::usage_of(Some(&response.raw)),
                     Err(failure) => super::usage::usage_of(failure.raw_response.as_ref()),

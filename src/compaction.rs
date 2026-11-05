@@ -859,11 +859,19 @@ impl Compactor {
                 Ok(response) => {
                     budget
                         .usage
+                        .observe_http(&self.database, response.response_facts)
+                        .await?;
+                    budget
+                        .usage
                         .observe(&self.database, usage::usage_of(Some(&response.raw)))
                         .await?;
                     response
                 }
                 Err(failure) => {
+                    budget
+                        .usage
+                        .observe_http(&self.database, failure.facts)
+                        .await?;
                     budget
                         .usage
                         .observe(
@@ -2205,6 +2213,69 @@ mod tests {
             live_spill.spilled_groups,
             live_before.saturating_sub(live_after)
         );
+        db.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn summary_http_429_is_recorded_with_retry_after_without_resend() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 8192];
+            let _ = stream.read(&mut buffer).await.unwrap();
+            let body = r#"{"error":{"message":"fixture"}}"#;
+            stream.write_all(format!("HTTP/1.1 429 Fixture\r\nContent-Type: application/json\r\nRetry-After: 2\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            for id in ["one", "two"] {
+                history::append_node(
+                    &tx,
+                    "t",
+                    id,
+                    None,
+                    "message",
+                    &json!({"role":"user","content":id.repeat(100)}),
+                    "now",
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let compactor = Compactor::new(
+            db.clone(),
+            Arc::new(summary_config(format!("http://{address}/v1"))),
+        );
+        let snapshot = compactor.snapshot("t", true).await.unwrap();
+        assert!(
+            compactor
+                .summarize_snapshot(snapshot, 0..2, CancellationToken::new())
+                .await
+                .is_err()
+        );
+        server.await.unwrap();
+        let saved: String = db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT value FROM app_meta WHERE key LIKE 'summary.usage.t.%'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["requests"], 1);
+        assert_eq!(saved["rate_observations"][0]["status"], 429);
+        assert_eq!(saved["rate_observations"][0]["retry_after_ms"], 2000);
+        assert_eq!(saved["rate_observations"][0]["applied_wait_ms"], 0);
         db.shutdown().await.unwrap();
     }
     #[tokio::test]

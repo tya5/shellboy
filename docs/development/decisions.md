@@ -2643,14 +2643,45 @@ Header's display-only128KiB path allowance avoids treating512-byte identity limi
 as a valid path limit. Oversized settings fail explicitly with a field witness;
 canonical CLI values remain intact. Native synthetic tests can qualify these
 copies/semantics, not Windows filesystem/path execution. No schema/worker/queue.
+## Disable Development Debug Information (2026-11-04)
+
+Set `[profile.dev] debug = false`; test inherits this profile. The target is the
+large set of unpacked macOS codegen object files, not panic source locations:
+those remain available in panic text without debug info. CI and workers do not
+set `RUST_BACKTRACE`. For a one-off build needing line-number backtraces, run
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only cargo test --locked --no-run`.
+
+Measured on this Apple Silicon Mac using Rust 1.99.1, fresh throwaway
+`CARGO_TARGET_DIR` under `/private/tmp`, `cargo test --locked --no-run`, and
+`du -sk target/debug`; three cold builds and one-file incremental rebuilds per
+profile. Before `line-tables-only`: clean 489.12/423.61/293.30s (median
+423.61s, range 293.30-489.12); incremental 2.90/4.15/2.65s (median 2.90s,
+range 2.65-4.15); target size 5,245,940/5,260,688/5,279,620 KiB (median
+5,260,688 KiB). After `debug=false`: clean 156.33/139.28/292.69s (median
+156.33s, range 139.28-292.69); incremental 2.86/2.76/3.90s (median 2.86s,
+range 2.76-3.90); target size 4,182,880/4,174,832/4,205,828 KiB (median
+4,182,880 KiB). Local clean and incremental medians did not increase; target
+size fell about 20.5%. The wide cold-build spread overlaps, so interpret the
+median, not each run in isolation.
+
+Three exact-SHA default CI runs for each profile on main-equivalent source:
+before runs 41931953415, 41931957475, 41932009257 had Ubuntu check durations
+652/538/623s (median 623s, range 538-652). After runs on candidate SHA
+`a91dc4ad96abc3732469c0b03f89f5c552791b6a` were 41936385665 (547s),
+41936389385 (418s), and 41936393572 (637s), all successful (median 547s,
+range 418-637). These fall within the measured baseline range. The durations
+are GitHub's Ubuntu job `startedAt` to `completedAt` intervals. No
+schema/migration or product behavior changes.
+
 ## #105: Line Tables For Development And Tests (2026-11-01)
 
-Use `[profile.dev] debug = "line-tables-only"`; Cargo's test profile inherits it.
-Keep release settings, the encoding_rs optimization and the existing #46 test
-aggregation unchanged. This reduces retained development debug information while
-preserving source-line panic backtraces; inspecting local variable values with a
-native debugger is an explicit trade-off. Revisit if full debug information is
-needed for a particular investigation, using a local profile override.
+This was the initial development profile choice, adopted on 2026-11-01 and
+superseded on 2026-11-04 by [Disable Development Debug Information](#disable-development-debug-information-2026-11-04).
+The original rationale and measurements below remain historical evidence. To
+obtain source-line backtraces for a one-off test build, use
+`CARGO_PROFILE_DEV_DEBUG=line-tables-only cargo test --locked --no-run`.
+Release settings, the encoding_rs optimization and the existing #46 test
+aggregation remain unchanged.
 
 One frozen macOS/aarch64 cold pair (main5ecbebc versus profile-only7a4bfc88)
 passed2125 Rust tests/35 ignored and71 Python tests on each side. Allocated target

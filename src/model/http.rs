@@ -80,6 +80,7 @@ pub struct HttpModelClient {
     connection: Connection,
     connection_name: String,
     usage_limit: Arc<std::sync::Mutex<Option<TimedUsageLimit>>>,
+    diagnostics: Arc<std::sync::OnceLock<crate::diagnostics::Diagnostics>>,
 }
 impl HttpModelClient {
     /// Count the actual dialect input, not discarded Responses-only replay items.
@@ -118,6 +119,7 @@ impl HttpModelClient {
             connection,
             connection_name: name.into(),
             usage_limit: Arc::new(std::sync::Mutex::new(None)),
+            diagnostics: Arc::new(std::sync::OnceLock::new()),
         })
     }
     fn active_usage_limit(&self) -> Option<super::usage_limit::UsageLimit> {
@@ -587,6 +589,14 @@ fn cancelled() -> ModelError {
 #[cfg(test)]
 mod observation_tests {
     use super::*;
+
+    #[test]
+    fn retry_after_presence_is_unknown_before_headers() {
+        let facts = response::ResponseFacts::default().rate_metadata();
+        assert!(facts["status"].is_null());
+        assert!(facts["retry_after_present"].is_null());
+        assert!(facts["retry_after_ms"].is_null());
+    }
     #[test]
     fn retry_after_accepts_seconds_and_http_dates_but_not_arbitrary_headers() {
         use std::time::Duration;

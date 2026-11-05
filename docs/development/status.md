@@ -4781,3 +4781,9 @@ interruption-only suffix/revision accounting. Exact-tip native CI is pending.
 Best-effort diagnostics are follow-up work, not a promise of successful writes
 to failing storage. No production inconsistency was exposed in this synthetic
 sample, and no production recovery fix or journal is claimed.
+## #224 Stage 1 observability (in progress)
+
+Stage 1 is owner-adopted; implementation and synthetic checks are in progress.
+No landing or CI success is claimed. Connection-wide waiting (stage 2) and
+budgeted summary retry with adaptive map concurrency (stage 3) remain separate
+future changes and landings.

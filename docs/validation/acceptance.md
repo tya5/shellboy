@@ -9902,3 +9902,8 @@ summary HTTP is pending and fresh-usage verification; those tests are unchanged.
 registration/watchdog policy and diff checks pass. Exact-tip native CI is pending.
 No production inconsistency is observed in this synthetic sample; this does not
 prove all storage-failure modes or missing-bookkeeping recovery.
+## #224 Stage 1 observability (not yet accepted)
+
+The in-progress implementation still needs focused synthetic 429, cancellation,
+restart and concurrent-thread coverage, independent review, and exact-tip default
+and all-OS CI. No live provider behavior or production quota is established.

@@ -224,6 +224,8 @@ pub struct ModelResponse {
     pub text: String,
     pub stream_observation: Option<StreamObservation>,
     pub http_observation: Option<http::HttpObservation>,
+    /// HTTP metadata, including absent observations for requests not sent.
+    pub response_facts: http::ResponseFacts,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct StreamObservation {
@@ -451,6 +453,7 @@ impl ModelResponse {
             text,
             stream_observation: None,
             http_observation: None,
+            response_facts: http::ResponseFacts::default(),
         })
     }
 }
