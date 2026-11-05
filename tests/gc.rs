@@ -1168,7 +1168,8 @@ async fn history_gc_budget_measurement_with_concurrent_writes() {
     };
     let started = std::time::Instant::now();
     let (mut steps, mut deferred, mut scanned, mut complete) = (0, 0, 0, false);
-    while started.elapsed() < std::time::Duration::from_secs(45) && steps < 20000 {
+    let deadline = crate::test_watchdog::Deadline::new("history GC under sustained writes");
+    while !deadline.expired() && steps < 20000 {
         let step = f.gc.history_step(&job).await.unwrap();
         steps += 1;
         deferred += usize::from(step.deferred);
@@ -1191,6 +1192,10 @@ async fn history_gc_budget_measurement_with_concurrent_writes() {
         "history GC did not finish under concurrent writes"
     );
     assert!(deferred > 0, "fixture did not trigger the VM-step budget");
+    assert!(
+        writes.load(Ordering::Relaxed) > 0,
+        "foreground writer made no progress"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1226,7 +1231,8 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     };
     let started = std::time::Instant::now();
     let (mut deferrals, mut steps, mut kept, mut complete) = (0, 0, 0, false);
-    while started.elapsed() < std::time::Duration::from_secs(45) && steps < 20000 {
+    let deadline = crate::test_watchdog::Deadline::new("history GC under sustained writes");
+    while !deadline.expired() && steps < 20000 {
         let step = f.gc.history_step(&job).await.unwrap();
         steps += 1;
         deferrals += usize::from(step.deferred);
@@ -1250,6 +1256,10 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
     assert!(complete && kept > 0 && deferrals > 0);
+    assert!(
+        writes.load(Ordering::Relaxed) > 0,
+        "foreground writer made no progress"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1275,9 +1285,9 @@ async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
             }
         })
     };
-    let started = std::time::Instant::now();
+    let deadline = crate::test_watchdog::Deadline::new("history GC single-item retention");
     let (mut deferred, mut complete) = (0, false);
-    while started.elapsed() < std::time::Duration::from_secs(45) {
+    while !deadline.expired() {
         let step = f.gc.history_step(&job).await.unwrap();
         deferred += usize::from(step.deferred);
         if step.complete {
@@ -1324,9 +1334,9 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
             }
         })
     };
-    let started = std::time::Instant::now();
+    let deadline = crate::test_watchdog::Deadline::new("history GC single-item retention");
     let (mut deferred, mut complete) = (0, false);
-    while started.elapsed() < std::time::Duration::from_secs(45) {
+    while !deadline.expired() {
         let step = f.gc.history_step(&job).await.unwrap();
         deferred += usize::from(step.deferred);
         if step.complete {
