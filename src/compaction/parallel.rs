@@ -148,9 +148,6 @@ impl Compactor {
                 run.cancel();
                 continue;
             };
-            if failure.is_none() && ctx.cancel.is_cancelled() {
-                failure = Some(ctx.cancelled(budget));
-            }
             let draining = failure.is_some();
             if let Err(error) = self
                 .finished(
