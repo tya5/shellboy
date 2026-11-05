@@ -591,6 +591,7 @@ mod tests {
                                 status,
                                 received,
                                 terminal_received,
+                                http_error_complete: false,
                                 retry_after: None,
                                 retry_after_present: false,
                                 http_observation: None,

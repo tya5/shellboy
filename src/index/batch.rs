@@ -5,7 +5,7 @@ impl IndexService {
     pub(super) async fn process_claims(
         &self,
         key: &str,
-        claims: Vec<Claimed>,
+        mut claims: Vec<Claimed>,
         cancel: CancellationToken,
     ) -> Result<(), ApiError> {
         if !self.capacity_allowed(key).await? {
@@ -30,38 +30,113 @@ impl IndexService {
             .as_ref()
             .map(|space| space.profile.as_str())
             .or(self.config.embedding.connection.as_deref())
-            .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding connection missing"))?;
+            .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding connection missing"))?
+            .to_owned();
         let model = first
             .space
             .as_ref()
             .map(|space| space.model.as_str())
             .or(self.config.embedding.model.as_deref())
-            .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding model missing"))?;
+            .ok_or_else(|| err(ErrorCode::ConfigInvalid, "Embedding model missing"))?
+            .to_owned();
+        let client = match self.clients.get(&connection_name) {
+            Ok(client) => client,
+            Err(error) => return self.handle_request_failure(key, claims, error).await,
+        };
+        let lease = match client.acquire_rate(&cancel).await {
+            Ok(lease) => lease,
+            Err(error) => return self.defer_before_send(claims, &error.kind).await,
+        };
+        if cancel.is_cancelled() {
+            return self.defer_before_send(claims, "cancelled").await;
+        }
+        let checked_key = key.to_owned();
+        let mut pause_keys = self.identity_keys();
+        pause_keys.push(checked_key.clone());
+        if let Some(family) = self.failure_key() {
+            pause_keys.push(family.to_owned());
+        }
+        let (retained, changed) = self
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let mut kept = Vec::new();
+                let mut changed = false;
+                let mut paused = false;
+                for key in &pause_keys {
+                    paused |= meta(&tx, &IndexKeys::new(key).pause())?.is_some();
+                }
+                for claimed in claims {
+                    if !same_claim(&tx, &claimed)? {
+                        continue;
+                    }
+                    if paused {
+                        changed |= defer_before_send_tx(&tx, &claimed, "index_paused")?;
+                    } else if !witness_valid(&tx, &claimed.work.witness, &claimed.work.body_kind)?
+                        || !group_current(&tx, IndexKeys::new(&checked_key), &claimed.work.group)?
+                    {
+                        if let Some(job) = &claimed.job_id {
+                            tx.execute("UPDATE embedding_job SET attempts=MAX(attempts-1,0) WHERE id=?1 AND state='running'", [job])?;
+                        }
+                        changed |= discard_claim(
+                            &tx,
+                            &claimed,
+                            "Source or index group changed during admission",
+                        )?;
+                    } else {
+                        let keys = IndexKeys::new(&checked_key);
+                        let selected = space_for_group(&tx, keys, &claimed.work.group)?;
+                        let unchanged = match (&claimed.space, selected) {
+                            (None, None) => true,
+                            (Some(expected), Some(current)) => {
+                                current.id == expected.id
+                                    && matches!(current.state.as_str(), "active" | "candidate")
+                                    && current.profile == expected.profile
+                                    && current.model == expected.model
+                                    && current.dimension == expected.dimension
+                                    && current.requested_dimensions == expected.requested_dimensions
+                                    && current.splitter == expected.splitter
+                                    && current.table == expected.table
+                            }
+                            _ => false,
+                        };
+                        if !unchanged || dimensions::candidate_stopped(&tx, keys, &claimed.work.group)? {
+                            changed |= defer_before_send_tx(&tx, &claimed, "space_changed_during_admission")?;
+                        } else {
+                            kept.push(claimed);
+                        }
+                    }
+                }
+                tx.commit()?;
+                Ok((kept, changed))
+            })
+            .await
+            .map_err(db_error)?;
+        self.publish_saved(changed);
+        claims = retained;
+        let Some(first) = claims.first() else {
+            return Ok(());
+        };
+        if !self.capacity_allowed(key).await? {
+            return self.defer_before_send(claims, "storage_limit").await;
+        }
+        if cancel.is_cancelled() {
+            return self.defer_before_send(claims, "cancelled").await;
+        }
         let input = claims
             .iter()
             .map(|claim| claim.work.segment.text.clone())
             .collect::<Vec<_>>();
-        let result = if self.config.connections.contains_key(connection_name) {
-            match self.clients.get(connection_name) {
-                Ok(client) => {
-                    client
-                        .embeddings(
-                            model,
-                            &input,
-                            first.space.as_ref().map(|space| space.dimension),
-                            requested_dimensions,
-                            cancel.clone(),
-                        )
-                        .await
-                }
-                Err(error) => Err(error),
-            }
-        } else {
-            Err(ModelError::new(
-                "config_missing",
-                "Embedding connection no longer exists",
-            ))
-        };
+        let result = client
+            .embeddings_admitted(
+                &model,
+                &input,
+                first.space.as_ref().map(|space| space.dimension),
+                requested_dimensions,
+                cancel.clone(),
+                lease,
+            )
+            .await;
         if cancel.is_cancelled() {
             return self
                 .fail_claims(
@@ -140,6 +215,25 @@ impl IndexService {
         Ok(())
     }
 
+    async fn defer_before_send(&self, claims: Vec<Claimed>, kind: &str) -> Result<(), ApiError> {
+        let kind = kind.to_owned();
+        let changed = self
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let mut changed = false;
+                for claim in claims {
+                    changed |= defer_before_send_tx(&tx, &claim, &kind)?;
+                }
+                tx.commit()?;
+                Ok(changed)
+            })
+            .await
+            .map_err(db_error)?;
+        self.publish_saved(changed);
+        Ok(())
+    }
+
     async fn handle_request_failure(
         &self,
         key: &str,
@@ -205,5 +299,154 @@ impl IndexService {
                 .await?;
         }
         Ok(())
+    }
+}
+
+fn defer_before_send_tx(
+    tx: &Transaction<'_>,
+    claimed: &Claimed,
+    kind: &str,
+) -> Result<bool, StorageError> {
+    if !same_claim(tx, claimed)? {
+        return Ok(false);
+    }
+    let error = json!({"kind":kind,"message":"Embedding admission deferred before any provider request; retry explicitly"});
+    let mut work = claimed.work.clone();
+    work.attempts = work.attempts.saturating_sub(1);
+    work.state = "failed".into();
+    work.next_at = None;
+    work.error = Some(error.clone());
+    let mut changed = false;
+    if let Some(job) = &claimed.job_id {
+        changed |= tx.execute("UPDATE embedding_job SET state='failed',attempts=MAX(attempts-1,0),error_json=?2,next_attempt_at=NULL WHERE id=?1 AND state='running'", params![job,error.to_string()])? > 0;
+        if update_json_meta(tx, &IndexKeys::input(job), &work)? != 1 {
+            return Err(serde_error());
+        }
+    }
+    if let Some(key) = &claimed.bootstrap_key {
+        changed |= update_json_meta(tx, key, &work)? > 0;
+    }
+    Ok(changed)
+}
+
+fn same_claim(db: &Connection, claimed: &Claimed) -> Result<bool, StorageError> {
+    if !claim_valid(db, claimed)? {
+        return Ok(false);
+    }
+    if let Some(job) = &claimed.job_id {
+        return Ok(db.query_row(
+            "SELECT attempts FROM embedding_job WHERE id=?1",
+            [job],
+            |r| r.get::<_, i64>(0),
+        )? == claimed.work.attempts as i64);
+    }
+    if let Some(key) = &claimed.bootstrap_key {
+        return Ok(
+            json_meta::<Work>(db, key)?.is_some_and(|work| work.attempts == claimed.work.attempts)
+        );
+    }
+    Ok(false)
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    fn work() -> Work {
+        let mut work = Work::pending(
+            Witness {
+                node_id: "node".into(),
+                revision: 1,
+                body_hash: None,
+                raw: None,
+            },
+            "user".into(),
+            Segment {
+                start: 0,
+                end: 1,
+                text: "x".into(),
+            },
+            "active",
+            "explicit",
+        );
+        work.state = "running".into();
+        work.attempts = 3;
+        work
+    }
+
+    #[test]
+    fn deferred_admission_is_atomic_does_not_count_a_send_and_does_not_mutate_newer_claims() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE embedding_job(id TEXT PRIMARY KEY,state TEXT,attempts INTEGER,error_json TEXT,next_attempt_at TEXT);").unwrap();
+        db.execute(
+            "INSERT INTO embedding_job VALUES('job','running',3,NULL,NULL)",
+            [],
+        )
+        .unwrap();
+        let original = work();
+        db.execute(
+            "INSERT INTO app_meta VALUES(?1,?2)",
+            params![IndexKeys::input("job"), encode_json(&original).unwrap()],
+        )
+        .unwrap();
+        let claimed = Claimed {
+            requested_dimensions: None,
+            job_id: Some("job".into()),
+            bootstrap_key: None,
+            space: None,
+            work: original.clone(),
+        };
+        {
+            let tx = db.transaction().unwrap();
+            assert!(defer_before_send_tx(&tx, &claimed, "rate_limit_deferred").unwrap());
+        }
+        assert_eq!(
+            db.query_row(
+                "SELECT attempts FROM embedding_job WHERE id='job'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
+        );
+        assert_eq!(
+            json_meta::<Work>(&db, &IndexKeys::input("job"))
+                .unwrap()
+                .unwrap()
+                .attempts,
+            3
+        );
+        {
+            let tx = db.transaction().unwrap();
+            assert!(defer_before_send_tx(&tx, &claimed, "rate_limit_deferred").unwrap());
+            tx.commit().unwrap();
+        }
+        let (state, attempts): (String, i64) = db
+            .query_row(
+                "SELECT state,attempts FROM embedding_job WHERE id='job'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((state.as_str(), attempts), ("failed", 2));
+        let saved: Work = json_meta(&db, &IndexKeys::input("job")).unwrap().unwrap();
+        assert_eq!((saved.state.as_str(), saved.attempts), ("failed", 2));
+        db.execute(
+            "UPDATE embedding_job SET state='running',attempts=4 WHERE id='job'",
+            [],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(!defer_before_send_tx(&tx, &claimed, "cancelled").unwrap());
+        tx.commit().unwrap();
+        assert_eq!(
+            db.query_row(
+                "SELECT attempts FROM embedding_job WHERE id='job'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            4
+        );
     }
 }

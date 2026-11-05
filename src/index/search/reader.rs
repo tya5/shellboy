@@ -191,7 +191,7 @@ fn read_db_error(error: StorageError) -> ApiError {
     }
 }
 
-fn check_space(db: &Connection, expected: &Space) -> Result<(), ApiError> {
+pub(super) fn check_space(db: &Connection, expected: &Space) -> Result<(), ApiError> {
     let selected = meta(db, IndexKeys::ACTIVE_SPACE).map_err(read_db_error)?;
     let current = selected
         .as_deref()

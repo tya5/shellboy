@@ -825,3 +825,249 @@ async fn usage_limit_http_error_is_shared_by_responses_and_chat_completions() {
         assert!(failure.facts.http_observation.is_none());
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn connection_wait_state_is_shared_by_clones_but_not_profiles_or_restart() {
+    let mut config = Config::default();
+    config.connections.clear();
+    let connection = Connection {
+        base_url: "http://127.0.0.1:12345/v1".into(),
+        ..Default::default()
+    };
+    config.connections.insert("one".into(), connection.clone());
+    config.connections.insert("two".into(), connection);
+    let clients = HttpClients::new(&config);
+    let first = clients.get("one").unwrap();
+    let same = clients.get("one").unwrap();
+    let different = clients.get("two").unwrap();
+    first.rate_gate.throttle(
+        Some(std::time::Duration::from_secs(5)),
+        first.rate_gate.generation(),
+    );
+    let token = CancellationToken::new();
+    assert!(different.rate_gate.acquire(&token).await.is_ok());
+    let waiting = tokio::spawn({
+        let token = token.clone();
+        async move { same.rate_gate.acquire(&token).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished());
+    token.cancel();
+    assert!(waiting.await.unwrap().is_err());
+    let restarted = HttpClients::new(&config).get("one").unwrap();
+    assert!(
+        restarted
+            .rate_gate
+            .acquire(&CancellationToken::new())
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+async fn real_429_headers_update_shared_profile_before_body_finishes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = Connection {
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        ..Default::default()
+    };
+    let client = HttpModelClient::for_connection("fixture", connection).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut body = [0u8; 8192];
+        let _ = stream.read(&mut body).await.unwrap();
+        stream.write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Length: 9999\r\n\r\n").await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let request_cancel = CancellationToken::new();
+    let request = tokio::spawn({
+        let client = client.clone();
+        let token = request_cancel.clone();
+        async move { client.models(token).await }
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while client.rate_gate.generation() == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("429 header not observed");
+    assert!(
+        !request.is_finished(),
+        "fixture response body must remain open"
+    );
+    let cancel = CancellationToken::new();
+    let waiting = tokio::spawn({
+        let gate = client.rate_gate.clone();
+        let cancel = cancel.clone();
+        async move { gate.acquire(&cancel).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished());
+    cancel.cancel();
+    assert!(waiting.await.unwrap().is_err());
+    request_cancel.cancel();
+    let _ = request.await;
+    server.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn catalog_waits_for_profile_and_cancels_before_sending() {
+    let server = server("catalog", false).await;
+    let client = HttpModelClient::for_connection("fixture", server.connection.clone()).unwrap();
+    client.rate_gate.throttle(
+        Some(std::time::Duration::from_secs(30)),
+        client.rate_gate.generation(),
+    );
+    let cancel = CancellationToken::new();
+    let task = tokio::spawn({
+        let client = client.clone();
+        let cancel = cancel.clone();
+        async move { client.models(cancel).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(!task.is_finished());
+    assert_eq!(server.accepts.load(Ordering::SeqCst), 0);
+    cancel.cancel();
+    assert_eq!(task.await.unwrap().unwrap_err().kind, "cancelled");
+    assert_eq!(server.accepts.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn catalog_wait_is_shared_by_profile_but_isolated_from_other_profiles() {
+    let server = server("catalog", false).await;
+    let config = Config {
+        connections: BTreeMap::from([
+            ("one".into(), server.connection.clone()),
+            ("two".into(), server.connection.clone()),
+        ]),
+        ..Default::default()
+    };
+    let clients = HttpClients::new(&config);
+    let first = clients.get("one").unwrap();
+    let same = clients.get("one").unwrap();
+    let other = clients.get("two").unwrap();
+    first.rate_gate.throttle(
+        Some(std::time::Duration::from_secs(30)),
+        first.rate_gate.generation(),
+    );
+    let cancel = CancellationToken::new();
+    let waiting = tokio::spawn({
+        let cancel = cancel.clone();
+        async move { same.models(cancel).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(!waiting.is_finished());
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        other.models(CancellationToken::new()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(result, ["catalog"]);
+    assert!(!waiting.is_finished());
+    cancel.cancel();
+    assert_eq!(waiting.await.unwrap().unwrap_err().kind, "cancelled");
+    assert_eq!(server.headers.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn catalog_429_long_retry_after_defers_next_call_without_a_send() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = Connection {
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        ..Default::default()
+    };
+    let client = HttpModelClient::for_connection("fixture", connection).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8192];
+        assert!(stream.read(&mut request).await.unwrap() > 0);
+        let body = r#"{"error":{"message":"synthetic"}}"#;
+        stream.write_all(format!("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 601\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+        listener
+    });
+    assert!(client.models(CancellationToken::new()).await.is_err());
+    let listener = server.await.unwrap();
+    let error = client.models(CancellationToken::new()).await.unwrap_err();
+    assert_eq!(error.kind, "rate_limit_deferred");
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), listener.accept())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn error_completion_fact_distinguishes_eof_from_interrupted_body() {
+    for complete in [true, false] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let connection = Connection {
+            base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+            ..Default::default()
+        };
+        let client = HttpModelClient::for_connection("fixture", connection).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 8192];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            let body = r#"{"error":{"message":"synthetic"}}"#;
+            let size = if complete {
+                body.len()
+            } else {
+                body.len() + 100
+            };
+            stream.write_all(format!("HTTP/1.1 500 Error\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n{body}").as_bytes()).await.unwrap();
+        });
+        let failure = client
+            .response(
+                response_request("fixture", vec![], None, false),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap_err();
+        server.await.unwrap();
+        assert_eq!(failure.facts.status, Some(500));
+        assert_eq!(failure.facts.http_error_complete, complete);
+    }
+}
+
+#[tokio::test]
+async fn catalog_429_blocks_embedding_on_same_profile_until_cancelled() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let connection = Connection {
+        base_url: format!("http://{}/v1", listener.local_addr().unwrap()),
+        ..Default::default()
+    };
+    let client = HttpModelClient::for_connection("fixture", connection).unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0; 8192];
+        assert!(stream.read(&mut request).await.unwrap() > 0);
+        let body = r#"{"error":{"message":"synthetic"}}"#;
+        stream.write_all(format!("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 30\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+        listener
+    });
+    assert!(client.models(CancellationToken::new()).await.is_err());
+    let listener = server.await.unwrap();
+    let cancel = CancellationToken::new();
+    let embedding = tokio::spawn({
+        let client = client.clone();
+        let token = cancel.clone();
+        async move {
+            client
+                .embeddings("fixture", &["x".to_owned()], None, None, token)
+                .await
+        }
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), listener.accept())
+            .await
+            .is_err()
+    );
+    assert!(!embedding.is_finished());
+    cancel.cancel();
+    assert_eq!(embedding.await.unwrap().unwrap_err().kind, "cancelled");
+}

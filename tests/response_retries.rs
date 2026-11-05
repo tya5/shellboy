@@ -2104,3 +2104,130 @@ async fn concurrent_threads_record_independent_429_observations() {
     fixture.no_more_requests().await;
     fixture.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
+    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 30\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let thread = request(
+        &fixture.control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let accepted: MessageAccepted = serde_json::from_value(
+        request(
+            &fixture.control,
+            Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread),
+                text: "second synthetic thread".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err(),
+        "second thread must not send during the shared cooldown"
+    );
+    crate::test_watchdog::watchdog(
+        "connection cooldown stop",
+        request(
+            &fixture.control,
+            Command::RunStop(RunTarget {
+                run_id: accepted.run_id.unwrap(),
+            }),
+        ),
+    )
+    .await
+    .expect("stop must not wait for the cooldown");
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
+    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 1\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let thread = request(
+        &fixture.control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let _: MessageAccepted = serde_json::from_value(
+        request(
+            &fixture.control,
+            Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.clone()),
+                text: "second synthetic thread".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err()
+    );
+    request(
+        &fixture.control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread),
+            model: Some("changed-model".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    let sent = fixture.incoming().await;
+    assert_eq!(sent.body["model"], "changed-model");
+    sent.reply.send(Reply::success()).ok().unwrap();
+    fixture.close().await;
+}
