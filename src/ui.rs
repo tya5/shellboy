@@ -6857,7 +6857,9 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
             Paragraph::new(chrome::welcome(
                 view,
                 &state.config,
+                state.palette,
                 body_area.width.saturating_sub(2),
+                body_area.height.saturating_sub(2),
             ))
             .wrap(Wrap { trim: false })
             .block(Block::default().padding(ratatui::widgets::Padding::uniform(1))),

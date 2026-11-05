@@ -7,6 +7,9 @@ Migration 29 adds the partial `model_attempt_active_recovery` index so startup
 decision: [acceptance](../validation/acceptance.md), [decisions](decisions.md).
 The upgrade checker now defaults to public v0.8.2 (schema 28) and target 29.
 Resume point: CI on the final SHA, then owner review.
+## Welcome logo (#228)
+
+Empty-thread welcome shows a 39-column ASCII logo with five info rows (version, model, cwd, config, data) when the body is at least 64 columns by 7 rows (inner); otherwise the previous vertical welcome. Resume point: CI on the branch tip, then owner review.
 
 ## Automatic compaction attempt record after post-commit failure (#226; implemented, CI pending)
 

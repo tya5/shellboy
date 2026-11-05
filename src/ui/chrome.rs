@@ -601,7 +601,9 @@ pub(super) fn footer_lines_with_db(
 pub(super) fn welcome(
     view: &ThreadView,
     config: &crate::config::Config,
+    palette: super::theme::Palette,
     width: u16,
+    height: u16,
 ) -> Vec<ratatui::text::Line<'static>> {
     use ratatui::{
         style::{Modifier, Style},
@@ -633,6 +635,9 @@ pub(super) fn welcome(
             true,
         )
     };
+    if width >= LOGO_MIN_WIDTH && height >= LOGO_MIN_HEIGHT {
+        return welcome_with_logo(view, config, palette, width, waiting);
+    }
     let bindings = match config.ui.language {
         crate::config::UiLanguage::Ja => glyphs::formatted!(
             "送信: {} · 改行: {}",
@@ -679,6 +684,84 @@ pub(super) fn welcome(
             }
         }),
     ]
+}
+
+/// ASCII logo: five rows of exactly `LOGO_WIDTH` columns (the artwork is 39 wide because of the y descender), as fixed constants.
+const LOGO: [&str; 5] = [
+    r" ___  _          _  _  _               ",
+    r"/ __|| |_   ___ | || || |__  ___  _  _ ",
+    r"\__ \| ' \ / -_)| || || '_ \/ _ \| || |",
+    r"|___/|_||_|\___||_||_||_.__/\___/ \_, |",
+    r"|____________________________________/ ",
+];
+const LOGO_WIDTH: usize = 39;
+const LOGO_GAP: usize = 3;
+/// Narrowest info column: label column plus a little value room.
+const LOGO_MIN_INFO: usize = 22;
+const LOGO_MIN_WIDTH: u16 = (LOGO_WIDTH + LOGO_GAP + LOGO_MIN_INFO) as u16;
+/// Logo rows plus one spare row so the block never fills the whole body.
+const LOGO_MIN_HEIGHT: u16 = 7;
+
+fn welcome_with_logo(
+    view: &ThreadView,
+    config: &crate::config::Config,
+    palette: super::theme::Palette,
+    width: u16,
+    waiting: &str,
+) -> Vec<ratatui::text::Line<'static>> {
+    use ratatui::{
+        style::{Modifier, Style},
+        text::{Line, Span},
+    };
+    let info = usize::from(width) - LOGO_WIDTH - LOGO_GAP;
+    let labels = match config.ui.language {
+        crate::config::UiLanguage::Ja => ["モデル", "作業場所", "設定", "データ"],
+        crate::config::UiLanguage::En => ["model", "cwd", "config", "data"],
+    };
+    let label_width = labels.iter().map(|label| label.width()).max().unwrap_or(0) + 2;
+    let muted = Style::default().fg(palette.muted());
+    let row = |label: &str, value: String| {
+        vec![
+            Span::styled(
+                format!("{label}{}", " ".repeat(label_width - label.width())),
+                muted,
+            ),
+            Span::raw(value),
+        ]
+    };
+    let room = info.saturating_sub(label_width);
+    let path = |path: Option<&std::path::Path>| match path {
+        Some(path) if !path.as_os_str().is_empty() => fit(&path.to_string_lossy(), room, true),
+        Some(_) => waiting.to_owned(),
+        None => "-".to_owned(),
+    };
+    let rows = [
+        vec![Span::styled(
+            format!("shellboy {}", env!("CARGO_PKG_VERSION")),
+            Style::default().add_modifier(Modifier::BOLD),
+        )],
+        row(
+            labels[0],
+            fit(view.model.as_deref().unwrap_or("-"), room, false),
+        ),
+        row(labels[1], path(Some(&view.cwd))),
+        row(
+            labels[2],
+            path(config.source.as_ref().map(|source| source.path.as_path())),
+        ),
+        row(labels[3], path(config.data_dir.as_deref())),
+    ];
+    LOGO.iter()
+        .zip(rows)
+        .map(|(logo, info_spans)| {
+            let mut spans = vec![
+                Span::styled(*logo, palette.live_work()),
+                Span::raw(" ".repeat(LOGO_GAP)),
+            ];
+            spans.extend(info_spans);
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // Sanitize display values, preserve graphemes, and make every cut explicit.
@@ -1170,7 +1253,12 @@ mod tests {
                 config.ui.language = language;
                 let ui = UiState::new(&config, PathBuf::from("/synthetic"));
                 for width in [54, 80] {
-                    let lines = welcome(ui.view(), &config, width);
+                    let palette = crate::ui::theme::Palette::from_capabilities(
+                        crate::config::PaletteMode::Dark,
+                        false,
+                        true,
+                    );
+                    let lines = welcome(ui.view(), &config, palette, width, 0);
                     let hint = lines
                         .last()
                         .unwrap()
@@ -1194,6 +1282,138 @@ mod tests {
             }
         }
         text_width::clear_terminal_width();
+    }
+
+    fn logo_welcome(
+        language: crate::config::UiLanguage,
+        mode: crate::config::PaletteMode,
+        no_color: bool,
+        width: u16,
+        height: u16,
+    ) -> Vec<ratatui::text::Line<'static>> {
+        let mut config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        config.ui.language = language;
+        config.data_dir = Some(PathBuf::from("/synthetic/data"));
+        config.source = Some(crate::config::ConfigSource {
+            path: PathBuf::from("/synthetic/config.toml"),
+            present: true,
+        });
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic/work"));
+        ui.view_mut().model = Some("fixture-model".into());
+        let palette = crate::ui::theme::Palette::from_capabilities(mode, no_color, true);
+        welcome(ui.view(), &config, palette, width, height)
+    }
+    fn plain(lines: &[ratatui::text::Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|s| s.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn logo_rows_are_ascii_and_exactly_39_columns() {
+        for row in LOGO {
+            assert!(row.is_ascii(), "{row}");
+            assert_eq!(row.width(), 39, "{row:?}");
+        }
+    }
+
+    #[test]
+    fn welcome_logo_renders_in_both_languages_and_palettes() {
+        use crate::config::{PaletteMode, UiLanguage};
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let lines = logo_welcome(language, PaletteMode::Dark, false, 90, 20);
+            assert_eq!(lines.len(), 5);
+            let text = plain(&lines);
+            println!("{language:?} wide:\n{text}\n");
+            let version = format!("shellboy {}", env!("CARGO_PKG_VERSION"));
+            for expected in [
+                version.as_str(),
+                "fixture-model",
+                "/synthetic/work",
+                "/synthetic/config.toml",
+                "/synthetic/data",
+            ] {
+                assert!(text.contains(expected), "{expected}: {text}");
+            }
+            assert!(!text.contains("AGENTS") && !text.contains("Enter a request"));
+            if language == UiLanguage::Ja {
+                assert!(text.contains("モデル") && text.contains("作業場所"));
+            } else {
+                assert!(text.contains("model") && text.contains("cwd"));
+            }
+            for line in &lines {
+                assert!(line.spans[0].content.is_ascii());
+                assert!(line.spans[0].content.width() == 39);
+                assert!(line.width() <= 90);
+            }
+            // Version is bold; logo uses the live-work accent.
+            let info = &lines[0].spans[2];
+            assert!(
+                info.style
+                    .add_modifier
+                    .contains(ratatui::style::Modifier::BOLD)
+            );
+            for (mode, color) in [(PaletteMode::Dark, 45), (PaletteMode::Light, 24)] {
+                let lines = logo_welcome(language, mode, false, 90, 20);
+                for line in &lines {
+                    assert_eq!(
+                        line.spans[0].style.fg,
+                        Some(ratatui::style::Color::Indexed(color))
+                    );
+                }
+            }
+            let plain_lines = logo_welcome(language, PaletteMode::Dark, true, 90, 20);
+            for line in &plain_lines {
+                assert!(line.spans.iter().all(|span| matches!(
+                    span.style.fg,
+                    None | Some(ratatui::style::Color::Reset)
+                )));
+            }
+        }
+    }
+
+    #[test]
+    fn welcome_falls_back_when_narrow_or_short() {
+        use crate::config::{PaletteMode, UiLanguage};
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let at_min = logo_welcome(language, PaletteMode::Dark, false, LOGO_MIN_WIDTH, 20);
+            assert_eq!(at_min.len(), 5);
+            assert!(
+                at_min
+                    .iter()
+                    .all(|l| l.width() <= usize::from(LOGO_MIN_WIDTH))
+            );
+            let narrow = logo_welcome(language, PaletteMode::Dark, false, LOGO_MIN_WIDTH - 1, 20);
+            let short = logo_welcome(language, PaletteMode::Dark, false, 90, LOGO_MIN_HEIGHT - 1);
+            for lines in [narrow, short] {
+                let text = plain(&lines);
+                println!("{language:?} fallback:\n{text}\n");
+                assert!(!text.contains("|____"));
+                assert!(text.contains("AGENTS: "));
+            }
+        }
+    }
+
+    #[test]
+    fn empty_thread_frame_shows_logo_only_when_the_body_has_room() {
+        let config = Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'").unwrap();
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+        let tall = frame_text(&mut ui, 100, 40);
+        assert!(
+            tall.contains("|____________________________________/"),
+            "{tall}"
+        );
+        let mut ui = UiState::new(&config, PathBuf::from("/synthetic"));
+        let short = frame_text(&mut ui, 100, 14);
+        println!("100x14:\n{short}");
+        assert!(!short.contains("|____"), "{short}");
     }
 
     #[test]
