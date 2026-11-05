@@ -9923,8 +9923,9 @@ are retained. These results do not establish live provider behavior, cross-profi
 coordination or cooldown persistence across owner restart. On macOS using the
 shared rust-slot, `cargo check --locked --tests` passed; focused runs passed 15
 gate tests, 3 boundary tests, 2 index-admission unit tests, 19 HTTP client tests
-(3 ignored), 4 #215 fault-matrix tests, 17 proactive integration tests, 9 index
+(3 ignored), 4 #215 fault-matrix tests, 17 proactive integration tests, 10 index
 batch tests, and 35 Responses retry integration tests. Additional focused runs
-passed summary, quota, actual owner-restart, wait-accounting and search cases.
+passed summary, quota, actual owner-restart, wait-accounting, typed history-search
+deferral and concurrent model-change/cancellation cases.
 Integration layout and occurrence-specific watchdog policy checks passed; native
 CI and independent review remain pending. No live-provider test was made.
