@@ -742,10 +742,12 @@ does not adopt the proposed recovery journal or guarantee bookkeeping writes
 when storage rejects them. The fault matrix and its synthetic-fault limitations
 are recorded in the validation record.
 
-## Proposed: recoverable automatic attempt record after post-commit failure (#226)
+## Adopted: recoverable automatic attempt record after post-commit failure (#226)
 
-Status: **Proposed, not adopted, not implemented.** Source baseline: `origin/main`
-`ca2505f7`. Line references are to that tree. This section does not change the
+Status: **Adopted and implemented** (option A below; the leader adopted the
+recommendation). The analysis sections 1-3 keep the pre-implementation line
+references of source baseline `origin/main` `ca2505f7`; the implementation notes
+at the end of this section list what differs from the proposal. This section does not change the
 #215 data-safety contract above; it only concerns the attempt record, the
 pending target, the #180 guard and the automatic-active witness.
 
@@ -892,7 +894,8 @@ What each loss affects:
   depends on a later write succeeding. #209 verification
   (`proactive.rs:121`) attaches to the provisional record as well.
 - Cost: one extra primary-key UPDATE (and at most one app_meta upsert) inside
-  an existing write transaction per committed stage. Not measured.
+  an existing write transaction per committed stage. Measured; see the
+  implementation notes.
 - Residual unknowns: if the triggering attempt's `error_json` is non-NULL
   invalid JSON, W0 and W4 already skip it today. The stage UPDATE then matches no row
   and adoption proceeds (diagnostics never block adoption), so no record exists.
@@ -986,4 +989,101 @@ Tests, reusing the #215 harness (`src/control/driver/proactive/fault_tests.rs`,
    list` as `automatic_reduction` with outcome `unknown`.
 
 Limits: synthetic SQLite trigger faults on disposable DBs, not OS disk-full or
-I/O failure. Timing and the byte size of the extra UPDATE are not measured.
+I/O failure.
+
+### 5. Implementation notes (as built)
+
+Code: `src/compaction/attempt.rs` (provisional record, stage fact, finish SQL),
+the six automatic Compactor entry points take an optional `AutomaticStage`
+(manual and overflow callers pass `None`), and `src/control/driver/proactive.rs`.
+Differences from the proposal and clarifications:
+
+- **Provisional record (W0).** Written in the witness transaction with
+  `outcome:"unknown"`, `provisional:true`, a per-attempt random `token`,
+  `reason`, `trigger`, `target_plan` (null when uncalibrated) and
+  `committed_stages:{}`.
+- **Stage fact.** Written by the stage's own transaction after the path and
+  epoch updates, through `UPDATE ... WHERE id=? AND json_valid(error_json) AND
+  token matches`. Fields: `stage`, `selection_revision`, `reasoning_epoch`
+  (read in the transaction), `spilled_groups`, `source_nodes`, `created_parts`,
+  `reused_parts`, `summary_node_id`, `source_characters`, `summary_characters`,
+  `summary_limit`, `model_requests`, `summary_usage` (the existing fixed counter
+  object) and `removed_characters`. `removed_characters` is the exact
+  replay-projection difference of the replaced items under the adoption
+  snapshot epoch: spill uses the replaced groups' projections before and after;
+  summary uses the existing source-characters measurement minus the summary
+  payload projection. It excludes the effect of an epoch advance on other
+  reasoning; only the driver's later re-measurement (`stages.*.removed_characters`)
+  establishes whole-history removal. Measured fact size: 304 bytes for a spill
+  stage on the synthetic fixture. The facts hold no arrays and no text other
+  than the stage name and one summary node ID.
+- **Provisional pending target.** Calibrated attempts upsert the existing key in
+  the same stage transaction, with `marks:null` and `provisional:true`; scope
+  `spill`/`prefix`/`active_turn` as W4 maps it. W4's target, when written,
+  replaces it and has no `provisional` field.
+- **W2 and W4 keep facts.** Both use one finish statement (`FINISH_SQL`) that
+  replaces the record body but copies `committed_stages` and `token` from the
+  stored record when the token matches. The W2 body now also carries `reason`,
+  `trigger` and `target_plan`, so an exception record no longer loses them.
+- **Uncalibrated sites.** The uncalibrated active-Turn summary and the late
+  prefix summary now record their stage (`stages`, `committed`, stage fact) and
+  have the same fault checkpoint as the calibrated calls. Previously W2
+  reported those stages as `not_reached` and a cancellation record omitted them.
+- **Hygiene.** Thread deletion also removes the automatic-active witness key
+  (the existing statement gained one parameter).
+- **Bounds and ownership.** At most four facts per record (each stage runs at
+  most once per attempt), one record per triggering attempt, one pending-target
+  key per Thread. No new table, key namespace, worker, queue, timer, migration
+  or startup step.
+- **Readback.** `compact list` shows `unknown` through the existing outcome
+  column; `unknown` joins the existing outcomes (`adopted`, `rejected`,
+  `exception`, ...).
+- **A stage-fact failure rolls the adoption back.** If the fact UPDATE or the
+  target upsert fails, the whole stage transaction fails, the replacement is not
+  adopted, and the driver takes its existing storage-failure path.
+  A record whose `error_json` is non-NULL invalid JSON matches no row; adoption
+  proceeds without a fact, as W0 and W4 already behaved.
+
+#### Cost measurement
+
+Synthetic fixture only (`active_turn_fixture_with` from the compaction unit
+tests, two 20,000-character tool results, a temp-dir SQLite file; macOS ARM64,
+debug build, one disposable DB per run; no provider; the summary stage used a
+loopback proxy). The same stage call ran with and without the automatic stage
+(three runs each), and the time inside the stage fact function (the added
+`SELECT`, `UPDATE` and target upsert) was captured separately. Temporary
+instrumentation, not kept in the tree (a wall-clock measurement does not belong
+in the test suite).
+
+| Stage | Call without fact (us, 3 runs) | Call with fact (us, 3 runs) | Added statements inside the transaction (us, 3 runs) |
+| --- | --- | --- | --- |
+| active spill | 14,029 / 9,194 / 9,215 | 9,338 / 9,365 / 9,249 | 225 / 211 / 210 |
+| active summary (1 request) | 13,265 / 11,242 / 11,094 | 11,363 / 11,325 / 11,953 | 233 / 234 / 249 |
+
+The first run of each row includes cold-start effects, which is why the
+no-fact call is slower there than the with-fact call. The measured added cost
+per stage was 210-249 us, about 2 percent of a call that adopts one group on this
+fixture. It is a synthetic debug-build measurement, not a production bound,
+and is not asserted anywhere.
+
+#### Tests
+
+`src/control/driver/proactive/fault_tests/record_tests.rs`, reusing the #215
+harness (`prepare`, `checkpoint`): for each of the four boundaries and each of
+nine faults (the four #215 faults, persistent write failure, rejected real
+exception write, rejected real final write, rejected real guard write, and
+rejected stage fact), the record is final or `unknown`; recorded stage names
+equal the expected stages; the spill-group sum and the summary node IDs of the
+facts equal the replacements the Thread adopted; each fact has fixed fields,
+and its revision and epoch equal the captured adoption values; the persisted
+#180 guard rows equal the pre-attempt rows wherever the attempt's own guard
+write is not reached or is rejected (a cancelled or final-write-rejected attempt
+legitimately saves its normal guard first); the witness is retained only after
+a rejected cleanup or a persistent failure; the provisional pending target has
+the stage's scope. After restart the record is byte-identical to the live one
+(nothing is reconciled or rewritten), `compact list` shows `unknown`, and a
+later above-threshold report starts a new automatic attempt and verifies the
+earlier target. A rejected stage fact leaves the epoch, replacements and path
+as they were. Two direct tests drive the uncalibrated active-Turn summary and
+the late prefix summary through a real history with the fault checkpoint. A
+database unit test covers witness removal on Thread deletion.

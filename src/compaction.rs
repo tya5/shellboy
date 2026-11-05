@@ -20,6 +20,10 @@ pub(crate) mod boundary;
 mod bounded;
 pub(crate) mod context_usage;
 use bounded::SummaryBudget;
+mod attempt;
+pub(crate) use attempt::{
+    AutomaticStage, FINISH_SQL as ATTEMPT_FINISH_SQL, begin_tx as attempt_begin_tx,
+};
 mod edit;
 mod keys;
 pub(crate) mod preview;
@@ -412,6 +416,7 @@ impl Compactor {
         &self,
         thread: &str,
         cancel: CancellationToken,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, false).await?;
         let ranges = policy::spill_ranges(&snapshot, false)
@@ -428,7 +433,8 @@ impl Compactor {
                 })
             })
             .collect();
-        self.spill_snapshot(snapshot, ranges, cancel, false).await
+        self.spill_snapshot(snapshot, ranges, cancel, false, automatic)
+            .await
     }
 
     pub(crate) async fn spill_staged_cancellable(
@@ -437,6 +443,7 @@ impl Compactor {
         active: bool,
         target: u64,
         cancel: CancellationToken,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, false).await?;
         let mut estimated_removed = 0u64;
@@ -459,7 +466,8 @@ impl Compactor {
                 })
             })
             .collect();
-        self.spill_snapshot(snapshot, ranges, cancel, active).await
+        self.spill_snapshot(snapshot, ranges, cancel, active, automatic)
+            .await
     }
 
     pub async fn spill_cancellable(
@@ -470,7 +478,8 @@ impl Compactor {
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, false).await?;
         let ranges = policy::spill_ranges(&snapshot, include_latest);
-        self.spill_snapshot(snapshot, ranges, cancel, false).await
+        self.spill_snapshot(snapshot, ranges, cancel, false, None)
+            .await
     }
     async fn spill_snapshot(
         &self,
@@ -478,6 +487,7 @@ impl Compactor {
         ranges: Vec<Range<usize>>,
         cancel: CancellationToken,
         drop_all_reasoning: bool,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         range::validate(&snapshot, &ranges, range::RangeMode::Spill)?;
         let mut replacements = Vec::new();
@@ -505,6 +515,17 @@ impl Compactor {
             .iter()
             .flat_map(|(i, _)| snapshot.groups[*i].sources.iter().map(|s| s.id.clone()))
             .collect();
+        let removed_characters = replacements
+            .iter()
+            .map(|(i, payload)| {
+                let before = snapshot.groups[*i]
+                    .sources
+                    .iter()
+                    .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
+                    .fold(0u64, u64::saturating_add);
+                before.saturating_sub(edit::projection_characters(payload, snapshot.epoch))
+            })
+            .fold(0u64, u64::saturating_add);
         let result = CompactResult {
             spilled_groups: replacements.len(),
             source_nodes: source_ids.len(),
@@ -547,6 +568,17 @@ impl Compactor {
                         [history::reasoning_keep_key(&snapshot.thread)],
                     )?;
                 }
+                if let Some(stage) = &automatic {
+                    attempt::record_tx(
+                        &tx,
+                        &snapshot.thread,
+                        stage,
+                        &result,
+                        &attempt::StageMeasure {
+                            removed_characters: Some(removed_characters),
+                        },
+                    )?;
+                }
                 tx.commit()?;
                 Ok(result)
             })
@@ -579,7 +611,7 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        self.summarize_snapshot(snapshot, range, cancel, boundary)
+        self.summarize_snapshot(snapshot, range, cancel, boundary, None)
             .await
     }
     /// #181/#182: replace every tool round of the active Turn with one summary
@@ -594,13 +626,15 @@ impl Compactor {
         thread: &str,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_active_guarded(thread, cancel, None).await
+        self.summarize_active_guarded(thread, cancel, None, None)
+            .await
     }
     pub(crate) async fn summarize_active_guarded(
         &self,
         thread: &str,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(plan) = policy::active_turn_plan(&snapshot) else {
@@ -621,6 +655,7 @@ impl Compactor {
             Some(plan),
             false,
             boundary,
+            automatic,
         )
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
@@ -632,7 +667,7 @@ impl Compactor {
         target: u64,
         cancel: CancellationToken,
     ) -> Result<(CompactResult, u64), ApiError> {
-        self.summarize_target_active_guarded(thread, target, cancel, None)
+        self.summarize_target_active_guarded(thread, target, cancel, None, None)
             .await
     }
     pub(crate) async fn summarize_target_active_guarded(
@@ -641,6 +676,7 @@ impl Compactor {
         target: u64,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<(CompactResult, u64), ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some((range, shortfall)) =
@@ -666,6 +702,7 @@ impl Compactor {
                 None,
                 true,
                 boundary,
+                automatic,
             )
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))?;
@@ -700,6 +737,7 @@ impl Compactor {
         thread: &str,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(range) = policy::unsummarized_prefix(&snapshot) else {
@@ -708,7 +746,7 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        self.summarize_snapshot(snapshot, range, cancel, boundary)
+        self.summarize_snapshot(snapshot, range, cancel, boundary, automatic)
             .await
     }
     pub(crate) async fn summarize_target_prefix_guarded(
@@ -717,6 +755,7 @@ impl Compactor {
         target: u64,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<(CompactResult, u64), ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some((range, shortfall)) =
@@ -731,7 +770,7 @@ impl Compactor {
             ));
         };
         let result = self
-            .summarize_snapshot(snapshot, range, cancel, boundary)
+            .summarize_snapshot(snapshot, range, cancel, boundary, automatic)
             .await?;
         Ok((result, shortfall))
     }
@@ -844,6 +883,7 @@ impl Compactor {
         range: Range<usize>,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         self.summarize_with_policy(
             snapshot,
@@ -851,6 +891,7 @@ impl Compactor {
             cancel,
             self.config.compaction.clone(),
             boundary,
+            automatic,
         )
         .await
     }
@@ -861,6 +902,7 @@ impl Compactor {
         cancel: CancellationToken,
         policy: crate::config::Compaction,
         boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::UsageLedger::new(&snapshot);
         self.summarize_recorded(
@@ -872,6 +914,7 @@ impl Compactor {
             None,
             false,
             boundary,
+            automatic,
         )
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
@@ -887,6 +930,7 @@ impl Compactor {
         active: Option<policy::ActiveTurnPlan>,
         drop_all_reasoning: bool,
         mut boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
         // The active-Turn plan already requires complete, unprotected groups;
         // its user messages are summarized, not fences.
@@ -1114,7 +1158,12 @@ impl Compactor {
                 "Summary does not shrink its original source projection; original path retained",
             ));
         }
+        let removed_characters = budget
+            .source_characters
+            .saturating_sub(edit::projection_characters(&payload, snapshot.epoch));
         let adoption = SummaryAdoption {
+            automatic,
+            removed_characters,
             drop_all_reasoning,
             snapshot,
             sources,
@@ -2312,7 +2361,7 @@ mod tests {
         let (url, server) = summary_proxy_capturing(vec![reply; map_count + 1]).await;
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let result = compactor
-            .summarize_snapshot(snapshot, range, CancellationToken::new(), None)
+            .summarize_snapshot(snapshot, range, CancellationToken::new(), None, None)
             .await
             .unwrap();
         let calls = server.await.unwrap();
@@ -2346,7 +2395,7 @@ mod tests {
         .unwrap();
         let before_spill = compactor.proactive_history_characters("t").await.unwrap();
         let spill = compactor
-            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new())
+            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new(), None)
             .await
             .unwrap();
         let after_spill = compactor.proactive_history_characters("t").await.unwrap();
@@ -2370,7 +2419,7 @@ mod tests {
         .unwrap();
         let live_before = compactor.proactive_history_characters("t").await.unwrap();
         let live_spill = compactor
-            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new())
+            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new(), None)
             .await
             .unwrap();
         let live_after = compactor.proactive_history_characters("t").await.unwrap();
@@ -2422,7 +2471,7 @@ mod tests {
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         assert!(
             compactor
-                .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None)
+                .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
                 .await
                 .is_err()
         );
@@ -2470,7 +2519,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let result = compactor
-            .summarize_snapshot(snapshot, 1..3, CancellationToken::new(), None)
+            .summarize_snapshot(snapshot, 1..3, CancellationToken::new(), None, None)
             .await
             .unwrap();
         assert_eq!(result.original_node_ids, ["middle-a", "middle-b"]);
@@ -2537,7 +2586,7 @@ mod tests {
         cancel.cancel();
         assert!(
             compactor
-                .spill_staged_cancellable("t", true, u64::MAX, cancel)
+                .spill_staged_cancellable("t", true, u64::MAX, cancel, None)
                 .await
                 .is_err()
         );
@@ -2567,7 +2616,7 @@ mod tests {
         }).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
         let result = compactor
-            .spill_staged_cancellable("t", true, u64::MAX, CancellationToken::new())
+            .spill_staged_cancellable("t", true, u64::MAX, CancellationToken::new(), None)
             .await
             .unwrap();
         assert_eq!(result.spilled_groups, 2);
@@ -3369,7 +3418,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let first = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None)
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
             .await
             .unwrap();
         let usage = first.summary_usage.clone().unwrap();
@@ -3398,7 +3447,7 @@ mod tests {
         .unwrap();
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let second = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None)
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
             .await
             .unwrap();
         assert_eq!((second.created_parts, second.reused_parts), (0, 2));

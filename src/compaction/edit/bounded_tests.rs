@@ -311,7 +311,7 @@ async fn automatic_second_stage_uses_reduction_limits_and_never_adopts_oversize_
     let snapshot = f.compactor.snapshot("t", true).await.unwrap();
     let e = crate::test_watchdog::watchdog("src/compaction/edit/bounded_tests.rs: automatic_second_stage_uses_reduction_limits_and_never_adopts_oversize_text",
         f.compactor
-            .summarize_snapshot(snapshot, 0..1, CancellationToken::new(), None),
+            .summarize_snapshot(snapshot, 0..1, CancellationToken::new(), None, None),
     )
     .await
     .expect("automatic stage watchdog")

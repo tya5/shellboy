@@ -59,6 +59,6 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
 - [Connection-wide rate feedback](connection-rate-limit.md) (#224, Phase 1):
   measured 429 recording gaps and a proposed shared wait/retry/fairness design.
   No runtime behavior changes or parallel-map implementation are adopted.
-- [Recoverable automatic attempt record](compaction.md#proposed-recoverable-automatic-attempt-record-after-post-commit-failure-226)
+- [Recoverable automatic attempt record](compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226)
   (#226): stage facts written in the stage adoption transaction; complete or
-  explicitly `unknown` after post-commit storage failure. Not implemented.
+  explicitly `unknown` after post-commit storage failure. Adopted and implemented.

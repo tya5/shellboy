@@ -1,5 +1,22 @@
 # Validation record
 
+## Automatic attempt record after post-commit failure (#226)
+
+macOS ARM64 through `rust-slot`, disposable DBs and loopback providers; no live
+provider, no real disk-full or I/O failure. `cargo test --lib record_` passes the
+nine fault classes times four boundaries, the two uncalibrated-site tests and the
+Thread-deletion test (details in the design's implementation notes). They verify:
+stage facts equal adopted replacements; the record is final or `unknown`; a
+persistent failure leaves `unknown` with the exact stages and a provisional
+target, retained witness, and nothing reconciled after restart; rejections at the
+real exception, guard and final write sites; a rejected stage fact rolls its
+stage back; `compact list` shows `unknown`; a later automatic attempt starts and
+verifies the earlier target. Per-stage extra write cost, measured on a synthetic
+fixture only: 210-249 us per stage in a debug build (three runs each; see design).
+Not verified: real-provider behavior, OS-level storage failure, Windows/Linux
+local runs (CI results are recorded with the final SHA), and the cost on a large
+production DB.
+
 ## Partial-spill summary cancellation (#215 review follow-up)
 
 Added loopback-owner regressions for closed spill then cancelled summary and

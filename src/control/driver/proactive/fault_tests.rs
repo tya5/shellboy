@@ -9,12 +9,34 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 
+mod record_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Fault {
     Storage,
     Cancellation,
     Remeasurement,
     Cleanup,
+    /// #226: after the checkpoint every attempt-record and automatic app_meta
+    /// write is rejected, so only the stage facts and provisional target remain.
+    Persistent,
+    /// #226: the real exception write (W2) is rejected after a real cleanup.
+    RejectException,
+    /// #226: the real final write (W4) is rejected; the attempt runs to its end.
+    RejectFinal,
+    /// #226: the real guard write (W3) is rejected; the attempt runs to its end.
+    RejectGuard,
+    /// #226: the stage fact itself is rejected before the stage adopts.
+    RejectFact,
+}
+impl Fault {
+    /// The attempt continues after the checkpoint instead of failing at it.
+    fn continues(self) -> bool {
+        matches!(
+            self,
+            Fault::RejectFinal | Fault::RejectGuard | Fault::RejectFact
+        )
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -47,7 +69,7 @@ async fn boundaries(fault: Fault) {
     .unwrap();
 }
 
-async fn boundary(fault: Fault, active: bool, summary: bool) {
+async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
     eprintln!("automatic boundary {fault:?} active={active} summary={summary}");
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
@@ -91,6 +113,11 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
             Fault::Storage => 1,
             Fault::Remeasurement => 2,
             Fault::Cleanup => 3,
+            Fault::Persistent => 4,
+            Fault::RejectException => 5,
+            Fault::RejectFinal => 6,
+            Fault::RejectGuard => 7,
+            Fault::RejectFact => 8,
         },
         reached: reached.clone(),
     });
@@ -134,6 +161,21 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
         "#))?;
         Ok(())
     }).await.unwrap();
+    // #226: faults that must precede the stage are installed before it runs.
+    let (hit_flag, stage_name) = (reached.clone(), stage);
+    if fault == Fault::RejectFact {
+        control.store.database.call(move |db| {
+            db.create_scalar_function("fault_fact_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
+                hit_flag.store(true, Ordering::SeqCst);
+                Ok(1i64)
+            })?;
+            db.execute_batch(&format!("CREATE TEMP TRIGGER fault_fact BEFORE UPDATE OF error_json ON model_attempt
+                WHEN json_type(NEW.error_json,'$.automatic_trim_attempt.committed_stages.{stage_name}')='object'
+                BEGIN SELECT fault_fact_hit(); SELECT RAISE(ABORT,'injected stage fact rejection'); END;"))?;
+            Ok(())
+        }).await.unwrap();
+    }
+    let guard_before = guard_rows(&control).await;
     request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if active {200} else {100},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
     if !active {
         incoming(&control, &mut receive)
@@ -157,7 +199,16 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
             break;
         }
         if let Ok(prefix) = receive.try_recv() {
-            assert!(active, "closed boundary must fail before another request");
+            assert!(
+                active || fault.continues(),
+                "closed boundary must fail before another request: {}",
+                prefix
+                    .body
+                    .to_string()
+                    .chars()
+                    .take(600)
+                    .collect::<String>()
+            );
             assert_eq!(prefix.body["tools"], json!([]));
             prefix
                 .reply
@@ -177,6 +228,51 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
         "no provider continuation after failure"
     );
     assert!(!control.compactor.fail_remeasurement.load(Ordering::SeqCst));
+    Fx {
+        root,
+        url,
+        limits,
+        owner,
+        control,
+        target,
+        receive,
+        server,
+        guard_before,
+    }
+}
+
+struct Fx {
+    root: tempfile::TempDir,
+    url: String,
+    limits: &'static str,
+    owner: DataOwner,
+    control: Arc<Control>,
+    target: String,
+    receive: mpsc::Receiver<Incoming>,
+    server: tokio::task::JoinHandle<()>,
+    guard_before: Vec<(String, String)>,
+}
+
+/// Persisted #180 guard and status rows, byte-exact.
+async fn guard_rows(control: &Control) -> Vec<(String, String)> {
+    control.store.database.call(|db| {
+        Ok(db.prepare("SELECT key,value FROM app_meta WHERE key GLOB 'compact.automatic_guard.*' OR key GLOB 'compact.automatic_status.*' ORDER BY key")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    }).await.unwrap()
+}
+
+async fn boundary(fault: Fault, active: bool, summary: bool) {
+    let Fx {
+        root,
+        url,
+        limits,
+        owner,
+        control,
+        target,
+        mut receive,
+        server,
+        guard_before: _,
+    } = prepare(fault, active, summary).await;
     if fault == Fault::Cleanup {
         let id = target.clone();
         control
@@ -397,6 +493,62 @@ pub(super) async fn checkpoint(
             // cleanup. Only its DELETE fails with SaveFailed; no stop is injected.
             Err(ApiError::new(ErrorCode::InvalidState, "injected boundary error before cleanup"))
         }
+        4 => control.store.database.call(|db| {
+            db.execute_batch("CREATE TEMP TRIGGER persistent_attempt BEFORE UPDATE OF error_json ON model_attempt
+                WHEN json_type(NEW.error_json,'$.automatic_trim_attempt')='object'
+                BEGIN SELECT RAISE(ABORT,'injected persistent attempt write failure'); END;
+                CREATE TEMP TRIGGER persistent_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_*'
+                BEGIN SELECT RAISE(ABORT,'injected persistent meta write failure'); END;
+                CREATE TEMP TRIGGER persistent_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_*'
+                BEGIN SELECT RAISE(ABORT,'injected persistent meta write failure'); END;
+                CREATE TEMP TRIGGER persistent_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_*'
+                BEGIN SELECT RAISE(ABORT,'injected persistent meta write failure'); END;
+                CREATE TEMP TABLE rejected_write(value INTEGER);
+                CREATE TEMP TRIGGER reject_write BEFORE INSERT ON rejected_write
+                BEGIN SELECT RAISE(ABORT,'injected independent postcommit storage write failure'); END;")?;
+            db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
+            Ok(())
+        }).await.map_err(storage_error),
+        5..=7 => {
+            let hit = injection.reached.clone();
+            let kind = injection.kind;
+            let thread = control.store.database.call(|db| Ok(db.query_row("SELECT id FROM thread LIMIT 1", [], |r| r.get::<_, String>(0))?)).await.map_err(storage_error)?;
+            control.store.database.call(move |db| {
+                db.create_scalar_function("fault_site_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
+                    hit.store(true, Ordering::SeqCst);
+                    Ok(1i64)
+                })?;
+                let abort = "BEGIN SELECT fault_site_hit(); SELECT RAISE(ABORT,'injected production write rejection'); END;";
+                if kind == 7 {
+                    // Seed a status row so the real clearing DELETE has a row to reject.
+                    db.execute("INSERT INTO app_meta(key,value) VALUES('compact.automatic_status.'||?1,'seed')", [&thread])?;
+                    db.execute_batch(&format!("CREATE TEMP TRIGGER fault_site BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_guard.*' {abort}
+                        CREATE TEMP TRIGGER fault_site_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_status.*' OR OLD.key GLOB 'compact.automatic_guard.*' {abort}
+                        CREATE TEMP TRIGGER fault_site_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' {abort}"))?;
+                } else {
+                    let when = if kind == 5 {
+                        "json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome')='exception'"
+                    } else {
+                        "json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome') NOT IN ('unknown','exception')"
+                    };
+                    db.execute_batch(&format!("CREATE TEMP TRIGGER fault_site BEFORE UPDATE OF error_json ON model_attempt WHEN {when} {abort}"))?;
+                }
+                Ok(())
+            }).await.map_err(storage_error)?;
+            if injection.kind == 5 {
+                // A storage failure takes the real exception path (W2).
+                control.store.database.call(|db| {
+                    db.execute_batch("CREATE TEMP TABLE rejected_write(value INTEGER);
+                        CREATE TEMP TRIGGER reject_write BEFORE INSERT ON rejected_write
+                        BEGIN SELECT RAISE(ABORT,'injected independent postcommit storage write failure'); END;")?;
+                    db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
+                    Ok(())
+                }).await.map_err(storage_error)
+            } else {
+                Ok(())
+            }
+        }
+        8 => Ok(()),
         _ => unreachable!(),
     };
     if injection.kind != 0 {
@@ -405,10 +557,10 @@ pub(super) async fn checkpoint(
             "storage faults do not depend on cancellation"
         );
     }
-    if injection.kind == 1 {
+    if matches!(injection.kind, 1 | 4) {
         assert_eq!(result.as_ref().unwrap_err().code, ErrorCode::SaveFailed);
     }
-    if injection.kind != 3 {
+    if !matches!(injection.kind, 3 | 5..=8) {
         injection.reached.store(true, Ordering::SeqCst);
     }
     result

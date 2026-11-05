@@ -1,13 +1,15 @@
 # Development status
 
-## Automatic compaction attempt record after post-commit failure (#226; design proposed)
+## Automatic compaction attempt record after post-commit failure (#226; implemented, CI pending)
 
-Design only. See the [proposal](../design/compaction.md#proposed-recoverable-automatic-attempt-record-after-post-commit-failure-226):
-write a provisional `outcome:"unknown"` record in the existing witness transaction,
-and each stage's fixed-size fact plus the calibrated pending target inside that
-stage's adoption transaction. No new table, key, worker or migration. Code reading
-shows the stale witness and the retained pre-attempt guard do not suppress later
-compaction. Not implemented or tested; resume point: owner decision on the proposal.
+Implemented per the [adopted design](../design/compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226):
+a provisional `unknown` record in the witness transaction, a fixed-size stage fact
+(and the calibrated provisional pending target) inside each stage's adoption
+transaction, W2/W4 keeping the facts, the two uncalibrated call sites recorded
+and checkpointed, and Thread deletion removing the witness. No new table, key,
+worker or migration. Synthetic fault-injection tests and the measured per-stage
+cost (210-249 us, debug build) are in the design and in the validation record.
+Resume point: CI results for the final SHA, then owner review.
 
 ## Partial-spill summary cancellation (#215 review follow-up)
 

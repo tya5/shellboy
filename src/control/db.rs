@@ -2572,9 +2572,11 @@ fn delete_thread(
         )
         .map_err(sql_error)?;
         tx.execute(
-            "DELETE FROM app_meta WHERE key IN (?1,?2,?3,?4)",
+            "DELETE FROM app_meta WHERE key IN (?1,?2,?3,?4,?5)",
             params![
                 crate::compaction::CompactionKeys::new(id).automatic_target(),
+                // #226: a stopped Thread's stale automatic-active witness.
+                crate::compaction::CompactionKeys::new(id).automatic_active(),
                 crate::compaction::CompactionKeys::new(id).automatic_guard(),
                 crate::compaction::CompactionKeys::new(id).automatic_status(),
                 // #182: the kept-reasoning set ends with its Thread.
@@ -4383,6 +4385,51 @@ mod thread_deletion_notification_tests {
             );
             owner.shutdown().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn deleting_a_thread_removes_its_automatic_compaction_metadata() {
+        let (root, owner) = fixture().await;
+        seed(&owner.db).await;
+        let keys = |id: &str| {
+            let keys = crate::compaction::CompactionKeys::new(id);
+            [
+                keys.automatic_active(),
+                crate::compaction::CompactionKeys::new(id).automatic_target(),
+                crate::compaction::CompactionKeys::new(id).automatic_guard(),
+                crate::compaction::CompactionKeys::new(id).automatic_status(),
+            ]
+        };
+        let seeded: Vec<String> = keys("parent").into_iter().chain(keys("child")).collect();
+        let saved = seeded.clone();
+        owner
+            .db
+            .call(move |db| {
+                for key in &saved {
+                    db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'x')", [key])?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let store = Store::new(
+            owner.db.clone(),
+            Arc::new(owner.loaded.config.clone()),
+            root.path().into(),
+            owner.instance_id.clone(),
+        );
+        store
+            .execute(delete(&owner.instance_id, false), None)
+            .await
+            .unwrap();
+        let remaining: Vec<String> = owner.db.call(|db| Ok(db.prepare("SELECT key FROM app_meta WHERE key GLOB 'compact.automatic_*' ORDER BY key")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?)).await.unwrap();
+        let mut expected: Vec<String> = keys("child").into();
+        expected.sort();
+        assert_eq!(
+            remaining, expected,
+            "only the deleted Thread's metadata, including the witness, is removed"
+        );
+        owner.shutdown().await.unwrap();
     }
 
     #[tokio::test]

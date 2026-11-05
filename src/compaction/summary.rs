@@ -1,6 +1,8 @@
 //! Fixed successful-summary adoption, retaining the caller's one transaction.
 use super::*;
 pub(super) struct SummaryAdoption {
+    pub(super) automatic: Option<AutomaticStage>,
+    pub(super) removed_characters: u64,
     pub(super) drop_all_reasoning: bool,
     pub(super) snapshot: Snapshot,
     pub(super) sources: Vec<Source>,
@@ -51,6 +53,17 @@ impl SummaryAdoption {
         }
         // A partial active summary drops all earlier reasoning regardless of suffix.
         self.result.summary_node_id = Some(node);
+        if let Some(stage) = &self.automatic {
+            super::attempt::record_tx(
+                tx,
+                &self.snapshot.thread,
+                stage,
+                &self.result,
+                &super::attempt::StageMeasure {
+                    removed_characters: Some(self.removed_characters),
+                },
+            )?;
+        }
         Ok(self.result)
     }
 }

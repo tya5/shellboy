@@ -174,12 +174,22 @@ async fn open_loop_reduce(
     let compactor = &control.compactor;
     let mut scope = "active_turn";
     let mut result = compactor
-        .summarize_active_guarded(&snapshot.thread, slot.stop.clone(), Some(&mut *boundary))
+        .summarize_active_guarded(
+            &snapshot.thread,
+            slot.stop.clone(),
+            Some(&mut *boundary),
+            None,
+        )
         .await;
     if matches!(&result, Ok(r) if r.no_target) {
         scope = "prefix";
         result = compactor
-            .summarize_prefix_guarded(&snapshot.thread, slot.stop.clone(), Some(&mut *boundary))
+            .summarize_prefix_guarded(
+                &snapshot.thread,
+                slot.stop.clone(),
+                Some(&mut *boundary),
+                None,
+            )
             .await;
     }
     Ok(match result {

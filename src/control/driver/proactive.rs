@@ -22,6 +22,38 @@ pub(super) struct ProactiveBudget {
     prefix_adopted: bool,
 }
 
+/// One automatic attempt's identity for the #226 recoverable record.
+struct Automatic {
+    attempt: String,
+    token: String,
+    thread: String,
+    turn: String,
+    target_tokens: Option<u64>,
+}
+
+impl Automatic {
+    /// The calibrated provisional target uses the scope W4 would give the
+    /// stage; `marks` stays null, the documented coverage-limited baseline.
+    fn stage(&self, stage: &'static str) -> crate::compaction::AutomaticStage {
+        let scope = match stage {
+            "closed_spill" => "spill",
+            "closed_summary" => "prefix",
+            _ => "active_turn",
+        };
+        crate::compaction::AutomaticStage {
+            attempt_id: self.attempt.clone(),
+            token: self.token.clone(),
+            stage,
+            target: self.target_tokens.map(|tokens| {
+                (
+                    crate::compaction::CompactionKeys::new(&self.thread).automatic_target(),
+                    json!({"attempt":self.attempt,"target_tokens":tokens,"scope":scope,"turn":self.turn,"marks":null,"provisional":true}).to_string(),
+                )
+            }),
+        }
+    }
+}
+
 enum Measurement {
     BelowThreshold,
     Ready(Evidence),
@@ -357,10 +389,28 @@ pub(super) async fn maybe_compact(
     .to_string();
     let (saved_key, saved_witness) = (key.clone(), witness.clone());
     let status_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_status();
+    let target_plan = evidence
+        .input_characters
+        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
+    // #226: the provisional `unknown` record shares the witness transaction, so
+    // every stage after it can append its fact to a record that exists.
+    let automatic = Automatic {
+        attempt: evidence.attempt.clone(),
+        token: uuid::Uuid::new_v4().to_string(),
+        thread: snapshot.thread.clone(),
+        turn: snapshot.turn.clone(),
+        target_tokens: target_plan.map(|plan| plan.target_tokens),
+    };
+    let provisional_trigger = json!({"auto_at_tokens": threshold, "input_tokens": evidence.input_tokens, "run_id": snapshot.run});
+    let provisional_plan = target_plan.map_or(Value::Null, |plan| json!({"target_tokens":plan.target_tokens,"remove_characters":plan.remove_characters,"input_characters":evidence.input_characters}));
+    let (provisional_trigger_copy, provisional_plan_copy) =
+        (provisional_trigger.clone(), provisional_plan.clone());
+    let (begin_attempt, begin_token) = (automatic.attempt.clone(), automatic.token.clone());
     control.store.database.call(move |db| {
         let tx = db.transaction()?;
         tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
         tx.execute("DELETE FROM app_meta WHERE key=?1", [status_key])?;
+        crate::compaction::attempt_begin_tx(&tx, &begin_attempt, &begin_token, REASON, &provisional_trigger, &provisional_plan)?;
         tx.commit()?;
         Ok(())
     }).await.map_err(storage_error)?;
@@ -371,9 +421,6 @@ pub(super) async fn maybe_compact(
     control.changed(&snapshot.thread);
     // Do not pin the replay frames while summary requests are in flight.
     snapshot.input.take();
-    let target_plan = evidence
-        .input_characters
-        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
     let mut midturn = Value::Null;
     let prefer_active = target_plan.is_none()
         && (evidence.insufficient_prefix
@@ -391,9 +438,9 @@ pub(super) async fn maybe_compact(
         Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
     let spill = if let Some(plan) = target_plan {
-        control.compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone()).await
+        control.compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
     } else if spill_new && !open_loop {
-        control.compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone()).await
+        control.compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
     } else {
         Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
     };
@@ -421,7 +468,7 @@ pub(super) async fn maybe_compact(
             "summary": spill,
             "summary_deferred": true,
         }),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed, boundary).await
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed, boundary, &automatic).await
         {
             Ok(mut summary) => {
                 if summary_scope == "prefix" && (middle_new || active_spill_new) && !slot.stop.is_cancelled()
@@ -429,7 +476,7 @@ pub(super) async fn maybe_compact(
                 {
                     let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
                     if before.saturating_sub(after) < plan.remove_characters {
-                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed, boundary).await {
+                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed, boundary, &automatic).await {
                             Ok(active) if !active.no_target => {
                                 summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
                                 summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
@@ -556,12 +603,20 @@ pub(super) async fn maybe_compact(
                         .unwrap_or(0),
                 )
                 .min(u32::MAX as u64) as u32;
-            let body = json!({"outcome":"exception", "cancelled":slot.stop.is_cancelled(), "stages":stages, "spill_counts":spill_counts}).to_string();
-            let attempt = evidence.attempt.clone();
-            control.store.database.call(move |db| {
-            db.execute("UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))", params![body,attempt])?;
-            Ok(())
-        }).await.map_err(storage_error)?;
+            let body = json!({"outcome":"exception", "cancelled":slot.stop.is_cancelled(), "reason":REASON, "trigger":provisional_trigger_copy, "target_plan":provisional_plan_copy, "stages":stages, "spill_counts":spill_counts}).to_string();
+            let (attempt, token) = (automatic.attempt.clone(), automatic.token.clone());
+            control
+                .store
+                .database
+                .call(move |db| {
+                    db.execute(
+                        crate::compaction::ATTEMPT_FINISH_SQL,
+                        params![body, attempt, token],
+                    )?;
+                    Ok(())
+                })
+                .await
+                .map_err(storage_error)?;
             return Err(error);
         }
     };
@@ -723,16 +778,13 @@ pub(super) async fn maybe_compact(
     };
     let target_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_target();
     let body = observation.to_string();
-    let attempt = evidence.attempt;
+    let (attempt, token) = (automatic.attempt.clone(), automatic.token.clone());
     control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
-            tx.execute(
-                "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))",
-                params![body, attempt],
-            )?;
+            tx.execute(crate::compaction::ATTEMPT_FINISH_SQL, params![body, attempt, token])?;
             if let Some(pending) = pending_target {
                 tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![target_key,pending])?;
             }
@@ -782,12 +834,33 @@ async fn active_after_spill(
     stages: &mut Value,
     committed: &mut Vec<crate::compaction::CompactResult>,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
+    automatic: &Automatic,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let Some(need) = remaining else {
-        return control
+        // #226: the uncalibrated active-Turn summary is a recorded stage too.
+        let summary = control
             .compactor
-            .summarize_active_guarded(thread, slot.stop.clone(), Some(&mut *boundary))
+            .summarize_active_guarded(
+                thread,
+                slot.stop.clone(),
+                Some(&mut *boundary),
+                Some(automatic.stage("active_summary")),
+            )
             .await;
+        if let Ok(summary) = &summary {
+            committed.push(summary.clone());
+        }
+        stages["active_summary"] = json!({"ran":true,"outcome":match &summary {
+            Ok(r) if r.no_target => "no_target",
+            Ok(_) => "adopted",
+            Err(_) if slot.stop.is_cancelled() => "cancelled",
+            Err(_) => "rejected",
+        }});
+        #[cfg(test)]
+        if summary.as_ref().is_ok_and(|r| !r.no_target) {
+            fault_tests::checkpoint(control, slot, "active_summary").await?;
+        }
+        return summary;
     };
     let before = control
         .compactor
@@ -796,7 +869,13 @@ async fn active_after_spill(
     stages["active_spill"] = json!({"ran":true,"remaining_before":need,"outcome":"started"});
     let spill = match control
         .compactor
-        .spill_staged_cancellable(thread, true, need, slot.stop.clone())
+        .spill_staged_cancellable(
+            thread,
+            true,
+            need,
+            slot.stop.clone(),
+            Some(automatic.stage("active_spill")),
+        )
         .await
     {
         Ok(spill) => spill,
@@ -839,7 +918,13 @@ async fn active_after_spill(
     stages["active_summary"] = json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
     let (mut summary, projected_shortfall) = match control
         .compactor
-        .summarize_target_active_guarded(thread, remaining, slot.stop.clone(), Some(&mut *boundary))
+        .summarize_target_active_guarded(
+            thread,
+            remaining,
+            slot.stop.clone(),
+            Some(&mut *boundary),
+            Some(automatic.stage("active_summary")),
+        )
         .await
     {
         Ok(summary) => summary,
@@ -900,6 +985,7 @@ async fn summarize_once(
     stages: &mut Value,
     committed: &mut Vec<crate::compaction::CompactResult>,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
+    automatic: &Automatic,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let compactor = &control.compactor;
     if !order.prefer_active && order.ordinary_new {
@@ -917,6 +1003,7 @@ async fn summarize_once(
                     target,
                     slot.stop.clone(),
                     Some(&mut *boundary),
+                    Some(automatic.stage("closed_summary")),
                 )
                 .await
                 .map(|(result, missing)| {
@@ -925,7 +1012,12 @@ async fn summarize_once(
                 })
         } else {
             compactor
-                .summarize_prefix_guarded(thread, slot.stop.clone(), Some(&mut *boundary))
+                .summarize_prefix_guarded(
+                    thread,
+                    slot.stop.clone(),
+                    Some(&mut *boundary),
+                    Some(automatic.stage("closed_summary")),
+                )
                 .await
         };
         if let Ok(summary) = &prefix {
@@ -973,6 +1065,7 @@ async fn summarize_once(
             stages,
             committed,
             boundary,
+            automatic,
         )
         .await;
         if !matches!(&active, Ok(result) if result.no_target) {
@@ -986,13 +1079,16 @@ async fn summarize_once(
     }
     if order.prefer_active && order.ordinary_new {
         *scope = "prefix";
-        return if let Some(target) = remaining {
+        // #226: the late prefix summary is recorded and checkpointed like the
+        // first-position one.
+        let prefix = if let Some(target) = remaining {
             compactor
                 .summarize_target_prefix_guarded(
                     thread,
                     target,
                     slot.stop.clone(),
                     Some(&mut *boundary),
+                    Some(automatic.stage("closed_summary")),
                 )
                 .await
                 .map(|(result, missing)| {
@@ -1001,9 +1097,28 @@ async fn summarize_once(
                 })
         } else {
             compactor
-                .summarize_prefix_guarded(thread, slot.stop.clone(), Some(&mut *boundary))
+                .summarize_prefix_guarded(
+                    thread,
+                    slot.stop.clone(),
+                    Some(&mut *boundary),
+                    Some(automatic.stage("closed_summary")),
+                )
                 .await
         };
+        if let Ok(summary) = &prefix {
+            committed.push(summary.clone());
+        }
+        stages["closed_summary"] = json!({"ran":true,"remaining_before":remaining,"outcome":match &prefix {
+            Ok(r) if r.no_target => "no_target",
+            Ok(_) => "adopted",
+            Err(_) if slot.stop.is_cancelled() => "cancelled",
+            Err(_) => "rejected",
+        }});
+        #[cfg(test)]
+        if prefix.as_ref().is_ok_and(|r| !r.no_target) {
+            fault_tests::checkpoint(control, slot, "closed_summary").await?;
+        }
+        return prefix;
     }
     Ok(crate::compaction::CompactResult {
         no_target: true,

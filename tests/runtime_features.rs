@@ -3516,7 +3516,11 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 let record = control.store.database.call(move |db| {
                     Ok(db.query_row("SELECT a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1", [thread], |row| row.get::<_,String>(0)).optional()?)
                 }).await.unwrap();
-                if let Some(record) = record { break serde_json::from_str::<Value>(&record).unwrap()["automatic_trim_attempt"].clone(); }
+                if let Some(record) = record {
+                    // The provisional `unknown` record (#226) exists from the start.
+                    let record = serde_json::from_str::<Value>(&record).unwrap()["automatic_trim_attempt"].clone();
+                    if record["outcome"] != "unknown" { break record; }
+                }
                 tokio::task::yield_now().await;
             };
             assert_eq!(record["outcome"], "adopted", "{record:#?}");

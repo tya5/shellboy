@@ -259,7 +259,7 @@ pub(super) async fn argument_free_compact(
         .await?;
     if open && summary.no_target {
         summary = compactor
-            .summarize_active_guarded(thread, cancel, boundary)
+            .summarize_active_guarded(thread, cancel, boundary, None)
             .await?;
     }
     summary.spilled_groups += spill.spilled_groups;

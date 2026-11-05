@@ -3442,3 +3442,29 @@ format is based on one observed case plus the documented fields; other
 providers' wrappers are not guessed. A fact whose reset exceeds the remaining
 retry schedule is not auto-retried and its reset time appears in the recovery
 reason.
+
+## D-226: Recoverable automatic attempt record (2026-11-05)
+
+The leader adopted option A of the #226 proposal. Each automatic attempt writes a
+provisional `unknown` record in its witness transaction; each stage appends a
+fixed-size content-free fact (and, when calibrated, the provisional pending
+target) in its own adoption transaction; W2/W4 keep the facts. Reason: a
+post-commit storage failure previously lost every diagnostic while the
+replacements stayed committed, and a second write cannot be made reliable once
+the writer fails, so the fact must commit with the replacement. Impact: one
+extra primary-key UPDATE (and one app_meta upsert when calibrated) per committed
+stage (210-249 us on a synthetic debug fixture); a failing fact write rolls the
+stage back, which is the same writer failure that would fail the commit. No new
+table, key, worker, queue or migration. Decisions made during implementation:
+(1) `removed_characters` in a fact is the projection difference of the replaced
+items only; whole-history removal stays with the driver's re-measurement.
+(2) The W2 exception body now also carries `reason`, `trigger` and `target_plan`.
+(3) The uncalibrated active-Turn summary and late prefix summary are now recorded
+stages; their `stages` entries were `not_reached` before. (4) The #180 guard and
+the witness need no change; the guard test asserts equality with the pre-attempt
+rows only where the attempt's own guard write is not reached or is rejected.
+(5) The cost measurement is temporary instrumentation, not a test, because
+wall-clock numbers do not belong in the suite. Revisit if a real DB shows the
+stage UPDATE matters, if another stage kind is added, or if a record with
+non-NULL invalid `error_json` must also carry facts.
+
