@@ -533,7 +533,13 @@ provider-reported input tokens of the first model request of the Thread that
 started after the adoption, and that request's ID. Both are read from saved
 attempts, not stored; the tokens are `null` while that request has no reported
 input (not yet finished, failed, or not reported by the provider) and both are
-`null` before any later request exists. Never estimated. Compare it with
+`null` before any later request exists. Never estimated. Only adopted summary
+events carry the two keys; spill, range-omission and summary-less attempts omit
+them (not applicable), while `null` on a summary means no later request yet or no
+reported input (including a request that has not yet finished). Several
+adoptions before one request share the same attempt ID, and that input reflects
+all of them, so do not sum effects. A fork's first request is not attributed to
+inherited summaries (null). Compare it with
 `trigger.input_tokens` and `trigger.auto_at_tokens` (automatic events) to see
 the effect of a compaction setting. Each summarizing event has `metrics.summary_usage`:
 `requests`, `map_requests`, `reduce_requests` and `input_tokens`,

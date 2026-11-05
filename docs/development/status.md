@@ -7,7 +7,7 @@
 conversation shows one collapsed `⬦` row per adopted summary (auto and manual,
 En/Ja) and a `⁂` note after the response that triggered a skipped, failed or
 spill-only automatic attempt; see [tui-presentation](../design/tui-presentation.md).
-No 10% growth rule exists in the product, so the note states the witness rule
+No 10% growth rule exists in the product, so the note states the eligible-content gate
 (D-230-2). Not verified on a real terminal or a live provider; synthetic render
 and read tests only. Resume point: CI on the final SHA, then owner review.
 

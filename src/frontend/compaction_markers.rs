@@ -62,7 +62,6 @@ pub(super) fn apply(nodes: &mut [UiNode], raw: Raw) -> Result<(), ApiError> {
         {
             node.presentation.title = facts.render(crate::config::UiLanguage::Ja);
             node.presentation.ui_messages.title = Some(Message::CompactionMarker(facts));
-            node.presentation.projection_stamp = None;
         }
     }
     for (node_id, attempt) in raw.attempts {
@@ -79,7 +78,6 @@ pub(super) fn apply(nodes: &mut [UiNode], raw: Raw) -> Result<(), ApiError> {
             .filter(|facts| !facts.has_summary)
         {
             node.presentation.compaction_note = Some(facts);
-            node.presentation.projection_stamp = None;
         }
     }
     Ok(())
@@ -257,6 +255,26 @@ mod tests {
             crate::presentation::compaction_marker::Outcome::Skipped
         );
         assert_eq!(note.fired_at, Some(206000));
+    }
+    #[test]
+    fn a_refresh_that_changes_only_the_note_or_marker_changes_the_render_stamp() {
+        let mut node = ui("resp2", "assistant_response", json!({"output":[]}));
+        super::super::streams::seal_node(&mut node);
+        let plain = node.presentation.projection_stamp;
+        assert!(plain.is_some());
+        let facts = crate::presentation::compaction_marker::MarkerFacts::from_event(
+            &json!({"kind":"automatic_reduction","state":"no_target","metrics":{}}),
+        )
+        .unwrap();
+        node.presentation.compaction_note = Some(facts.clone());
+        super::super::streams::seal_node(&mut node);
+        let noted = node.presentation.projection_stamp;
+        assert_ne!(plain, noted);
+        node.presentation.compaction_note = None;
+        node.presentation.ui_messages.title = Some(Message::CompactionMarker(facts));
+        super::super::streams::seal_node(&mut node);
+        assert_ne!(plain, node.presentation.projection_stamp);
+        assert_ne!(noted, node.presentation.projection_stamp);
     }
     #[test]
     fn pages_without_summaries_or_automatic_attempts_do_no_compaction_read() {

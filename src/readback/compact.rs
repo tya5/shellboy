@@ -228,23 +228,25 @@ struct PostInput {
 /// The first model request of the Thread that started after the replacement was
 /// adopted, read from saved attempts (no stored link). Turns are walked in
 /// `ended_at` order so the first match ends the scan; an open Turn is the
-/// fallback. Input tokens are the provider-reported value or None, never an
+/// fallback. A fork's inherited replacements (also in the parent's
+/// `thread_replacement`) match nothing: its first request was not caused by them. Input tokens are the provider-reported value or None, never an
 /// estimate.
 fn post_adoption_input(
     db: &Connection,
     thread: &str,
+    replacement: &str,
     adopted_at: &str,
 ) -> Result<Option<PostInput>, crate::storage::StorageError> {
     let projection = crate::usage::sql_projection("a.usage_json");
     let ended = format!(
-        "SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1"
+        "SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 AND NOT EXISTS(SELECT 1 FROM thread f JOIN thread_replacement p ON p.thread_id=f.parent_thread_id WHERE f.id=?1 AND p.replacement_id=?3) ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1"
     );
     let open = format!(
-        "SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY a.started_at,a.rowid LIMIT 1"
+        "SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND u.state IN ('preparing','running','waiting','recovery_wait') AND a.started_at>?2 AND octet_length(a.id)<=512 AND NOT EXISTS(SELECT 1 FROM thread f JOIN thread_replacement p ON p.thread_id=f.parent_thread_id WHERE f.id=?1 AND p.replacement_id=?3) ORDER BY a.started_at,a.rowid LIMIT 1"
     );
     for sql in [ended, open] {
         let found = db
-            .query_row(&sql, params![thread, adopted_at], |row| {
+            .query_row(&sql, params![thread, adopted_at, replacement], |row| {
                 Ok(PostInput {
                     attempt_id: row.get(0)?,
                     input_tokens: crate::usage::StandardUsage::read(row, 1)?.input_tokens,
@@ -261,11 +263,14 @@ fn post_inputs(
     db: &Connection,
     thread: &str,
     replacements: &[ReplacementRow],
+    limit: usize,
 ) -> Result<std::collections::HashMap<String, PostInput>, crate::storage::StorageError> {
     let mut found = std::collections::HashMap::new();
-    for row in replacements {
+    // Replacements are newest first and the page keeps the newest `limit` events,
+    // so a summary that survives is among the first `limit` replacement rows.
+    for row in replacements.iter().take(limit) {
         if row.format != "spill-v1"
-            && let Some(input) = post_adoption_input(db, thread, &row.at)?
+            && let Some(input) = post_adoption_input(db, thread, &row.id, &row.at)?
         {
             found.insert(row.id.clone(), input);
         }
@@ -437,7 +442,7 @@ pub(super) fn collect_tx(
             raw: budget.text(row, 3, true)?,
         });
     }
-    let post_input = post_inputs(db, thread, &replacements)?;
+    let post_input = post_inputs(db, thread, &replacements, a.limit as usize)?;
     let saturated = included_receipts == cap || automatic.len() == cap || replacements.len() == cap;
     Ok(RawCompactions {
         thread: thread.into(),

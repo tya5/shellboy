@@ -3522,15 +3522,16 @@ ordering rests on timestamp string comparison like `next_request_pending`; a
 clock step backwards could pair the wrong attempt. Revisit if a measured read
 cost or timestamp anomaly appears.
 
-## D-230-2: Marker next-trigger text follows the witness, not a 10% rule (2026-11-06)
+## D-230-2: Marker next-trigger text states the eligible-content gate, not a 10% rule (2026-11-06)
 
-Decision: the note for a skipped, failed or rejected proactive attempt says the
-next attempt happens when new eligible content appears, re-checked in the next
-Turn. Reason: #230 mentions a 10% input growth rule, but `proactive_guard.rs`
-retries by a saved eligible-source witness within a Turn and has no growth
-percentage; showing one would be a guess. Impact: text only. Revisit if a growth
-rule is added (#229 mentions it for the thread threshold); then derive the input
-level from the saved trigger and display it. Also: the row keeps the existing
-`⬦`/`⁂` marks and the `|`/`·` separator rule instead of a `──` rule line, to
-reuse existing presentation parts; spilled count is shown only when known and
-above zero.
+Decision: the note for a skipped, failed or rejected proactive attempt says
+`next: when new eligible content appears`. Reason: #230 mentions a 10% input
+growth rule, but the product retries only when the saved history changes so that
+the bounded candidate forecast shows new or grown eligible content (a later Turn
+alone or more input tokens alone does not retry); showing a percentage would be a
+guess. Impact: text only. Revisit if a growth rule is added. The row keeps the
+existing `⬦`/`⁂` marks and the separator rule instead of a `──` rule line, to
+reuse existing presentation parts; the spilled count is shown only when known and
+above zero. Review follow-ups: the render stamp now covers the note and marker
+facts; a fork's inherited replacements get null linkage; a spill-only attempt
+shows a rejected summary and no later-input part.

@@ -710,13 +710,13 @@ there is no estimate, and providers or gateways that report no input tokens neve
 trigger it. Context-overflow reduction remains the last-resort fallback.
 
 If the compaction is not adopted (summary failure, nothing safely compactable),
-the request continues. Another proactive attempt in the same Run requires the
-provider's reported input count to increase by at least 10% of `auto_at_tokens`
-(rounded up) from the last non-adopted attempt, while still meeting the threshold.
-Unknown, unchanged or decreasing usage does not retry. If a spill succeeds but
+the request continues. Another attempt is made only when the saved history changes so that the bounded
+candidate forecast shows new or grown eligible content (a new spill group or
+summary source) compared with the saved evidence; a later Turn alone, or more
+input tokens alone, does not retry. If a spill succeeds but
 the summary is rejected, `compact list` records an adopted spill with
 `metrics.summary_rejected: true` and the failed summary's reported usage; the
-same growth gate applies before another attempt. Proactive spill selects only
+same eligible-content gate applies before another attempt. Proactive spill selects only
 safe groups whose replayed JSON becomes shorter; this is not a token estimate.
 Ordinary summary protects
 the current and latest completed Turns; a long current Turn's old tool outputs

@@ -145,7 +145,7 @@ pub(in crate::readback) fn read_display(
                     .is_some_and(|v| v["spilled_groups"].as_u64().is_some_and(|n| n > 0))
             }),
     );
-    let post_input = post_inputs(db, thread, &replacements)?;
+    let post_input = post_inputs(db, thread, &replacements, 1)?;
     Ok(RawCompactions {
         thread: thread.into(),
         limit: 1,

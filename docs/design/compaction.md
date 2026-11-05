@@ -1108,6 +1108,17 @@ page candidate cap; 5 for the latest-compaction display). Failed or rejected
 proactive attempts have no replacement and show null.
 
 Conversation marker (#230): see [tui-presentation](tui-presentation.md). The
-retry condition shown on a skipped or failed attempt is the existing Turn-scoped
-eligible-source witness; the issue's 10% growth rule is not implemented in the
-product (see D-230-2), so no percentage is displayed.
+retry condition shown on a skipped or failed attempt is the existing
+eligible-content gate (new or grown spill/summary candidates against the saved
+evidence); the issue's 10% growth rule is not implemented (see D-230-2), so no
+percentage is displayed.
+
+Linkage limits (#230 review): the fields are carried by adopted summary events
+(`kind` `summary`, `compact` or `automatic_reduction` with a summary node); spill
+and range-omission events and attempts without a summary do not carry them (the
+keys are absent, which is not-applicable, as distinct from null on a summary,
+which means no later request yet or no reported input). Several adoptions before
+one request share the same `post_compaction_attempt_id`; that input reflects all
+of them, so do not sum effects. A fork inherits its parent's replacements and its
+first request is not attributed to them (null). Only the latest 200 events are
+searched for the conversation marker.

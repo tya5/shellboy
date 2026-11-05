@@ -436,6 +436,11 @@ pub(super) fn seal_node(node: &mut UiNode) {
             node.presentation.input_sender_label.as_deref(),
             node.presentation.reply_state,
             node.presentation.reply_excerpt.as_deref(),
+            // Display-only compaction facts (#230) are skipped by serde.
+            format!(
+                "{:?}{:?}",
+                node.presentation.compaction_note, node.presentation.ui_messages.title
+            ),
         ),
     )
     .is_err()

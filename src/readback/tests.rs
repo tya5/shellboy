@@ -662,3 +662,60 @@ fn compaction_links_first_request_after_adoption_without_storage_or_estimates() 
         assert!(sum3["post_compaction_attempt_id"].is_null());
     });
 }
+
+#[test]
+fn forked_thread_does_not_attribute_its_first_request_to_inherited_summaries() {
+    watchdog(|| {
+        let c = db();
+        node(&c, "original", "message", "2026-10-31T00:00:00Z", json!({}));
+        replacement(
+            &c,
+            "sum",
+            "summary",
+            "2026-10-31T00:10:00Z",
+            json!({"item":{"role":"developer","content":[{"type":"input_text","text":"s"}]}}),
+        );
+        c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,parent_thread_id)VALUES('fork','/','','p','m','2026-10-31T00:00:00Z','t')", []).unwrap();
+        c.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('fr','fork','completed','2026-10-31T00:00:00Z')", []).unwrap();
+        c.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('ft','fork','fr','completed','2026-10-31T00:11:00Z','2026-10-31T00:20:00Z')", []).unwrap();
+        c.execute(
+            "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES('fork','sum')",
+            [],
+        )
+        .unwrap();
+        attempt_at(
+            &c,
+            "fork-first",
+            "ft",
+            "2026-10-31T00:12:00Z",
+            Some(json!({"input_tokens":7000})),
+        );
+        c.execute(
+            "UPDATE turn SET ended_at='2026-10-31T00:30:00Z' WHERE id='t'",
+            [],
+        )
+        .unwrap();
+        attempt_at(
+            &c,
+            "parent-next",
+            "t",
+            "2026-10-31T00:13:00Z",
+            Some(json!({"input_tokens":9000})),
+        );
+        let mut args = comp_args();
+        args.thread_id = Some("fork".into());
+        let fork = compactions(&c, "fork", &args).unwrap();
+        let item = &fork["items"][0];
+        assert_eq!(item["event_id"], "sum");
+        assert!(
+            item["post_compaction_attempt_id"].is_null()
+                && item["post_compaction_input_tokens"].is_null(),
+            "{item}"
+        );
+        let parent = compactions(&c, "t", &comp_args()).unwrap();
+        assert_eq!(
+            parent["items"][0]["post_compaction_attempt_id"],
+            "parent-next"
+        );
+    });
+}

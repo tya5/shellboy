@@ -39,6 +39,8 @@ pub struct MarkerFacts {
     pub parts: Option<u64>,
     pub summary_chars: Option<u64>,
     pub spilled_groups: Option<u64>,
+    /// A spill was adopted but its summary was rejected.
+    pub summary_rejected: bool,
     pub cost: Option<(Amount, Amount)>,
     pub after: After,
 }
@@ -89,6 +91,7 @@ impl MarkerFacts {
             parts: metrics["summary_parts"].as_u64(),
             summary_chars: metrics["summary_characters"].as_u64(),
             spilled_groups: metrics["spilled_groups"].as_u64(),
+            summary_rejected: !has_summary && metrics["summary_rejected"] == true,
             cost: usage.is_object().then(|| {
                 (
                     amount(&usage["input_tokens"]),
@@ -162,6 +165,13 @@ impl MarkerFacts {
             (Some(n), true) if n > 0 => parts.push(format!("{n} spilled")),
             _ => {}
         }
+        if self.summary_rejected {
+            parts.push(if en {
+                "summary failed or rejected".into()
+            } else {
+                "要約は失敗または不採用".into()
+            });
+        }
         let show = |a: Amount| match (a.known, a.partial) {
             (Some(n), false) => k(n),
             (Some(n), true) => format!("{}+", k(n)),
@@ -173,14 +183,17 @@ impl MarkerFacts {
             (None, false) => "費用 不明".into(),
             (None, true) => "cost unknown".into(),
         });
-        parts.push(match (self.after, en) {
-            (After::Tokens(n), false) => format!("要約後の入力 {}", k(n)),
-            (After::Unreported, false) => "要約後の入力 未報告".into(),
-            (After::Pending, false) => "要約後の入力 次の要求待ち".into(),
-            (After::Tokens(n), true) => format!("input after {}", k(n)),
-            (After::Unreported, true) => "input after: not reported".into(),
-            (After::Pending, true) => "input after: awaiting next request".into(),
-        });
+        // A spill-only attempt has no summary to compare, so no later input.
+        if self.has_summary {
+            parts.push(match (self.after, en) {
+                (After::Tokens(n), false) => format!("要約後の入力 {}", k(n)),
+                (After::Unreported, false) => "要約後の入力 未報告または未完了".into(),
+                (After::Pending, false) => "要約後の入力 次の要求待ち".into(),
+                (After::Tokens(n), true) => format!("input after {}", k(n)),
+                (After::Unreported, true) => "input after: not reported or not yet finished".into(),
+                (After::Pending, true) => "input after: awaiting next request".into(),
+            });
+        }
         head + &parts.join(sep)
     }
     fn not_adopted(&self, language: UiLanguage) -> String {
@@ -206,9 +219,9 @@ impl MarkerFacts {
         // The retry gate is the saved eligible-source witness of the Turn; no
         // growth percentage exists in the product, so none is shown.
         let next = if en {
-            "next: when new eligible content appears (re-checked next Turn)"
+            "next: when new eligible content appears"
         } else {
-            "次の発動：新しい要約対象が増えたとき（次の Turn で再判定）"
+            "次の発動：新しい要約対象が増えたとき"
         };
         let colon = if en { ": " } else { "：" };
         format!("{head}{colon}{reason}{sep}{input}{sep}{next}")
@@ -256,7 +269,7 @@ mod tests {
         event["post_compaction_input_tokens"] = Value::Null;
         assert_eq!(
             render(&event, UiLanguage::Ja, true),
-            "手動要約：ノード数不明 → 要約 件数不明（字数不明） · 費用 不明 · 要約後の入力 未報告"
+            "手動要約：ノード数不明 → 要約 件数不明（字数不明） · 費用 不明 · 要約後の入力 未報告または未完了"
         );
         event["post_compaction_attempt_id"] = Value::Null;
         event["metrics"]["summary_usage"] = json!({"input_tokens":{"known_sum":30000,"unknown_count":1,"overflow":false},
@@ -272,19 +285,32 @@ mod tests {
             "trigger":{"input_tokens":205000,"auto_at_tokens":200000},"metrics":{}});
         assert_eq!(
             render(&event, UiLanguage::Ja, true),
-            "自動要約を見送り：要約できる対象なし · 入力 205K（閾値 200K） · 次の発動：新しい要約対象が増えたとき（次の Turn で再判定）"
+            "自動要約を見送り：要約できる対象なし · 入力 205K（閾値 200K） · 次の発動：新しい要約対象が増えたとき"
         );
         event["state"] = json!("rejected");
         event["trigger"] = json!({});
         assert_eq!(
             render(&event, UiLanguage::En, true),
-            "Auto summary not adopted: failed or rejected · input unknown · next: when new eligible content appears (re-checked next Turn)"
+            "Auto summary not adopted: failed or rejected · input unknown · next: when new eligible content appears"
         );
         event["state"] = json!("unknown");
         assert!(
             render(&event, UiLanguage::En, false)
                 .starts_with("Auto summary outcome: unknown | input unknown | next")
         );
+    }
+    #[test]
+    fn spill_only_attempt_with_rejected_summary_shows_the_rejection_and_no_later_input() {
+        let event = json!({"kind":"automatic_reduction","state":"adopted",
+            "trigger":{"input_tokens":205000,"auto_at_tokens":200000},
+            "metrics":{"summary_rejected":true,"spilled_groups":3}});
+        let text = render(&event, UiLanguage::En, true);
+        assert_eq!(
+            text,
+            "Auto spill: triggered at 205K · 3 spilled · summary failed or rejected · cost unknown"
+        );
+        assert!(render(&event, UiLanguage::Ja, true).contains("要約は失敗または不採用"));
+        assert!(!text.contains("input after"));
     }
     #[test]
     fn non_marker_kinds_are_ignored() {
