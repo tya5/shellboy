@@ -1,5 +1,14 @@
 # Development status
 
+## Automatic compaction attempt record after post-commit failure (#226; design proposed)
+
+Design only. See the [proposal](../design/compaction.md#proposed-recoverable-automatic-attempt-record-after-post-commit-failure-226):
+write a provisional `outcome:"unknown"` record in the existing witness transaction,
+and each stage's fixed-size fact plus the calibrated pending target inside that
+stage's adoption transaction. No new table, key, worker or migration. Code reading
+shows the stale witness and the retained pre-attempt guard do not suppress later
+compaction. Not implemented or tested; resume point: owner decision on the proposal.
+
 ## Partial-spill summary cancellation (#215 review follow-up)
 
 An additive fix on top of the author tip preserves committed spill/source metadata

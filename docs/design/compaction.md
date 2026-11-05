@@ -741,3 +741,249 @@ after storage failure are follow-up work, not this data-safety gate. This decisi
 does not adopt the proposed recovery journal or guarantee bookkeeping writes
 when storage rejects them. The fault matrix and its synthetic-fault limitations
 are recorded in the validation record.
+
+## Proposed: recoverable automatic attempt record after post-commit failure (#226)
+
+Status: **Proposed, not adopted, not implemented.** Source baseline: `origin/main`
+`ca2505f7`. Line references are to that tree. This section does not change the
+#215 data-safety contract above; it only concerns the attempt record, the
+pending target, the #180 guard and the automatic-active witness.
+
+### Current write sequence
+
+One automatic attempt in `src/control/driver/proactive.rs` performs these
+durable writes, each its own transaction on the DB writer:
+
+| # | Write | Location |
+| --- | --- | --- |
+| W0 | witness `compact.automatic_active.<thread>` upsert + status delete | `proactive.rs:360-366` |
+| S1 | closed-Turn spill adoption (path, replacements, provenance) | call `proactive.rs:393-396`, tx `compaction.rs:514-551` |
+| S2 | closed-Turn summary adoption | calls `proactive.rs:913-930` and the uncalibrated late prefix `proactive.rs:987-1006`; tx `compaction.rs:1137-1145`, `compaction/summary.rs:13-55` |
+| S3 | active-Turn spill adoption + epoch advance | call `proactive.rs:797-800`, tx `compaction.rs:540-549` |
+| S4 | active-Turn summary adoption + epoch advance | calls `proactive.rs:838-845` and the uncalibrated `proactive.rs:786-791`; tx as S2 |
+| W1 | value-matched witness DELETE | `proactive.rs:500-511`; its error returns at `proactive.rs:517` |
+| W2 | exception record (`outcome:"exception"`, `stages`, `spill_counts`) | `proactive.rs:549-566` |
+| W3 | guard save or clear (#180) | `proactive.rs:658`, `proactive.rs:683` (reads at `:626`, `:630`, `:634` can also fail) |
+| W4 | final `automatic_trim_attempt` + pending target `compact.automatic_target.<thread>` | `proactive.rs:724-743` |
+
+Re-measurements (`proactive_history_characters`, `compaction.rs:675-695`) run
+after S1 (`proactive.rs:407`), after S2 (`proactive.rs:951`, `:430`) and before
+and after S3/S4 (`proactive.rs:794`, `:825`, `:867`). Any `?` between a stage
+commit and W4 leaves the stage committed and skips every later write.
+
+### 1. What is lost or stale, per failure
+
+"Stage committed" means S1-S4 returned `Ok` with a non-empty result. Every row
+below applies equally after S1, S2, S3 or S4, because none of the records is
+written inside a stage transaction.
+
+| Failure after a committed stage | Attempt record (`model_attempt.error_json.$.automatic_trim_attempt` of the triggering attempt) | Pending target | #180 guard | Witness |
+| --- | --- | --- | --- | --- |
+| Storage error at a later stage, re-measurement or guard read; W1 succeeds | W2 runs. If W2 succeeds: `outcome:"exception"` with per-stage `outcome`/`adopted_groups`, but no summary node, source IDs, usage, `target_plan` or `trigger`. If W2 fails: the record is absent, or a previous record on the same attempt remains | Not written. A previous attempt's target, if any, remains | Pre-attempt value retained (W3 not reached) | Removed |
+| Non-storage re-measurement/snapshot rejection (for example the Run is stopping); W1 succeeds | As above; W2 is normally reachable because the DB is healthy | Not written | Pre-attempt value | Removed |
+| W1 (cleanup) fails | Absent: `cleanup?` at `proactive.rs:517` returns before W2 and W4 | Not written | Pre-attempt value | **Retained** |
+| W3 or W4 fails (DB failing at the end) | Absent (W4 is the only complete write) | Not written (same transaction as W4) | If W3 succeeded and W4 failed: saved or cleared as for success, without a matching record | Removed (W1 before) |
+| Cancellation after a committed stage, DB healthy | Complete: `committed_result` (`proactive.rs:520-547`, `:751-773`) and W4 record `adopted`, `cancelled:true`; the pending target is written | Written | Saved/cleared normally | Removed |
+| Cancellation, then W1/W3/W4 fails | As the matching storage row | As that row | As that row | As that row |
+
+Additional gaps found while reading the code:
+
+- The uncalibrated active-Turn summary (`proactive.rs:786-791`) and the
+  uncalibrated late prefix summary (`proactive.rs:987-1006`) neither update
+  `stages` nor push to `committed`, and have no fault checkpoint. W2 after them
+  reports those stages as `not_reached`, even though they committed. The #215
+  matrix (`proactive/fault_tests.rs:81-86`) covers only the four calibrated
+  call sites.
+- The #215 "Storage" fault (`fault_tests.rs:377-383`) fails an unrelated TEMP
+  table write, so W2 and W4 can still succeed in that test. The earlier probe
+  (`/tmp/215-postcommit-failure-report.md`, test machine only) rejected the
+  production W1 DELETE and observed pending target 0, adopted record 0, witness 1
+  at all four boundaries. No test rejects W2, W3 or W4 at their production sites.
+
+What each loss affects:
+
+- **Attempt record:** diagnostics only. Readers are `compact list`
+  (`readback/compact.rs:97-101`, outcome via `COALESCE(...,'recorded')`) and
+  `list_observation.rs:106,165` (`automatic_recorded`). The trigger does not read
+  it. Re-triggering is prevented by `next_request_pending`, which is derived from
+  replacement timestamps (`context_usage.rs:129-160`), not from this record. A
+  lost record cannot cause a repeated compaction of the same measurement.
+- **Pending target:** continuity of the #209 shortfall only. Without it, a next
+  report between the target and the threshold is `BelowThreshold`
+  (`proactive.rs:135-137`), so the shortfall does not continue until the
+  threshold is crossed again. #209 verification for this attempt is never
+  attached. An older target that was verified `insufficient` and not removed
+  (`proactive.rs:100-133` removes only `met` or a connection/model change)
+  keeps steering `insufficient_prefix`/`insufficient_spill`/`exhausted_active`
+  with that older attempt's scope. Spill scope has no Turn check
+  (`proactive.rs:133-134`).
+- **#180 guard:** no added suppression. W3 is skipped, so the pre-attempt guard
+  (or no guard) persists. That guard admitted this attempt, so the stages it
+  admitted are new relative to it. The committed path rewrite makes
+  `same_witness`/`unchanged` false (`proactive_guard.rs:88-99`), which forces a
+  fresh forecast at the next boundary. Consumed candidates are gone and
+  remaining ones get the same admission decision as at the start of the failed
+  attempt. Lost: rejection counters and reason (diagnostics), `refresh_revision`
+  and `summary_frozen_current_turn` (`proactive_guard.rs:53-77`). Their absence
+  makes the next decision more permissive, not less. This is derived from
+  reading the code; no test asserts it.
+- **Witness:** display only. The only reader is the activity footer
+  (`frontend/activity.rs:245-273`). It shows the witness only for the same live
+  Run and a `preparing`/`running` Turn. See 3.
+
+### 2. Options for a recoverable record
+
+**A. Stage fact in the stage's own adoption transaction (preferred).**
+
+- In W0's existing transaction, also write a provisional record on the
+  triggering attempt: `$.automatic_trim_attempt = {"outcome":"unknown",
+  "provisional":true, "token":<uid>, "reason":"proactive_threshold",
+  "trigger":{...}, "target_plan":{...}|null, "committed_stages":{}}`. Use the
+  same `WHERE id=? AND (error_json IS NULL OR json_valid(error_json))` as
+  W4. If W0 fails, no stage runs (`proactive.rs:366` returns first), so nothing
+  is lost.
+- Pass an optional `AutomaticStage { attempt_id, token, stage, target }` into
+  the six automatic Compactor entry points (`spill_staged_cancellable`,
+  `spill_reducing_cancellable`, `summarize_prefix_guarded`,
+  `summarize_target_prefix_guarded`, `summarize_active_guarded`,
+  `summarize_target_active_guarded`). From there it goes to `spill_snapshot`
+  and to `SummaryAdoption`. Manual and overflow callers pass `None`; their
+  contract is unchanged. After `select_path` and the epoch update, inside the
+  same transaction (`compaction.rs:533-549`, `summary.rs:35-52`), run one
+  primary-key `UPDATE model_attempt SET error_json=json_set(error_json,
+  '$.automatic_trim_attempt.committed_stages.<stage>', json(?fact)) WHERE id=?
+  AND json_valid(error_json) AND
+  json_extract(error_json,'$.automatic_trim_attempt.token')=?token`.
+- The fact is a fixed field set with no content and no ID lists: `stage`,
+  post-commit `selection_revision` and `reasoning_epoch` (read in the
+  transaction), `spilled_groups`, `source_nodes`, `created_parts`,
+  `reused_parts`, `summary_node_id` (at most one), `source_characters`,
+  `summary_characters`, `summary_limit`, `model_requests`, `summary_usage`
+  counters. `removed_characters`/`remaining_after` are absent (unknown) until
+  re-measurement. Ordered provenance stays authoritative in `replacement_source`.
+- When an `AutomaticStage` has a calibrated target, the same transaction also
+  upserts the pending target `{attempt, target_tokens, scope, turn,
+  marks:null, provisional:true}`. Scope is `spill` for S1, `prefix` for S2 and
+  `active_turn` for S3/S4, the same mapping W4 uses (`proactive.rs:712-723`).
+  `marks:null` matches the existing coverage-limited baseline (`proactive.rs:703-711`,
+  `.ok().flatten()`): later same-Turn active widening is not established
+  (`proactive.rs:240-248`). That is the documented conservative behavior, not a
+  new rule.
+- W2 and W4 keep their content but carry the DB-side facts forward instead of
+  replacing them: `json_set(json(?new),'$.committed_stages',
+  json_extract(error_json,'$.automatic_trim_attempt.committed_stages'))` and
+  `token`. W4's pending target overwrites the provisional one, as today.
+- Bounds: one record per triggering attempt (the existing rule; a later Run on
+  the same measurement still overwrites it); at most four facts, because each
+  stage runs at most once per attempt (`proactive.rs:386`). Each fact has a fixed
+  field set. One pending-target key per Thread (the existing key, 1 MiB check at
+  `proactive.rs:716`). No new table, key namespace, worker, queue, timer or
+  migration. The existing JSON field and the `automatic_compaction_turn` partial
+  index (`migrations/0015_readback_indexes.sql:5`, `storage/current.sql:394`)
+  already cover an object at `$.automatic_trim_attempt`.
+- Idempotence and reconciliation: none is needed. The fact is written exactly
+  once, atomically with the replacement it describes. Re-running a `json_set`
+  with the same value is a no-op. No startup step reads or rewrites these
+  records.
+- If the DB keeps failing: a stage transaction that fails commits neither the
+  replacement nor its fact. A stage that commits has its fact. W1-W4 may all
+  fail; the record then stays `outcome:"unknown"` with the exact committed stage
+  set, which is the required complete-or-unknown state. The proposal never
+  depends on a later write succeeding. #209 verification
+  (`proactive.rs:121`) attaches to the provisional record as well.
+- Cost: one extra primary-key UPDATE (and at most one app_meta upsert) inside
+  an existing write transaction per committed stage. Not measured.
+- Residual unknowns: if the triggering attempt's `error_json` is non-NULL
+  invalid JSON, W0 and W4 already skip it today. The stage UPDATE then matches no row
+  and adoption proceeds (diagnostics never block adoption), so no record exists.
+  This limitation already exists; it is not new. A stage
+  transaction that fails because of the fact UPDATE rolls the adoption back.
+  That is acceptable, because the same writer failure would fail the commit.
+
+**B. Bounded journal reconciled later (not recommended).** A Thread-owned
+`compact.automatic_journal.<thread>` key holding at most four stage facts.
+To survive the failures above it must also be written inside the stage
+transaction, so it is option A plus a second location. It also needs: a
+reconciliation write into `model_attempt` at the next boundary or in
+`interrupt_previous_work` (`control/state.rs:496-503`). That write can fail
+too; the journal then stays and the next try repeats it idempotently with
+`json_set` plus delete in one transaction. It needs Thread-deletion cleanup
+(`control/db.rs:2575-2583`), a startup `GLOB` scan bounded by the number of
+Threads holding a journal, and rules for a journal whose attempt row is gone.
+It adds code and tests without recording anything A cannot. A journal written
+outside the stage transaction gives no improvement, because it is just another
+write that can fail separately.
+
+**C. Roll back the adoption when its record cannot be saved.** Option A gives
+exactly this inside one transaction. A separate post-commit undo would violate
+#215 and is rejected.
+
+### 3. Stale automatic-active witness
+
+- It cannot suppress compaction, indefinitely or otherwise. `maybe_compact`
+  never reads it and overwrites it with an upsert (`proactive.rs:360-366`).
+  Manual compaction and the guard do not read it. The only other reader is the
+  activity display (`frontend/activity.rs:245-273`).
+- Clearing: the owning attempt deletes it with an exact-value DELETE, so a
+  retiring owner cannot remove a newer witness (`proactive.rs:499-511`).
+  Startup removes every witness (`control/state.rs:500-503`; tests
+  `state.rs:1018-1030`, `fault_tests.rs:219-233`). A driver storage failure
+  latches `fail_storage` and begins owner shutdown (`control.rs:1159-1165`,
+  `control.rs:1068-1084`), so a stale witness survives at most until the next
+  startup.
+- Display exposure: in the failing process, if `stop_without_driver`
+  (`control.rs:1180`) also cannot save the stopped Run, the Run and Turn rows
+  may remain `live`/`running`. The footer could then show automatic compaction
+  until the owner exits. Not tested; unknown.
+- Hygiene gap: Thread deletion removes the target, guard and status keys but
+  not the witness (`control/db.rs:2575-2583`). Deletion requires stopped Runs,
+  so the display filter hides it, and startup deletes it. Proposed: add the
+  witness key to that existing DELETE (one parameter, same statement).
+- No new detection is required. Moving W1 into W4's transaction is not
+  proposed, because it would not help when the DB is failing.
+
+### 4. Recommendation and proof
+
+Smallest change: option A. Write the provisional `outcome:"unknown"` record in
+W0's existing transaction. Write each stage's fixed-size fact, and the
+provisional pending target when the attempt is calibrated, inside that stage's
+adoption transaction. Have W2/W4 carry `committed_stages` forward. Optionally
+add the witness to the Thread-deletion DELETE. Invariant: for every automatic
+attempt whose W0 committed, the triggering attempt's record is either a final
+outcome or `outcome:"unknown"`, and in both cases `committed_stages` is
+exactly the set of committed S1-S4. The #180 guard and the witness need no
+change, by the analysis above. Readback shows `unknown` through the existing
+outcome column. The CLI/design outcome lists gain that value when adopted.
+
+Tests, reusing the #215 harness (`src/control/driver/proactive/fault_tests.rs`,
+`fault_boundary` capture and `checkpoint`):
+
+1. For all four faults × four boundaries, after the driver joins and again after
+   reopen, assert that `committed_stages` keys equal the stages whose
+   replacement is selected. Assert that the faulted stage's
+   `selection_revision`/`reasoning_epoch` equal `fault_boundary`, that the
+   outcome is final or `unknown`, and that facts contain no arrays or text
+   beyond stage/node IDs. Cancellation expects the final `adopted` record.
+2. New fault "persistent": after the checkpoint, TEMP triggers reject every
+   `model_attempt` UPDATE and every `app_meta` write, so W1-W4 all fail. Assert
+   `unknown` with the exact stages, the provisional target (calibrated) and the
+   retained witness. After reopen: witness removed, record unchanged (no
+   reconciliation ran), and a fresh report verifies the provisional target,
+   with `target_verification` attached to the same record.
+3. Production-site rejection of W4 only (trigger `WHEN
+   json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome')<>'unknown'`),
+   and separately of W2 and W3. This closes the caveat in the #215 validation
+   record that only an unrelated write was failed.
+4. Atomicity: reject the stage-fact UPDATE itself. Assert the stage is not
+   adopted: path, epoch, `replacement` and `replacement_source` unchanged.
+5. Uncalibrated call sites (`proactive.rs:786-791`, `:987-1006`): add
+   checkpoints and run cases 1-2 there.
+6. Guard: after each storage fault, assert the persisted guard is byte-equal to
+   the pre-attempt guard. After reopen, a fresh above-threshold report starts an
+   automatic attempt (`AutomaticCompactionStarted`). This proves that neither
+   the guard nor a witness suppresses compaction.
+7. Readback unit test: an `unknown` provisional record appears in `compact
+   list` as `automatic_reduction` with outcome `unknown`.
+
+Limits: synthetic SQLite trigger faults on disposable DBs, not OS disk-full or
+I/O failure. Timing and the byte size of the extra UPDATE are not measured.
