@@ -1,6 +1,6 @@
 # Connection-Wide Rate Feedback (#224)
 
-## Status: Stage 1 Adopted; Stages 2 and 3 Proposed
+## Status: Stages 1 and 2 Adopted; Stage 3 Proposed
 
 2026-11-05. The owner adopted stage 1 observability: record HTTP status,
 Retry-After and actual applied wait in existing conversation attempt and summary
@@ -8,10 +8,13 @@ records, expose per-connection 429/5xx counts and waits in usage get, and log
 one structured event per HTTP 429. Record metadata only; retain unknown coverage
 for older records and interrupted observations. Do not introduce a new table.
 
-Connection-scoped waiting, summary retry and adaptive parallel map remain
-proposed stages 2 and 3, to be adopted and landed separately. Current #76 and
-#188 rules and summary adoption/cache fences remain unchanged. This decision
-does not claim stage 1 is implemented or validated.
+Stage 1 landed at ab1a7197. The owner adopts stage 2 connection-scoped waiting
+on 2026-11-05, separately from stage 3 summary retry and adaptive parallel map,
+which remain proposals. Each configured connection profile owns independent
+in-memory feedback and FIFO wait state; aliases are not merged by provider or
+credential. Two profiles sharing an upstream quota can each receive 429s. No
+credential fingerprint is computed or stored. Current #76 and #188 rules and
+summary adoption/cache fences remain unchanged.
 
 ## Measurement And Limits
 
@@ -160,17 +163,11 @@ shared gate; a late success cannot erase a newer throttle generation. Wait
 expiry means eligible to compete, not permission to skip normal admission/CAS,
 selection, capacity, credentials or stop checks. Revalidate after waiting.
 
-Initial identity is the configured connection profile. To satisfy same-provider /
-same-key aliases, propose sharing its rate-state reference for matching resolved
-API origin/base path and effective authentication identity, constructed privately
-at owner startup with a per-process salted fingerprint. Never store/log a key,
-header, hash/fingerprint or provider URL in usage output. Do not merge unrelated
-keys or origins; profile names remain the user-facing dimension. A matching
-identity can conservatively share across models/endpoints even if provider quotas
-are finer. Exact alias grouping needs confirmation against LiteLLM's quota scope;
-if effective identity cannot be established safely, do not pretend profiles are
-one domain. This is a review decision before implementation, not permission to
-inspect/publish credentials or add configuration now.
+The owner-selected identity is the configured connection profile, even when two
+profiles use the same provider or credential. Proxy quotas may vary by upstream
+model or deployment; a 429 on one profile must not pause another. Profiles that
+actually share a quota are throttled independently and may each receive 429s.
+Never fingerprint credentials or expose keys, headers or provider URLs in usage.
 
 ## Proposed 429 Transition And Retry Contracts
 
