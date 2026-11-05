@@ -18,6 +18,35 @@ summary adoption/cache fences remain unchanged. Each profile permits at most
 1,024 pending admission waiters; an additional waiter receives a typed deferred
 error without sending. Cancellation removes its waiter and releases capacity.
 
+## Stage 2 Admission Contract
+
+Each owner client registry owns one ephemeral gate per configured profile name;
+client clones share it. Requests already admitted are not cancelled by later
+feedback. Every HTTP 429 updates the later of existing and provider deadlines
+at headers, including when the body is stalled; an absent or invalid header
+uses connection-capped exponential backoff. A short synchronous critical
+section registers FIFO waiter tickets before asynchronous waiting. The earliest
+eligible waiter owns one probe; a completed non-429 probe clears its generation,
+while cancellation, timeout, and stale success cannot clear newer feedback.
+The gate does not serialize requests before rate feedback. No background worker,
+new table, hidden transport retry, or autonomous resumption is introduced.
+
+Waiters release any Thread boundary before sleeping and reacquire/revalidate
+selection before a send. Existing receive deadlines start only after admission.
+Index claims and source/space/pause fences are checked again after the wait;
+pre-send deferral does not consume a provider attempt. Gate waits over 600
+seconds defer rather than truncate the provider deadline. Unrepresentable
+monotonic deadlines stay deferred for the lifetime of the owner. A profile can
+retain at most 1,024 waiting tickets; overflow returns a typed deferred error.
+
+Existing request and summary observations record actual admission wait in
+`admission_wait_ms`; `applied_wait_ms` includes that wait and, for a retried
+conversation attempt, its subsequent retry sleep. A wait cancelled or rejected
+before an attempt exists has no attempt record, so coverage remains unknown.
+These records contain numeric facts, not headers, credentials or provider URLs.
+They are observations, not restart state. Separate processes and profiles do
+not share a gate; profiles sharing one upstream quota throttle independently.
+
 ## Measurement And Limits
 
 Owner-authorized, single read-only `mode=ro` SQLite connection, `VACUUM INTO`

@@ -26,13 +26,16 @@ pub struct ResponseFacts {
     pub terminal_received: bool,
     /// A bounded non-success HTTP error body reached EOF.
     pub http_error_complete: bool,
+    /// Actual time spent waiting for connection admission, if measured.
+    pub admission_wait_ms: Option<u64>,
     /// Transport observations do not establish peer receipt or processing.
     pub http_observation: Option<HttpObservation>,
 }
 impl ResponseFacts {
     pub(crate) fn rate_metadata(self) -> Value {
         json!({"status": self.status, "retry_after_present": self.status.map(|_| self.retry_after_present),
-            "retry_after_ms": self.retry_after.map(|d| d.as_millis().min(u64::MAX as u128) as u64)})
+            "retry_after_ms": self.retry_after.map(|d| d.as_millis().min(u64::MAX as u128) as u64),
+            "admission_wait_ms": self.admission_wait_ms})
     }
     fn observe_stream(&mut self, parsed: &ResponseStream) {
         if parsed.has_output() {
@@ -71,7 +74,8 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, events.map(Events::Plain), None, None)
+        let admission = self.public_rate_admission(&cancel).await?;
+        self.response_with_admission(request, cancel, events.map(Events::Plain), None, admission)
             .await
     }
     /// Attach the continuing Thread identity only to this Responses request.
@@ -84,14 +88,83 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<Value>>,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(
+        let admission = self.public_rate_admission(&cancel).await?;
+        self.response_with_admission(
             request,
             cancel,
             events.map(Events::Plain),
             Some(thread),
-            None,
+            admission,
         )
         .await
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn public_rate_admission(
+        &self,
+        cancel: &CancellationToken,
+    ) -> Result<(RateAdmission, u64), AttemptFailure> {
+        if cancel.is_cancelled() {
+            return Err(cancelled().into());
+        }
+        match self.reserve_rate_admission(None)? {
+            RateReservation::Ready(admission) => Ok((admission, 0)),
+            RateReservation::Waiting(waiter) => {
+                let started = tokio::time::Instant::now();
+                let lease = waiter.wait(cancel).await?;
+                Ok((
+                    RateAdmission::Lease(lease),
+                    started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                ))
+            }
+        }
+    }
+    #[allow(clippy::result_large_err)]
+    async fn response_with_admission(
+        &self,
+        request: Value,
+        cancel: CancellationToken,
+        events: Option<Events>,
+        thread: Option<&str>,
+        (admission, elapsed): (RateAdmission, u64),
+    ) -> Result<ModelResponse, AttemptFailure> {
+        let mut result = match &admission {
+            RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
+            RateAdmission::Lease(_) => {
+                self.response_inner(request, cancel, events, thread, None)
+                    .await
+            }
+        };
+        match &mut result {
+            Ok(response) => response.response_facts.admission_wait_ms = Some(elapsed),
+            Err(failure) => failure.facts.admission_wait_ms = Some(elapsed),
+        }
+        if let RateAdmission::Lease(lease) = &admission {
+            let facts = match &result {
+                Ok(response) => Some(response.response_facts),
+                Err(failure)
+                    if failure.facts.terminal_received || failure.facts.http_error_complete =>
+                {
+                    Some(failure.facts)
+                }
+                Err(_) => None,
+            };
+            if let Some(status) = facts.and_then(|facts| facts.status) {
+                lease.complete(status);
+            }
+        }
+        result
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub(crate) async fn response_for_thread_pre_admitted(
+        &self,
+        thread: &str,
+        request: Value,
+        cancel: CancellationToken,
+    ) -> Result<ModelResponse, AttemptFailure> {
+        self.response_inner(request, cancel, None, Some(thread), None)
+            .await
     }
     // Preserve the same bounded recovery payload as response().
     #[allow(clippy::result_large_err)]

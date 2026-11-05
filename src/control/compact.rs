@@ -146,6 +146,8 @@ impl Control {
         let boundary = self.boundary(thread).await;
         loop {
             let guard = tokio::select! {biased; _=token.cancelled()=>None, guard=boundary.lock()=>Some(guard)};
+            let mut guard =
+                guard.map(|guard| crate::compaction::boundary::Boundary::new(&boundary, guard));
             let target = thread.to_owned();
             let next = self
                 .store
@@ -177,7 +179,7 @@ impl Control {
             } else if let Err(error) = self.gc.require_capacity().await {
                 Err(error)
             } else {
-                self.perform_compact(thread, args.as_ref(), token.clone())
+                self.perform_compact(thread, args.as_ref(), token.clone(), guard.as_mut())
                     .await
             };
             let save_failed = result
@@ -212,16 +214,19 @@ impl Control {
         thread: &str,
         edit: Option<&ContextEditArgs>,
         cancel: CancellationToken,
+        boundary: Option<&mut crate::compaction::boundary::Boundary<'_>>,
     ) -> Result<Value, ApiError> {
         if let Some(edit) = edit {
             return encode_result(
-                self.compactor.edit(thread, edit, cancel).await?,
+                self.compactor
+                    .edit_with_boundary(thread, edit, cancel, boundary)
+                    .await?,
                 ErrorCode::InvalidState,
                 "Cannot encode context edit result",
             );
         }
         encode_result(
-            argument_free_compact(&self.compactor, thread, cancel).await?,
+            argument_free_compact(&self.compactor, thread, cancel, boundary).await?,
             ErrorCode::InvalidState,
             "Cannot encode compact result",
         )
@@ -234,6 +239,7 @@ pub(super) async fn argument_free_compact(
     compactor: &crate::compaction::Compactor,
     thread: &str,
     cancel: CancellationToken,
+    mut boundary: Option<&mut crate::compaction::boundary::Boundary<'_>>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     // #182: while the tool loop is open, spill waits for a closed-loop
     // boundary; the ordinary summary runs, else the active-Turn summary.
@@ -248,9 +254,13 @@ pub(super) async fn argument_free_compact(
             .spill_cancellable(thread, false, cancel.clone())
             .await?
     };
-    let mut summary = compactor.summarize(thread, false, cancel.clone()).await?;
+    let mut summary = compactor
+        .summarize_guarded(thread, false, cancel.clone(), boundary.as_deref_mut())
+        .await?;
     if open && summary.no_target {
-        summary = compactor.summarize_active_turn(thread, cancel).await?;
+        summary = compactor
+            .summarize_active_guarded(thread, cancel, boundary)
+            .await?;
     }
     summary.spilled_groups += spill.spilled_groups;
     summary.source_nodes += spill.source_nodes;

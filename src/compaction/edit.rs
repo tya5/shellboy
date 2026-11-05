@@ -57,6 +57,16 @@ impl Compactor {
         args: &ContextEditArgs,
         cancel: CancellationToken,
     ) -> Result<ContextEditResult, ApiError> {
+        self.edit_with_boundary(thread, args, cancel, None).await
+    }
+
+    pub(crate) async fn edit_with_boundary(
+        &self,
+        thread: &str,
+        args: &ContextEditArgs,
+        cancel: CancellationToken,
+        boundary: Option<&mut super::boundary::Boundary<'_>>,
+    ) -> Result<ContextEditResult, ApiError> {
         args.validate()?;
         let mut limits = self.config.compaction.clone();
         if let Some(value) = args.max_chars {
@@ -107,7 +117,9 @@ impl Compactor {
                     Ok(selected) => selected,
                     Err(error) if matches!(args.action, ContextEditAction::Summary) => {
                         return self
-                            .summarize_hidden_marker(snapshot, from, to, cancel, error, limits)
+                            .summarize_hidden_marker(
+                                snapshot, from, to, cancel, error, limits, boundary,
+                            )
                             .await;
                     }
                     Err(error) => return Err(error),
@@ -125,6 +137,7 @@ impl Compactor {
                             cancel,
                             edit_error("Selected marker cannot be summarized"),
                             limits,
+                            boundary,
                         )
                         .await;
                 }
@@ -133,7 +146,7 @@ impl Compactor {
                     self.spill_snapshot(snapshot, vec![selected], cancel, false)
                         .await?
                 } else {
-                    self.summarize_with_policy(snapshot, selected, cancel, limits)
+                    self.summarize_with_policy(snapshot, selected, cancel, limits, boundary)
                         .await?
                 };
                 let after = history_characters(&self.snapshot(thread, false).await?);
@@ -181,6 +194,7 @@ impl Compactor {
             Ok((sources,completed))
         }).await.map_err(storage_error)
     }
+    #[allow(clippy::too_many_arguments)]
     async fn summarize_hidden_marker(
         &self,
         mut snapshot: Snapshot,
@@ -189,6 +203,7 @@ impl Compactor {
         cancel: CancellationToken,
         original_error: ApiError,
         limits: crate::config::Compaction,
+        boundary: Option<&mut super::boundary::Boundary<'_>>,
     ) -> Result<ContextEditResult, ApiError> {
         let before = history_characters(&snapshot);
         let markers = snapshot
@@ -240,7 +255,7 @@ impl Compactor {
             snapshot.groups.splice(index..index + 1, groups);
             let thread = snapshot.thread.clone();
             let compact = self
-                .summarize_with_policy(snapshot, index..index + count, cancel, limits)
+                .summarize_with_policy(snapshot, index..index + count, cancel, limits, boundary)
                 .await?;
             let after = history_characters(&self.snapshot(&thread, false).await?);
             return Ok(ContextEditResult {

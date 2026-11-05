@@ -137,10 +137,14 @@ impl IndexService {
             .clients
             .get(&space.profile)
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
-        let lease = client
-            .acquire_rate(&cancel)
-            .await
-            .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
+        let lease = client.acquire_rate(&cancel).await.map_err(|error| {
+            let api = err(ErrorCode::IoFailed, error.to_string());
+            if error.kind == "rate_limit_deferred" {
+                api.details(json!({"failure_kind":"rate_limit_deferred"}))
+            } else {
+                api
+            }
+        })?;
         let expected = space.clone();
         let target = args.thread_id.clone();
         self.database

@@ -9902,8 +9902,29 @@ summary HTTP is pending and fresh-usage verification; those tests are unchanged.
 registration/watchdog policy and diff checks pass. Exact-tip native CI is pending.
 No production inconsistency is observed in this synthetic sample; this does not
 prove all storage-failure modes or missing-bookkeeping recovery.
-## #224 Stage 1 observability (not yet accepted)
+## #224 Stage 1 observability (landed)
 
-The in-progress implementation still needs focused synthetic 429, cancellation,
-restart and concurrent-thread coverage, independent review, and exact-tip default
-and all-OS CI. No live provider behavior or production quota is established.
+Stage 1 landed at ab1a7197f7981875b9bbe9939964cf96efb15b75 after independent
+review. Exact-tip default CI 41952432608 and all-OS CI 41953346665 passed. No
+live-provider behavior or production quota is established by those checks.
+
+## #224 stage 2 shared connection admission (in progress)
+
+Focused local synthetic fixtures exercise real loopback 429 headers and stalled
+error bodies, long provider delays, FIFO reservations polled out of order,
+cancellation and dropped probes, bounded queue overflow, profile isolation and
+restart clearing. Real owner tests exercise simultaneous Threads, responsive
+stop, model changes while waiting, manual summary cancellation and stale
+selection, successful attempt/summary wait accounting, and proactive spill
+preservation during cancellation. SQLite index fixtures exercise deletion and
+space changes during admission, no-send attempt accounting and ordinary batch
+and search behavior. Existing explicit-usage-limit and #215 fault regressions
+are retained. These results do not establish live provider behavior, cross-profile
+coordination or cooldown persistence across owner restart. On macOS using the
+shared rust-slot, `cargo check --locked --tests` passed; focused runs passed 15
+gate tests, 3 boundary tests, 2 index-admission unit tests, 19 HTTP client tests
+(3 ignored), 4 #215 fault-matrix tests, 17 proactive integration tests, 9 index
+batch tests, and 35 Responses retry integration tests. Additional focused runs
+passed summary, quota, actual owner-restart, wait-accounting and search cases.
+Integration layout and occurrence-specific watchdog policy checks passed; native
+CI and independent review remain pending. No live-provider test was made.
