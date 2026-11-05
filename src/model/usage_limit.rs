@@ -18,31 +18,42 @@ pub struct UsageLimit {
 }
 impl UsageLimit {
     pub(crate) fn parse(value: &Value, now: DateTime<Utc>) -> Option<Self> {
-        let error = value
-            .get("error")
-            .filter(|v| v.is_object())
-            .unwrap_or(value);
+        let error = value.get("error").filter(|v| !v.is_null()).unwrap_or(value);
+        if let Some(text) = error.as_str() {
+            return Self::text(text, now);
+        }
         Self::object(error, now).or_else(|| {
             let text = error.get("message")?.as_str()?;
             Self::text(text, now)
         })
     }
+    /// Recognizes a bare JSON fact or a `litellm.RateLimitError` message that
+    /// embeds one. LiteLLM may append diagnostic text after the embedded JSON,
+    /// so only the first JSON value at a candidate brace is read.
     pub(crate) fn text(text: &str, now: DateTime<Utc>) -> Option<Self> {
+        const MAX_CANDIDATES: usize = 16;
         if text.len() > 65_536 {
             return None;
         }
         let text = text.trim();
-        let json = if text.starts_with('{') {
+        let rest = if text.starts_with('{') {
             text
         } else {
             let rest = text.strip_prefix("litellm.RateLimitError")?;
             if !rest.starts_with(':') && !rest.starts_with(char::is_whitespace) {
                 return None;
             }
-            &rest[rest.find('{')?..]
+            rest
         };
-        let value: Value = serde_json::from_str(json).ok()?;
-        Self::object(value.get("error").unwrap_or(&value), now)
+        rest.match_indices('{')
+            .take(MAX_CANDIDATES)
+            .find_map(|(at, _)| {
+                let value: Value = serde_json::Deserializer::from_str(&rest[at..])
+                    .into_iter::<Value>()
+                    .next()?
+                    .ok()?;
+                Self::object(value.get("error").unwrap_or(&value), now)
+            })
     }
     fn object(error: &Value, now: DateTime<Utc>) -> Option<Self> {
         if ![error.get("type"), error.get("code")]
@@ -173,6 +184,30 @@ mod tests {
             assert!(UsageLimit::parse(&value, now).is_none(), "{value}");
         }
         assert!(UsageLimit::text("provider says usage_limit_reached", now).is_none());
+        // Observed shape: LiteLLM wraps a ChatGPT plan limit in a 429 and may
+        // append diagnostic text after the embedded JSON.
+        let wrapped = format!(
+            "litellm.RateLimitError: RateLimitError: ChatgptException - {}\nReceived Model Group=m\nAvailable Model Group Fallbacks=None",
+            json!({"error":{"type":"usage_limit_reached","plan_type":"prolite","resets_at":at,"limit_window_minutes":10080,"resets_in_seconds":3600}})
+        );
+        for value in [
+            json!({"error":{"message":wrapped.clone()}}),
+            json!({"error":wrapped.clone()}),
+        ] {
+            let fact = UsageLimit::parse(&value, now).unwrap();
+            assert_eq!(fact.resets_at, at);
+            assert_eq!(fact.limit_window_minutes, Some(10080));
+        }
+        assert!(
+            UsageLimit::text(
+                &format!(
+                    "{} trailing",
+                    json!({"type":"usage_limit_reached","resets_at":at})
+                ),
+                now
+            )
+            .is_some()
+        );
         assert_eq!(
             UsageLimit::retry_after_header("601", now)
                 .unwrap()
