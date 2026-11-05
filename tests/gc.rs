@@ -52,6 +52,30 @@ impl Fixture {
         self.db.call(|db|{db.execute("INSERT INTO gc_job VALUES('job','history',(SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'),NULL,'pending',NULL)",[])?;Ok(())}).await.unwrap();
     }
 }
+// A trigger calls this before its expensive SQL, guaranteeing that the actual
+// worker has foreground demand even on fast or heavily loaded CI hosts.
+async fn install_budget_demand(f: &Fixture) {
+    let worker = f.db.clone();
+    f.db.call(move |db| {
+        db.create_scalar_function(
+            "gc_test_foreground_demand",
+            0,
+            rusqlite::functions::FunctionFlags::empty(),
+            move |_| {
+                match worker.try_call(|_| Ok(())) {
+                    Ok(reply) => drop(reply),
+                    Err(shellboy::storage::StorageError::QueueFull) => {}
+                    Err(error) => return Err(rusqlite::Error::UserFunctionError(Box::new(error))),
+                }
+                Ok(0_i64)
+            },
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
 fn now() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 10, 24, 0, 0, 0).unwrap()
 }
@@ -1140,6 +1164,7 @@ async fn history_gc_cleanup_is_resumable_for_many_marks() {
 async fn history_gc_budget_measurement_with_concurrent_writes() {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
     f.db.call(|db| {
         db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10000) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'budget-root-'||i,'turn','user','now','{}',2 FROM n", [])?;
         Ok(())
@@ -1149,7 +1174,7 @@ async fn history_gc_budget_measurement_with_concurrent_writes() {
     // A deterministic expensive per-row operation makes the initial cleanup
     // batch exceed the worker's real SQLite budget under foreground demand.
     f.db.call(|db| {
-        db.execute_batch("CREATE TEMP TRIGGER gc_budget_fixture AFTER DELETE ON shellboy_gc_mark BEGIN SELECT SUM(payload_bytes) FROM node; END;")?;
+        db.execute_batch("CREATE TEMP TRIGGER gc_budget_fixture AFTER DELETE ON shellboy_gc_mark BEGIN SELECT gc_test_foreground_demand(); SELECT SUM(payload_bytes) FROM node; END;")?;
         Ok(())
     }).await.unwrap();
     let stop = Arc::new(AtomicBool::new(false));
@@ -1215,6 +1240,39 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     }).await.unwrap();
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
+    let setup_deadline = crate::test_watchdog::Deadline::new("history GC reverse-check setup");
+    while f.gc.history_step(&job).await.unwrap().stage != "sweep" {
+        setup_deadline.check();
+    }
+    // The reverse query has no trigger. Force it to be prepared afresh and
+    // queue foreground work from the SQLite authorizer before it executes.
+    let worker = f.db.clone();
+    let authorizations = Arc::new(AtomicUsize::new(0));
+    let observed = authorizations.clone();
+    f.db.call(move |db| {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        db.authorizer(Some(move |context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Read {
+                    table_name: "replacement_source",
+                    ..
+                }
+            ) {
+                observed.fetch_add(1, Ordering::Relaxed);
+                match worker.try_call(|_| Ok(())) {
+                    Ok(reply) => drop(reply),
+                    Err(shellboy::storage::StorageError::QueueFull) => {}
+                    Err(_) => return Authorization::Deny,
+                }
+            }
+            Authorization::Allow
+        }))?;
+        db.flush_prepared_statement_cache();
+        Ok(())
+    })
+    .await
+    .unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let writes = Arc::new(AtomicUsize::new(0));
     let writer = {
@@ -1236,7 +1294,11 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
         let step = f.gc.history_step(&job).await.unwrap();
         steps += 1;
         deferrals += usize::from(step.deferred);
-        kept = f.db.call(|db| Ok(db.query_row("SELECT COALESCE(json_extract(cursor_json,'$.kept_count'),json_extract(error_json,'$.kept_over_budget'),0) FROM gc_job WHERE id='job'", [], |r| r.get::<_, i64>(0))?)).await.unwrap();
+        kept = f.db.call(|db| {
+            let count = db.query_row("SELECT COALESCE(json_extract(cursor_json,'$.kept_count'),json_extract(error_json,'$.kept_over_budget'),0) FROM gc_job WHERE id='job'", [], |r| r.get::<_, i64>(0))?;
+            db.flush_prepared_statement_cache();
+            Ok(count)
+        }).await.unwrap();
         if step.complete {
             complete = true;
             break;
@@ -1257,6 +1319,10 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     f.db.shutdown().await.unwrap();
     assert!(complete && kept > 0 && deferrals > 0);
     assert!(
+        authorizations.load(Ordering::Relaxed) > 0,
+        "authorizer did not observe the reverse query"
+    );
+    assert!(
         writes.load(Ordering::Relaxed) > 0,
         "foreground writer made no progress"
     );
@@ -1266,10 +1332,11 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
 async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
     f.db.call(|db| {
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('expensive-tombstone','user','now','{}',2)", [])?;
         db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'fixture-'||i,'turn','user','now','{}',2 FROM n", [])?;
-        db.execute_batch("CREATE TEMP TRIGGER costly_tombstone BEFORE UPDATE OF payload_json ON node WHEN OLD.id='expensive-tombstone' BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_tombstone BEFORE UPDATE OF payload_json ON node WHEN OLD.id='expensive-tombstone' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
     f.job().await;
@@ -1313,6 +1380,7 @@ async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
 async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
     f.db.call(|db| {
         db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'mark-'||i,'turn','user','now','{}',2 FROM n", [])?;
         Ok(())
@@ -1320,7 +1388,7 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
     f.job().await;
     let job = f.gc.start_history().await.unwrap().unwrap();
     f.db.call(|db| {
-        db.execute_batch("CREATE TEMP TRIGGER costly_mark BEFORE DELETE ON shellboy_gc_mark WHEN OLD.node_id='mark-1' BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_mark BEFORE DELETE ON shellboy_gc_mark WHEN OLD.node_id='mark-1' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
     let stop = Arc::new(AtomicBool::new(false));
@@ -1384,10 +1452,11 @@ async fn history_gc_discovers_pending_job_after_many_done_jobs_in_batches() {
 async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
     f.db.call(|db| {
         db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('cursor-expensive','user','now','{}',2)", [])?;
         db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'cursor-fixture-'||i,'turn','user','now','{}',2 FROM n", [])?;
-        db.execute_batch("CREATE TEMP TRIGGER costly_gc_cursor AFTER UPDATE OF cursor_json ON gc_job WHEN EXISTS(SELECT 1 FROM node WHERE id='cursor-expensive' AND payload_json IS NULL) BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_gc_cursor AFTER UPDATE OF cursor_json ON gc_job WHEN EXISTS(SELECT 1 FROM node WHERE id='cursor-expensive' AND payload_json IS NULL) BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
     f.job().await;
@@ -1431,6 +1500,7 @@ async fn history_gc_keeps_candidate_if_cursor_update_exceeds_budget() {
 async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
     use std::sync::atomic::{AtomicBool, Ordering};
     let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
     f.db.call(|db| {
         db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('root','turn','user','now','{}',2)", [])?;
         db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) SELECT 'retained-'||i,'user','now','{}',2 FROM n", [])?;
@@ -1444,7 +1514,7 @@ async fn history_gc_full_retention_fallback_counts_nodes_only_once() {
     }
     f.db.call(|db| {
         db.execute("UPDATE gc_job SET cursor_json=json_set(cursor_json,'$.kept_count',1,'$.kept_ids',json_array('root')) WHERE id='job'", [])?;
-        db.execute_batch("CREATE TEMP TRIGGER costly_expansion BEFORE UPDATE OF expanded ON shellboy_gc_mark WHEN OLD.node_id='root' BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_expansion BEFORE UPDATE OF expanded ON shellboy_gc_mark WHEN OLD.node_id='root' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
         Ok(())
     }).await.unwrap();
     let stop = Arc::new(AtomicBool::new(false));
