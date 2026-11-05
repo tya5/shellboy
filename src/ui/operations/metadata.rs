@@ -82,6 +82,7 @@ impl Form {
             "timeout" => FieldId::Timeout,
             "excerpt_chars" => FieldId::ExcerptChars,
             "end_message_only" => FieldId::EndMessageOnly,
+            "parts" => FieldId::Parts,
             "encoding" => FieldId::Encoding,
             "relation" => FieldId::Relation,
             "kinds" => FieldId::Kinds,
@@ -1027,6 +1028,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::ExcerptChars => local!(language, "抜粋文字数", "Excerpt characters"),
         FieldId::LimitBytes => local!(language, "取得byte数", "Read size in bytes"),
         FieldId::EndMessageOnly => local!(language, "終了メッセージのみ", "End message only"),
+        FieldId::Parts => local!(language, "要約partの一覧", "Summary parts"),
         FieldId::Encoding => local!(language, "文字コード", "Encoding"),
         FieldId::Relation => local!(language, "履歴の関係", "History relationship"),
         FieldId::Kinds => local!(language, "含めるnode種類", "Included node kinds"),
@@ -1314,6 +1316,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "保存された最終assistant messageだけを取得し、推論と途中説明を除きます。",
             "Fetch only the saved final assistant message, excluding reasoning and interim explanations."
+        ),
+        FieldId::Parts => local!(
+            language,
+            "要約ノードの保存済みpart(map、reduce)を、範囲・段・費用・本文つきで取得します。",
+            "Fetch a summary node's saved parts (map, reduce) with range, stage, usage and bodies."
         ),
         FieldId::Encoding => local!(
             language,

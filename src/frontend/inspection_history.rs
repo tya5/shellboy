@@ -121,6 +121,7 @@ mod tests {
             limit_bytes: 65536,
             encoding: "UTF-8".into(),
             end_message_only: false,
+            parts: false,
         });
         let InspectionTarget::HistorySources(scope)=capture(&command,&json!({"node_id":"n","provenance":{"source_revision":7,"origin_thread_id":"creation"},"text":"retained"})).unwrap() else {panic!()};
         assert_eq!(scope.nodes, vec![("n".into(), Some(7))]);

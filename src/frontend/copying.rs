@@ -55,6 +55,7 @@ async fn source(
         let body = history
             .get(HistoryGetArgs {
                 end_message_only: false,
+                parts: false,
                 node_id: node_id.clone(),
                 limit_bytes: MAX_BODY_BYTES,
                 cursor,

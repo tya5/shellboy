@@ -37,6 +37,7 @@ async fn append(database: &DbWorker, id: &str, kind: &str, payload: Value) {
 fn body(node: &str, limit: u32, cursor: Option<String>) -> HistoryGetArgs {
     HistoryGetArgs {
         end_message_only: false,
+        parts: false,
         node_id: node.into(),
         limit_bytes: limit,
         cursor,
@@ -814,6 +815,7 @@ async fn final_answer_projection_excludes_reasoning_and_binds_its_own_cursor_sco
     assert!(default.text.contains("later commentary"));
     let request = HistoryGetArgs {
         end_message_only: true,
+        parts: false,
         ..body("final-node", 8, None)
     };
     let first = history.get(request.clone()).await.unwrap();

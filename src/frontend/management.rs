@@ -444,6 +444,7 @@ pub(super) fn follow_target_in(
                 HistoryGetArgs {
                     node_id: source.into(),
                     end_message_only: false,
+                    parts: false,
                     cursor: None,
                     encoding: DEFAULT_ENCODING.into(),
                     limit_bytes: MAX_BODY_BYTES,
@@ -570,6 +571,7 @@ fn follow_in(
         | "request_node_id"
         | "result_node_id" => Ok(Command::HistoryGet(HistoryGetArgs {
             end_message_only: false,
+            parts: false,
             node_id: id,
             cursor: None,
             encoding: DEFAULT_ENCODING.into(),

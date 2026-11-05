@@ -213,6 +213,7 @@ fn links(kind: WorkKind, item: &WorkItem) -> Result<Vec<Command>> {
     if let Some(id) = &item.end_message_node_id {
         links.push(Command::HistoryGet(HistoryGetArgs {
             end_message_only: false,
+            parts: false,
             node_id: id.clone(),
             cursor: None,
             limit_bytes: 16384,

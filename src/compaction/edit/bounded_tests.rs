@@ -152,6 +152,75 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
     assert_eq!(p["item"]["content"][0]["text"], final_text);
     assert_eq!(final_text.matches("# Purpose").count(), 1);
     assert_eq!(final_text.matches("# Constraints").count(), 1);
+    // `history get --parts`: map keys then reduce keys, with range, stage and
+    // provider-reported usage (the mock reports none, so usage is null).
+    let node = path[0].clone();
+    let (body, parts) =
+        f.db.call(move |db| {
+            let get = crate::protocol::HistoryGetArgs {
+                end_message_only: false,
+                parts: true,
+                node_id: node,
+                limit_bytes: 200,
+                cursor: None,
+                encoding: "utf-8".into(),
+            };
+            Ok(crate::history::read_node(db, &get))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let parts = parts.unwrap();
+    println!("{}", serde_json::to_string_pretty(&parts).unwrap());
+    let items = parts["items"].as_array().unwrap();
+    assert_eq!(parts["reduce_keys_recorded"], true);
+    assert_eq!(items.len(), 4 + 5);
+    assert!(
+        items[..4]
+            .iter()
+            .all(|i| i["stage"] == "map" && i["listed_as"] == "map")
+    );
+    assert!(
+        items[4..]
+            .iter()
+            .all(|i| i["stage"] == "reduce" && i["listed_as"] == "reduce")
+    );
+    assert_eq!(items[4]["round"], 1);
+    assert_eq!(items[8]["round"], 2);
+    assert!(
+        items
+            .iter()
+            .all(|i| i["state"] == "retained" && i["reusable"] == true)
+    );
+    assert_eq!(items[0]["sources"]["first"], "n0");
+    assert_eq!(items[0]["sources"]["count"], 1);
+    // The final reduce part covers every source in order.
+    assert_eq!(items[8]["sources"]["first"], "n0");
+    assert_eq!(items[8]["sources"]["last"], "n3");
+    assert_eq!(items[8]["sources"]["count"], 4);
+    assert!(items[0]["usage"].is_null());
+    // The body is paged by limit_bytes; the first page is full and continues.
+    assert_eq!(body.text.len(), 200);
+    assert!(body.next_cursor.is_some());
+    // An identical retry reuses every map and reduce part: no new request.
+    let requests_before = lines(&log);
+    f.db.call(|db| {
+        let tx = db.transaction()?;
+        let revision = tx.query_row(
+            "SELECT selection_revision FROM thread WHERE id='t'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )?;
+        let ids: Vec<String> = (0..4).map(|i| format!("n{i}")).collect();
+        history::select_path(&tx, "t", revision as u64, &ids, "now")?;
+        tx.commit()?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let again = edit(&f, &args("n3")).await.unwrap();
+    assert_eq!(lines(&log), requests_before);
+    assert_eq!(again.compact.model_requests, Some(0));
     let requests: Vec<Value> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()
@@ -219,6 +288,8 @@ async fn cache_group(f: &Fixture, index: usize, text: &str) {
         sources: sources.iter().map(|s| s.id.clone()).collect(),
         cache_key: Some(cache_key.clone()),
         raw_response: Some(raw),
+        stage: None,
+        round: None,
     }
     .save(&f.db, cache_key)
     .await

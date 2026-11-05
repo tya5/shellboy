@@ -560,6 +560,9 @@ pub struct HistoryGetOptions {
     /// Read only the saved end message (final assistant message); exclude reasoning and commentary.
     #[arg(long)]
     pub end_message_only: bool,
+    /// For a summary node: list its saved summary parts (map then reduce) with per-part range, stage, usage and paged bodies.
+    #[arg(long, conflicts_with = "end_message_only")]
+    pub parts: bool,
     #[arg(long = "node")]
     pub node_id: String,
     #[arg(long,default_value_t=wire::MAX_BODY_BYTES)]
@@ -902,6 +905,7 @@ impl Cli {
                 }),
                 HistoryCommand::Get(a) => C::HistoryGet(wire::HistoryGetArgs {
                     end_message_only: a.end_message_only,
+                    parts: a.parts,
                     node_id: a.node_id,
                     limit_bytes: a.limit_bytes,
                     cursor: a.cursor,

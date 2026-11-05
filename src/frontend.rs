@@ -2905,7 +2905,7 @@ async fn run_with_delivery(
                         if !spawn_read(&mut read_workers, &read_slots, &read_cancel, async move {
                             match request(
                                 &control,
-                                Command::HistoryGet(HistoryGetArgs { end_message_only: false,
+                                Command::HistoryGet(HistoryGetArgs { end_message_only: false, parts: false,
                                     node_id,
                                     cursor,
                                     limit_bytes: MAX_BODY_BYTES,

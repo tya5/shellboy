@@ -23,6 +23,14 @@ spill-only automatic attempt; see [tui-presentation](../design/tui-presentation.
 No 10% growth rule exists in the product, so the note states the eligible-content gate
 (D-230-2). Not verified on a real terminal or a live provider; synthetic render
 and read tests only. Resume point: CI on the final SHA, then owner review.
+## Summary parts reader and GC (#232 C1, #233; branch `issue-232/parts-reader`)
+
+Reduce parts now store `sources` (ordered union of inputs) and parts store
+`stage`/`round`; the summary node stores `summary_reduce_keys`. The summary-cache
+sweep also collects parts whose `sources` is missing, empty or invalid.
+`history get --node SUMMARY --parts` reads them (CLI only; the TUI form gained
+the matching `parts` field). S2 (fork reuses parent map parts) is tested and
+holds. Resume point: CI on the final SHA, then owner review. TUI view is later.
 
 ## Active-attempt recovery index (#219; implemented, CI pending)
 

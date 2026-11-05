@@ -1,6 +1,6 @@
 # Summary Parts: Inspection and Reuse (Study for #232)
 
-Status: **study, not adopted.** Nothing here changes a contract until the user decides; implementation waits for that decision. Evidence is from `origin/main` at `a65421c74b` (code reading, not a run). Claims not covered by an existing test are marked *unverified*.
+Status: **recommendation adopted for C0 and C1 (2026-11-05, #232/#233).** Decisions: parts are not nodes; deleting the conversation deletes its parts; no new node kind for search; legacy `sources: []` parts are collected by a general rule (missing/empty/invalid `sources` is stale), no one-off migration; CLI is `history get --node SUMMARY --parts`; CLI only first (TUI later). Implemented: reduce parts carry `sources`, parts record `stage`, summary nodes record `summary_reduce_keys`, S2 is tested (a fork reuses the parent's map parts). The text below is the original study. Evidence is from `origin/main` at `a65421c74b` (code reading, not a run). Claims not covered by an existing test are marked *unverified*.
 
 ## 1. What a summary part is today
 

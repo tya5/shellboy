@@ -284,6 +284,9 @@ impl HistoryGetArgs {
         nonempty(&self.node_id, "node_id")?;
         nonempty(&self.encoding, "encoding")?;
         limit(self.limit_bytes, MAX_BODY_BYTES)?;
+        if self.parts && self.end_message_only {
+            return Err(invalid("parts and end_message_only cannot be combined"));
+        }
         optional_nonempty(self.cursor.as_deref(), "cursor")
     }
 }

@@ -1425,7 +1425,16 @@ impl Store {
                 Ok(result)
             }
             Command::HistoryList(args) => MutationResult::value(history::list_nodes(tx, args)?),
-            Command::HistoryGet(args) => MutationResult::value(history::get_node(tx, args)?),
+            Command::HistoryGet(args) => {
+                let (body, parts) = history::read_node(tx, args)?;
+                let mut value = serde_json::to_value(body).map_err(|_| {
+                    error(ErrorCode::InvalidState, "history body is not serializable")
+                })?;
+                if let (Some(parts), Some(object)) = (parts, value.as_object_mut()) {
+                    object.insert("parts".into(), parts);
+                }
+                MutationResult::value(value)
+            }
             Command::HistoryRelations(args) => MutationResult::value(history::relations(tx, args)?),
             _ => Err(error(
                 ErrorCode::InvalidState,
@@ -3897,6 +3906,7 @@ mod agents_reference_tests {
                         db,
                         &HistoryGetArgs {
                             end_message_only: false,
+                            parts: false,
                             node_id: node.clone(),
                             limit_bytes: MAX_BODY_BYTES,
                             cursor: None,

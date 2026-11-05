@@ -517,7 +517,7 @@ args!(HistoryListArgs { #[serde(default = "history_excerpt_chars")] excerpt_char
 fn is_false(value: &bool) -> bool {
     !*value
 }
-args!(HistoryGetArgs { #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
+args!(HistoryGetArgs { #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, #[serde(default, skip_serializing_if = "is_false")] parts: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
 args!(HistorySearchArgs {
     query: String,
     #[serde(default = "search_limit")]

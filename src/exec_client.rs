@@ -200,6 +200,7 @@ impl Session {
                 "capability",
                 Command::HistoryGet(HistoryGetArgs {
                     end_message_only: true,
+                    parts: false,
                     node_id: uuid::Uuid::new_v4().to_string(),
                     limit_bytes: 1,
                     cursor: None,
@@ -458,6 +459,7 @@ impl Session {
                     "answer",
                     Command::HistoryGet(HistoryGetArgs {
                         end_message_only: mode != ResultMode::Reply,
+                        parts: false,
                         node_id: node.clone(),
                         limit_bytes: 65_536,
                         cursor: cursor.clone(),

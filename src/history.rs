@@ -631,6 +631,14 @@ fn execution_links(
 }
 
 pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<HistoryBody, ApiError> {
+    read_node(connection, args).map(|(body, _)| body)
+}
+
+/// `get_node`, plus the per-part facts when `args.parts` selects a summary's parts.
+pub fn read_node(
+    connection: &Connection,
+    args: &HistoryGetArgs,
+) -> Result<(HistoryBody, Option<Value>), ApiError> {
     if args.limit_bytes == 0 || args.limit_bytes > MAX_BODY_BYTES {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -647,7 +655,15 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
     } else {
         args.encoding.as_str()
     };
-    let cursor_scope = if args.end_message_only {
+    let cursor_scope = if args.parts {
+        if row.kind != "summary" {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "Parts require a summary node",
+            ));
+        }
+        "history.get.parts"
+    } else if args.end_message_only {
         if row.kind != "assistant_response" {
             return Err(ApiError::new(
                 ErrorCode::InvalidArgument,
@@ -678,7 +694,19 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
             "conversation JSON text is UTF-8; use shell.read for raw re-decoding",
         ));
     }
-    let text = if let Some(body) = &row.payload {
+    let mut parts_info = None;
+    let text = if args.parts {
+        let value: Value = row
+            .payload
+            .as_deref()
+            .and_then(|body| serde_json::from_str(body).ok())
+            .ok_or_else(|| {
+                ApiError::new(ErrorCode::TargetUnavailable, "summary body is unavailable")
+            })?;
+        let (info, text) = crate::compaction::inspect_parts(connection, &value)?;
+        parts_info = Some(info);
+        text
+    } else if let Some(body) = &row.payload {
         if matches!(
             row.kind.as_str(),
             "incomplete_response" | "model_stream_observation"
@@ -756,7 +784,7 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
         "SELECT dst FROM edge WHERE src=?1 ORDER BY dst",
         &args.node_id,
     )?;
-    Ok(HistoryBody {
+    let body = HistoryBody {
         context: crate::context::for_node(connection, &args.node_id)?,
         provenance: provenance(connection, &args.node_id)?,
         node_id: args.node_id.clone(),
@@ -774,7 +802,8 @@ pub fn get_node(connection: &Connection, args: &HistoryGetArgs) -> Result<Histor
         } else {
             None
         },
-    })
+    };
+    Ok((body, parts_info))
 }
 
 fn reference_ids(connection: &Connection, sql: &str, id: &str) -> Result<Vec<String>, ApiError> {

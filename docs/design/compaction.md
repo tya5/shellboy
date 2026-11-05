@@ -223,7 +223,20 @@ parts, including their source-ID lines, into reduce batches of at most 64,000
 characters, then consolidate again until one final summary remains. Never split
 a part: an oversized part is sent alone and counted in the existing summary
 usage record as `oversized_reduce_parts` without storing its contents.
-Prompts deduplicate goals/constraints, keep only the latest confirmed state,
+
+Summary parts are cache records in `app_meta` (`summary.part.<digest>`); the key
+has no Thread ID. Each record stores `text`, `sources`, `cache_key`, the
+normalized `raw_response`, and (#232) `stage` (`map`, or `reduce` with `round`).
+A reduce part's `sources` is the ordered, de-duplicated union of its input
+parts' sources. The summary node's out-of-band payload keeps `summary_part_keys`
+(map) and `summary_reduce_keys` (every reduce round, in creation order); replay
+sends only `item`, so neither reaches a request. `shellboy history get --node
+SUMMARY --parts` is the read-only reader (cli-reference): it reports absent
+fields of older records as null, reports a missing record as `not_retained`,
+and never reconstructs. A retry with the same key overwrites the part, so the
+reader shows the current record. A fork shares node rows and copies the model
+settings, so it computes the same map keys for a shared prefix and reuses the
+parent's parts (tested, S2). Parts are never nodes and are not indexed.Prompts deduplicate goals/constraints, keep only the latest confirmed state,
 retain decisions/reasons, unresolved work, uncertainty and source node IDs.
 Original payloads, replacement sources, cancellation and transactional CAS
 adoption remain unchanged. Per D-017, automatic stage 2 shares these bounds.

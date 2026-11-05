@@ -152,6 +152,11 @@ struct CachedPart {
     cache_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     raw_response: Option<Value>,
+    /// `map`, or `reduce` (with `round`). Absent on records saved before #232.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stage: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    round: Option<u32>,
 }
 // Refusal remains displayable in normal conversation; only the summary
 // adoption boundary excludes it, including mixed output_text/refusal responses.
@@ -198,6 +203,68 @@ impl CachedPart {
                 response.text == self.text && !summary_refused(&response.output)
             })
     }
+}
+/// Most parts one `history get --parts` reads (a summary has far fewer).
+const PART_READ_LIMIT: usize = 1024;
+/// Reader for `history get --node SUMMARY --parts`: per-part facts as JSON and
+/// the concatenated bodies as text. Absent fields (records saved before the
+/// stage/sources were recorded) are reported as null, never reconstructed; a
+/// key without a record (collected or overwritten) is `not_retained`.
+pub(crate) fn inspect_parts(db: &Connection, payload: &Value) -> Result<(Value, String), ApiError> {
+    let keys_of = |name: &str| -> Option<Vec<String>> {
+        payload.get(name).and_then(Value::as_array).map(|keys| {
+            keys.iter()
+                .filter_map(|k| k.as_str().map(String::from))
+                .collect()
+        })
+    };
+    let map_keys = keys_of("summary_part_keys").unwrap_or_default();
+    let reduce_keys = keys_of("summary_reduce_keys");
+    if map_keys.len() + reduce_keys.as_ref().map_or(0, Vec::len) > PART_READ_LIMIT {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "summary has more than 1024 parts",
+        ));
+    }
+    let mut items = Vec::new();
+    let mut text = String::new();
+    let listed = map_keys
+        .iter()
+        .map(|k| (k, "map"))
+        .chain(reduce_keys.iter().flatten().map(|k| (k, "reduce")));
+    for (key, listed_as) in listed {
+        let row: Option<String> = db
+            .query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(|e| storage_error(e.into()))?;
+        let Some(row) = row else {
+            items.push(json!({"key":key,"listed_as":listed_as,"state":"not_retained"}));
+            continue;
+        };
+        let Ok(part) = serde_json::from_str::<CachedPart>(&row) else {
+            items.push(json!({"key":key,"listed_as":listed_as,"state":"unreadable"}));
+            continue;
+        };
+        let usage = usage::usage_of(part.raw_response.as_ref()).map(|u| u.to_value());
+        items.push(json!({
+            "key":key,
+            "listed_as":listed_as,
+            "state":"retained",
+            "stage":part.stage,
+            "round":part.round,
+            "sources":(!part.sources.is_empty()).then(|| json!({"first":part.sources.first(),"last":part.sources.last(),"count":part.sources.len()})),
+            "characters":part.text.chars().count(),
+            "usage":usage,
+            "reusable":part.reusable(),
+        }));
+        text.push_str(&format!("--- part {key} ---\n{}\n\n", part.text));
+    }
+    Ok((
+        json!({"reduce_keys_recorded":reduce_keys.is_some(),"items":items}),
+        text,
+    ))
 }
 fn invalid(text: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidState, text)
@@ -1071,7 +1138,7 @@ impl Compactor {
         }
         let sources = covered;
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
-        let body = self
+        let (body, reduce_keys) = self
             .reduce_summary(&snapshot, &parts, budget, &cancel, boundary)
             .await?;
         let summary_usage = budget.usage.usage().clone();
@@ -1085,7 +1152,7 @@ impl Compactor {
             body
         };
         // Out-of-band metadata like summary_part_keys: replay sends only `item`.
-        let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>(),"summary_usage":summary_usage});
+        let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":body}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_part_keys":parts.iter().filter_map(|p|p.cache_key.as_deref()).collect::<Vec<_>>(),"summary_reduce_keys":reduce_keys,"summary_usage":summary_usage});
         // The ordered replacement sources already give the original order and
         // every message ID (a message ID is its node ID), so nothing else is
         // stored for them.
@@ -3488,6 +3555,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn part_reader_reports_unknown_for_old_records_and_not_retained_for_missing() {
+        let (_root, db) = database().await;
+        let raw = json!({"status":"completed","usage":{"input_tokens":7,"output_tokens":3},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"old"}]}]});
+        db.call(move |db| {
+            db.execute(
+                "INSERT INTO app_meta(key,value)VALUES('summary.part.old',?1),('summary.part.bad','x')",
+                [json!({"text":"old","sources":[],"raw_response":raw}).to_string()],
+            )?;
+            let payload = json!({"summary_part_keys":["summary.part.old","summary.part.gone","summary.part.bad"]});
+            let (info, text) = inspect_parts(db, &payload).unwrap();
+            assert_eq!(info["reduce_keys_recorded"], false);
+            let items = info["items"].as_array().unwrap();
+            assert_eq!(items[0]["state"], "retained");
+            assert!(items[0]["stage"].is_null() && items[0]["sources"].is_null());
+            assert_eq!(items[0]["usage"], json!({"input_tokens":7,"output_tokens":3}));
+            assert_eq!(items[1]["state"], "not_retained");
+            assert_eq!(items[2]["state"], "unreadable");
+            assert!(text.contains("old"));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    /// #232 S2: a fork shares node rows and copies the Thread settings, so the
+    /// same prefix with the same settings hits the parent's map parts.
+    #[tokio::test]
+    async fn fork_summarizing_the_shared_prefix_reuses_the_parents_map_parts() {
+        let (url, server) = summary_proxy(vec![json!({"id":"summary","status":"completed","output":[
+            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Shared prefix summary"}]}
+        ]})]).await;
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            for id in ["one", "two"] {
+                history::append_node(
+                    &tx,
+                    "t",
+                    id,
+                    None,
+                    "message",
+                    &json!({"role":"user","content":id.repeat(100)}),
+                    "now",
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let parent = compactor
+            .summarize("t", false, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!((parent.created_parts, parent.reused_parts), (1, 0));
+        db.call(|db| {
+            let tx = db.transaction()?;
+            let revision = tx.query_row(
+                "SELECT selection_revision FROM thread WHERE id='t'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )?;
+            history::select_path(
+                &tx,
+                "t",
+                revision as u64,
+                &["one".into(), "two".into()],
+                "now",
+            )?;
+            history::fork_thread(
+                &tx,
+                &crate::protocol::ThreadForkArgs {
+                    agents: None,
+                    thread_id: "t".into(),
+                    node_id: "two".into(),
+                    cwd: None,
+                },
+                "fork",
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let fork = compactor
+            .summarize("fork", false, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!((fork.created_parts, fork.reused_parts), (0, 1));
+        // The mock served exactly one request: the fork made none.
+        assert_eq!(server.await.unwrap(), 1);
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn successful_summary_cached_and_adopted_atomically_without_losing_originals() {
         let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"extra":"x".repeat(128*1024)},"output_tokens":10,"attribution":"x".repeat(128*1024)},"output":[
             {"type":"reasoning","summary":[{"type":"summary_text","text":"PRIVATE-REASONING"},{"type":"reasoning_text","text":"PRIVATE-DETAIL"}],"encrypted_content":"OPAQUE-AUDIT"},
@@ -3577,6 +3742,9 @@ mod tests {
             assert_eq!(part["raw_response"]["usage"],json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":80},"output_tokens":10}));
             assert!(part["raw_response"]["usage"].to_string().len()<256);
             assert_eq!(part["sources"], json!(["one", "two"]));
+            assert_eq!(part["stage"], "map");
+            assert!(part.get("round").is_none());
+            assert_eq!(payload["summary_reduce_keys"], json!([]));
             assert_eq!(
                 part["raw_response"]["output"][0]["encrypted_content"],
                 "OPAQUE-AUDIT"
@@ -3592,6 +3760,7 @@ mod tests {
                 !sent.contains("PRIVATE-REASONING")
                     && !sent.contains("OPAQUE-AUDIT")
                     && !sent.contains("summary_part_keys")
+                    && !sent.contains("summary_reduce_keys")
             );
             Ok(())
         })
@@ -3887,6 +4056,8 @@ mod tests {
             sources: vec!["source".into()],
             cache_key: None,
             raw_response: Some(raw.clone()),
+            stage: None,
+            round: None,
         };
         assert!(
             part.reusable(),

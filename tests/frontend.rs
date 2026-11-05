@@ -2044,6 +2044,7 @@ async fn structured_history_pages_details_url_copy_and_wait_cancel_keep_original
     assert!(canonical.starts_with(&(first.text.clone() + &second.text)));
     send.send(UiAction::Manage(Command::HistoryGet(HistoryGetArgs {
         end_message_only: false,
+        parts: false,
         node_id: "long".into(),
         cursor: None,
         limit_bytes: MAX_BODY_BYTES,
@@ -3352,6 +3353,7 @@ async fn external_input_copy_keeps_only_canonical_body_and_code_not_sender_metad
         .get(HistoryGetArgs {
             node_id: "external-copy".into(),
             end_message_only: false,
+            parts: false,
             limit_bytes: 65536,
             cursor: None,
             encoding: "UTF-8".into(),

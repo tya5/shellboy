@@ -487,6 +487,7 @@ async fn context_trim_large_marker_range_summarizes_short_notice_and_preserves_o
         let body = crate::history::History::new(fixture.db.clone())
             .get(crate::protocol::HistoryGetArgs {
                 end_message_only: false,
+                parts: false,
                 node_id: original_id,
                 limit_bytes: 65536,
                 cursor: None,

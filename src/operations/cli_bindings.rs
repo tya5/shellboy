@@ -247,6 +247,7 @@ const MEANINGS: &[Meaning] = &[
             ("cursor", FieldId::Cursor),
             ("encoding", FieldId::Encoding),
             ("end_message_only", FieldId::EndMessageOnly),
+            ("parts", FieldId::Parts),
         ],
         None,
     ),

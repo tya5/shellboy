@@ -1881,6 +1881,7 @@ async fn large_database_observations_do_not_grow_receipts_even_when_pending_rese
         }),
         Command::HistoryGet(HistoryGetArgs {
             end_message_only: false,
+            parts: false,
             node_id: message.message_id.clone(),
             limit_bytes: 65536,
             cursor: None,

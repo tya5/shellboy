@@ -28,10 +28,16 @@ pub(super) struct Job {
     sources: Vec<String>,
     /// `(start, end, depth)` of a map segment, for context-limit splitting.
     span: (usize, usize, u8),
+    /// 1-based reduce round; 0 for a map segment.
+    round: u32,
     retries: u32,
     delay: Duration,
 }
 impl Job {
+    pub(super) fn reduce_round(mut self, round: u32) -> Self {
+        self.round = round;
+        self
+    }
     pub(super) fn new(
         path: Vec<usize>,
         cache_key: String,
@@ -45,6 +51,7 @@ impl Job {
             request,
             sources,
             span,
+            round: 0,
             retries: 0,
             delay: Duration::ZERO,
         }
@@ -330,6 +337,8 @@ impl Compactor {
             sources: job.sources.clone(),
             cache_key: Some(job.cache_key.clone()),
             raw_response: Some(response.raw),
+            stage: Some(if job.round == 0 { "map" } else { "reduce" }.into()),
+            round: (job.round > 0).then_some(job.round),
         };
         part.save(&self.database, job.cache_key.clone()).await?;
         if draining {

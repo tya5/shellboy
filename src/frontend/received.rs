@@ -748,6 +748,7 @@ mod tests {
         let raw = crate::history::History::new(owner.db.clone())
             .get(crate::protocol::HistoryGetArgs {
                 end_message_only: false,
+                parts: false,
                 node_id: "n0".into(),
                 limit_bytes: 65536,
                 cursor: None,

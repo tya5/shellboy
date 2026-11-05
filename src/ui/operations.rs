@@ -1480,6 +1480,7 @@ impl Form {
                         "false".into(),
                         Boolean,
                     ),
+                    f("parts", "要約partの一覧", "false".into(), Boolean),
                     f("limit", "取得byte数", "65536".into(), Number),
                     f("cursor", "続きcursor", String::new(), Text),
                     f("encoding", "encoding", DEFAULT_ENCODING.into(), Text),
@@ -1487,6 +1488,7 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::HistoryGet(HistoryGetArgs {
                         end_message_only: form.boolean("end_message_only")?,
+                        parts: form.boolean("parts")?,
                         node_id: form.owned("node")?,
                         limit_bytes: form.number("limit")?,
                         cursor: form.optional("cursor")?,
