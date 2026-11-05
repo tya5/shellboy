@@ -134,6 +134,7 @@ impl ModelError {
             message: error
                 .get("message")
                 .and_then(Value::as_str)
+                .or_else(|| error.as_str())
                 .unwrap_or("Proxy returned an error without a message")
                 .chars()
                 .take(MAX_ERROR_MESSAGE_CHARS)
