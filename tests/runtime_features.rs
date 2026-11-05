@@ -4978,12 +4978,20 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         };
         assert_eq!(adopted.2.len(), 4, "both complete call/result groups retain provenance");
         assert!(tokio::time::timeout(std::time::Duration::from_millis(250), receive.recv()).await.is_err(), "summary must wait without sending");
+        crate::test_watchdog::watchdog("change model during proactive wait", request(&control,
+            Command::ThreadSet(ThreadSetArgs { thread_id: Some(target.clone()), model: Some("changed-model".into()), ..Default::default() })
+        )).await.unwrap();
+        let id = target.clone();
+        let changed = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
+        assert_eq!(changed.0, adopted.0);
+        assert_eq!(changed.2, adopted.2);
+        assert_eq!(changed.1, adopted.1 + 1, "model change advances the reasoning epoch once");
         let run = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await["run_id"].as_str().unwrap().to_owned();
         request(&control, Command::RunStop(RunTarget { run_id: run })).await;
         settled(&control, &target).await;
         let id = target.clone();
         let after = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
-        assert_eq!(after, adopted, "cancelled admission preserves selected spills, epoch, and ordered provenance");
+        assert_eq!(after, changed, "cancelled admission preserves selected spills, the changed-model epoch, and ordered provenance");
         let id = target.clone();
         let record: String = control.store.database.call(move |db| Ok(db.query_row(
             "SELECT a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.cancelled')=1 ORDER BY a.rowid DESC LIMIT 1", [id], |r| r.get(0))?)).await.unwrap();
