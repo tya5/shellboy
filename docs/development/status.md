@@ -1,5 +1,18 @@
 # Development status
 
+## macOS-only local test failures (#234; fixed, CI pending)
+
+Root cause for both tests: the native-shell guardian (`src/shell/unix_lifeline.rs`)
+closed inherited descriptors by walking `0..sysconf(_SC_OPEN_MAX)` on macOS (no
+`close_range`). With a raised soft limit (`ulimit -n` 1048576 on the dev machine;
+256 on CI) this takes long, so the guardian kept `owner.lock` after an owner kill
+(restart: "data directory already has an owner") and shell start was delayed (the
+`tui_recovery` merge test). Reproduced by `ulimit -n 256` (pass) vs `1048576`
+(fail); env, locale and HOME were not factors. Fix: macOS lists open descriptors
+with `proc_pidinfo(PROC_PIDLISTFDS)`; the walk remains the fallback. Unit test
+`close_from_closes_open_descriptors_without_walking_the_limit`. Resume point: CI on
+the final SHA, then owner review.
+
 ## Compaction marker and post-compaction input (#230; implemented, CI pending)
 
 `compact list` adopted summaries carry `post_compaction_input_tokens` and

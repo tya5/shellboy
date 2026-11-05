@@ -326,9 +326,50 @@ unsafe fn close_from(first: u32, limit: i32) {
         if libc::syscall(libc::SYS_close_range, first, u32::MAX, 0u32) == 0 {
             return;
         }
+        #[cfg(target_os = "macos")]
+        if close_listed(first as i32) {
+            return;
+        }
         for fd in first as i32..limit {
             libc::close(fd);
         }
+    }
+}
+// macOS has no close_range. Walking up to a raised RLIMIT_NOFILE (for example
+// 1048576) takes long enough to delay shell startup and keep the owner lock
+// alive in the guardian, so close only the descriptors this process has open.
+// Allocation-free: this runs between fork and exec. False means "use the walk".
+#[cfg(target_os = "macos")]
+unsafe fn close_listed(first: i32) -> bool {
+    unsafe {
+        let mut entries: [libc::proc_fdinfo; 256] = std::mem::zeroed();
+        let bytes = std::mem::size_of_val(&entries) as libc::c_int;
+        for _ in 0..64 {
+            let listed = libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDLISTFDS,
+                0,
+                entries.as_mut_ptr().cast(),
+                bytes,
+            );
+            if listed < 0 {
+                return false;
+            }
+            let mut closed = false;
+            for entry in &entries[..listed as usize / std::mem::size_of::<libc::proc_fdinfo>()] {
+                if entry.proc_fd >= first {
+                    libc::close(entry.proc_fd);
+                    closed = true;
+                }
+            }
+            if listed < bytes {
+                return true;
+            }
+            if !closed {
+                return false;
+            }
+        }
+        false
     }
 }
 // A short-lived child creates a private group which the guardian can join.
@@ -460,6 +501,28 @@ unsafe fn guard(child: i32, life: i32, status: i32, limit: i32) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn close_from_closes_open_descriptors_without_walking_the_limit() {
+        // An unbounded limit makes the fallback walk effectively endless, so
+        // returning proves the direct path (close_range / listed descriptors).
+        let (a, _b) = UnixStream::pair().unwrap();
+        let fd = unsafe { libc::fcntl(a.as_raw_fd(), libc::F_DUPFD, 40) };
+        assert!(fd >= 40);
+        let child = unsafe { libc::fork() };
+        if child == 0 {
+            unsafe {
+                close_from(40, i32::MAX);
+                let open = libc::fcntl(fd, libc::F_GETFD) >= 0;
+                libc::_exit(if open { 1 } else { 0 });
+            }
+        }
+        assert!(child > 0);
+        let mut status = 0;
+        unsafe { libc::waitpid(child, &mut status, 0) };
+        unsafe { libc::close(fd) };
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
+    }
     #[tokio::test]
     async fn natural_shell_exit_drains_stderr_to_eof_before_guardian_release() {
         crate::test_watchdog::watchdog("native stderr EOF before guardian release", async {
