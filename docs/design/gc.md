@@ -144,6 +144,30 @@ receipts are eligible. The GC transaction rechecks live endpoints and terminal
 state before deletion. A collection chunk does not remove operation_receipt
 idempotency records, whose existing independent retention policy still applies.
 
+## Explicit prune of replacement originals (#235)
+
+`thread prune --before NODE` is the only way to release originals that
+compaction keeps. It sets `replacement.state='pruned'` (the column is free text;
+no schema change) for the completed replacements this Thread holds whose output
+precedes NODE on its path, summaries and spills alike, plus the nested closure
+(a source that is itself an adopted output the Thread holds). A replacement held
+by another live Thread (a `thread_replacement` row or the output on its path) is
+skipped and counted. The same transaction bumps `root_revision` and enqueues an
+ordinary history `gc_job`, and the caller marks the same maintenance work thread
+delete marks; the command deletes nothing itself and promises no timing.
+
+Reachability changes, all keyed on `state='pruned'`: provenance expansion
+(`provenance_step`) and the sweep revalidation and `searchable` consumers walk
+skip pruned replacements; root rule 2 (Turn ownership) does not protect a node
+that is a source of a pruned replacement the same Thread holds; `searchable`
+treats such a node as not retained unless another root holds it. Path, other
+Threads' Turns, pins, receipts, attachment deliveries and unpruned consumers keep
+their effect, so shared originals survive. A job that already marked the nodes is
+conservative; the prune's own job reclaims them. Tombstones record
+`pruned_unreachable`. Replacement outputs, edges and `replacement_source` rows
+stay. Closure bound: 65,536 replacements or sources, else `input_limit`. Spills
+are included in the one rule. See [thread prune study](thread-prune-rewind-branches.md).
+
 ## Budget-resumable history GC (#225)
 
 Each history stage persists its cursor with its data changes. Deferred batches

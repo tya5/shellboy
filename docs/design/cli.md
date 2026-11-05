@@ -13,6 +13,7 @@ shellboy thread create [--cwd PATH] [--connection PROFILE] [--model ID] [--effor
 shellboy thread fork --thread ID --node ID [--cwd PATH]
 shellboy thread delete-preview --thread ID [--descendants]
 shellboy thread delete --thread ID [--descendants]
+shellboy thread prune [--thread ID] --before NODE [--dry-run]
 shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT]
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)

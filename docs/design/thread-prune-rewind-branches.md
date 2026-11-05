@@ -1,6 +1,12 @@
 # Thread Prune, Rewind and Branches (Study)
 
-Status: **study, not adopted.** It covers three user directions from 2026-11-06:
+Status: **P1 (prune) adopted by the user on 2026-11-06 with two simplifications:
+spills are included (one rule for summaries and spills, nested included), and there
+is no `--older-than` and no byte estimate (`reclaimable_bytes: null`). Implemented as
+#235; see [GC](gc.md#explicit-prune-of-replacement-originals-235). The prune section
+below is the study; where it excludes spills or reports `candidate_payload_bytes`
+only as a fact, the adopted behavior above wins. R1/R2/B1 (rewind, branches) remain
+a study, not adopted.** Original status line: It covers three user directions from 2026-11-06:
 explicit prune of compacted originals, rewind in place, and a branch view in
 the TUI. For the branch view the user chose option (d): an inline marker plus a
 branch panel. Evidence comes from reading the code at `origin/main` `7cb82d3923`.

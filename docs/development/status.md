@@ -1,5 +1,20 @@
 # Development status
 
+## Thread prune (#235; implemented, CI pending)
+
+`shellboy thread prune [--thread T] --before NODE [--dry-run]` (wire `thread.prune`,
+OperationId `ThreadPrune`) releases a Thread's hold on the originals of adopted
+summaries and spills (nested included) before NODE. No schema change: it sets
+`replacement.state='pruned'`, bumps `root_revision`, enqueues a history `gc_job` and
+marks the same maintenance work thread delete marks. Reachability: pruned
+replacements are skipped in the GC provenance lookup, the sweep revalidation and
+`searchable`; Turn ownership no longer protects a source of a pruned replacement
+the same Thread holds. Replacements held by other live Threads are skipped and
+counted; originals on other paths, pins and receipts survive. `history get` of a
+released original and `compact --restore` of its summary fail with a pruned /
+not-retained error. Tests: `tests/thread_prune.rs` plus a restore-guard unit test.
+Resume point: exact-tip default and all-OS CI, then integration.
+
 ## macOS-only local test failures (#234; fixed, CI pending)
 
 Root cause for both tests: the native-shell guardian (`src/shell/unix_lifeline.rs`)

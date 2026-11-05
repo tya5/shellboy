@@ -60,3 +60,15 @@ thread.fork. These DB-only helpers do not acquire file workers or invent an
 actor. Their returned agents_path is the actual inherited path. Product
 Control/CLI/TUI fork supports explicit references through validation, CAS and
 audit before invoking the primitive with an inherited/default argument.
+
+## Pruned originals (#235)
+
+`thread prune` releases a Thread's hold on originals of adopted summaries and
+spills (see [GC](gc.md)). Readers treat such an original as not retained as soon
+as the prune commits, if no other root (path, another Thread's Turn, receipt,
+pin, unpruned consumer) holds it: `history get` returns `target_unavailable`
+with a "pruned ... not retained" message, and a tombstoned body records
+`deleted_reason=pruned_unreachable`; the check does not wait for the GC.
+`searchable` excludes the node. Summary and spill nodes, edges and
+`replacement_source` rows remain, so `history get` of a summary still lists
+source IDs.

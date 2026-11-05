@@ -1137,3 +1137,15 @@ one request share the same `post_compaction_attempt_id`; that input reflects all
 of them, so do not sum effects. A fork inherits its parent's replacements; for those
 the keys are omitted (not applicable) and the marker shows no later-input part. Only the latest 200 events are
 searched for the conversation marker.
+
+## Pruned replacements (#235)
+
+A replacement with `state='pruned'` was released by `thread prune`: its
+originals are no longer held by the pruning Thread, so `compact --restore`,
+hidden-marker re-summarization and `history get --parts` sources cannot use it.
+The restore path refuses at preparation and again inside the commit transaction
+(`invalid_state`, "originals were pruned ... not retained"). Spill placeholders
+keep their `retrieve:` hint; fetching the original reports it as pruned. The
+summary node, its parts cache and summary text are not removed by the prune
+itself; cache entries whose sources the GC tombstones are collected by the
+existing summary-cache sweep. Compaction never reuses a pruned replacement.

@@ -247,6 +247,18 @@ shellboy thread delete --thread THREAD_ID
 
 `--descendants` also targets lineage children; verify the scope first. Shared fork paths and necessary provenance remain; tombstones retain reasons after collection. Dedicated bodies of deleted Threads are not guaranteed to remain readable forever.
 
+## Releasing originals of summaries and spills
+
+Compaction keeps originals by design. When you decide you no longer need them, release them explicitly for one Thread:
+
+```sh
+shellboy thread prune --thread THREAD_ID --before NODE_ID --dry-run
+shellboy thread prune --thread THREAD_ID --before NODE_ID
+shellboy storage collect --category history   # optional: reclaim now, read nodes_tombstoned / history_bytes_collected
+```
+
+Summaries and spills adopted before `NODE_ID` (nested summaries included) lose this Thread's hold on their originals; the reachability GC reclaims whatever no other root holds. Originals that a fork or another live Thread still holds, pins, pending receipts and attachment deliveries are kept, and replacements another live Thread holds are skipped and counted. The dry-run reports summary and spill counts separately, the raw size of the candidates, and `reclaimable_bytes: null`; the real reclaimed amount is whatever the GC reports. You lose, for that range: restoring the summary, searching the originals, cached partial summaries and rewinding into it. The summary and spill placeholders remain. Reading a pruned original reports "pruned / not retained". This cannot be undone and nothing does it automatically. The GC frees pages inside the database file but does not shrink the file (no automatic VACUUM).
+
 ## Reading capacity figures
 
 Key `storage status` fields:
