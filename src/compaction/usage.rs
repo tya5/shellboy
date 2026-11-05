@@ -193,7 +193,7 @@ impl UsageLedger {
         facts: crate::model::http::ResponseFacts,
     ) -> Result<(), ApiError> {
         let mut observation = facts.rate_metadata();
-        observation["applied_wait_ms"] = json!(0);
+        observation["applied_wait_ms"] = json!(facts.admission_wait_ms.unwrap_or(0));
         if let Some(index) = self.record.rate_observation_pending.take()
             && let Some(slot) = self.record.rate_observations.get_mut(index as usize)
         {

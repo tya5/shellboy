@@ -1046,5 +1046,141 @@
     "function": "reserved_batch_continuation_keeps_fifo_and_worker_permit_until_ui_resumes",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing reserved_batch_continuation_keeps_fifo_and_worker_permit_until_ui_resumes test occurrence only; migrate on #41 integration, no file-wide exemption."
+  },
+  {
+    "file": "src/model/http/clients/tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "09757cc8de032b25da4148286595b112563b9b2875fd46108b2d4cb9ccad4eb9",
+    "function": "real_429_headers_update_shared_profile_before_body_finishes",
+    "count": 1,
+    "reason": "Synthetic stalled-body fixture: the five-second timeout bounds observing headers before cancelling the open body; it is not a provider latency claim."
+  },
+  {
+    "file": "src/model/http/clients/tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "a782a3124e6bf23b14bd0f888f69e5ad7be287ed5b06ce901ca82d7c1d636cdf",
+    "function": "catalog_wait_is_shared_by_profile_but_isolated_from_other_profiles",
+    "count": 1,
+    "reason": "Synthetic profile-isolation fixture: the existing five-second bound asserts the unrelated profile can complete while the other waits."
+  },
+  {
+    "file": "src/model/http/clients/tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "7960c0e38821f24eca5131d8e69acf6650095ec6d65ad67e0228f3397fcf5932",
+    "function": "catalog_429_long_retry_after_defers_next_call_without_a_send",
+    "count": 1,
+    "reason": "Synthetic loopback negative observation: the 25ms accept window checks that deferred admission did not open a second connection."
+  },
+  {
+    "file": "src/model/http/clients/tests.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "05589e4e77c10e6c098869880ed0f23174a38e875cb1eaceee754a0d1d1f6db3",
+    "function": "catalog_429_blocks_embedding_on_same_profile_until_cancelled",
+    "count": 1,
+    "reason": "Synthetic loopback negative observation: the 100ms accept window checks that an embedding cannot bypass the shared cooldown."
+  },
+  {
+    "file": "src/model/http/rate_gate.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "caa44f9ab2936b13f7de650b33fcc04c44b4e1d1ac3fe2239cc256fca0a0005d",
+    "function": "concurrent_429s_do_not_multiply_backoff_in_one_generation",
+    "count": 1,
+    "reason": "Paused Tokio clock: exact Instant arithmetic checks provider floor/feedback generation without a real-time deadline."
+  },
+  {
+    "file": "src/model/http/rate_gate.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "7051df2193dfc941480d4ce8451e3492c6ed7b2d45ff4e6c99ed46c0d321be7e",
+    "function": "stale_feedback_does_not_hide_a_newer_throttle_wave",
+    "count": 1,
+    "reason": "Paused Tokio clock: exact Instant arithmetic checks provider floor/feedback generation without a real-time deadline."
+  },
+  {
+    "file": "src/model/http/rate_gate.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "85627dac7566a2fbd3088f104b20f7191614f705e9a60d1632315b1d8874ffa4",
+    "function": "long_provider_wait_defers_without_truncation",
+    "count": 1,
+    "reason": "Paused Tokio clock: exact Instant arithmetic checks provider floor/feedback generation without a real-time deadline."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "c7dcffe4904df60317826e1866af9430a7efc8db5761e88344168b438b46d8fa",
+    "function": "connection_cooldown_blocks_other_thread_and_stop_remains_responsive",
+    "count": 1,
+    "reason": "Synthetic real-owner negative observation: 250ms of a 30-second provider floor checks that the second Thread sends nothing."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "c96d0dd61ee2e23ae8c5bded231db305d203ce19264a578988221f809a68ecc5",
+    "function": "connection_cooldown_revalidates_model_before_second_thread_sends",
+    "count": 1,
+    "reason": "Synthetic real-owner negative observation: 100ms of a one-second provider floor establishes the wait before changing the model."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "e9360d5dc7ce0955bed1ce14af6aab806659b001bb2fab5dee18cd14770127d2",
+    "function": "manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it",
+    "count": 1,
+    "reason": "Synthetic manual-summary test: 250ms checks no send during a 30-second floor; two seconds checks the Thread boundary remains responsive."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "c60703be875a6e185db848e55415ca034f0f70329f9b99bcf1011376351f7182",
+    "function": "manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it",
+    "count": 1,
+    "reason": "Synthetic manual-summary test: 250ms checks no send during a 30-second floor; two seconds checks the Thread boundary remains responsive."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "156a869498e511029a8bc33a129a3ad1a097de903529d119b4ef9509898f50d1",
+    "function": "manual_summary_revalidates_selection_after_connection_wait",
+    "count": 1,
+    "reason": "Synthetic stale-selection test: 250ms checks no send during a five-second floor; two seconds checks the Thread boundary remains responsive."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "461ed59cf70c67fe9855bd65d01324c90b4e3ecf4c9378a12644212daf9d9a2c",
+    "function": "manual_summary_revalidates_selection_after_connection_wait",
+    "count": 1,
+    "reason": "Synthetic stale-selection test: 250ms checks no send during a five-second floor; two seconds checks the Thread boundary remains responsive."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "10a0938983a7e32a4b54101919a8d2814a6a1af990cdc6e5d1d639de4b5310dd",
+    "function": "shared_connection_wait_is_recorded_on_successful_attempt",
+    "count": 1,
+    "reason": "Synthetic wait-accounting fixture: 250ms of a five-second provider floor establishes a real wait before checking saved metrics."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "94f5685ab05925e79f89744e861f04ccf44c9a04e937aba3f0f2d1296055b3ea",
+    "function": "summary_connection_wait_is_recorded_in_existing_usage",
+    "count": 1,
+    "reason": "Synthetic summary-accounting fixture: 250ms of a five-second provider floor establishes a real wait before checking saved metrics."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "32439859f7dc3daaca8550f4ed1548d3da3792df366abc200ce5a7f2614f027e",
+    "function": "owner_restart_clears_connection_cooldown_without_resuming_old_work",
+    "count": 1,
+    "reason": "Synthetic restart assertion: a ten-second bound distinguishes a cleared gate from the original thirty-second provider cooldown."
+  },
+  {
+    "file": "tests/runtime_features.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "4d2374a585a29246c6416dd322919fc068dc05fd81f404a94f06ec4bed652020",
+    "function": "proactive_spill_then_cancelled_connection_wait_preserves_adoption",
+    "count": 1,
+    "reason": "Synthetic proactive cancellation fixture: 250ms of a thirty-second floor checks the summary is not sent before stop."
   }
 ]

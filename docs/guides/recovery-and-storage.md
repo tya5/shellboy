@@ -92,7 +92,18 @@ Eligible failures are HTTP 429/500/502/503/504 and temporary connection failures
 
 If headers for HTTP 429/500/502/503/504 have arrived and reading their error body stalls or disconnects, the saved HTTP status still determines retry eligibility. HTTP 400/401/403 and similar responses do not retry solely because their body retrieval timed out.
 
-Per-connection `response_max_retries = 0` disables automatic retries. `response_retry_partial = false` sends only partial-output failures to recovery wait; communication failures containing metadata/heartbeats without output remain retryable. `response_retry_max_delay_ms` caps exponential delay (default 60000); server `Retry-After` has a separate fixed ten-minute cap. See [configuration](configuration.md). Retries may duplicate charges when upstream processing already occurred. Failed attempts save the count, delay, and this possibility. Recovery wait after automatic retries does not resume merely with time. Retry-After over 600 seconds is preserved/displayed and enters recovery wait rather than being shortened to 600 seconds and resent.
+Per-connection `response_max_retries = 0` disables automatic retries. `response_retry_partial = false` sends only partial-output failures to recovery wait; communication failures containing metadata/heartbeats without output remain retryable. `response_retry_max_delay_ms` caps exponential delay (default 60000); a server `Retry-After` has a separate ten-minute automatic-wait ceiling. See [configuration](configuration.md). Retries may duplicate charges when upstream processing already occurred. Failed attempts save the count, delay, and this possibility. Recovery wait after automatic retries does not resume merely with time. Retry-After over 600 seconds is preserved/displayed and enters recovery wait rather than being shortened to 600 seconds and resent.
+
+An HTTP 429 also establishes an in-memory wait shared by work using the same
+configured connection profile, including conversations, summaries, embeddings,
+and model lists. Existing requests are not cancelled; waiting does not create a
+new HTTP attempt or silently resend a request. Waiters are admitted FIFO, with
+one probe after a cooldown; cancellation releases its place. At most 1,024
+waiters per profile are retained, and excess or over-ten-minute waits are
+reported as deferred. Separate configured profiles wait independently even if
+they share an upstream quota and can each receive 429s. The owner forgets this
+state on restart; it does not automatically resume recovery or reconstruct a
+provider deadline from old records.
 
 Partial output includes not only visible body text but reasoning items received via `response.output_item.added`, including encrypted reasoning (`encrypted_content`). With `response_retry_partial = false`, a communication failure after such an item enters recovery wait even when visible text is empty.
 

@@ -595,3 +595,72 @@ async fn source_deleted_during_shared_cooldown_is_not_sent_to_provider() {
     assert_eq!(state, "failed");
     f.close().await;
 }
+
+#[tokio::test]
+async fn space_changed_during_shared_cooldown_defers_without_provider_charge() {
+    index_state_changed_during_cooldown(false).await;
+}
+
+#[tokio::test]
+async fn pause_during_shared_cooldown_defers_without_provider_charge() {
+    index_state_changed_during_cooldown(true).await;
+}
+
+async fn index_state_changed_during_cooldown(pause: bool) {
+    let f = Fixture::new(1, 64, 64).await;
+    f.nodes(&[("first-rate-space", "rate")]).await;
+    f.proxy.replies.lock().unwrap().rate_once = true;
+    assert!(
+        f.service
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+    );
+    f.nodes(&[("space-waiting", "synthetic")]).await;
+    let service = f.service.clone();
+    let pending = tokio::spawn(async move { service.process_one(CancellationToken::new()).await });
+    crate::test_watchdog::watchdog("index space claim waits", async {
+        loop {
+            let active = f.db.call(|db| Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM embedding_job WHERE source_node_id='space-waiting' AND state='running')", [], |r| r.get::<_, bool>(0))?)).await.unwrap();
+            if active { break; }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    f.db.call(move |db| {
+        if pause {
+            let splitter: String = db.query_row("SELECT splitter_version FROM index_space WHERE id=(SELECT value FROM app_meta WHERE key='index.active_space')", [], |r| r.get(0))?;
+            let profile = splitter.strip_prefix("unicode-paragraph-v1:").expect("fixture index identity");
+            db.execute("INSERT INTO app_meta(key,value) VALUES(?1,'{}')", [format!("index.pause.{profile}")])?;
+        } else {
+            db.execute("UPDATE index_space SET state='inactive' WHERE id=(SELECT value FROM app_meta WHERE key='index.active_space')", [])?;
+        }
+        Ok(())
+    }).await.unwrap();
+    assert!(
+        crate::test_watchdog::watchdog("index detects changed space", pending)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+    );
+    assert_eq!(
+        f.proxy.requests().len(),
+        2,
+        "changed space must not trigger another provider request"
+    );
+    let (state, attempts, kind): (String, i64, String) = f.db.call(|db| Ok(db.query_row(
+        "SELECT state,attempts,json_extract(error_json,'$.kind') FROM embedding_job WHERE source_node_id='space-waiting'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?)).await.unwrap();
+    assert_eq!(
+        (state.as_str(), attempts, kind.as_str()),
+        (
+            "failed",
+            0,
+            if pause {
+                "index_paused"
+            } else {
+                "space_changed_during_admission"
+            }
+        )
+    );
+    f.close().await;
+}

@@ -4784,9 +4784,26 @@ interruption-only suffix/revision accounting. Exact-tip native CI is pending.
 Best-effort diagnostics are follow-up work, not a promise of successful writes
 to failing storage. No production inconsistency was exposed in this synthetic
 sample, and no production recovery fix or journal is claimed.
-## #224 Stage 1 observability (in progress)
+## #224 Stage 1 observability (landed)
 
-Stage 1 is owner-adopted; implementation and synthetic checks are in progress.
-No landing or CI success is claimed. Connection-wide waiting (stage 2) and
-budgeted summary retry with adaptive map concurrency (stage 3) remain separate
-future changes and landings.
+Stage 1 landed on main at ab1a7197f7981875b9bbe9939964cf96efb15b75, with
+independent review and successful exact-tip default and all-OS CI. Connection
+waiting (stage 2) is separate; budgeted summary retries and adaptive map
+concurrency (stage 3) remain an unadopted proposal.
+
+## #224 stage 2 connection-scoped waiting (in progress)
+
+The owner-adopted per-profile FIFO cooldown is implemented across conversation,
+summary, embedding and model-catalog requests. Waiters are bounded and removed
+on cancellation; a completed non-429 probe releases the cooldown, and feedback
+is fenced so stale completions cannot clear newer 429s. Actual admission waits are
+recorded in existing attempt and summary observations. The state is in memory,
+not shared across configured profiles, and is forgotten on restart. Each index
+claim and selected search space is revalidated after waiting. Stage 3 summary
+retry and adaptive map concurrency remain unadopted.
+
+Synthetic macOS focused checks pass for shared and isolated profiles, FIFO and
+cancellation, long waits, no-send embedding/source fences, summary wait and
+selection changes, proactive post-spill cancellation, #76/#188 regressions and
+#215 fault cases. Independent review, exact-tip native CI and integration handoff
+remain pending; no live-provider behavior is claimed.

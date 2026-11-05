@@ -27,7 +27,8 @@ pub(super) async fn adopt_response(
         .http_observation
         .map(|value| serde_json::to_string(&value).expect("HTTP observation"));
     let mut rate_metadata = response.response_facts.rate_metadata();
-    rate_metadata["applied_wait_ms"] = json!(0);
+    rate_metadata["applied_wait_ms"] =
+        json!(response.response_facts.admission_wait_ms.unwrap_or(0));
     let rate_metadata = rate_metadata.to_string();
     let output = response.output.clone();
     let group_id = group;

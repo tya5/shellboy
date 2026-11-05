@@ -375,6 +375,44 @@ mod admission_tests {
     }
 
     #[test]
+    fn deferred_bootstrap_admission_releases_attempt_without_resurrecting_a_new_claim() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        let original = work();
+        db.execute(
+            "INSERT INTO app_meta VALUES('boot',?1)",
+            [encode_json(&original).unwrap()],
+        )
+        .unwrap();
+        let claimed = Claimed {
+            requested_dimensions: None,
+            job_id: None,
+            bootstrap_key: Some("boot".into()),
+            space: None,
+            work: original,
+        };
+        {
+            let tx = db.transaction().unwrap();
+            assert!(defer_before_send_tx(&tx, &claimed, "rate_limit_deferred").unwrap());
+            tx.commit().unwrap();
+        }
+        let saved: Work = json_meta(&db, "boot").unwrap().unwrap();
+        assert_eq!((saved.state.as_str(), saved.attempts), ("failed", 2));
+        let mut newer = work();
+        newer.attempts = 4;
+        db.execute(
+            "UPDATE app_meta SET value=?1 WHERE key='boot'",
+            [encode_json(&newer).unwrap()],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(!defer_before_send_tx(&tx, &claimed, "cancelled").unwrap());
+        tx.commit().unwrap();
+        assert_eq!(json_meta::<Work>(&db, "boot").unwrap().unwrap().attempts, 4);
+    }
+
+    #[test]
     fn deferred_admission_is_atomic_does_not_count_a_send_and_does_not_mutate_newer_claims() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE embedding_job(id TEXT PRIMARY KEY,state TEXT,attempts INTEGER,error_json TEXT,next_attempt_at TEXT);").unwrap();

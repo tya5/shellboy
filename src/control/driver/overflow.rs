@@ -120,7 +120,8 @@ pub(super) async fn retry_or_recover(
     }
     let mut saved = json!({"error":failure.error,"partial_text":failure.partial_text,"partial_reasoning":failure.partial_reasoning,"attempt_id":attempt,"completed_items":failure.completed_items,"raw_response":failure.raw_response});
     saved["rate_observation"] = failure.facts.rate_metadata();
-    saved["rate_observation"]["applied_wait_ms"] = json!(0);
+    saved["rate_observation"]["applied_wait_ms"] =
+        json!(failure.facts.admission_wait_ms.unwrap_or(0));
     if let Some(observation) = trim_not_applied {
         saved["automatic_trim_attempt"] = observation;
     }

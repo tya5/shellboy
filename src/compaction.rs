@@ -16,6 +16,7 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+pub(crate) mod boundary;
 mod bounded;
 pub(crate) mod context_usage;
 use bounded::SummaryBudget;
@@ -561,6 +562,16 @@ impl Compactor {
         allow_protected_suffix: bool,
         cancel: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
+        self.summarize_guarded(thread, allow_protected_suffix, cancel, None)
+            .await
+    }
+    pub(crate) async fn summarize_guarded(
+        &self,
+        thread: &str,
+        allow_protected_suffix: bool,
+        cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
+    ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(range) = policy::summary_range(&snapshot, allow_protected_suffix) else {
             return Ok(CompactResult {
@@ -568,7 +579,8 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        self.summarize_snapshot(snapshot, range, cancel).await
+        self.summarize_snapshot(snapshot, range, cancel, boundary)
+            .await
     }
     /// #181/#182: replace every tool round of the active Turn with one summary
     /// (③ summarized, ④ the latest complete tool group as plain text), keeping
@@ -581,6 +593,14 @@ impl Compactor {
         &self,
         thread: &str,
         cancel: CancellationToken,
+    ) -> Result<CompactResult, ApiError> {
+        self.summarize_active_guarded(thread, cancel, None).await
+    }
+    pub(crate) async fn summarize_active_guarded(
+        &self,
+        thread: &str,
+        cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(plan) = policy::active_turn_plan(&snapshot) else {
@@ -600,15 +620,27 @@ impl Compactor {
             &mut ledger,
             Some(plan),
             false,
+            boundary,
         )
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
     }
+    #[cfg(test)]
     pub(crate) async fn summarize_target_active(
         &self,
         thread: &str,
         target: u64,
         cancel: CancellationToken,
+    ) -> Result<(CompactResult, u64), ApiError> {
+        self.summarize_target_active_guarded(thread, target, cancel, None)
+            .await
+    }
+    pub(crate) async fn summarize_target_active_guarded(
+        &self,
+        thread: &str,
+        target: u64,
+        cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<(CompactResult, u64), ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some((range, shortfall)) =
@@ -625,7 +657,16 @@ impl Compactor {
         let mut ledger = usage::UsageLedger::new(&snapshot);
         let policy = self.config.compaction.clone();
         let result = self
-            .summarize_recorded(snapshot, range, cancel, policy, &mut ledger, None, true)
+            .summarize_recorded(
+                snapshot,
+                range,
+                cancel,
+                policy,
+                &mut ledger,
+                None,
+                true,
+                boundary,
+            )
             .await
             .map_err(|error| usage::annotate(error, ledger.usage()))?;
         Ok((result, shortfall))
@@ -654,10 +695,11 @@ impl Compactor {
     }
     /// #182 proactive order: the ordinary prefix summary only when the prefix
     /// holds something other than earlier summaries.
-    pub(crate) async fn summarize_unsummarized_prefix(
+    pub(crate) async fn summarize_prefix_guarded(
         &self,
         thread: &str,
         cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<CompactResult, ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some(range) = policy::unsummarized_prefix(&snapshot) else {
@@ -666,13 +708,15 @@ impl Compactor {
                 ..Default::default()
             });
         };
-        self.summarize_snapshot(snapshot, range, cancel).await
+        self.summarize_snapshot(snapshot, range, cancel, boundary)
+            .await
     }
-    pub(crate) async fn summarize_target_prefix(
+    pub(crate) async fn summarize_target_prefix_guarded(
         &self,
         thread: &str,
         target: u64,
         cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<(CompactResult, u64), ApiError> {
         let snapshot = self.snapshot(thread, true).await?;
         let Some((range, shortfall)) =
@@ -686,7 +730,9 @@ impl Compactor {
                 target,
             ));
         };
-        let result = self.summarize_snapshot(snapshot, range, cancel).await?;
+        let result = self
+            .summarize_snapshot(snapshot, range, cancel, boundary)
+            .await?;
         Ok((result, shortfall))
     }
     /// #182: whether the provider tool loop is open on the selected path (the
@@ -699,14 +745,112 @@ impl Compactor {
             .await
             .map_err(storage_error)
     }
+    async fn summary_admission(
+        &self,
+        client: &crate::model::http::HttpModelClient,
+        snapshot: &Snapshot,
+        cancel: &CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
+    ) -> Result<(crate::model::http::RateAdmission, u64), ApiError> {
+        let reservation = client.reserve_rate_admission(None).map_err(|error| {
+            ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
+                .details(json!({"kind":error.kind}))
+        })?;
+        let admission = match reservation {
+            crate::model::http::RateReservation::Ready(admission) => (admission, 0),
+            crate::model::http::RateReservation::Waiting(waiter) => {
+                let start = tokio::time::Instant::now();
+                let wait = async {
+                    let result = waiter.wait(cancel).await;
+                    (result, start.elapsed())
+                };
+                let (result, elapsed) = if let Some(boundary) = boundary {
+                    boundary
+                        .pause(cancel, wait)
+                        .await
+                        .map_err(|_| invalid("Summary cancelled; original path retained"))?
+                } else {
+                    wait.await
+                };
+                let lease = result.map_err(|error| {
+                    if error.kind == "cancelled" {
+                        invalid("Summary cancelled; original path retained")
+                    } else {
+                        ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
+                            .details(json!({"kind":error.kind}))
+                    }
+                })?;
+                let witness = snapshot.clone();
+                self.database
+                    .call(move |db| {
+                        let tx = db.transaction()?;
+                        validate(&tx, &witness)?;
+                        tx.commit()?;
+                        Ok(())
+                    })
+                    .await
+                    .map_err(storage_error)?;
+                (
+                    crate::model::http::RateAdmission::Lease(lease),
+                    elapsed.as_millis().min(u64::MAX as u128) as u64,
+                )
+            }
+        };
+        Ok(admission)
+    }
+
+    #[allow(clippy::result_large_err)]
+    async fn summary_response(
+        client: &crate::model::http::HttpModelClient,
+        thread: &str,
+        request: Value,
+        cancel: CancellationToken,
+        (admission, elapsed): (crate::model::http::RateAdmission, u64),
+    ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
+        let mut response = match &admission {
+            crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
+            crate::model::http::RateAdmission::Lease(_) => {
+                client
+                    .response_for_thread_pre_admitted(thread, request, cancel)
+                    .await
+            }
+        };
+        match &mut response {
+            Ok(response) => response.response_facts.admission_wait_ms = Some(elapsed),
+            Err(failure) => failure.facts.admission_wait_ms = Some(elapsed),
+        }
+        if let crate::model::http::RateAdmission::Lease(lease) = &admission {
+            let facts = match &response {
+                Ok(response) => Some(response.response_facts),
+                Err(failure)
+                    if failure.facts.terminal_received || failure.facts.http_error_complete =>
+                {
+                    Some(failure.facts)
+                }
+                Err(_) => None,
+            };
+            if let Some(status) = facts.and_then(|facts| facts.status) {
+                lease.complete(status);
+            }
+        }
+        response
+    }
+
     async fn summarize_snapshot(
         &self,
         snapshot: Snapshot,
         range: Range<usize>,
         cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_with_policy(snapshot, range, cancel, self.config.compaction.clone())
-            .await
+        self.summarize_with_policy(
+            snapshot,
+            range,
+            cancel,
+            self.config.compaction.clone(),
+            boundary,
+        )
+        .await
     }
     async fn summarize_with_policy(
         &self,
@@ -714,11 +858,21 @@ impl Compactor {
         range: Range<usize>,
         cancel: CancellationToken,
         policy: crate::config::Compaction,
+        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        self.summarize_recorded(snapshot, range, cancel, policy, &mut ledger, None, false)
-            .await
-            .map_err(|error| usage::annotate(error, ledger.usage()))
+        self.summarize_recorded(
+            snapshot,
+            range,
+            cancel,
+            policy,
+            &mut ledger,
+            None,
+            false,
+            boundary,
+        )
+        .await
+        .map_err(|error| usage::annotate(error, ledger.usage()))
     }
     #[allow(clippy::too_many_arguments)]
     async fn summarize_recorded(
@@ -730,6 +884,7 @@ impl Compactor {
         ledger: &mut usage::UsageLedger,
         active: Option<policy::ActiveTurnPlan>,
         drop_all_reasoning: bool,
+        mut boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<CompactResult, ApiError> {
         // The active-Turn plan already requires complete, unprotected groups;
         // its user messages are summarized, not fences.
@@ -850,11 +1005,20 @@ impl Compactor {
                 snapshot.effort.as_deref(),
                 false,
             );
+            budget.ensure_map()?;
+            let admission = self
+                .summary_admission(&client, &snapshot, &cancel, boundary.as_deref_mut())
+                .await?;
             budget.request_map()?;
             budget.usage.begin(&self.database, false).await?;
-            let response = match client
-                .response_for_thread(&snapshot.thread, request, cancel.clone(), None)
-                .await
+            let response = match Self::summary_response(
+                &client,
+                &snapshot.thread,
+                request,
+                cancel.clone(),
+                admission,
+            )
+            .await
             {
                 Ok(response) => {
                     budget
@@ -923,7 +1087,7 @@ impl Compactor {
         let sources = covered;
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
         let body = self
-            .reduce_summary(&snapshot, &parts, budget, &cancel)
+            .reduce_summary(&snapshot, &parts, budget, &cancel, boundary)
             .await?;
         let summary_usage = budget.usage.usage().clone();
         let body = if let Some(plan) = &active {
@@ -2146,7 +2310,7 @@ mod tests {
         let (url, server) = summary_proxy_capturing(vec![reply; map_count + 1]).await;
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let result = compactor
-            .summarize_snapshot(snapshot, range, CancellationToken::new())
+            .summarize_snapshot(snapshot, range, CancellationToken::new(), None)
             .await
             .unwrap();
         let calls = server.await.unwrap();
@@ -2256,7 +2420,7 @@ mod tests {
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         assert!(
             compactor
-                .summarize_snapshot(snapshot, 0..2, CancellationToken::new())
+                .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None)
                 .await
                 .is_err()
         );
@@ -2304,7 +2468,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let result = compactor
-            .summarize_snapshot(snapshot, 1..3, CancellationToken::new())
+            .summarize_snapshot(snapshot, 1..3, CancellationToken::new(), None)
             .await
             .unwrap();
         assert_eq!(result.original_node_ids, ["middle-a", "middle-b"]);
@@ -3203,7 +3367,7 @@ mod tests {
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let first = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new())
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None)
             .await
             .unwrap();
         let usage = first.summary_usage.clone().unwrap();
@@ -3232,7 +3396,7 @@ mod tests {
         .unwrap();
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let second = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new())
+            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None)
             .await
             .unwrap();
         assert_eq!((second.created_parts, second.reused_parts), (0, 2));
