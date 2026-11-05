@@ -16,7 +16,7 @@ managed画像のdeleting→unlink→deletedとpin/active検査は共有Attachmen
 
 logical bytesの採用定義は保存本文（nodeと監査outputの重複を含む）、snapshot/draft/attempt/event/receipt本文、pipe原文、managed raw_size、vec float32要素、`app_meta` の `index.*` 入力/preview/bootstrap/auto payloadの合計。SQLiteのB-tree/索引page overheadとは別の値とする。`reclaimable_bytes` はrawから確実に回収できる下限であり、会話GCやmanaged候補の未確定見積りを加算しない。詳細応答の `reclaimable_is_lower_bound` をtrueとし、quotaはこの見積りではなくlogical live合計で判定する。索引workerも同じ `require_capacity_tx` を利用する。
 
-raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内のtransactionに分ける（単独の既存oversize chunkだけは進捗のため許容）。root/出典/sweepは各128件。mark後にruntime pinが追加された場合もsweep直前に未mark pinを取り込み、残りの破壊候補を現在のpinを含むrootと逆方向の再帰出典で同transaction内に再検証する。sweep cursorは戻さず、継続するpin追加で進捗を失わない。root revisionだけでは捉えられない一時読取り保護をこの検査で補う。
+raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内のtransactionに分ける（単独の既存oversize chunkだけは進捗のため許容）。root/出典/sweepは各128件。mark後のruntime pin追加を含め、各破壊候補を現在のpinを含むrootと逆方向の再帰出典で同transaction内に再検証する。sweep cursorは戻さず、継続するpin追加で進捗を失わない。root revisionだけでは捉えられない一時読取り保護をこの検査で補う。
 
 確定境界は [GC実装](../../src/gc/history.rs) と [到達性・容量・競合回帰](../../tests/gc.rs) を参照する。実行版・環境・測定と未実施は [検証状況](../validation/acceptance.md) に記録する。全量データでのGC中入力遅延・physical filesystemの回収速度は局所回帰から達成としない。
 
@@ -141,3 +141,26 @@ still recipient-owned history. Once both model endpoints are deleted, terminal
 receipts are eligible. The GC transaction rechecks live endpoints and terminal
 state before deletion. A collection chunk does not remove operation_receipt
 idempotency records, whose existing independent retention policy still applies.
+
+## Budget-resumable history GC (#225)
+
+Each history stage persists its cursor with its data changes. Deferred batches
+are halved to one, and provenance uses replacement-rowid and source-ordinal
+subcursors. TEMP marks are cleared in bounded reset and cleanup stages; the
+finite original job horizon is closed in bounded batches. Each destructive
+node decision revalidates current reverse reachability and pins in the same
+transaction as the tombstone. An interrupted single-node check or indivisible
+tombstone retains the node for this pass and records a bounded count and up to
+eight short node IDs, never content. Indivisible receipt cleanup is retained and
+counted separately. If a single provenance expansion or reset mark cannot be
+processed within budget, the pass conservatively retains all payload nodes;
+unremoved TEMP marks are counted and disappear when the connection closes.
+Job discovery scans a bounded rowid window and keeps its position in memory;
+a worker restart safely restarts discovery. This trades reclamation for safety
+and forward progress.
+
+Tombstone and index deletion remain atomic: search filters deleted sources
+(`src/index/search.rs`), but retry fee preview reads failed jobs and fixed inputs
+without a tombstone gate (`src/index/observations.rs`). Splitting physical index
+purge after tombstone would therefore expose stale job observations. A future
+change may split it only after all readers enforce the required visibility.
