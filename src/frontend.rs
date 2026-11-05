@@ -6,6 +6,7 @@ use admission::{spawn_read, spawn_work};
 mod browser;
 mod browser_read;
 mod client_operations;
+mod compaction_markers;
 mod copying;
 mod draft_images;
 mod draft_saver;

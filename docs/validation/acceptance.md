@@ -1,5 +1,16 @@
 # Validation record
 
+## Compaction marker and post-compaction input (#230)
+
+Verified (macOS, synthetic databases and render tests only): read-time link of the
+first later request's reported input to an adopted summary (earlier requests
+ignored, unreported stays null, no later request gives null); En/Ja, wide and
+narrow, auto and manual, adopted, skipped, failed and unknown marker text; the
+collapsed row expands to the summary body; a page with no summary or automatic
+attempt performs no compaction read. Not verified: a real terminal, a live
+provider, live refresh of a marker when a compaction is adopted while the
+conversation is open (it appears on the next history read).
+
 ## Automatic attempt record after post-commit failure (#226)
 
 macOS ARM64 through `rust-slot`, disposable DBs and loopback providers; no live

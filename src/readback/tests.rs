@@ -583,23 +583,65 @@ fn compaction_links_first_request_after_adoption_without_storage_or_estimates() 
         let c = db();
         node(&c, "original", "message", "2026-10-31T00:00:00Z", json!({}));
         let body = |t: &str| json!({"item":{"role":"developer","content":[{"type":"input_text","text":t}]}});
-        for (id, at) in [("sum1", "2026-10-31T00:10:00Z"), ("sum2", "2026-10-31T00:20:00Z"), ("sum3", "2026-10-31T00:30:00Z")] {
+        for (id, at) in [
+            ("sum1", "2026-10-31T00:10:00Z"),
+            ("sum2", "2026-10-31T00:20:00Z"),
+            ("sum3", "2026-10-31T00:30:00Z"),
+        ] {
             replacement(&c, id, "summary", at, body(id));
-            operation(&c, &format!("{id}-op"), "summary", at, json!({"before_characters":9,"after_characters":3,"omitted_nodes":0,"compact":{"source_nodes":1,"summary_node_id":id,"original_node_ids":["original"]}}));
+            operation(
+                &c,
+                &format!("{id}-op"),
+                "summary",
+                at,
+                json!({"before_characters":9,"after_characters":3,"omitted_nodes":0,"compact":{"source_nodes":1,"summary_node_id":id,"original_node_ids":["original"]}}),
+            );
         }
         c.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('later','t','t','completed','2026-10-31T00:11:00Z','2026-10-31T00:25:00Z')",[]).unwrap();
         c.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('open','t','t','running','2026-10-31T00:26:00Z')",[]).unwrap();
         // Before sum1: ignored. First after sum1 reports 32000; the follow-up is not used.
-        attempt_at(&c, "before", "t", "2026-10-31T00:05:00Z", Some(json!({"input_tokens":205000})));
-        attempt_at(&c, "after1", "later", "2026-10-31T00:11:00Z", Some(json!({"input_tokens":32000})));
-        attempt_at(&c, "after1b", "later", "2026-10-31T00:12:00Z", Some(json!({"input_tokens":99000})));
+        attempt_at(
+            &c,
+            "before",
+            "t",
+            "2026-10-31T00:05:00Z",
+            Some(json!({"input_tokens":205000})),
+        );
+        attempt_at(
+            &c,
+            "after1",
+            "later",
+            "2026-10-31T00:11:00Z",
+            Some(json!({"input_tokens":32000})),
+        );
+        attempt_at(
+            &c,
+            "after1b",
+            "later",
+            "2026-10-31T00:12:00Z",
+            Some(json!({"input_tokens":99000})),
+        );
         // After sum2 the provider reported nothing: null, not the next attempt's value.
         attempt_at(&c, "after2", "later", "2026-10-31T00:21:00Z", None);
-        attempt_at(&c, "after2b", "later", "2026-10-31T00:22:00Z", Some(json!({"input_tokens":50000})));
+        attempt_at(
+            &c,
+            "after2b",
+            "later",
+            "2026-10-31T00:22:00Z",
+            Some(json!({"input_tokens":50000})),
+        );
         // sum3 is only followed by an unreported request in the open Turn.
         attempt_at(&c, "after3", "open", "2026-10-31T00:31:00Z", None);
         let page = compactions(&c, "t", &comp_args()).unwrap();
-        let by = |id: &str| page["items"].as_array().unwrap().iter().find(|i| i["event_id"] == id).unwrap().clone();
+        let by = |id: &str| {
+            page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|i| i["event_id"] == id)
+                .unwrap()
+                .clone()
+        };
         assert_eq!(by("sum1")["post_compaction_input_tokens"], 32000);
         assert_eq!(by("sum1")["post_compaction_attempt_id"], "after1");
         assert!(by("sum2")["post_compaction_input_tokens"].is_null());
@@ -607,9 +649,16 @@ fn compaction_links_first_request_after_adoption_without_storage_or_estimates() 
         assert!(by("sum3")["post_compaction_input_tokens"].is_null());
         assert_eq!(by("sum3")["post_compaction_attempt_id"], "after3");
         // Nothing after the newest adoption yet: both fields null.
-        c.execute("DELETE FROM model_attempt WHERE id='after3'", []).unwrap();
+        c.execute("DELETE FROM model_attempt WHERE id='after3'", [])
+            .unwrap();
         let page = compactions(&c, "t", &comp_args()).unwrap();
-        let sum3 = page["items"].as_array().unwrap().iter().find(|i| i["event_id"] == "sum3").unwrap().clone();
+        let sum3 = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["event_id"] == "sum3")
+            .unwrap()
+            .clone();
         assert!(sum3["post_compaction_attempt_id"].is_null());
     });
 }

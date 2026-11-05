@@ -183,7 +183,7 @@ pub(super) struct FooterTrailing<'a> {
     pub(super) db_status: Option<&'a str>,
 }
 /// 999 -> `999`, 10200 -> `10.2K`, 140000 -> `140K`, 1200000 -> `1.2M` (floored).
-pub(super) fn compact_tokens(n: u64) -> String {
+pub(crate) fn compact_tokens(n: u64) -> String {
     fn scaled(n: u64, unit: u64, suffix: &str) -> String {
         let tenths = n / (unit / 10);
         if tenths >= 1000 || tenths.is_multiple_of(10) {

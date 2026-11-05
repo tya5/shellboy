@@ -236,8 +236,12 @@ fn post_adoption_input(
     adopted_at: &str,
 ) -> Result<Option<PostInput>, crate::storage::StorageError> {
     let projection = crate::usage::sql_projection("a.usage_json");
-    let ended = format!("SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1");
-    let open = format!("SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY a.started_at,a.rowid LIMIT 1");
+    let ended = format!(
+        "SELECT a.id,{projection} FROM turn u INDEXED BY turns_by_thread_end JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NOT NULL AND u.ended_at>=?2 AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY u.ended_at,a.started_at,a.rowid LIMIT 1"
+    );
+    let open = format!(
+        "SELECT a.id,{projection} FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.thread_id=?1 AND u.ended_at IS NULL AND a.started_at>?2 AND octet_length(a.id)<=512 ORDER BY a.started_at,a.rowid LIMIT 1"
+    );
     for sql in [ended, open] {
         let found = db
             .query_row(&sql, params![thread, adopted_at], |row| {
@@ -537,10 +541,15 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
     // #230: adopted summaries link to the provider-reported input of the next
     // request. Null means not yet known or not reported, never an estimate.
     for item in &mut items {
-        if !matches!(item["kind"].as_str(), Some("summary" | "automatic_reduction" | "compact")) {
+        if !matches!(
+            item["kind"].as_str(),
+            Some("summary" | "automatic_reduction" | "compact")
+        ) {
             continue;
         }
-        let node = item["metrics"]["summary_node_id"].as_str().or(item["event_id"].as_str());
+        let node = item["metrics"]["summary_node_id"]
+            .as_str()
+            .or(item["event_id"].as_str());
         let found = node.and_then(|id| post_input.get(id));
         item["post_compaction_attempt_id"] = json!(found.map(|f| f.attempt_id.as_str()));
         item["post_compaction_input_tokens"] = json!(found.and_then(|f| f.input_tokens));

@@ -3521,3 +3521,16 @@ cancellation and late arrival. Impact: no table, column, event or worker. Limit:
 ordering rests on timestamp string comparison like `next_request_pending`; a
 clock step backwards could pair the wrong attempt. Revisit if a measured read
 cost or timestamp anomaly appears.
+
+## D-230-2: Marker next-trigger text follows the witness, not a 10% rule (2026-11-06)
+
+Decision: the note for a skipped, failed or rejected proactive attempt says the
+next attempt happens when new eligible content appears, re-checked in the next
+Turn. Reason: #230 mentions a 10% input growth rule, but `proactive_guard.rs`
+retries by a saved eligible-source witness within a Turn and has no growth
+percentage; showing one would be a guess. Impact: text only. Revisit if a growth
+rule is added (#229 mentions it for the thread threshold); then derive the input
+level from the saved trigger and display it. Also: the row keeps the existing
+`⬦`/`⁂` marks and the `|`/`·` separator rule instead of a `──` rule line, to
+reuse existing presentation parts; spilled count is shown only when known and
+above zero.

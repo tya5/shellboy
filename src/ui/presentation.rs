@@ -571,6 +571,16 @@ fn node_lines_inner(
         }
     }
     out.role = LineRole::Meta;
+    if let Some(note) = &node.presentation.compaction_note {
+        out.extend(indented_wrap(
+            vec![Line::from(Span::styled(
+                // NBSP keeps the mark with the first word when the row wraps.
+                format!("{}\u{a0}{}", RowKind::Notice.mark(), note.render(language)),
+                Style::default().fg(theme::MUTED),
+            ))],
+            width,
+        ));
+    }
     for notice in omission_notices(language, node) {
         let row = Line::from(Span::styled(notice, Style::default().fg(theme::MUTED)));
         if conversational || node.presentation.kind == PresentationKind::Event {
@@ -1439,13 +1449,16 @@ pub(super) fn history_with_cache(
             continue;
         }
         let node = &view.nodes()[rendered_index];
+        let default_open = !collapsed_marker_summary(node);
         let chunk = if view
             .items
-            .is_open(&ItemKey::Node(node.node_id.clone()), true, "")
+            .is_open(&ItemKey::Node(node.node_id.clone()), default_open, "")
         {
             chunk
-        } else {
+        } else if default_open {
             vec![Line::from(Text::Collapsed.render(language))]
+        } else {
+            collapsed_marker_row(language, node, width)
         };
         let mut chunk = hanging_wrap(chunk, width.max(1));
         user_band(language, &mut chunk, node, width, view.palette);
@@ -1803,9 +1816,29 @@ fn node_region(view: &ThreadView, node: &UiNode) -> ItemRegion {
         primary_node_id: node.node_id.clone(),
         execution_id: None,
         expandable: true,
-        default_open: true,
+        default_open: !collapsed_marker_summary(node),
         outcome: String::new(),
     }
+}
+/// A summary that carries its compaction marker (#230) starts as that one row;
+/// opening it reads the summary body (pull, not push).
+fn collapsed_marker_summary(node: &UiNode) -> bool {
+    node.presentation.kind == PresentationKind::Summary
+        && matches!(
+            node.presentation.ui_messages.title,
+            Some(Message::CompactionMarker(_))
+        )
+}
+fn collapsed_marker_row(language: UiLanguage, node: &UiNode, width: u16) -> Vec<Line<'static>> {
+    hanging_wrap(
+        vec![Line::from(Span::styled(
+            format!("{} {}", RowKind::Summary.mark(), label(language, node)),
+            Style::default()
+                .fg(color(node))
+                .add_modifier(Modifier::BOLD),
+        ))],
+        width.saturating_sub(2).max(1),
+    )
 }
 pub(super) fn tool_outcome(tool: &crate::presentation::ToolPresentation) -> String {
     let current = tool
@@ -2140,7 +2173,22 @@ fn append_node_cached(
         None
     };
     let node = slice.as_ref().unwrap_or(node);
-    let mut chunk = if view.items.is_open(&key, true, "") {
+    let default_open = !collapsed_marker_summary(node);
+    if !default_open
+        && block_index != usize::MAX
+        && block_index != 0
+        && !view.items.is_open(&key, default_open, "")
+    {
+        // The one marker row belongs to the first block; later blocks add none.
+        return;
+    }
+    let mut chunk = if !view.items.is_open(&key, default_open, "") {
+        if default_open {
+            vec![Line::from(Text::Collapsed.render(language))]
+        } else {
+            collapsed_marker_row(language, node, width)
+        }
+    } else {
         node_lines(
             language,
             node,
@@ -2149,8 +2197,6 @@ fn append_node_cached(
             width,
             links,
         )
-    } else {
-        vec![Line::from(Text::Collapsed.render(language))]
     };
     user_band(language, &mut chunk, node, width, view.palette);
     append_item_rows(
@@ -3018,6 +3064,37 @@ fn japanese_config() -> crate::config::Config {
     let mut config = crate::config::Config::default();
     config.ui.language = UiLanguage::Ja;
     config
+}
+
+#[cfg(test)]
+fn marker_event(kind: &str, state: &str, summary: bool) -> serde_json::Value {
+    let mut event = serde_json::json!({"kind":kind,"state":state,
+        "trigger":{"input_tokens":205000,"auto_at_tokens":200000},"metrics":{}});
+    if summary {
+        event["metrics"] = serde_json::json!({"summary_node_id":"sum","source_nodes":412,"summary_parts":1,"summary_characters":31000,"spilled_groups":8,
+            "summary_usage":{"input_tokens":{"known_sum":30000,"unknown_count":0,"overflow":false},"output_tokens":{"known_sum":2000,"unknown_count":0,"overflow":false}}});
+        event["post_compaction_attempt_id"] = "next".into();
+        event["post_compaction_input_tokens"] = 32000.into();
+    }
+    event
+}
+#[cfg(test)]
+fn marker_summary_node(event: &serde_json::Value) -> UiNode {
+    let payload = serde_json::json!({"text":"要約の本文","source_node_ids":["one","two"]});
+    let text = crate::history::text_of_payload(&payload);
+    let facts = crate::presentation::compaction_marker::MarkerFacts::from_event(event).unwrap();
+    let mut presentation = crate::presentation::project("summary", &payload, &text, 0);
+    presentation.title = facts.render(UiLanguage::Ja);
+    presentation.ui_messages.title = Some(Message::CompactionMarker(facts));
+    UiNode {
+        node_id: "sum".into(),
+        role: "summary".into(),
+        total_chars: text.chars().count(),
+        text,
+        base_char_offset: 0,
+        reasoning_ranges: vec![],
+        presentation,
+    }
 }
 
 #[cfg(test)]
@@ -4912,6 +4989,100 @@ mod tests {
         );
     }
     #[test]
+    fn compaction_marker_is_one_collapsed_row_that_expands_to_the_summary_body_at_any_width() {
+        for manual in [false, true] {
+            let event = marker_event(
+                if manual {
+                    "compact"
+                } else {
+                    "automatic_reduction"
+                },
+                "adopted",
+                true,
+            );
+            for language in [UiLanguage::Ja, UiLanguage::En] {
+                for width in [100u16, 40, 20] {
+                    let mut config = crate::config::Config::default();
+                    config.ui.language = language;
+                    let mut view = ThreadView::new(&config, std::env::temp_dir());
+                    *view.nodes_mut_for_test() = vec![marker_summary_node(&event)];
+                    let closed = plain(&history(&view, width).0);
+                    let word = if manual {
+                        ["手動要約", "Manual summary"]
+                    } else {
+                        ["自動要約", "Auto summary"]
+                    }[(language == UiLanguage::En) as usize];
+                    assert!(closed.starts_with("⬦ "), "{closed}");
+                    assert!(
+                        closed
+                            .replace(['\n', ' ', '\u{a0}'], "")
+                            .contains(&word.replace(' ', "")),
+                        "{closed}"
+                    );
+                    assert!(
+                        !closed.contains("要約の本文"),
+                        "closed rows must not push the body: {closed}"
+                    );
+                    let rows = history(&view, width).0;
+                    assert!(
+                        rows.iter().all(|line| line.width() <= usize::from(width)),
+                        "{width}: {closed}"
+                    );
+                    let key = ItemKey::Node("sum".into());
+                    view.items.toggle(key.clone(), false, "");
+                    let open = plain(&history(&view, width).0);
+                    assert!(open.contains("要約の本文"), "{open}");
+                    view.items.toggle(key, false, "");
+                    assert!(!plain(&history(&view, width).0).contains("要約の本文"));
+                }
+            }
+        }
+    }
+    #[test]
+    fn compaction_note_rows_cover_skipped_failed_and_unknown_attempts_in_both_languages() {
+        let payload = serde_json::json!({"output":[]});
+        for (state, ja, en) in [
+            ("no_target", "見送り", "skipped"),
+            ("rejected", "採用せず", "not adopted"),
+            ("unknown", "結果", "outcome"),
+        ] {
+            let facts = crate::presentation::compaction_marker::MarkerFacts::from_event(
+                &marker_event("automatic_reduction", state, false),
+            )
+            .unwrap();
+            let text = "回答".to_owned();
+            let mut presentation =
+                crate::presentation::project("assistant_response", &payload, &text, 0);
+            presentation.compaction_note = Some(facts);
+            let node = UiNode {
+                node_id: "r".into(),
+                role: "assistant_response".into(),
+                total_chars: 2,
+                text,
+                base_char_offset: 0,
+                reasoning_ranges: vec![],
+                presentation,
+            };
+            for (language, word) in [(UiLanguage::Ja, ja), (UiLanguage::En, en)] {
+                for width in [100u16, 30] {
+                    let lines = node_lines(language, &node, false, 0, width, &mut Vec::new());
+                    let shown = plain(&lines);
+                    assert!(shown.contains("⁂"), "{shown}");
+                    assert!(
+                        shown
+                            .replace(['\n', ' ', '\u{a0}'], "")
+                            .contains(&word.replace(' ', "")),
+                        "{shown}"
+                    );
+                    assert!(
+                        lines.iter().all(|line| line.width() <= usize::from(width)),
+                        "{shown}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
     fn tool_calls_use_inline_shell_marker_without_assistant_role_line() {
         let command = "printf synthetic-marker";
         let node = UiNode {
@@ -5132,6 +5303,36 @@ mod tests {
 
 #[cfg(test)]
 mod conversation_item_tests {
+    #[test]
+    fn compaction_marker_stays_one_row_in_the_typed_history_path() {
+        let mut view = ThreadView::new(&japanese_config(), std::env::temp_dir());
+        let mut summary = marker_summary_node(&marker_event("compact", "adopted", true));
+        // Several body blocks must still yield a single marker row.
+        let block = summary
+            .presentation
+            .blocks
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        summary.presentation.blocks = vec![block.clone(), block];
+        *view.nodes_mut_for_test() = vec![
+            node(
+                "call",
+                "",
+                vec![PresentationBlock {
+                    kind: BlockKind::ToolCall,
+                    tool: Some(tool("c", "completed")),
+                    ..Default::default()
+                }],
+            ),
+            summary,
+        ];
+        let closed = plain(&history(&view, 100).0);
+        assert_eq!(closed.matches("手動要約").count(), 1, "{closed}");
+        assert!(!closed.contains("要約の本文"), "{closed}");
+        view.items.toggle(ItemKey::Node("sum".into()), false, "");
+        assert!(plain(&history(&view, 100).0).contains("要約の本文"));
+    }
 
     #[test]
     fn boundary_rows_are_unselectable_and_tools_stay_dense() {

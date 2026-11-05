@@ -1106,3 +1106,8 @@ first attempt after the adoption, so the first match ends the scan; an open Turn
 is the fallback. One such lookup runs per retained replacement row (at most the
 page candidate cap; 5 for the latest-compaction display). Failed or rejected
 proactive attempts have no replacement and show null.
+
+Conversation marker (#230): see [tui-presentation](tui-presentation.md). The
+retry condition shown on a skipped or failed attempt is the existing Turn-scoped
+eligible-source witness; the issue's 10% growth rule is not implemented in the
+product (see D-230-2), so no percentage is displayed.

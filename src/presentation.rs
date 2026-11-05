@@ -32,6 +32,7 @@ pub mod messages;
 mod projection;
 pub mod rows;
 pub use projection::project;
+pub mod compaction_marker;
 mod summary;
 use crate::terminal_links::valid_link_target as http;
 use events::{attention, event_description};
@@ -892,6 +893,10 @@ pub struct NodePresentation {
     pub read_revision: u64,
     #[serde(skip)]
     pub provisional_stream: bool,
+    /// Skipped, failed or spill-only automatic attempt triggered after this
+    /// response (#230); drawn as one note row, never part of the saved body.
+    #[serde(skip)]
+    pub compaction_note: Option<compaction_marker::MarkerFacts>,
     #[serde(default)]
     pub event_class: EventClass,
     pub kind: PresentationKind,

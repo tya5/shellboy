@@ -563,6 +563,26 @@ reports that limit; F6 retains the full saved references. F7 remains HTTP links.
 Unlike row groups have nonselectable spacing; consecutive tools stay dense.
 The `◉` work-region heading is reserved for #86, not drawn by this change.
 
+### 要約の区切り行（#230）
+
+要約が採用された位置には `⬦` の1行が閉じた状態で出る。開く（Enter）と要約本文を読める。
+例（日本語、続いて英語）:
+
+```text
+⬦ 自動要約：205K で発動 · 412 ノード → 要約 1 件（31K 字） · 退避 8 件 · 費用 in 30K / out 2K · 要約後の入力 32K
+⬦ Auto summary: triggered at 205K · 412 nodes → 1 summary (31K chars) · 8 spilled · cost in 30K / out 2K · input after 32K
+```
+
+手動は `手動要約：` / `Manual summary:` で始まり、発動の入力量を持たない。
+`費用` は要約の要求のトークン数（金額ではない）。報告されていない値は `不明`、
+一部の要求だけ報告がないときは `30K+`。`要約後の入力` は採用後の最初の要求で提供元が
+報告した入力で、まだ要求がなければ `次の要求待ち`、報告がなければ `未報告`。
+同じ値は `shellboy compact list` の `post_compaction_input_tokens` で読める。
+自動要約が見送られた・採用されなかった試行は、その応答の直後に `⁂` の1行で出る
+（理由・そのときの入力量と閾値・次に発動する条件）。次の条件は保存された判定の規則
+（同じ Turn では新しい要約対象が増えるまで再試行しない）であり、割合の閾値ではない。
+狭い幅では折り返す。印は既存の語彙（`⬦` `⁂`）だけを使う。
+
 ## Context size in the footer
 
 The footer's first row ends with the current Thread's latest adopted model

@@ -1,5 +1,16 @@
 # Development status
 
+## Compaction marker and post-compaction input (#230; implemented, CI pending)
+
+`compact list` adopted summaries carry `post_compaction_input_tokens` and
+`post_compaction_attempt_id`, derived at read time with no storage (D-230-1). The
+conversation shows one collapsed `⬦` row per adopted summary (auto and manual,
+En/Ja) and a `⁂` note after the response that triggered a skipped, failed or
+spill-only automatic attempt; see [tui-presentation](../design/tui-presentation.md).
+No 10% growth rule exists in the product, so the note states the witness rule
+(D-230-2). Not verified on a real terminal or a live provider; synthetic render
+and read tests only. Resume point: CI on the final SHA, then owner review.
+
 ## Active-attempt recovery index (#219; implemented, CI pending)
 
 Migration 29 adds the partial `model_attempt_active_recovery` index so startup

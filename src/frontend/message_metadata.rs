@@ -311,7 +311,7 @@ pub(super) async fn enrich(
     for (target, node) in nodes.iter_mut().zip(projected) {
         *target = node;
     }
-    Ok(())
+    super::compaction_markers::enrich(control, viewed_thread, nodes).await
 }
 
 fn project(raw: &RawSource, viewed: Option<&str>, parent: Option<&str>) -> Metadata {

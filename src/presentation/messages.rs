@@ -331,6 +331,8 @@ pub enum Message {
         count: usize,
         replaced: bool,
     },
+    /// One-row compaction marker (#230), rendered from saved facts.
+    CompactionMarker(super::compaction_marker::MarkerFacts),
     SourceCount {
         count: usize,
     },
@@ -529,6 +531,7 @@ impl Message {
                     "要約 | 出典{count}件 | F6>O 原文"
                 ),
             },
+            Self::CompactionMarker(facts) => facts.render(language),
             Self::SourceCount { count } => match (en, count) {
                 (true, 1) => crate::ui::text_width::glyphs::select(
                     "  1 original · F6 Details",
