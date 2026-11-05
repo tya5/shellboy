@@ -25,6 +25,7 @@ None. Version 0.8.1 is appropriate because the changes are additive or compatibl
 | Markdown fallback ([#221](https://github.com/tya5/shellboy/issues/221)) | A bounded readable fallback preserves text when Markdown rendering metadata is unavailable. The original field cause remains unconfirmed. | No | None | Commit `2ccbe02906` |
 | Startup context queries ([#219](https://github.com/tya5/shellboy/issues/219)) | Reuses recovery candidates to avoid completed-history scans; results are workload-specific. | No | None | Commit `bded17ecae` |
 | Thread deletion preview ([#204](https://github.com/tya5/shellboy/issues/204)) | On one snapshot, three-run median preview time fell from 2,693.8 ms to 115.0 ms for a large tree, and from 2,052.4 ms to 7.7 ms for a leaf; these are snapshot-specific measurements. | No | None | Commit `78cc8349f7` |
+| Connection rate-limit observation ([#224](https://github.com/tya5/shellboy/issues/224)) | `usage get` reports recorded 429/5xx and caller wait observations by connection; missing or interrupted data remains unknown. Owner logs are best effort and report dropped records. This stage does not add connection-wide throttling or summary retries. | No | None | Commit `ab1a7197f7` |
 | Development build profile | Development and test builds omit debug information by default; an environment override restores line tables. | No | None | Commit `8ce66fb452` |
 
 ## Unverified / pending
