@@ -17,7 +17,7 @@ pub(crate) struct AutomaticStage {
 }
 
 /// Replaces W2/W4 bodies while keeping the stage facts of the same token.
-pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))";
+pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND COALESCE(json_extract(error_json,'$.automatic_trim_attempt.token'),?3)=?3";
 
 /// Writes the provisional `unknown` record inside the witness transaction.
 pub(crate) fn begin_tx(
@@ -85,4 +85,42 @@ pub(super) fn record_tx(
         )?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn late_finish_with_an_older_token_cannot_replace_a_newer_record() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE model_attempt(id TEXT PRIMARY KEY, error_json TEXT)")
+            .unwrap();
+        db.execute("INSERT INTO model_attempt(id) VALUES('a')", [])
+            .unwrap();
+        let read = |db: &rusqlite::Connection| -> Value {
+            let text: String = db
+                .query_row("SELECT error_json FROM model_attempt", [], |r| r.get(0))
+                .unwrap();
+            serde_json::from_str(&text).unwrap()
+        };
+        let finish = |db: &rusqlite::Connection, outcome: &str, token: &str| {
+            db.execute(
+                FINISH_SQL,
+                params![json!({"outcome":outcome}).to_string(), "a", token],
+            )
+            .unwrap()
+        };
+        // No record yet: the first finish writes.
+        assert_eq!(finish(&db, "first", "new"), 1);
+        assert_eq!(read(&db)["automatic_trim_attempt"]["token"], "new");
+        // A late write from an older attempt token changes nothing.
+        assert_eq!(finish(&db, "stale", "old"), 0);
+        let record = read(&db);
+        assert_eq!(record["automatic_trim_attempt"]["outcome"], "first");
+        assert_eq!(record["automatic_trim_attempt"]["token"], "new");
+        // The same token may still replace its own record.
+        assert_eq!(finish(&db, "second", "new"), 1);
+        assert_eq!(read(&db)["automatic_trim_attempt"]["outcome"], "second");
+    }
 }
