@@ -58,16 +58,7 @@ pub(super) fn history_step(
         report.root_revision = current;
     }
     match progress.stage {
-        Stage::Reset => clean_marks(
-            &tx,
-            job,
-            &mut progress,
-            &mut report,
-            batch,
-            candidate,
-            keep,
-            true,
-        )?,
+        Stage::Reset => clean_marks(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
         Stage::Receipts => receipts_step(&tx, &mut progress, &mut report, batch, candidate, keep)?,
         Stage::Roots => roots_step(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
 
@@ -76,16 +67,9 @@ pub(super) fn history_step(
         }
 
         Stage::Sweep => sweep_step(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
-        Stage::Cleanup => clean_marks(
-            &tx,
-            job,
-            &mut progress,
-            &mut report,
-            batch,
-            candidate,
-            keep,
-            false,
-        )?,
+        Stage::Cleanup => {
+            clean_marks(&tx, job, &mut progress, &mut report, batch, candidate, keep)?
+        }
         Stage::Finish => finish_step(&tx, job, &mut progress, &mut report, root, batch)?,
     }
     report.stage = progress.stage.as_str().into();
@@ -368,8 +352,8 @@ fn clean_marks(
     batch: usize,
     candidate: &std::sync::Mutex<Option<String>>,
     keep: Option<&str>,
-    resetting: bool,
 ) -> Result<()> {
+    let resetting = matches!(progress.stage, Stage::Reset);
     // Scan by rowid even for other jobs so examination itself is bounded.
     let rows = tx.prepare("SELECT rowid,job_id,node_id FROM shellboy_gc_mark WHERE rowid>?1 ORDER BY rowid LIMIT ?2").map_err(sql_error)?
         .query_map(params![progress.last_rowid,batch as i64], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).map_err(sql_error)?
