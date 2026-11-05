@@ -10001,3 +10001,35 @@ fixture also verifies that one successful probe releases queued requests without
 serializing their HTTP lifetimes and that all three Turns complete.
 Integration layout and occurrence-specific watchdog policy checks passed; native
 CI and independent review remain pending. No live-provider test was made.
+
+## #35 Display language: final acceptance (closed 2026-11-05)
+
+Checked on main `5540f444` (owner decision: record and close; reopen a new
+issue if mixing is found later).
+
+- Language audit (`scripts/dev/language-audit.py` with
+  `language-classifications.json`): 387 files, `a=2940, b=1597, protected=4,
+  c=0`; `--check` passes, `--ui-pending` returns no records, and the 28 Python
+  audit tests pass. No unexplained Japanese remains on English UI paths; the
+  remaining Japanese literals are Japanese-only resources, test literals and
+  four evidence-pinned protected tokens. `src/control/db.rs`, `src/app.rs` and
+  `src/ipc/server.rs` contain no Japanese literals; `src/compaction.rs` has
+  Japanese only in tests.
+- Counts 0, 1 and many in both languages:
+  `complete_count_sentences_cover_zero_one_and_many`
+  (`src/presentation/messages.rs`),
+  `paste_counts_are_complete_zero_one_and_many_messages` (`src/ui/input.rs`),
+  `counts_and_cancel_messages_are_complete_for_zero_one_and_many`
+  (`src/ui/message_queue.rs`),
+  `watch_title_counts_use_complete_singular_and_plural_messages`
+  (`src/ui/threads.rs`), and the English/Japanese label test in
+  `src/frontend/received/list.rs`.
+- Three-OS CI on that SHA: runs 42000242794 and 42000248543 (Ubuntu, macOS,
+  Windows) passed; the main push run 42014032841 reused them.
+- Phase A (#139) and phase C (#152) were accepted earlier.
+
+Accepted as not verified: the audit is a lexical classification, not an
+end-to-end proof that every screen renders only English; there is no
+whole-screen default-config rendering test; physical terminals were not
+checked. The earlier "Stage C acceptance remains unverified" notes above are
+superseded by this entry.
