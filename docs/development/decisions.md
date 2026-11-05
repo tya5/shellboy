@@ -3418,3 +3418,27 @@ spill was adopted: no earlier reasoning survives replay, giving the same
 drop-all provider shape as the approved full summary. Record the remaining need
 before and after. This implements the owner choice to summarize only what is
 needed; provider behavior remains unvalidated by paid Anthropic runs.
+
+## D-224: Profile-scoped connection wait (2026-11-05)
+
+The owner adopted #224 stage 2. After an HTTP 429, all requests of one
+configured connection profile (the name the user configured, not merged by
+provider or credential) pause new sends until the Retry-After time, or a
+connection-capped exponential backoff when the header is absent or invalid.
+Admission is FIFO with one probe; state is in memory and bounded (1,024 waiters
+per profile) with no new worker, queue or table. Restart clears it. Existing
+#76 retry rules and #188 usage-limit rules are unchanged. Known limitation:
+profiles that share one upstream quota are throttled independently and may each
+receive a 429. Stage 3 (summary retry, adaptive map concurrency) is not
+included. Revisit when real measurements show cross-profile quota sharing
+matters or when a stable provider quota identity is documented.
+
+Usage-limit recognition: a real LiteLLM 429 (`litellm.RateLimitError`) wrapping a
+ChatGPT plan `usage_limit_reached` fact was retried eight times because the
+embedded JSON was followed by diagnostic text, which the strict parser
+rejected. The parser now reads the first JSON value at up to 16 candidate braces
+of a `litellm.RateLimitError` message (also when `error` is a plain string). The
+format is based on one observed case plus the documented fields; other
+providers' wrappers are not guessed. A fact whose reset exceeds the remaining
+retry schedule is not auto-retried and its reset time appears in the recovery
+reason.
