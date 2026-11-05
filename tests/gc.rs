@@ -1283,21 +1283,30 @@ async fn history_gc_keeps_single_over_budget_reachability_candidate() {
     })
     .await
     .unwrap();
+    let started = std::time::Instant::now();
     let stop = Arc::new(AtomicBool::new(false));
     let writes = Arc::new(AtomicUsize::new(0));
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
     let writer = {
         let db = f.db.clone();
         let stop = stop.clone();
         let writes = writes.clone();
         tokio::spawn(async move {
+            let mut ready = Some(ready_tx);
             while !stop.load(Ordering::Relaxed) {
                 db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
                 writes.fetch_add(1, Ordering::Relaxed);
+                if let Some(ready) = ready.take() {
+                    let _ = ready.send(());
+                }
                 tokio::task::yield_now().await;
             }
         })
     };
-    let started = std::time::Instant::now();
+    crate::test_watchdog::watchdog("history GC foreground writer start", ready_rx)
+        .await
+        .unwrap()
+        .unwrap();
     let (mut deferrals, mut steps, mut kept, mut complete) = (0, 0, 0, false);
     let deadline = crate::test_watchdog::Deadline::new("history GC under sustained writes");
     while !deadline.expired() && steps < 20000 {

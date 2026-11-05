@@ -26,10 +26,10 @@ remeasurement failure paths.
 On macOS via `rust-slot`, the focused GC/index suite passed 31 tests with one
 ignored. With continuous foreground root-revision writes and test-only queued
 foreground noops, the four-thread synthetic pass completed in 2,747 steps,
-with 5 budget deferrals, 40,001 scanned, 478 writes, and 10,315 ms elapsed.
+with 5 budget deferrals, 40,001 scanned, 348 writes, and 9,534 ms elapsed.
 With the shortened sweep horizon, a 5,000-reverse-reference candidate remained
 intact and the pass completed in 13 steps with 8 deferrals and 24 writes in
-190 ms (fixture and root/mark setup excluded). These synthetic measurements are
+154 ms (fixture and root/mark setup excluded). These synthetic measurements are
 not production-data performance bounds.
 
 A synthetic cursor-update interruption verifies rollback and candidate
