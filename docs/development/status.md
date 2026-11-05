@@ -4749,3 +4749,11 @@ rendered a 64,329-byte full body in 18 ms and its 4,841-byte anchor window in
 remains undiagnosed. Regression coverage includes long and multiple blocks,
 anchor selection, metadata omission, width changes, and the retained resize
 worker request. Focused tests and full validation are in progress.
+
+### #204 HistorySearch validation batching (in progress)
+
+Proposal 2 design now specifies bounded (256-key) set-oriented validation while
+preserving the exact scalar witness-currentness and search-visibility predicates,
+initial eligibility SQL, ranking and fresh-snapshot refresh. The implementation
+and synthetic equivalence test are under development. Real-copy before/after
+measurement and hosted CI are pending; do not treat this entry as acceptance.

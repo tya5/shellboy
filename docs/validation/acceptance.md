@@ -9831,3 +9831,13 @@ boundaries differ. The one snapshot was deleted after measurement.
 
 - Metadata omission after the one bounded anchored rerender now keeps readable plain source text instead of replacing the body with an updating-only placeholder. Fallback output is capped at 8 KiB total per node, centered near source anchors, and marks omitted prefix/suffix.
 - Regression coverage exercises a long omitted block, multiple Markdown blocks, an internal anchor, the metadata cap, and width changes; normal rendered Markdown still wins when matching metadata is available. Raw Markdown in real-history incidents remains undiagnosed.
+
+### #204 HistorySearch validation batching (pending)
+
+- [ ] Synthetic tests compare scalar and batched witness validity and candidate
+  visibility across replacements, deleted ownership, forks, hidden and shared
+  sources, stale/tombstoned rows, and verify identical eligible top-k ordering.
+- [ ] One immutable read-only-source `VACUUM INTO` copy measures scalar versus
+  bounded batched validation on the same candidates and reports scope/environment.
+- [ ] Focused test, formatting, `cargo check --tests`, standard CI and 3-OS CI
+  pass on the final exact SHA; the snapshot is removed after measurement.

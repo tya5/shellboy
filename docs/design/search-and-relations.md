@@ -110,3 +110,47 @@ replacement_source_reverse and Thread-path indexes and cached prepared statement
 Each keyword batch contains at most 32 node IDs; it does not reconstruct the full
 recursive scope. Per-node snapshot and current-path/provenance distinctions remain
 unchanged. Synthetic thousands-of-node timing is recorded separately from any SLA.
+
+### Batched current-source and visibility validation (Issue #204 Proposal 2)
+
+Eligibility remains the existing joined/filtering query: completed job identity,
+chunk/source revisions and hashes, payload presence, tombstone status, timestamps,
+kind filters, and optional current Thread scope are evaluated before KNN. After
+that query has collected candidate metadata, validation may batch only the
+per-distinct-witness current-source check and per-distinct-node search-visibility
+check. It must use bounded JSON/table batches (never interpolate identifiers or
+create a persistent index/cache), with a fixed maximum batch size and cancellation
+checks between batches. This avoids one SQL statement preparation/step per
+witness or node without transferring bodies or vectors to Rust.
+
+A batched witness predicate is exactly `witness_valid`: current node exists,
+`payload_json IS NOT NULL`, `deleted_reason IS NULL`, revision and body hash equal
+the witness; for `tool_raw`, the witness must include raw identity and the
+matching `shell_execution` must have the same id, retention_generation,
+saved_sequence and output_encoding, terminal state in exited/failed/stopped,
+and no `raw_tombstone.<execution>` marker. Canonical validation does not apply
+raw retention rules. Malformed/missing watermarks and body-kind/raw mismatch
+remain rejected. Deduplication may share a result only for exactly equal
+Witness values (including raw identity), as today.
+
+Visibility is still `history::reachability::searchable`: starting from each
+candidate, traverse reverse source-to-consumer edges through the same
+replacement_source/replacement joins as the scalar implementation (which has no
+replacement-state filter); a candidate is visible if any reachable node satisfies
+the current `ROOT_PREDICATE`, or if no reachable node satisfies `DELETED_OWNER`.
+Preserve
+`UNION` cycle termination, live-root precedence, ownerless legacy sources, and
+all existing root classes. Candidate identity must remain associated with its
+own recursive closure; one candidate's roots cannot make another visible.
+
+The set-oriented query must produce the same per-key booleans as the existing
+`witness_valid` and `searchable` functions for the same read snapshot. It must not
+alter eligibility enumeration, candidate chunk IDs, sqlite-vec KNN ordering,
+node deduplication, distance tie-breaks, limit expansion, exact-L2 fallback,
+or top-k. Keep result refresh's separate newer-snapshot revalidation unchanged.
+Before replacing the old validation, an equivalence test compares old and batched
+maps and final rankings for synthetic histories covering current/replaced and
+stale sources, tombstones, deleted owners, live shared roots, forks, completed
+and pending replacements, and cycles. If SQLite's recursive CTE semantics
+or bounded batching cannot preserve candidate-local roots or witness identity,
+retain the old path and report the constraint rather than weakening a rule.

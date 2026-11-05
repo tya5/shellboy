@@ -246,6 +246,26 @@ pub(super) fn ensure_space(
         table,
     })
 }
+pub(super) fn witnesses_valid_many(
+    db: &Connection,
+    witnesses: &[(Witness, String)],
+) -> Result<Vec<bool>, StorageError> {
+    let input = serde_json::to_string(witnesses).map_err(|_| serde_error())?;
+    let sql = "WITH requested AS (SELECT CAST(key AS INTEGER) ordinal,json_extract(value,'$[0].node_id') node_id,json_extract(value,'$[0].revision') revision,json_extract(value,'$[0].body_hash') body_hash,json_extract(value,'$[0].raw') raw,json_extract(value,'$[1]') body_kind FROM json_each(?1)) SELECT q.ordinal,EXISTS(SELECT 1 FROM node n WHERE n.id=q.node_id AND n.payload_revision=q.revision AND n.body_hash IS q.body_hash AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL AND (q.body_kind<>'tool_raw' OR (q.raw IS NOT NULL AND EXISTS(SELECT 1 FROM shell_execution e WHERE e.id=json_extract(q.raw,'$.execution') AND e.retention_generation=json_extract(q.raw,'$.generation') AND e.saved_sequence=json_extract(q.raw,'$.saved_sequence') AND e.output_encoding=json_extract(q.raw,'$.encoding') AND e.state IN('exited','failed','stopped')) AND NOT EXISTS(SELECT 1 FROM app_meta m WHERE m.key='raw_tombstone.'||json_extract(q.raw,'$.execution'))))) FROM requested q ORDER BY q.ordinal";
+    let mut statement = db.prepare_cached(sql)?;
+    let rows = statement.query_map([input], |row| {
+        Ok((row.get::<_, i64>(0)? as usize, row.get::<_, bool>(1)?))
+    })?;
+    let mut result = vec![false; witnesses.len()];
+    for row in rows {
+        let (ordinal, valid) = row?;
+        if let Some(slot) = result.get_mut(ordinal) {
+            *slot = valid;
+        }
+    }
+    Ok(result)
+}
+
 pub(super) fn witness_valid(
     db: &Connection,
     witness: &Witness,
@@ -621,5 +641,98 @@ mod metadata_tests {
             );
         }
         assert!(json_meta::<Work>(&db, &input).unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod batched_witness_tests {
+    use super::*;
+
+    #[test]
+    fn batched_witness_checks_match_scalar_current_source_rules() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE node(id TEXT PRIMARY KEY,payload_revision INTEGER,body_hash TEXT,payload_json TEXT,deleted_reason TEXT);
+            CREATE TABLE shell_execution(id TEXT PRIMARY KEY,retention_generation INTEGER,saved_sequence INTEGER,output_encoding TEXT,state TEXT);
+            CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT);
+            INSERT INTO node VALUES('current',2,'hash','{}',NULL),('stale',1,'old','{}',NULL),('deleted',2,'hash','{}','collected'),('no-payload',2,'hash',NULL,NULL),('raw',2,'hash','{}',NULL);
+            INSERT INTO shell_execution VALUES('exec',4,9,'UTF-8','exited');")
+            .unwrap();
+        let raw = RawWitness {
+            execution: "exec".into(),
+            generation: 4,
+            saved_sequence: 9,
+            encoding: "UTF-8".into(),
+        };
+        let cases: Vec<(Witness, String)> = vec![
+            (
+                Witness {
+                    node_id: "current".into(),
+                    revision: 2,
+                    body_hash: Some("hash".into()),
+                    raw: None,
+                },
+                "canonical".into(),
+            ),
+            (
+                Witness {
+                    node_id: "stale".into(),
+                    revision: 1,
+                    body_hash: Some("old".into()),
+                    raw: None,
+                },
+                "canonical".into(),
+            ),
+            (
+                Witness {
+                    node_id: "deleted".into(),
+                    revision: 2,
+                    body_hash: Some("hash".into()),
+                    raw: None,
+                },
+                "canonical".into(),
+            ),
+            (
+                Witness {
+                    node_id: "no-payload".into(),
+                    revision: 2,
+                    body_hash: Some("hash".into()),
+                    raw: None,
+                },
+                "canonical".into(),
+            ),
+            (
+                Witness {
+                    node_id: "raw".into(),
+                    revision: 2,
+                    body_hash: Some("hash".into()),
+                    raw: Some(raw.clone()),
+                },
+                "tool_raw".into(),
+            ),
+            (
+                Witness {
+                    node_id: "raw".into(),
+                    revision: 2,
+                    body_hash: Some("hash".into()),
+                    raw: Some(RawWitness {
+                        generation: 5,
+                        ..raw.clone()
+                    }),
+                },
+                "tool_raw".into(),
+            ),
+        ];
+        let scalar = cases
+            .iter()
+            .map(|(witness, kind)| witness_valid(&db, witness, kind).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(witnesses_valid_many(&db, &cases).unwrap(), scalar);
+        assert_eq!(scalar, [true, true, false, false, true, false]);
+        db.execute(
+            "INSERT INTO app_meta VALUES('raw_tombstone.exec','collected')",
+            [],
+        )
+        .unwrap();
+        assert!(!witnesses_valid_many(&db, &cases).unwrap()[4]);
     }
 }

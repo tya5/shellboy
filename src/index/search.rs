@@ -242,9 +242,9 @@ fn ranked_hits(
     let mut rows = statement
         .query(params![space.id, args.thread_id, kinds, excluded])
         .map_err(sql_error)?;
-    let mut eligible = Vec::<i64>::new();
-    let mut witness_checks = HashMap::<Witness, bool>::new();
-    let mut visibility = HashMap::<String, bool>::new();
+    const WITNESS_BATCH: usize = 256;
+    const VISIBILITY_BATCH: usize = 8192;
+    let mut candidate_rows = Vec::<(i64, Witness, String)>::new();
     while let Some(row) = rows.next().map_err(sql_error)? {
         ensure_running(cancel)?;
         if from.is_some() || to.is_some() {
@@ -257,8 +257,7 @@ fn ranked_hits(
             }
         }
         let watermark: Option<String> = row.get(3).map_err(sql_error)?;
-        let witness = watermark.as_deref().and_then(Witness::from_watermark);
-        let Some(mut witness) = witness else {
+        let Some(mut witness) = watermark.as_deref().and_then(Witness::from_watermark) else {
             continue;
         };
         let kind: String = row.get(5).map_err(sql_error)?;
@@ -274,24 +273,44 @@ fn ranked_hits(
         if witness.node_id != node || witness.revision != revision {
             continue;
         }
-        let valid = if let Some(valid) = witness_checks.get(&witness) {
-            *valid
-        } else {
-            let valid = witness_valid(db, &witness, &kind).map_err(db_error)?;
-            witness_checks.insert(witness, valid);
-            valid
-        };
-        if valid {
-            let searchable = if let Some(visible) = visibility.get(&node) {
-                *visible
-            } else {
-                let visible = history::reachability::searchable(db, &node).map_err(sql_error)?;
-                visibility.insert(node, visible);
-                visible
-            };
-            if searchable {
-                eligible.push(row.get(0).map_err(sql_error)?);
-            }
+        candidate_rows.push((row.get(0).map_err(sql_error)?, witness, kind));
+    }
+
+    let mut witness_checks = HashMap::<Witness, bool>::new();
+    let mut witness_kinds = HashMap::<Witness, String>::new();
+    for (_, witness, kind) in &candidate_rows {
+        witness_kinds
+            .entry(witness.clone())
+            .or_insert_with(|| kind.clone());
+    }
+    let witness_items: Vec<_> = witness_kinds.into_iter().collect();
+    for batch in witness_items.chunks(WITNESS_BATCH) {
+        ensure_running(cancel)?;
+        let valid = witnesses_valid_many(db, batch).map_err(db_error)?;
+        for ((witness, _), valid) in batch.iter().zip(valid) {
+            witness_checks.insert(witness.clone(), valid);
+        }
+    }
+    let mut eligible_nodes = Vec::<String>::new();
+    let mut seen_nodes = HashSet::<String>::new();
+    for (_, witness, _) in &candidate_rows {
+        if witness_checks.get(witness) == Some(&true) && seen_nodes.insert(witness.node_id.clone())
+        {
+            eligible_nodes.push(witness.node_id.clone());
+        }
+    }
+    let mut visibility = HashMap::<String, bool>::new();
+    for batch in eligible_nodes.chunks(VISIBILITY_BATCH) {
+        ensure_running(cancel)?;
+        let visible = history::reachability::searchable_many(db, batch).map_err(sql_error)?;
+        visibility.extend(batch.iter().cloned().zip(visible));
+    }
+    let mut eligible = Vec::<i64>::new();
+    for (chunk, witness, _) in candidate_rows {
+        if witness_checks.get(&witness) == Some(&true)
+            && visibility.get(&witness.node_id) == Some(&true)
+        {
+            eligible.push(chunk);
         }
     }
     if eligible.is_empty() {
@@ -580,3 +599,80 @@ mod visibility_cost_tests {
 
 #[cfg(test)]
 mod performance_tests;
+
+#[cfg(test)]
+mod validation_benchmark_tests {
+    use super::*;
+    use rusqlite::OpenFlags;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "read-only real-history validation benchmark; set HISTORY_SEARCH_SNAPSHOT"]
+    fn compare_old_and_batched_validation_on_snapshot() {
+        let path = std::env::var("HISTORY_SEARCH_SNAPSHOT").unwrap();
+        let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+        db.pragma_update(None, "query_only", true).unwrap();
+        let mut statement = db.prepare("SELECT DISTINCT j.authorized_watermark,j.body_kind FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id AND j.state='done' AND j.space_id=c.space_id AND j.source_node_id=c.source_node_id AND j.source_revision=c.source_revision AND j.source_hash=c.content_hash AND j.span_start=c.span_start AND j.span_end=c.span_end JOIN node n ON n.id=c.source_node_id WHERE n.payload_json IS NOT NULL AND n.deleted_reason IS NULL AND n.payload_revision=c.source_revision").unwrap();
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap();
+        let mut witnesses = HashMap::<Witness, String>::new();
+        for row in rows {
+            let (watermark, kind) = row.unwrap();
+            let Some(mut witness) = watermark.as_deref().and_then(Witness::from_watermark) else {
+                continue;
+            };
+            if kind == "tool_raw" {
+                if witness.raw.is_none() {
+                    continue;
+                }
+            } else {
+                witness.raw = None;
+            }
+            witnesses.entry(witness).or_insert(kind);
+        }
+        let inputs: Vec<_> = witnesses.into_iter().collect();
+        let ids: Vec<_> = inputs
+            .iter()
+            .map(|(w, _)| w.node_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let started = Instant::now();
+        let old_witness: Vec<_> = inputs
+            .iter()
+            .map(|(w, kind)| witness_valid(&db, w, kind).unwrap())
+            .collect();
+        let old_witness_elapsed = started.elapsed();
+        let started = Instant::now();
+        let old_visible: Vec<_> = ids
+            .iter()
+            .map(|id| history::reachability::searchable(&db, id).unwrap())
+            .collect();
+        let old_visibility_elapsed = started.elapsed();
+
+        let started = Instant::now();
+        let new_witness = witnesses_valid_many(&db, &inputs).unwrap();
+        let new_witness_elapsed = started.elapsed();
+        let started = Instant::now();
+        let new_visible = ids
+            .chunks(8192)
+            .flat_map(|batch| history::reachability::searchable_many(&db, batch).unwrap())
+            .collect::<Vec<_>>();
+        let new_visibility_elapsed = started.elapsed();
+        assert_eq!(new_witness, old_witness);
+        assert_eq!(new_visible, old_visible);
+        eprintln!(
+            "history-search validation snapshot candidates={} witnesses={} old_witness_ms={} old_visibility_ms={} batch_witness_ms={} batch_visibility_ms={}",
+            ids.len(),
+            inputs.len(),
+            old_witness_elapsed.as_millis(),
+            old_visibility_elapsed.as_millis(),
+            new_witness_elapsed.as_millis(),
+            new_visibility_elapsed.as_millis()
+        );
+    }
+}

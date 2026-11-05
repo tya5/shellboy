@@ -56,3 +56,20 @@ The rollback-journal busy fixture above verifies wait/retry guidance. A separate
 non-database-file regression exercises actual `SQLITE_NOTADB`, while
 the missing-table tests exercise both shared ranking and reader space-check
 error paths. These are synthetic local database faults, not user-data tests.
+
+
+## HistorySearch candidate validation batches (Issue #204 Proposal 2)
+
+The initial eligibility SQL remains unchanged. The ranking snapshot may validate
+its distinct source witnesses and candidate visibility in bounded, set-oriented
+read-only queries (maximum 256 witness keys and 8192 visibility keys per batch, cancellation between batches).
+This is a query-shape optimization only: preserve the existing `witness_valid`
+predicate exactly, including terminal raw execution identity and tombstone checks,
+and `history::reachability::searchable` exactly, including replacement-source
+reverse traversal (without adding a replacement-state filter), cycles, live roots,
+deleted ownership and ownerless legacy sources. Keep each visibility closure keyed by its originating candidate. The
+query must not transfer source bodies/vectors to Rust or use persistent staging.
+The later fresh-snapshot validation remains unchanged. Equivalence tests compare
+old and batch results and ranked top-k on synthetic replacement, deletion, fork,
+hidden-source, stale-witness and raw-retention cases. If equality cannot be
+proven, retain the old validation path.

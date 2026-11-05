@@ -48,7 +48,7 @@ pub use store::delete_source_vectors_tx;
 use store::{
     RawWitness, Space, Witness, decode_json, encode_json, group_current, json_meta, load_space,
     maybe_activate_candidate, meta, set_json_meta, set_meta, space_for_group, update_json_meta,
-    valid_table, witness_valid,
+    valid_table, witness_valid, witnesses_valid_many,
 };
 mod batch;
 mod claim;
