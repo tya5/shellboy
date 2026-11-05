@@ -170,26 +170,26 @@ on that same copy was 1,796 ms before and 881 ms after; both captures had zero
 failures and both repair runs had zero repaired, unresolved, and retired groups.
 A partial wait-prefix index cost 40.9 ms to build and saved under 18 ms for
 one wait; the active-attempt partial index cost 380 ms to build for a 30 ms to
-0.16 ms one-row update. Neither index's one-time cost is justified here. The
-step-specific and full-stage readings have different boundaries; these are
+0.16 ms one-row update. That copy measurement was warm and understated the real
+cold startup, so the active-attempt index was later accepted (below); the wait-
+prefix index remains rejected. The step-specific and full-stage readings have different boundaries; these are
 local SQLite 3.51 / arm64 macOS observations, not end-to-end startup guarantees.
 
 ## Active-attempt interruption index (#219 follow-up)
 
 `interrupt_previous_attempts` updates only `preparing` and `inflight` attempts.
 Migration 29 adds the partial `model_attempt_active_recovery` index on `state`
-for exactly those rows. This preserves the UPDATE predicate and transaction;
+for exactly those rows. The UPDATE statement and transaction are unchanged;
 there is no eligibility marker to maintain, and completed/failed/incomplete/
-cancelled attempts remain outside the index. Existing schema-28 databases
-receive the index via migration 29 before startup recovery; fresh databases
-create it from the current schema. The migration is index-only, with no data
-backfill. Recovery still runs its original update, so any eligible row is
-matched; the index cannot hide an eligible attempt.
+cancelled attempts stay outside the index. Existing schema-28 databases get the
+index (index-only, no backfill) before startup recovery; fresh databases create
+it from the current schema. The index cannot hide an eligible row, because the
+index predicate equals the statement predicate.
 
-On the local schema-28 read-only-source `VACUUM INTO` copy (70,056 attempts,
-three eligible), SQLite 3.51 / arm64 macOS measured the original UPDATE at
-292.5 ms on its first trial and 97.1/29.0 ms on subsequent trials; it scanned
-the table. Creating the partial index took 30.2 ms. The same UPDATE then used
-`SEARCH ... USING COVERING INDEX model_attempt_active_recovery` and measured
-0.36/0.30/0.27 ms, updating the same three rows. Trials rolled back. This is
-local statement-level evidence, not a full `InterruptedWork` timing guarantee.
+On a `VACUUM INTO` copy of the owner database (schema 28, 70,494 attempts, zero
+eligible at copy time; SQLite 3.51, arm64 macOS) the UPDATE changed from
+`SCAN model_attempt` to `SEARCH model_attempt USING COVERING INDEX
+model_attempt_active_recovery (state=?)`. Three rolled-back runs: 572.6 / 47.1 /
+50.2 ms before, 1.10 / 1.85 / 2.15 ms after; the index built in 45.5 ms and
+occupies one 4,096-byte page. These are local statement-level readings, not an
+end-to-end startup guarantee.

@@ -504,3 +504,8 @@ a separate release gate. No migration was added since v0.7.2.
 ## v0.8.1 synthetic upgrade check
 
 The candidate checker defaults to public v0.8.0 (schema 27), expected v0.8.1 and target schema 28. Migration `0028_tool_group_recovery_candidates` adds recovery candidate markers. Run the owner-controlled upgrade check separately on an owned disposable fixture; CI alone is not that check.
+
+## Next-release synthetic upgrade check (schema 29)
+
+The checker defaults to public v0.8.2 (schema 28) and target schema 29; the expected version defaults to the Cargo.toml package version. Migration `0029_active_attempt_recovery_index` adds a partial index only. Run it on an owned disposable fixture; CI alone is not that check.
+

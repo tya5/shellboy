@@ -10033,3 +10033,26 @@ end-to-end proof that every screen renders only English; there is no
 whole-screen default-config rendering test; physical terminals were not
 checked. The earlier "Stage C acceptance remains unverified" notes above are
 superseded by this entry.
+
+## #219 active-attempt recovery index (migration 29)
+
+Measured 2026-11-05 on one read-only `VACUUM INTO` copy of the owner DB
+(schema 28, 70,494 `model_attempt` rows, 0 eligible at copy time, 4,096-byte
+pages, SQLite 3.51.0, arm64 macOS; copy deleted afterwards, no owner opened on
+it). The statement `UPDATE model_attempt SET state,ended_at,error_json WHERE
+state IN ('preparing','inflight')` ran inside a rolled-back transaction, one
+process per run.
+
+| | plan | run 1 / 2 / 3 |
+|---|---|---|
+| before | `SCAN model_attempt` | 572.6 / 47.1 / 50.2 ms |
+| after | `SEARCH ... USING COVERING INDEX model_attempt_active_recovery (state=?)` | 1.10 / 1.85 / 2.15 ms |
+
+Index build 45.5 ms; index size 1 page (4,096 bytes). The first "before" run
+was the least warm; a true cold-cache run (the owner's 3,277 ms) could not be
+reproduced without purging the OS cache. Unit tests (migration from 24-28,
+planner use, only the two states updated) and `scripts/check-release-upgrade.py`
+tests (public v0.8.2 schema 28 to 29) pass locally; an exact-binary upgrade
+check and the owner's real startup time are not verified. CI results are
+recorded in the status entry.
+

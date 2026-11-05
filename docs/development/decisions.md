@@ -3468,17 +3468,20 @@ wall-clock numbers do not belong in the suite. Revisit if a real DB shows the
 stage UPDATE matters, if another stage kind is added, or if a record with
 non-NULL invalid `error_json` must also carry facts.
 
-## #219 interrupted-work 4.495 s follow-up
+## #219 active-attempt partial index accepted (migration 29)
 
-The owner's v0.8.1 startup log records 4,495 ms for `interrupted_work`; the
-associated slow DB job identifies `interrupt_previous_attempts` and 3,029 ms
-statement elapsed, 69,547 fullscan steps and one updated row. `state.rs` uses a
-full-table state predicate. A fresh schema-28 read-only snapshot has 70,056
-attempts and three eligible; its same-copy UPDATE dropped from 292.5 ms cold /
-97.1 and 29.0 ms warm to 0.36 / 0.30 / 0.27 ms with a partial index, whose
-build took 30.2 ms. Therefore migration 29 adds an index on `state` restricted
-to `preparing`/`inflight`, preserving recovery semantics without a new marker
-or backfill. It must pass recovery-state behavior tests, planner verification,
-and both standard and all-OS CI. The owner's original per-step 4.495 s remains
-not fully reproduced; this index addresses the specifically logged 3.029 s
-statement, not unexplained remaining stage time.
+On the owner's real machine v0.8.2 startup stage `interrupted_work` took
+4,858 ms with no migration; the #201 diagnostics attribute 3,277 ms to
+`UPDATE model_attempt SET ... WHERE state IN ('preparing','inflight')` (70,493
+full-scan steps, 281,997 VM steps). The earlier rejection rested on a copy
+measurement (343 ms cold / 33 ms warm, index build 380 ms) that did not
+reproduce cold-cache startup on a 4 GB database; the real cold cost is about ten
+times larger and is paid on every start, while the index is built once and holds
+only active rows. So migration 29 adds `model_attempt_active_recovery` on
+`state` restricted to `preparing`/`inflight`, with the statement unchanged.
+Measured on a fresh copy: 572.6/47.1/50.2 ms before, 1.10/1.85/2.15 ms after;
+build 45.5 ms; index 4 KiB. The wait-prefix index stays rejected. Revisit if the
+set of interruptible attempt states changes (the index predicate must follow the
+statement). Not reproduced: the exact 3.3 s cold figure on the copy (the page
+cache was warm for the copy), so the real startup gain is to be confirmed on the
+owner's machine after release.
