@@ -187,8 +187,7 @@ fn provenance_step(
         .query_map(params![job,batch as i64], |r| Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?))).map_err(sql_error)?
         .collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
     if pending.is_empty() {
-        progress.stage = Stage::Sweep;
-        progress.last_rowid = 0;
+        begin_sweep(progress);
     }
     let mut budget = batch;
     for (node, replacement_cursor, ordinal) in pending {
@@ -198,8 +197,7 @@ fn provenance_step(
         if keep == Some(node.as_str()) {
             // An interrupted expansion leaves its protected sources unknown.
             progress.retain_all = true;
-            progress.stage = Stage::Sweep;
-            progress.last_rowid = 0;
+            begin_sweep(progress);
             break;
         }
         *candidate.lock().expect("history candidate") = Some(node.clone());
@@ -239,6 +237,17 @@ fn provenance_step(
         budget = budget.saturating_sub(sources.len().max(1));
     }
     Ok(())
+}
+
+fn begin_sweep(progress: &mut Progress) {
+    // The conservative full-pass scan counts each retained node once, including
+    // any node already counted during root marking.
+    if progress.retain_all {
+        progress.kept_count = 0;
+        progress.kept_ids.clear();
+    }
+    progress.stage = Stage::Sweep;
+    progress.last_rowid = 0;
 }
 
 fn tombstone_node(
