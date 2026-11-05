@@ -1,13 +1,17 @@
 # Connection-Wide Rate Feedback (#224)
 
-## Status: Proposed / Phase 1 Only
+## Status: Stage 1 Adopted; Stages 2 and 3 Proposed
 
-2026-11-05. Measurement and design draft, **not an adopted contract or an
-implementation**. No runtime/config/schema changes accompany this document.
-Current behavior remains [model HTTP](model-http.md), including #76 and #188;
-summary adoption/cache rules remain [compaction](compaction.md). #215 parallel
-map is a future consumer, not enabled by this draft. Owner/reviewer approval and
-implementation acceptance below are required before changing behavior.
+2026-11-05. The owner adopted stage 1 observability: record HTTP status,
+Retry-After and actual applied wait in existing conversation attempt and summary
+records, expose per-connection 429/5xx counts and waits in usage get, and log
+one structured event per HTTP 429. Record metadata only; retain unknown coverage
+for older records and interrupted observations. Do not introduce a new table.
+
+Connection-scoped waiting, summary retry and adaptive parallel map remain
+proposed stages 2 and 3, to be adopted and landed separately. Current #76 and
+#188 rules and summary adoption/cache fences remain unchanged. This decision
+does not claim stage 1 is implemented or validated.
 
 ## Measurement And Limits
 
@@ -280,7 +284,7 @@ rather than add one silently. Awaiters exist only for bounded existing work,
 not durable queued jobs. At W=1, long requests may still delay other callers;
 no latency guarantee or preemption is implied.
 
-## Proposed Observability And Usage Get
+## Stage 1: Adopted Observability And Usage Get
 
 Record bounded typed observations at headers/send completion, separately from
 retry decisions. Attribute actual HTTP call identity, UTC observation day, saved
