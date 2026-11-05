@@ -1422,12 +1422,13 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
         })
     };
     let deadline = crate::test_watchdog::Deadline::new("history GC single-item retention");
-    let (mut deferred, mut complete) = (0, false);
+    let (mut deferred, mut complete, mut kept_marks) = (0, false, 0);
     while !deadline.expired() {
         let step = f.gc.history_step(&job).await.unwrap();
         deferred += usize::from(step.deferred);
         if step.complete {
             complete = true;
+            kept_marks = step.kept_marks;
             break;
         }
     }
@@ -1439,9 +1440,63 @@ async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
         Ok(())
     }).await.unwrap();
     f.db.shutdown().await.unwrap();
+    // The TUI diagnostic copies this step count (#225 review HOLD).
     assert!(
-        complete && deferred > 0,
-        "complete={complete}, deferred={deferred}"
+        complete && deferred > 0 && kept_marks == 1,
+        "complete={complete}, deferred={deferred}, kept_marks={kept_marks}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_skips_and_reports_a_single_over_budget_receipt_cleanup() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    install_budget_demand(&f).await;
+    f.db.call(|db| {
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'fixture-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        for i in 1..=200 {
+            let (id, node) = (format!("rcpt-{i}"), format!("fixture-{i}"));
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,'null','deleted',?2,'cancelled','now','{}')",params![id,node])?;
+        }
+        db.execute_batch("CREATE TEMP TRIGGER costly_receipt BEFORE DELETE ON receipt WHEN OLD.id='rcpt-1' BEGIN SELECT gc_test_foreground_demand(); SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let deadline = crate::test_watchdog::Deadline::new("history GC single-receipt retention");
+    let (mut deferred, mut complete, mut kept_receipts) = (0, false, 0);
+    while !deadline.expired() {
+        let step = f.gc.history_step(&job).await.unwrap();
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            complete = true;
+            kept_receipts = step.kept_receipts;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM receipt WHERE id='rcpt-1'")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM receipt WHERE id LIKE 'rcpt-%'")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_receipts')=1")?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+    assert!(
+        complete && deferred > 0 && kept_receipts == 1,
+        "complete={complete}, deferred={deferred}, kept_receipts={kept_receipts}"
     );
 }
 

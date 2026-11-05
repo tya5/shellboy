@@ -35,6 +35,8 @@ pub struct GcDiagnostics {
     pub deferrals: u64,
     pub restarts: u64,
     pub kept_over_budget: u64,
+    pub kept_receipts: u64,
+    pub kept_marks: u64,
     pub started: std::time::Instant,
     pub last_advance: std::time::Instant,
     pub completed: Option<std::time::Instant>,
@@ -123,6 +125,8 @@ pub struct HistoryStep {
     pub scanned: u64,
     pub nodes_tombstoned: u64,
     pub kept_over_budget: u64,
+    pub kept_receipts: u64,
+    pub kept_marks: u64,
     pub bytes_collected: u64,
     pub restarted: bool,
     pub complete: bool,
@@ -827,6 +831,8 @@ impl GcService {
                             deferrals: 0,
                             restarts: 0,
                             kept_over_budget: 0,
+                            kept_receipts: 0,
+                            kept_marks: 0,
                             started: now,
                             last_advance: now,
                             completed: None,
@@ -884,6 +890,8 @@ impl GcService {
                 scanned: 0,
                 nodes_tombstoned: 0,
                 kept_over_budget: 0,
+                kept_receipts: 0,
+                kept_marks: 0,
                 bytes_collected: 0,
                 restarted: false,
                 complete: false,
@@ -922,6 +930,8 @@ impl GcService {
             deferrals: 0,
             restarts: 0,
             kept_over_budget: 0,
+            kept_receipts: 0,
+            kept_marks: 0,
             started: now,
             last_advance: now,
             completed: None,
@@ -939,6 +949,8 @@ impl GcService {
                 .restarts
                 .saturating_add(u64::from(step.restarted));
             diagnostic.kept_over_budget = step.kept_over_budget;
+            diagnostic.kept_receipts = step.kept_receipts;
+            diagnostic.kept_marks = step.kept_marks;
             if step.complete {
                 diagnostic.completed = Some(now);
             }

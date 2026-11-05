@@ -80,6 +80,8 @@ impl Page {
                     "経過秒",
                     "最終進捗から秒",
                     "予算超過で保持",
+                    "予算超過で保持した受領",
+                    "予算超過で残した印",
                 ],
                 UiLanguage::En => [
                     "GC stage",
@@ -89,6 +91,8 @@ impl Page {
                     "Elapsed seconds",
                     "Seconds since cursor advance",
                     "Retained over budget",
+                    "Receipts retained over budget",
+                    "Marks left over budget",
                 ],
             };
             let values = [
@@ -99,6 +103,8 @@ impl Page {
                 elapsed.to_string(),
                 age.to_string(),
                 gc.kept_over_budget.to_string(),
+                gc.kept_receipts.to_string(),
+                gc.kept_marks.to_string(),
             ];
             let mut details = vec![Row::Section("DB / GC".into())];
             details.extend(
@@ -1266,6 +1272,8 @@ mod tests {
             deferrals: 4,
             restarts: 2,
             kept_over_budget: 3,
+            kept_receipts: 6,
+            kept_marks: 7,
             started: now - Duration::from_secs(10),
             last_advance: now - Duration::from_secs(5),
             completed: None,
@@ -1280,8 +1288,25 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("\n");
-            for expected in ["DB / GC", "sweep", "123", "4", "2", "10", "5", "3"] {
+            for expected in [
+                "DB / GC", "sweep", "123", "4", "2", "10", "5", "3", "6", "7",
+            ] {
                 assert!(rendered.contains(expected), "{expected}: {rendered}");
+            }
+            let (receipts, marks) = match language {
+                UiLanguage::En => ("Receipts retained over budget", "Marks left over budget"),
+                UiLanguage::Ja => ("予算超過で保持した受領", "予算超過で残した印"),
+            };
+            for (label, value) in [(receipts, "6"), (marks, "7")] {
+                // A long label may wrap its value onto the following line.
+                let lines = rendered.lines().collect::<Vec<_>>();
+                let at = lines.iter().position(|line| line.contains(label));
+                assert!(
+                    at.is_some_and(|at| lines[at..lines.len().min(at + 2)]
+                        .iter()
+                        .any(|line| line.trim_end().ends_with(value))),
+                    "{label}: {rendered}"
+                );
             }
             let mut ui = UiState::new(&config, std::env::temp_dir());
             ui.apply(crate::ui::UiUpdate::GcDiagnostics(Some(gc.clone())));

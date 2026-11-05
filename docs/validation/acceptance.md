@@ -51,7 +51,15 @@ full-pass liveness. Production budget behavior is unchanged. Earlier default CI
 passed; final-SHA default and all-OS CI remain pending.
 
 The in-memory GC restart observation and bilingual F1 screen unit tests pass.
-Current-root and pin changes are covered by focused GC tests. These tests do not
+Current-root and pin changes are covered by focused GC tests.
+
+Review follow-up (macOS, `rust-slot`, rebased on v0.8.2 main): a single
+over-budget receipt cleanup and TEMP mark cleanup are now counted on the step
+result and the F1 snapshot, not only in the finished job's `error_json`; a new
+receipt fixture and the mark fixture assert both, and the restored cursor
+decoding unit test covers every stage. Integration tests matching `gc` passed 53
+with 2 ignored; `--lib gc` passed 28 with 2 ignored; fmt and all-target strict
+Clippy passed. Final-SHA default and all-OS CI results are reported on #225. These tests do not
 reproduce or explain the unavailable original Windows workload.
 
 ## Startup timing CLI (#212; SemVer review follow-up in progress)

@@ -66,8 +66,9 @@ visible. This is observability, not a wall-clock completion guarantee.
 
 The existing GC service publishes one content-free in-memory watch snapshot for
 the current or most recent history pass. It contains the stage, cumulative
-scanned work, budget deferrals, restarts, retained-over-budget node count, pass
-start and last committed cursor advance. The frontend coalesces updates; the UI
+scanned work, budget deferrals, restarts, retained-over-budget node count, the
+separate retained receipt and TEMP mark cleanup counts, pass start and last
+committed cursor advance. The frontend coalesces updates; the UI
 never queries the writer to display them. When no higher-priority DB activity is shown, the footer identifies an active
 GC and points to F1; the DB / GC section at the top of the F1 or `/help` guide displays
 the full details in English or Japanese, updating its clock once a second.

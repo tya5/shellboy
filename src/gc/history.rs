@@ -25,6 +25,8 @@ pub(super) fn history_step(
         scanned: 0,
         nodes_tombstoned: 0,
         kept_over_budget: 0,
+        kept_receipts: 0,
+        kept_marks: 0,
         bytes_collected: 0,
         restarted: false,
         complete: state == "done",
@@ -76,6 +78,8 @@ pub(super) fn history_step(
     }
     report.stage = progress.stage.as_str().into();
     report.kept_over_budget = progress.kept_count;
+    report.kept_receipts = progress.kept_receipts;
+    report.kept_marks = progress.kept_marks;
     if !report.complete {
         tx.execute(
             "UPDATE gc_job SET cursor_json=?2 WHERE id=?1",
@@ -423,4 +427,52 @@ fn finish_step(
         report.complete = true;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn durable_stage_bytes_and_current_progress_fields_are_required() {
+        for (stage, literal) in [
+            (Stage::Reset, "reset"),
+            (Stage::Receipts, "receipts"),
+            (Stage::Roots, "roots"),
+            (Stage::Provenance, "provenance"),
+            (Stage::Sweep, "sweep"),
+            (Stage::Cleanup, "cleanup"),
+            (Stage::Finish, "finish"),
+        ] {
+            assert_eq!(
+                serde_json::to_string(&stage).unwrap(),
+                format!("\"{literal}\"")
+            );
+            let decoded: Stage = serde_json::from_str(&format!("\"{literal}\"")).unwrap();
+            assert_eq!(decoded.as_str(), literal);
+        }
+        // A cursor written before #225 still decodes; new counters default.
+        let current =
+            r#"{"stage":"sweep","last_rowid":123,"horizon":456,"revalidate_roots":false}"#;
+        let progress: Progress = serde_json::from_str(current).unwrap();
+        assert_eq!(progress.horizon, 456);
+        assert!(!progress.revalidate_roots && !progress.retain_all);
+        assert_eq!(progress.last_rowid, 123);
+        assert_eq!(progress.receipt_horizon, 0);
+        assert_eq!(progress.job_horizon, 0);
+        assert_eq!(
+            (
+                progress.kept_count,
+                progress.kept_receipts,
+                progress.kept_marks
+            ),
+            (0, 0, 0)
+        );
+        assert!(progress.kept_ids.is_empty());
+        assert!(serde_json::from_str::<Progress>(r#"{"stage":"sweep","last_rowid":123}"#).is_err());
+        assert!(
+            serde_json::from_str::<Progress>(r#"{"stage":"future","last_rowid":123}"#).is_err()
+        );
+        // history_step keeps its existing .ok() -> reset path for these; no
+        // partially trusted destructive cursor is introduced.
+    }
 }

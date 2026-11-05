@@ -15,7 +15,7 @@ Storage-failure/remeasurement recovery is a separate
 unverified risk, not claimed fixed by this follow-up.
 ## History GC budget resumption (#225; in progress)
 
-Adaptive history stages retain oversized indivisible nodes, and an in-memory GC snapshot is visible in the F1 guide. Index deletion remains atomic with tombstoning because retry-fee observations do not filter tombstoned jobs. Focused macOS tests and synthetic sustained writes pass; default and all-OS CI remain pending.
+Adaptive history stages retain oversized indivisible nodes, and an in-memory GC snapshot is visible in the F1 guide. Index deletion remains atomic with tombstoning because retry-fee observations do not filter tombstoned jobs. Retained receipt and TEMP mark cleanups are counted in the F1 snapshot (review HOLD follow-up). Focused macOS tests and synthetic sustained writes pass; final-SHA default and all-OS CI results are reported on #225. Resume point: fast-forward main after CI, or address CI failures.
 
 ## Startup timing CLI (#212)
 
