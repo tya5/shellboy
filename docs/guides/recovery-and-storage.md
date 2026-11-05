@@ -94,6 +94,8 @@ If headers for HTTP 429/500/502/503/504 have arrived and reading their error bod
 
 Per-connection `response_max_retries = 0` disables automatic retries. `response_retry_partial = false` sends only partial-output failures to recovery wait; communication failures containing metadata/heartbeats without output remain retryable. `response_retry_max_delay_ms` caps exponential delay (default 60000); a server `Retry-After` has a separate ten-minute automatic-wait ceiling. See [configuration](configuration.md). Retries may duplicate charges when upstream processing already occurred. Failed attempts save the count, delay, and this possibility. Recovery wait after automatic retries does not resume merely with time. Retry-After over 600 seconds is preserved/displayed and enters recovery wait rather than being shortened to 600 seconds and resent.
 
+A 429 whose body reports `usage_limit_reached` with a reset time (including when LiteLLM wraps it in a `litellm.RateLimitError` message) is not retried before that reset when it is later than the automatic retry schedule; the reset time is shown in the recovery reason.
+
 An HTTP 429 also establishes an in-memory wait shared by work using the same
 configured connection profile, including conversations, summaries, embeddings,
 and model lists. Existing requests are not cancelled; waiting does not create a
