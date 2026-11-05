@@ -177,11 +177,23 @@ impl Waiter {
                     && state.until.is_none_or(|until| until <= now)
                 {
                     state.queued.pop_front();
-                    state.probe = true;
                     self.id = None;
+                    let generation = state.generation;
+                    if state.until.is_none() {
+                        // The probe succeeded: drain queued admissions in order
+                        // without serializing their subsequent HTTP requests.
+                        drop(state);
+                        self.gate.changed.notify_waiters();
+                        return Ok(Lease {
+                            _permit: None,
+                            generation,
+                            gate: self.gate.clone(),
+                        });
+                    }
+                    state.probe = true;
                     return Ok(Lease {
                         _permit: Some(()),
-                        generation: state.generation,
+                        generation,
                         gate: self.gate.clone(),
                     });
                 }
@@ -457,9 +469,19 @@ mod tests {
         );
         drop(probe);
         let earlier = second.await.unwrap();
-        assert!(!later.is_finished());
-        drop(earlier);
-        assert!(later.await.is_ok());
+        assert!(
+            earlier._permit.is_none(),
+            "successful probe clears throttling"
+        );
+        let later = crate::test_watchdog::watchdog("released FIFO waiter", later)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            later._permit.is_none(),
+            "released waiters do not serialize HTTP requests"
+        );
+        drop((earlier, later));
     }
     #[tokio::test(start_paused = true)]
     async fn fifo_and_header_floor_are_respected() {
