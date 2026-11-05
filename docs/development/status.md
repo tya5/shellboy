@@ -50,9 +50,8 @@ holds. Resume point: CI on the final SHA, then owner review. TUI view is later.
 
 Migration 30 adds nullable `thread.auto_compact_at`; `thread set --auto-compact-at N|0|''`
 overrides the connection / `[compaction]` threshold per Thread (design:
-[compaction](../design/compaction.md)). The upgrade checker keeps public v0.8.2 as schema 28 and
-accepts target 30 (0.8.3 is expected to be schema 29). Resume point: rebase after the 0.8.3
-release, CI on the final SHA, then owner review.
+[compaction](../design/compaction.md)). The upgrade checker now defaults to public v0.8.3 (schema 29)
+and target 30. Resume point: CI on the final SHA, then owner review.
 
 ## Active-attempt recovery index (#219; implemented, CI pending)
 

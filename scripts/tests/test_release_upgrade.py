@@ -289,11 +289,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'default threshold'):
             checks.check_migration(db, before, 29, 30)
 
-    def test_arguments_default_to_public_v082_schema28_and_target30(self):
+    def test_arguments_default_to_public_v083_schema29_and_target30(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.8.2', 28, checks.CARGO_VERSION, 30))
+                         ('0.8.3', 29, checks.CARGO_VERSION, 30))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
