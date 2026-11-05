@@ -40,7 +40,7 @@ async fn latest_group_spill_is_progress_even_when_the_summary_has_no_prefix() {
     let before = db.call(|db| {
         Ok(db.query_row("SELECT SUM(length(CAST(n.payload_json AS BLOB))) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id='t'",[],|r|r.get::<_,i64>(0))?)
     }).await.unwrap();
-    let result = spill_and_summarize(&compactor, "t", CancellationToken::new())
+    let result = spill_and_summarize(&compactor, "t", CancellationToken::new(), None)
         .await
         .unwrap();
     let after = db.call(|db| {
@@ -67,7 +67,7 @@ async fn latest_group_spill_is_progress_even_when_the_summary_has_no_prefix() {
         Ok(())
     }).await.unwrap();
     assert!(
-        spill_and_summarize(&compactor, "t", CancellationToken::new())
+        spill_and_summarize(&compactor, "t", CancellationToken::new(), None)
             .await
             .unwrap()
             .no_target,
@@ -80,7 +80,7 @@ async fn latest_group_spill_is_progress_even_when_the_summary_has_no_prefix() {
 async fn an_empty_path_does_not_invent_second_stage_progress() {
     let (_root, db, compactor) = fixture().await;
     assert!(
-        spill_and_summarize(&compactor, "t", CancellationToken::new())
+        spill_and_summarize(&compactor, "t", CancellationToken::new(), None)
             .await
             .unwrap()
             .no_target

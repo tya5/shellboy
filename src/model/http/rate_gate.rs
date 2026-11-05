@@ -16,6 +16,7 @@ struct Feedback {
     beyond_clock: bool,
     generation: u64,
     consecutive: u32,
+    counted_generation: Option<u64>,
     next_ticket: u64,
     queued: VecDeque<u64>,
     probe: bool,
@@ -119,7 +120,10 @@ impl RateGate {
     }
     pub(super) fn throttle(&self, header: Option<Duration>, request_generation: u64) {
         let mut state = self.feedback.lock().expect("rate gate poisoned");
-        let exponent = if state.generation == request_generation {
+        let new_wave = state
+            .counted_generation
+            .is_none_or(|last| request_generation > last);
+        let exponent = if new_wave {
             state.consecutive
         } else {
             state.consecutive.saturating_sub(1)
@@ -135,8 +139,9 @@ impl RateGate {
             // An unrepresentable provider delay must not become an early retry.
             state.beyond_clock = true;
         }
-        if state.generation == request_generation {
+        if new_wave {
             state.consecutive = state.consecutive.saturating_add(1);
+            state.counted_generation = Some(request_generation);
         }
         state.generation = state.generation.wrapping_add(1);
         drop(state);
@@ -197,6 +202,7 @@ impl Lease {
         let mut state = self.gate.feedback.lock().expect("rate gate poisoned");
         if state.generation == self.generation {
             state.consecutive = 0;
+            state.counted_generation = None;
             state.until = None;
         }
     }
@@ -205,6 +211,16 @@ impl Lease {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test(start_paused = true)]
+    async fn completed_non_429_probe_clears_cooldown_without_serializing_new_requests() {
+        let gate = RateGate::new(60_000);
+        gate.throttle(None, gate.generation());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let lease = gate.acquire(&CancellationToken::new()).await.unwrap();
+        lease.complete(500);
+        drop(lease);
+        assert!(matches!(gate.reserve(), Ok(Reservation::Ready(_))));
+    }
     #[tokio::test(start_paused = true)]
     async fn dropped_probe_keeps_cooldown_and_unblocks_next_waiter() {
         let gate = RateGate::new(60_000);
@@ -269,6 +285,30 @@ mod tests {
         assert!(first._permit.is_none());
         assert!(second._permit.is_none());
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_429_feedback_preserves_latest_deadline_and_one_backoff_wave() {
+        let gate = RateGate::new(60_000);
+        let generation = gate.generation();
+        let started = Instant::now();
+        let barrier = Arc::new(tokio::sync::Barrier::new(9));
+        let mut tasks = Vec::new();
+        for seconds in 10..18 {
+            let gate = gate.clone();
+            let barrier = barrier.clone();
+            tasks.push(tokio::spawn(async move {
+                barrier.wait().await;
+                gate.throttle(Some(Duration::from_secs(seconds)), generation);
+            }));
+        }
+        barrier.wait().await;
+        for task in tasks {
+            task.await.unwrap();
+        }
+        let state = gate.feedback.lock().unwrap();
+        assert_eq!(state.consecutive, 1);
+        assert_eq!(state.generation, 8);
+        assert!(state.until.unwrap() >= started + Duration::from_secs(17));
+    }
     #[tokio::test(start_paused = true)]
     async fn concurrent_429s_do_not_multiply_backoff_in_one_generation() {
         let gate = RateGate::new(60_000);
@@ -280,6 +320,21 @@ mod tests {
         assert_eq!(
             state.until.unwrap(),
             Instant::now() + Duration::from_secs(1)
+        );
+    }
+    #[tokio::test(start_paused = true)]
+    async fn stale_feedback_does_not_hide_a_newer_throttle_wave() {
+        let gate = RateGate::new(60_000);
+        let old = gate.generation();
+        gate.throttle(None, old);
+        let newer = gate.generation();
+        gate.throttle(None, old);
+        gate.throttle(None, newer);
+        let state = gate.feedback.lock().unwrap();
+        assert_eq!(state.consecutive, 2);
+        assert_eq!(
+            state.until.unwrap(),
+            Instant::now() + Duration::from_secs(2)
         );
     }
     #[tokio::test(start_paused = true)]

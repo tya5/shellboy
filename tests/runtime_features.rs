@@ -134,7 +134,12 @@ async fn proxy_with_sse(
                 } else {
                     ("application/json", body.to_string())
                 };
-                let _=stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
+                let retry_after = if status == 429 {
+                    "Retry-After: 30\r\n"
+                } else {
+                    ""
+                };
+                let _=stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{retry_after}Connection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
             });
         }
     });
@@ -4941,4 +4946,67 @@ async fn proactive_target_widens_in_one_attempt_and_keeps_usage() {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
+    crate::test_watchdog::watchdog("proactive shared cooldown cancellation", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        send(&control, &target, &"protected current ".repeat(70_000)).await;
+        let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
+        for index in 0..2 {
+            incoming(&control, &mut receive).await.reply.send((200, json!({
+                "id":format!("large-{index}"),"status":"completed","usage":{"input_tokens":100,"output_tokens":1},
+                "output":[{"type":"function_call","call_id":format!("large-{index}"),"name":"shell","arguments":json!({"command":large_command}).to_string()}]
+            }))).unwrap();
+        }
+        let before = incoming(&control, &mut receive).await;
+        let other = thread(&control).await;
+        send(&control, &other, "trigger shared rate limit").await;
+        incoming(&control, &mut receive).await.reply.send((429, json!({"error":{"message":"synthetic"}}))).unwrap();
+        settled(&control, &other).await;
+        before.reply.send((200, json!({"id":"threshold","status":"completed","usage":{"input_tokens":200,"output_tokens":1},"output":[{"type":"function_call","call_id":"threshold","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
+        let adopted = loop {
+            let id = target.clone();
+            let state = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
+            if state.0.len() == 2 { break state; }
+            tokio::task::yield_now().await;
+        };
+        assert_eq!(adopted.2.len(), 4, "both complete call/result groups retain provenance");
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(250), receive.recv()).await.is_err(), "summary must wait without sending");
+        let run = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await["run_id"].as_str().unwrap().to_owned();
+        request(&control, Command::RunStop(RunTarget { run_id: run })).await;
+        settled(&control, &target).await;
+        let id = target.clone();
+        let after = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
+        assert_eq!(after, adopted, "cancelled admission preserves selected spills, epoch, and ordered provenance");
+        let id = target.clone();
+        let record: String = control.store.database.call(move |db| Ok(db.query_row(
+            "SELECT a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.cancelled')=1 ORDER BY a.rowid DESC LIMIT 1", [id], |r| r.get(0))?)).await.unwrap();
+        let record: Value = serde_json::from_str(&record).unwrap();
+        assert_eq!(record["automatic_trim_attempt"]["outcome"], "adopted");
+        assert_eq!(record["automatic_trim_attempt"]["summary"]["spilled_groups"], 2);
+        assert!(receive.try_recv().is_err());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    }).await.unwrap();
+}
+
+fn proactive_wait_witness(
+    db: &rusqlite::Connection,
+    thread: &str,
+) -> Result<(Vec<String>, i64, Vec<String>), shellboy::storage::StorageError> {
+    let ids = db.prepare("SELECT n.id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill' ORDER BY p.ordinal")?.query_map([thread], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let epoch = db.query_row(
+        "SELECT reasoning_epoch FROM thread WHERE id=?1",
+        [thread],
+        |r| r.get(0),
+    )?;
+    let sources = db.prepare("SELECT s.source_node_id FROM thread_path p JOIN replacement r ON r.output_node_id=p.node_id JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE p.thread_id=?1 AND r.format_version='spill-v1' AND n.payload_json IS NOT NULL ORDER BY p.ordinal,s.ordinal")?.query_map([thread], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok((ids, epoch, sources))
 }

@@ -47,6 +47,7 @@ pub(super) async fn maybe_compact(
     snapshot: &mut Snapshot,
     slot: &DriverSlot,
     budget: &mut ProactiveBudget,
+    boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<bool, ApiError> {
     let config = &control.store.config;
     let threshold = config
@@ -420,7 +421,7 @@ pub(super) async fn maybe_compact(
             "summary": spill,
             "summary_deferred": true,
         }),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed).await
+        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed, boundary).await
         {
             Ok(mut summary) => {
                 if summary_scope == "prefix" && (middle_new || active_spill_new) && !slot.stop.is_cancelled()
@@ -428,7 +429,7 @@ pub(super) async fn maybe_compact(
                 {
                     let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
                     if before.saturating_sub(after) < plan.remove_characters {
-                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed).await {
+                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed, boundary).await {
                             Ok(active) if !active.no_target => {
                                 summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
                                 summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
@@ -780,11 +781,12 @@ async fn active_after_spill(
     allow_summary: bool,
     stages: &mut Value,
     committed: &mut Vec<crate::compaction::CompactResult>,
+    boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let Some(need) = remaining else {
         return control
             .compactor
-            .summarize_active_turn(thread, slot.stop.clone())
+            .summarize_active_guarded(thread, slot.stop.clone(), Some(&mut *boundary))
             .await;
     };
     let before = control
@@ -837,7 +839,7 @@ async fn active_after_spill(
     stages["active_summary"] = json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
     let (mut summary, projected_shortfall) = match control
         .compactor
-        .summarize_target_active(thread, remaining, slot.stop.clone())
+        .summarize_target_active_guarded(thread, remaining, slot.stop.clone(), Some(&mut *boundary))
         .await
     {
         Ok(summary) => summary,
@@ -897,6 +899,7 @@ async fn summarize_once(
     shortfall: &mut Option<u64>,
     stages: &mut Value,
     committed: &mut Vec<crate::compaction::CompactResult>,
+    boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let compactor = &control.compactor;
     if !order.prefer_active && order.ordinary_new {
@@ -909,7 +912,12 @@ async fn summarize_once(
             json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
         let prefix = if let Some(target) = remaining {
             compactor
-                .summarize_target_prefix(thread, target, slot.stop.clone())
+                .summarize_target_prefix_guarded(
+                    thread,
+                    target,
+                    slot.stop.clone(),
+                    Some(&mut *boundary),
+                )
                 .await
                 .map(|(result, missing)| {
                     *shortfall = Some(missing);
@@ -917,7 +925,7 @@ async fn summarize_once(
                 })
         } else {
             compactor
-                .summarize_unsummarized_prefix(thread, slot.stop.clone())
+                .summarize_prefix_guarded(thread, slot.stop.clone(), Some(&mut *boundary))
                 .await
         };
         if let Ok(summary) = &prefix {
@@ -964,6 +972,7 @@ async fn summarize_once(
             order.middle_new,
             stages,
             committed,
+            boundary,
         )
         .await;
         if !matches!(&active, Ok(result) if result.no_target) {
@@ -979,7 +988,12 @@ async fn summarize_once(
         *scope = "prefix";
         return if let Some(target) = remaining {
             compactor
-                .summarize_target_prefix(thread, target, slot.stop.clone())
+                .summarize_target_prefix_guarded(
+                    thread,
+                    target,
+                    slot.stop.clone(),
+                    Some(&mut *boundary),
+                )
                 .await
                 .map(|(result, missing)| {
                     *shortfall = Some(missing);
@@ -987,7 +1001,7 @@ async fn summarize_once(
                 })
         } else {
             compactor
-                .summarize_unsummarized_prefix(thread, slot.stop.clone())
+                .summarize_prefix_guarded(thread, slot.stop.clone(), Some(&mut *boundary))
                 .await
         };
     }

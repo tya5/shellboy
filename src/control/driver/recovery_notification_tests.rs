@@ -452,6 +452,7 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         failure,
         &mut retry::RetryBudget::default(),
         &mut OverflowBudget::default(),
+        &mutex,
         mutex.lock().await,
     )
     .await

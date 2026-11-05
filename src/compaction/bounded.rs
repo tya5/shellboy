@@ -21,20 +21,28 @@ impl SummaryBudget<'_> {
             "model_requests":self.requests,"map_requests":self.map_requests,"reduce_requests":self.reduce_requests,
             "map_limit":self.map_limit,"reduce_limit":self.reduce_limit}))
     }
-    pub fn request_map(&mut self) -> Result<(), ApiError> {
+    pub fn ensure_map(&self) -> Result<(), ApiError> {
         if self.map_requests >= self.map_limit {
             return Err(self.error("Summary map request budget exhausted during context splitting; original path retained"));
         }
+        Ok(())
+    }
+    pub fn request_map(&mut self) -> Result<(), ApiError> {
+        self.ensure_map()?;
         self.map_requests += 1;
         self.requests += 1;
         Ok(())
     }
-    pub fn request_reduce(&mut self) -> Result<(), ApiError> {
+    pub fn ensure_reduce(&self) -> Result<(), ApiError> {
         if self.reduce_requests >= self.reduce_limit {
             return Err(
                 self.error("Summary reduce request budget exhausted; original path retained")
             );
         }
+        Ok(())
+    }
+    pub fn request_reduce(&mut self) -> Result<(), ApiError> {
+        self.ensure_reduce()?;
         self.reduce_requests += 1;
         self.requests += 1;
         Ok(())
@@ -55,6 +63,7 @@ impl Compactor {
         parts: &[CachedPart],
         budget: &mut SummaryBudget<'_>,
         cancel: &CancellationToken,
+        mut boundary: Option<&mut super::boundary::Boundary<'_>>,
     ) -> Result<String, ApiError> {
         if parts.len() == 1 && parts[0].text.chars().count() as u64 <= budget.limit {
             budget.summary_characters = parts[0].text.chars().count() as u64;
@@ -110,8 +119,6 @@ impl Compactor {
                     reduced.push(part.text);
                     continue;
                 }
-                budget.request_reduce()?;
-                budget.usage.begin(&self.database, true).await?;
                 let client = self
                     .clients
                     .get(&snapshot.profile)
@@ -125,9 +132,20 @@ impl Compactor {
                     snapshot.effort.as_deref(),
                     false,
                 );
-                let response = client
-                    .response_for_thread(&snapshot.thread, request, cancel.clone(), None)
-                    .await;
+                budget.ensure_reduce()?;
+                let admission = self
+                    .summary_admission(&client, snapshot, cancel, boundary.as_deref_mut())
+                    .await?;
+                budget.request_reduce()?;
+                budget.usage.begin(&self.database, true).await?;
+                let response = Self::summary_response(
+                    &client,
+                    &snapshot.thread,
+                    request,
+                    cancel.clone(),
+                    admission,
+                )
+                .await;
                 let facts = match &response {
                     Ok(response) => response.response_facts,
                     Err(failure) => failure.facts,

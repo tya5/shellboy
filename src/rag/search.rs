@@ -88,7 +88,9 @@ pub(super) async fn embed(
         .map_err(|error| {
             let failure = error.embedding_failure();
             err(
-                if failure.credentials_or_credit || failure.rate_limited {
+                if error.kind == "rate_limit_deferred" {
+                    "rate_limit_deferred"
+                } else if failure.credentials_or_credit || failure.rate_limited {
                     "embedding_paused"
                 } else {
                     "embedding_failed"

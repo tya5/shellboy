@@ -154,14 +154,33 @@ pub(super) async fn drive(
         // flight. A reported input over the threshold compacts here, one step
         // after the large request; the new snapshot is then read again.
         let mut snapshot = snapshot;
-        if proactive::maybe_compact(
+        let mut compact_boundary =
+            crate::compaction::boundary::Boundary::new(&boundary, boundary_guard);
+        let compacted = proactive::maybe_compact(
             &control,
             &mut snapshot,
             &request_slot,
             &mut proactive_budget,
+            &mut compact_boundary,
         )
-        .await?
+        .await;
+        if let Err(error) = &compacted
+            && error.is_storage_failure()
         {
+            return Err(error.clone());
+        }
+        let Some(boundary_guard) = compact_boundary.into_guard() else {
+            if slot.stop.is_cancelled() {
+                return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+            }
+            if turn_binding.cancel.is_cancelled() {
+                continue;
+            }
+            return Err(invalid(
+                "Compaction released its Thread boundary unexpectedly",
+            ));
+        };
+        if compacted? {
             continue;
         }
         let refreshed = instructions
@@ -177,10 +196,10 @@ pub(super) async fn drive(
             Ok(client) => client,
             Err(error) => return fail_turn(&control, &snapshot, error).await,
         };
-        let (mut snapshot, boundary_guard, rate_lease) = match rate_client
+        let (mut snapshot, boundary_guard, rate_lease, admission_wait_ms) = match rate_client
             .reserve_rate_admission(retry_budget.usage_limit_retry_bypass())
         {
-            Ok(model::http::RateReservation::Ready(lease)) => (snapshot, boundary_guard, lease),
+            Ok(model::http::RateReservation::Ready(lease)) => (snapshot, boundary_guard, lease, 0),
             pending => {
                 // Waiting must not hold the Thread boundary or a pinned replay snapshot.
                 let witness = (
@@ -191,6 +210,7 @@ pub(super) async fn drive(
                 );
                 snapshot.input.take();
                 drop(boundary_guard);
+                let wait_started = tokio::time::Instant::now();
                 let rate_result = match pending {
                     Ok(model::http::RateReservation::Waiting(waiter)) => waiter
                         .wait(&turn_binding.cancel)
@@ -199,6 +219,8 @@ pub(super) async fn drive(
                     Err(error) => Err(error),
                     Ok(model::http::RateReservation::Ready(_)) => unreachable!(),
                 };
+                let admission_wait_ms =
+                    wait_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                 if slot.stop.is_cancelled() {
                     return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
                 }
@@ -234,7 +256,7 @@ pub(super) async fn drive(
                         .await;
                     }
                 };
-                (refreshed, boundary_guard, lease)
+                (refreshed, boundary_guard, lease, admission_wait_ms)
             }
         };
         let admitted =
@@ -255,7 +277,7 @@ pub(super) async fn drive(
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }
-        let outcome = match &rate_lease {
+        let mut outcome = match &rate_lease {
             model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             model::http::RateAdmission::Lease(_) => {
                 stream_response(
@@ -270,6 +292,10 @@ pub(super) async fn drive(
                 .await
             }
         };
+        match &mut outcome {
+            Ok(response) => response.response_facts.admission_wait_ms = Some(admission_wait_ms),
+            Err(failure) => failure.facts.admission_wait_ms = Some(admission_wait_ms),
+        }
         if let model::http::RateAdmission::Lease(lease) = &rate_lease {
             let facts = match &outcome {
                 Ok(response) => Some(response.response_facts),
@@ -296,7 +322,7 @@ pub(super) async fn drive(
         if facts.status.is_some() {
             let mut observation = facts.rate_metadata();
             if outcome.is_ok() {
-                observation["applied_wait_ms"] = json!(0);
+                observation["applied_wait_ms"] = json!(admission_wait_ms);
             }
             let saved_attempt = attempt.clone();
             let observation = observation.to_string();
@@ -389,6 +415,7 @@ pub(super) async fn drive(
                     failure,
                     &mut retry_budget,
                     &mut overflow,
+                    &boundary,
                     boundary_guard,
                 )
                 .await?;
@@ -1161,11 +1188,14 @@ async fn spill_and_summarize(
     compactor: &crate::compaction::Compactor,
     thread: &str,
     cancel: CancellationToken,
+    boundary: Option<&mut crate::compaction::boundary::Boundary<'_>>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let spill = compactor
         .spill_cancellable(thread, true, cancel.clone())
         .await?;
-    let summary = compactor.summarize(thread, true, cancel).await?;
+    let summary = compactor
+        .summarize_guarded(thread, true, cancel, boundary)
+        .await?;
     Ok(if summary.no_target && !spill.no_target {
         spill
     } else {

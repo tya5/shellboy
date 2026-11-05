@@ -127,7 +127,8 @@ async fn thinking_binding_retry(
             "reason":"thinking_binding"},
         "thinking_binding_retry":{"reasoning_dropped":true}});
     body["rate_observation"] = failure.facts.rate_metadata();
-    body["rate_observation"]["applied_wait_ms"] = json!(0);
+    body["rate_observation"]["applied_wait_ms"] =
+        json!(failure.facts.admission_wait_ms.unwrap_or(0));
     let (saved_attempt, thread) = (attempt.to_owned(), snapshot.thread.clone());
     let applied = control
         .store
@@ -168,16 +169,17 @@ async fn open_loop_reduce(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     slot: &DriverSlot,
+    boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<Value, ApiError> {
     let compactor = &control.compactor;
     let mut scope = "active_turn";
     let mut result = compactor
-        .summarize_active_turn(&snapshot.thread, slot.stop.clone())
+        .summarize_active_guarded(&snapshot.thread, slot.stop.clone(), Some(&mut *boundary))
         .await;
     if matches!(&result, Ok(r) if r.no_target) {
         scope = "prefix";
         result = compactor
-            .summarize_unsummarized_prefix(&snapshot.thread, slot.stop.clone())
+            .summarize_prefix_guarded(&snapshot.thread, slot.stop.clone(), Some(&mut *boundary))
             .await;
     }
     Ok(match result {
@@ -241,7 +243,7 @@ impl RetryBudget {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) async fn retry_or_recover(
+pub(super) async fn retry_or_recover<'a>(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     slot: &DriverSlot,
@@ -249,8 +251,10 @@ pub(super) async fn retry_or_recover(
     mut failure: model::http::AttemptFailure,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
-    boundary_guard: tokio::sync::MutexGuard<'_, ()>,
+    boundary: &'a tokio::sync::Mutex<()>,
+    boundary_guard: tokio::sync::MutexGuard<'a, ()>,
 ) -> Result<(), ApiError> {
+    let mut boundary_guard = crate::compaction::boundary::Boundary::new(boundary, boundary_guard);
     let connection = &control.store.config.connections[&snapshot.profile];
     let limit = connection.response_max_retries;
     if failure.error.is_thinking_binding() && !budget.thinking_binding_retried {
@@ -308,7 +312,11 @@ pub(super) async fn retry_or_recover(
             // spills wait; overflow falls back to the active-Turn summary.
             let mut observation = json!({"outcome":"stages_exhausted"});
             if overflow.begin().is_some() {
-                observation = open_loop_reduce(control, snapshot, slot).await?;
+                observation =
+                    open_loop_reduce(control, snapshot, slot, &mut boundary_guard).await?;
+                if !boundary_guard.is_held() {
+                    return Ok(());
+                }
                 control.changed(&snapshot.thread);
             }
             if observation["outcome"] != "adopted" {
@@ -335,6 +343,7 @@ pub(super) async fn retry_or_recover(
                     &control.compactor,
                     &snapshot.thread,
                     slot.stop.clone(),
+                    Some(&mut boundary_guard),
                 )
                 .await
                 {
@@ -344,6 +353,9 @@ pub(super) async fn retry_or_recover(
                     Err(error) if error.is_storage_failure() => return Err(error),
                     Err(error) => json!({"outcome":"rejected","error":error}),
                 };
+                if !boundary_guard.is_held() {
+                    return Ok(());
+                }
                 if stage == Some(overflow::Reduction::OldGroups) {
                     observation["maximum_outcome"] = maximum_outcome;
                 }
@@ -420,13 +432,19 @@ pub(super) async fn retry_or_recover(
         // Admission is released while waiting; ordinary boundaries are checked
         // again before the next POST. Stop/shutdown wins over even a zero delay.
         drop(boundary_guard);
+        let admission_wait_ms = failure
+            .facts
+            .admission_wait_ms
+            .unwrap_or(0)
+            .min(i64::MAX as u64) as i64;
         let wait_started = tokio::time::Instant::now();
         tokio::select! {
             biased;
             _ = slot.stop.cancelled() => {},
             _ = tokio::time::sleep(delay) => {},
         }
-        let applied_ms = wait_started.elapsed().as_millis().min(i64::MAX as u128) as i64;
+        let applied_ms = (wait_started.elapsed().as_millis().min(i64::MAX as u128) as i64)
+            .saturating_add(admission_wait_ms);
         let saved_attempt = attempt.clone();
         control.store.database.call(move |db| {
             db.execute("UPDATE model_attempt SET error_json=json_set(error_json, '$.rate_observation.applied_wait_ms', ?2), input_manifest_json=json_set(input_manifest_json, '$.rate_observation.applied_wait_ms', ?2) WHERE id=?1 AND json_valid(error_json)", params![saved_attempt, applied_ms])?;
@@ -592,6 +610,7 @@ mod tests {
                                 received,
                                 terminal_received,
                                 http_error_complete: false,
+                                admission_wait_ms: None,
                                 retry_after: None,
                                 retry_after_present: false,
                                 http_observation: None,

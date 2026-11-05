@@ -171,6 +171,10 @@ in the DB; legacy or interrupted facts are unknown, not zero. The owner-log 429
 event is best effort: the bounded non-blocking logger may drop it under
 contention or backpressure, with the number dropped shown in the `dropped` field
 of the next event successfully written. Log absence is not evidence of no 429.
+A 429 can also delay later work on the same configured connection profile. The
+wait is in memory and is cleared at owner restart; it is not an automatic retry.
+Separate profiles remain independent even when they use the same upstream quota.
+See [Recovery](recovery-and-storage.md#automatic-retries-for-temporary-model-communication-failures).
 
 To inspect your own saved usage, run `shellboy usage get`; add
 `--thread THREAD_ID --include-children` for a bounded conversation-family total.

@@ -1,4 +1,5 @@
 //! Automatic Responses retries through a real owner, using only synthetic loopback traffic.
+use rusqlite::OptionalExtension;
 use serde_json::{Value, json};
 use shellboy::{
     app::DataOwner,
@@ -1897,9 +1898,9 @@ async fn short_explicit_usage_limit_keeps_the_normal_retry_schedule() {
 }
 
 #[tokio::test]
-async fn unknown_429_keeps_retry_policy_without_inferred_cooldown() {
+async fn unknown_429_keeps_retry_policy_without_inferred_usage_limit() {
     let mut f = Fixture::new(8, 60_000, 120_000).await;
-    // Explicit zero backoff exercises the ordinary retry path without real sleep.
+    // Zero Retry-After keeps ordinary retry eligibility; the shared gate adds its safety floor.
     f.incoming()
         .await
         .reply
@@ -2230,4 +2231,431 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
     assert_eq!(sent.body["model"], "changed-model");
     sent.reply.send(Reply::success()).ok().unwrap();
     fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() {
+    let mut fixture = Fixture::with_history(
+        0,
+        10,
+        5_000,
+        true,
+        None,
+        true,
+        Some(1_000),
+        "synthetic summary wait",
+    )
+    .await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 30\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let edit = ContextEditArgs {
+        thread_id: Some(fixture.accepted.thread_id.clone()),
+        action: ContextEditAction::Summary,
+        from_node_id: Some("old-large-context".into()),
+        to_node_id: Some("old-answer".into()),
+        max_chars: None,
+        max_percent: None,
+    };
+    let accepted = request(&fixture.control, Command::ContextEdit(edit)).await;
+    assert!(accepted["operation_id"].is_string());
+    let target = fixture.accepted.thread_id.clone();
+    crate::test_watchdog::watchdog("manual summary starts", async {
+        loop {
+            let key = format!("compact.inflight.{target}");
+            let active = fixture
+                .control
+                .store
+                .database
+                .call(move |db| {
+                    Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
+                        [key],
+                        |row| row.get::<_, bool>(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            if active {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err(),
+        "summary must not send during shared cooldown"
+    );
+    let thread = fixture.accepted.thread_id.clone();
+    let counted: i64 = fixture
+        .control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+        "SELECT COALESCE(SUM(json_extract(value,'$.requests')),0) FROM app_meta WHERE key LIKE ?1",
+        [format!("summary.usage.{thread}.%")], |r| r.get(0))?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        counted, 0,
+        "waiting must not consume a summary request slot"
+    );
+    let changed = request(
+        &fixture.control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(fixture.accepted.thread_id.clone()),
+            model: Some("changed-model".into()),
+            ..Default::default()
+        }),
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(2), changed)
+        .await
+        .expect("Thread boundary remains available during admission wait");
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn manual_summary_revalidates_selection_after_connection_wait() {
+    let mut fixture = Fixture::with_history(
+        0,
+        10,
+        5_000,
+        true,
+        None,
+        true,
+        Some(1_000),
+        "synthetic summary validation",
+    )
+    .await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 5\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let target = fixture.accepted.thread_id.clone();
+    let accepted = request(
+        &fixture.control,
+        Command::ContextEdit(ContextEditArgs {
+            thread_id: Some(target.clone()),
+            action: ContextEditAction::Summary,
+            from_node_id: Some("old-large-context".into()),
+            to_node_id: Some("old-answer".into()),
+            max_chars: None,
+            max_percent: None,
+        }),
+    )
+    .await;
+    let operation = accepted["operation_id"].as_str().unwrap().to_owned();
+    crate::test_watchdog::watchdog("manual summary begins", async {
+        loop {
+            let key = format!("compact.inflight.{target}");
+            let active = fixture
+                .control
+                .store
+                .database
+                .call(move |db| {
+                    Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",
+                        [key],
+                        |r| r.get::<_, bool>(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            if active {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err()
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        request(
+            &fixture.control,
+            Command::ThreadSet(ThreadSetArgs {
+                thread_id: Some(target),
+                model: Some("changed-model".into()),
+                ..Default::default()
+            }),
+        ),
+    )
+    .await
+    .expect("waiting compaction must not hold the Thread boundary");
+    let state = crate::test_watchdog::watchdog("manual summary rejects stale selection", async {
+        loop {
+            let status = request(
+                &fixture.control,
+                Command::OperationGet(OperationTarget {
+                    operation_id: operation.clone(),
+                }),
+            )
+            .await;
+            let state = status["downstream"]["state"].as_str().unwrap_or("");
+            if state == "failed" || state == "completed" {
+                break state.to_owned();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        state, "failed",
+        "changed model must invalidate the pending summary"
+    );
+    fixture.no_more_requests().await;
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shared_connection_wait_is_recorded_on_successful_attempt() {
+    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 5\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let target = request(
+        &fixture.control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let accepted: MessageAccepted = serde_json::from_value(
+        request(
+            &fixture.control,
+            Command::MessageSend(MessageSendArgs {
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(target),
+                text: "synthetic waited request".into(),
+            }),
+        )
+        .await,
+    )
+    .unwrap();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err()
+    );
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::success())
+        .ok()
+        .unwrap();
+    let turn = accepted.turn_id.unwrap();
+    let observation = crate::test_watchdog::watchdog("waited attempt completes", async {
+        loop {
+            let turn = turn.clone();
+            let record = fixture.control.store.database.call(move |db| {
+                Ok(db.query_row("SELECT json_extract(input_manifest_json,'$.rate_observation') FROM model_attempt WHERE turn_id=?1 AND state='completed'", [turn], |r| r.get::<_, String>(0)).optional()?)
+            }).await.unwrap();
+            if let Some(record) = record { break serde_json::from_str::<Value>(&record).unwrap(); }
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    assert_eq!(observation["status"], 200);
+    let admission = observation["admission_wait_ms"].as_u64().unwrap();
+    assert!(
+        admission > 0,
+        "actual gate wait must not be recorded as zero"
+    );
+    assert_eq!(observation["applied_wait_ms"], admission);
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn summary_connection_wait_is_recorded_in_existing_usage() {
+    let mut fixture = Fixture::with_history(
+        0,
+        10,
+        5_000,
+        true,
+        None,
+        true,
+        Some(1_000),
+        "summary wait usage",
+    )
+    .await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 5\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let target = fixture.accepted.thread_id.clone();
+    let accepted = request(
+        &fixture.control,
+        Command::ContextEdit(ContextEditArgs {
+            thread_id: Some(target.clone()),
+            action: ContextEditAction::Summary,
+            from_node_id: Some("old-large-context".into()),
+            to_node_id: Some("old-answer".into()),
+            max_chars: None,
+            max_percent: None,
+        }),
+    )
+    .await;
+    let operation = accepted["operation_id"].as_str().unwrap().to_owned();
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(250),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err()
+    );
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::success())
+        .ok()
+        .unwrap();
+    let state = crate::test_watchdog::watchdog("summary usage recorded", async {
+        loop {
+            let status = request(
+                &fixture.control,
+                Command::OperationGet(OperationTarget {
+                    operation_id: operation.clone(),
+                }),
+            )
+            .await;
+            let state = status["downstream"]["state"].as_str().unwrap_or("");
+            if state == "failed" || state == "completed" {
+                break state.to_owned();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(state, "completed");
+    let observation: String = fixture.control.store.database.call(move |db| Ok(db.query_row(
+        "SELECT json_extract(value,'$.rate_observations[0]') FROM app_meta WHERE key LIKE ?1 ORDER BY key LIMIT 1",
+        [format!("summary.usage.{target}.%")], |r| r.get(0))?)).await.unwrap();
+    let observation: Value = serde_json::from_str(&observation).unwrap();
+    assert_eq!(observation["status"], 200);
+    let wait = observation["admission_wait_ms"].as_u64().unwrap();
+    assert!(wait > 0);
+    assert_eq!(observation["applied_wait_ms"], wait);
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
+    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 30\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let Fixture {
+        _root: root,
+        owner,
+        control,
+        mut requests,
+        server,
+        ..
+    } = fixture;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    drop(control);
+    let owner = DataOwner::start(
+        Some(root.path().join("config.toml")),
+        Some(root.path().join("data")),
+        root.path().into(),
+    )
+    .await
+    .unwrap();
+    let control = Control::new(&owner, root.path().into());
+    assert!(
+        requests.try_recv().is_err(),
+        "restart must not replay old work"
+    );
+    let thread = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            cwd: None,
+            parent_id: None,
+            connection: None,
+            model: None,
+            effort: None,
+        }),
+    )
+    .await["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    request(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            expect_reply: false,
+            sender_label: None,
+            deliver: Deliver::Next,
+            thread_id: Some(thread),
+            text: "explicit post-restart work".into(),
+        }),
+    )
+    .await;
+    let next = tokio::time::timeout(std::time::Duration::from_secs(10), requests.recv())
+        .await
+        .expect("new owner must not retain the old 30-second cooldown")
+        .unwrap();
+    next.reply.send(Reply::success()).ok().unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
 }
