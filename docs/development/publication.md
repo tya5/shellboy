@@ -500,3 +500,7 @@ The candidate checker defaults to public v0.7.2, conversation schema 27,
 expected v0.8.0 and target schema 27. Use an owned disposable fixture and
 previously nonexistent output directory; an exact-binary upgrade check is still
 a separate release gate. No migration was added since v0.7.2.
+
+## v0.8.1 synthetic upgrade check
+
+The candidate checker defaults to public v0.8.0 (schema 27), expected v0.8.1 and target schema 28. Migration `0028_tool_group_recovery_candidates` adds recovery candidate markers. Run the owner-controlled upgrade check separately on an owned disposable fixture; CI alone is not that check.
