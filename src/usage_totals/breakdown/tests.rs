@@ -675,8 +675,19 @@ fn compaction_without_requests_stays_unknown_and_pagination_scans_bounded_window
 fn grouped_connection_rates_follow_candidate_window() {
     let db = fixture();
     insert(&db, "limited", "t1", "2026-10-31T00:30:00Z", "failed", None);
-    insert(&db, "unknown", "t1", "2026-10-31T00:30:01Z", "completed", None);
-    db.execute("UPDATE model_attempt SET input_manifest_json=?1 WHERE id='limited'", [json!({"rate_observation":{"status":429,"applied_wait_ms":42}}).to_string()]).unwrap();
+    insert(
+        &db,
+        "unknown",
+        "t1",
+        "2026-10-31T00:30:01Z",
+        "completed",
+        None,
+    );
+    db.execute(
+        "UPDATE model_attempt SET input_manifest_json=?1 WHERE id='limited'",
+        [json!({"rate_observation":{"status":429,"applied_wait_ms":42}}).to_string()],
+    )
+    .unwrap();
     let result = read(&db, &args("thread"), "fixture").unwrap();
     let rates = &result["items"][0]["connection_rates"]["by_connection"]["p"];
     assert_eq!(rates["http_429"], 1);

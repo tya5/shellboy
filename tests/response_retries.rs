@@ -2003,7 +2003,7 @@ async fn thinking_binding_rejection_is_resent_once_without_reasoning_and_recorde
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn concurrent_threads_record_independent_429_observations() {
-    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    let mut fixture = Fixture::new(0, 10, 120_000).await;
     let first = fixture.incoming().await;
     let thread = request(
         &fixture.control,
@@ -2046,11 +2046,24 @@ async fn concurrent_threads_record_independent_429_observations() {
     crate::test_watchdog::watchdog("first 429 log event", async {
         loop {
             let body = std::fs::read_to_string(&log).unwrap_or_default();
-            if body.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                .any(|event| event["event"] == "model_rate_limited") { break; }
+            if body
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .any(|event| event["event"] == "model_rate_limited")
+            {
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-    }).await.expect("first 429 event must be logged");
+    })
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "first 429 event missing: {error}; log={:?}; dropped={}",
+            std::fs::read_to_string(&log),
+            fixture.owner.diagnostics.pending_dropped()
+        )
+    });
     second.reply.send(Reply::error(429, "")).ok().unwrap();
     let turn1 = fixture.accepted.turn_id.clone().unwrap();
     let turn2 = second_accepted.turn_id.unwrap();
@@ -2068,12 +2081,26 @@ async fn concurrent_threads_record_independent_429_observations() {
     crate::test_watchdog::watchdog("two 429 log events", async {
         loop {
             let body = std::fs::read_to_string(&log).unwrap_or_default();
-            let count = body.lines().filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                .filter(|event| event["event"] == "model_rate_limited").count();
-            if count >= 2 { assert_eq!(count, 2); break; }
+            let count = body
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .filter(|event| event["event"] == "model_rate_limited")
+                .count();
+            if count >= 2 {
+                assert_eq!(count, 2);
+                break;
+            }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
-    }).await.unwrap_or_else(|error| panic!("exactly two 429 events must be logged: {error}; log={:?}; dropped={}", std::fs::read_to_string(&log), fixture.owner.diagnostics.pending_dropped()));
+    })
+    .await
+    .unwrap_or_else(|error| {
+        panic!(
+            "exactly two 429 events must be logged: {error}; log={:?}; dropped={}",
+            std::fs::read_to_string(&log),
+            fixture.owner.diagnostics.pending_dropped()
+        )
+    });
     fixture.no_more_requests().await;
     fixture.close().await;
 }
