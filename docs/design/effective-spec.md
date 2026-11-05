@@ -57,6 +57,13 @@ no new index/migration is required for that B+C query. F separately requires
 the parent index; see [storage](storage.md). Historical version
 notes below describe their own releases, not the current schema number.
 
+## History GC diagnostics (#225)
+
+The DB footer links to F1, where a bounded in-memory snapshot shows history GC
+stage, scanned work, deferrals, restarts, elapsed time, age since cursor
+advance, and retained-over-budget nodes. The UI does not read the database for
+this display. Details and limits are in [storage](storage.md#history-gc-diagnostics-225).
+
 ## DB worker activity visibility (#190, 2026-11-03)
 
 An active DB job is read from an in-memory watch snapshot, never by queuing a
