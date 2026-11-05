@@ -2656,10 +2656,12 @@ median, not each run in isolation.
 
 Three exact-SHA default CI runs for each profile on main-equivalent source:
 before runs 41931953415, 41931957475, 41932009257 had Ubuntu check durations
-652/538/623s (median 623s, range 538-652); after runs are pending at decision
-record time and must be filled in before accepting this change. This candidate
-is not accepted/landed unless the three after runs show no increase beyond the
-baseline spread. No schema/migration or product behavior changes.
+652/538/623s (median 623s, range 538-652). After runs on candidate SHA
+`a91dc4ad96abc3732469c0b03f89f5c552791b6a` were 41936385665 (547s),
+41936389385 (418s), and 41936393572 (637s), all successful (median 547s,
+range 418-637). These fall within the measured baseline range. The durations
+are GitHub's Ubuntu job `startedAt` to `completedAt` intervals. No
+schema/migration or product behavior changes.
 
 ## #105: Line Tables For Development And Tests (2026-11-01)
 
