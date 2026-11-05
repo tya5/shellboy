@@ -1020,7 +1020,7 @@ impl Store {
                 if path.pop().as_deref()!=Some(&node){return Err(error(ErrorCode::InvalidState,"Edit fork boundary changed"));}
                 tx.execute("DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT id FROM attachment_ref WHERE source_node_id=?2)",params![fork,node]).map_err(sql_error)?;
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
-                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None},None,&now)?;}
+                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs { expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
@@ -1276,6 +1276,11 @@ impl Store {
             Command::ThreadGet(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
                 let mut details = thread_details(tx, &id)?;
+                details.effective_auto_compact_at =
+                    Some(self.config.compaction.auto_at_tokens_for(
+                        details.auto_compact_at,
+                        self.config.connections.get(&details.connection),
+                    ));
                 details.usage_totals = Some(crate::usage_totals::read_logged(
                     tx,
                     &crate::usage_totals::Scope::Thread {
@@ -1561,7 +1566,7 @@ impl Store {
         now: &str,
     ) -> Result<String> {
         let inherited = if let Some(parent) = &args.parent_id {
-            Some(tx.query_row("SELECT cwd,agents_path,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[parent],|row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(|| error(ErrorCode::ThreadNotFound,"parent Thread not found"))?)
+            Some(tx.query_row("SELECT cwd,agents_path,profile_id,model_id,effort,auto_compact_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[parent],|row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?))).optional().map_err(sql_error)?.ok_or_else(|| error(ErrorCode::ThreadNotFound,"parent Thread not found"))?)
         } else {
             None
         };
@@ -1633,7 +1638,7 @@ impl Store {
             })
             .filter(|value| !value.is_empty());
         let id = uuid::Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now]).map_err(sql_error)?;
+        tx.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at,auto_compact_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now,inherited.as_ref().and_then(|p|p.5)]).map_err(sql_error)?;
         bump_roots(tx)?;
         Ok(id)
     }
@@ -1648,6 +1653,14 @@ impl Store {
         let id = target(args.thread_id.as_deref(), caller)?;
         let current = thread_details(tx, &id)?;
         let title = args.title.as_deref().map(str::trim);
+        if let Some(value) = &args.auto_compact_at {
+            let value = crate::protocol::validation::parse_auto_compact_at(value)?;
+            tx.execute(
+                "UPDATE thread SET auto_compact_at=?2 WHERE id=?1",
+                params![id, value],
+            )
+            .map_err(sql_error)?;
+        }
         if args.connection.is_none()
             && args.model.is_none()
             && args.cwd.is_none()
@@ -2038,7 +2051,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;

@@ -1078,6 +1078,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .request(Request::new(
             format!("{}:preview-race", observer.store.instance_id),
             Command::ThreadSet(ThreadSetArgs {
+                auto_compact_at: None,
                 agents: None,
                 thread_id: Some("source".into()),
                 title: Some("changed".into()),
@@ -2666,6 +2667,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
         .request(Request::new(
             format!("{}:metadata-refresh", observer.store.instance_id),
             Command::ThreadSet(ThreadSetArgs {
+                auto_compact_at: None,
                 agents: None,
                 thread_id: Some(thread.clone()),
                 title: Some("metadata during stream".into()),

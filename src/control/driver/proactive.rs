@@ -82,9 +82,29 @@ pub(super) async fn maybe_compact(
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<bool, ApiError> {
     let config = &control.store.config;
+    // Read at every boundary so `thread set --auto-compact-at` applies from the next check (#229).
+    let thread_override = {
+        let thread = snapshot.thread.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db
+                    .query_row(
+                        "SELECT auto_compact_at FROM thread WHERE id=?1",
+                        [&thread],
+                        |r| r.get::<_, Option<i64>>(0),
+                    )
+                    .optional()?
+                    .flatten()
+                    .map(|v| v as u64))
+            })
+            .await
+            .map_err(storage_error)?
+    };
     let threshold = config
         .compaction
-        .auto_at_tokens_for(config.connections.get(&snapshot.profile));
+        .auto_at_tokens_for(thread_override, config.connections.get(&snapshot.profile));
     if threshold == 0 {
         if budget.status_context.take().is_some() {
             super::proactive_guard::hide_status(control, &snapshot.thread).await?;

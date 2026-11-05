@@ -46,6 +46,13 @@ sweep also collects parts whose `sources` is missing, empty or invalid.
 `history get --node SUMMARY --parts` reads them (CLI only; the TUI form gained
 the matching `parts` field). S2 (fork reuses parent map parts) is tested and
 holds. Resume point: CI on the final SHA, then owner review. TUI view is later.
+## Per-Thread auto-compaction threshold (#229; implemented, CI pending)
+
+Migration 30 adds nullable `thread.auto_compact_at`; `thread set --auto-compact-at N|0|''`
+overrides the connection / `[compaction]` threshold per Thread (design:
+[compaction](../design/compaction.md)). The upgrade checker keeps public v0.8.2 as schema 28 and
+accepts target 30 (0.8.3 is expected to be schema 29). Resume point: rebase after the 0.8.3
+release, CI on the final SHA, then owner review.
 
 ## Active-attempt recovery index (#219; implemented, CI pending)
 

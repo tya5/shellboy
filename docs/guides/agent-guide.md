@@ -332,7 +332,10 @@ an edit after the source changes. The published v0.5.0 binary lacks this flag.
 Shellboy also compacts automatically (argument-free spill and summary) at the
 next safe boundary once a response reports input tokens at or above the
 configured `auto_at_tokens` (default 200,000; `compact list` shows
-`reason: "proactive_threshold"`). Do not answer it with repeated
+`reason: "proactive_threshold"`). You may change your own Thread's threshold with
+`shellboy thread set --auto-compact-at N` (`0` turns it off for this Thread, `''`
+returns to the configured value); `thread get` shows `auto_compact_at` and
+`effective_auto_compact_at`. It applies from the next request boundary. Do not answer it with repeated
 `compact --maximal`; that drops role context and cache hits. Do targeted range
 edits only when still needed.
 An active-Turn summary may cover user messages delivered during the work. Its

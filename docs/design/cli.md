@@ -14,7 +14,7 @@ shellboy thread fork --thread ID --node ID [--cwd PATH]
 shellboy thread delete-preview --thread ID [--descendants]
 shellboy thread delete --thread ID [--descendants]
 shellboy thread prune [--thread ID] --before NODE [--dry-run]
-shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT]
+shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)
 shellboy message get --message ID
@@ -39,7 +39,7 @@ shellboy index (status|backfill|retry|rebuild) [--scope (threads|all)] [--space 
 shellboy storage (status|collect) [--category (raw|managed-images|history|index|all)]
 ```
 
-`--thread` を省略可能な自己対象型は有効originからControlが解決する。history searchは例外で、省略時は全体検索とし、originの自己Threadを補わない。外部CLIに「最後に開いたThread」を補わない。fork/delete/history listの必須対象は既存公開型に合わせて必須とする。接続profileとmodel IDは独立指定。`--effort ''` は明示解除、未指定は継承/変更なし。過去索引を始めるbackfill/rebuildは明示対象を求めるprotocol検査を通す。
+`--thread` を省略可能な自己対象型は有効originからControlが解決する。history searchは例外で、省略時は全体検索とし、originの自己Threadを補わない。外部CLIに「最後に開いたThread」を補わない。fork/delete/history listの必須対象は既存公開型に合わせて必須とする。接続profileとmodel IDは独立指定。`--effort ''` は明示解除、未指定は継承/変更なし。`--auto-compact-at` はThread単位の自動要約閾値で、N=設定、0=このThreadだけ停止、`''`=接続/`[compaction]` の値へ戻す(#229)。過去索引を始めるbackfill/rebuildは明示対象を求めるprotocol検査を通す。
 
 `into_command(self,startup_cwd)` は必要時だけTokio stdinを読む。`into_command_with_stdin(self,startup_cwd,&mut reader)` でテスト可能にする。textとtext-stdinは必須排他で、CLI stdinは常にUTF-8本文として読む。shell writeのencodingはその後shell runtimeがpipe送信前に変換する。改行/NULを含む本文はそのまま保持し、trimや改行追加をしない。空本文も許す。stdin/argv本文のparser側安全境界は8MiB、上限+1byteまで読んで超過を検出しinput_limitとする。切捨て・部分送信はしない。最終draft/stdin設定上限とJSONframe上限はさらに各層で検査する。stdin読取り失敗/不正UTF-8では本文をerrorへ複製しない。
 

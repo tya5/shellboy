@@ -35,6 +35,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         model: model.map(str::to_owned),
         cwd,
         effort: None,
+        auto_compact_at: None,
     };
     // Exercise both the title-only fast path and full settings path through
     // external requests, never the frontend's local ThreadSet success shortcut.

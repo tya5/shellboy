@@ -472,6 +472,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     request(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            auto_compact_at: None,
             agents: None,
             connection: None,
             thread_id: Some(thread.clone()),

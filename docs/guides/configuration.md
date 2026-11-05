@@ -664,7 +664,8 @@ source projection: such a result is rejected too.
 replaces the corresponding configured limits for that invocation; unspecified
 limits keep their configured values. Run `config check` to validate the section
 and inspect its resolved values in `result.compaction`, then restart the owner
-to apply changed settings. Checking still uses only the model catalog, not a chat.
+to apply changed settings (the proactive threshold can also be changed per Thread
+without a restart; see below). Checking still uses only the model catalog, not a chat.
 
 Map and reduce have independent request budgets: `summary_map_max_requests`
 (default 128) and `summary_reduce_max_requests` (default 16), each in 1..4096.
@@ -730,6 +731,14 @@ those summary requests (input, cached, cache-creation, output), separate from
 conversation requests, so you can judge whether the threshold pays off. Values a
 provider does not report stay unknown; reused cached summary parts send nothing. To keep a persistently large context, set
 `auto_at_tokens = 0` globally or for one connection, then restart the owner.
+To change the threshold for one Thread without a restart, use
+`shellboy thread set --auto-compact-at N` (`0` turns proactive compaction off for
+that Thread, `''` returns it to the connection / `[compaction]` value). The Thread
+value wins over the configured ones, applies from the next request-boundary check
+(never to a request already sent), stays when the Thread's connection changes and
+is inherited by child Threads; `thread get` shows it as `auto_compact_at` beside
+the value in use, `effective_auto_compact_at`. The 10% retry-growth rule above
+uses the value in effect at each check.
 
 ### Unknown shell arguments
 

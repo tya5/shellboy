@@ -10,6 +10,16 @@ collapsed row expands to the summary body; a page with no summary or automatic
 attempt performs no compaction read. Not verified: a real terminal, a live
 provider, live refresh of a marker when a compaction is adopted while the
 conversation is open (it appears on the next history read).
+## Per-Thread auto-compaction threshold (#229)
+
+macOS ARM64 through `rust-slot`, disposable DBs and the loopback provider proxy. Store tests
+cover set, override, `0` disable, `''` clear, child inheritance, connection change keeping the
+value, rejection of `-1`/`1.5`/text/overflow, and `thread get` returning both the Thread value
+and the effective value. Two owner tests cover the driver: a Thread `0` over a connection
+threshold of 100 never summarizes until cleared, and a value set while a request is in flight
+leaves that request alone and applies at the next boundary check. The release-upgrade checker
+tests cover schema 29 to 30 (public v0.8.2 stays schema 28). Not verified: Windows/Linux local
+runs (CI is recorded with the final SHA) and any live provider.
 
 ## Automatic attempt record after post-commit failure (#226)
 

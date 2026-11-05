@@ -176,11 +176,28 @@ impl ThreadForkArgs {
     }
 }
 
+<<<<<<< HEAD
 impl ThreadPruneArgs {
     fn validate(&self) -> Result<(), ApiError> {
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
         nonempty(&self.before_node_id, "before_node_id")
     }
+=======
+/// `""` clears the Thread override; digits set it (0 disables proactive compaction).
+pub(crate) fn parse_auto_compact_at(value: &str) -> Result<Option<i64>, ApiError> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid(
+            "auto_compact_at must be a non-negative integer, 0 to disable, or an empty string to clear",
+        ));
+    }
+    value
+        .parse::<i64>()
+        .map(Some)
+        .map_err(|_| invalid("auto_compact_at is out of range"))
+>>>>>>> 8154c865f5 (Add per-Thread proactive compaction threshold (thread set --auto-compact-at, migration 30))
 }
 
 impl ThreadSetArgs {
@@ -201,12 +218,16 @@ impl ThreadSetArgs {
                 return Err(invalid("title must not exceed 512 Unicode characters"));
             }
         }
+        if let Some(value) = &self.auto_compact_at {
+            parse_auto_compact_at(value)?;
+        }
         if self.connection.is_none()
             && self.cwd.is_none()
             && self.model.is_none()
             && self.effort.is_none()
             && self.title.is_none()
             && self.agents.is_none()
+            && self.auto_compact_at.is_none()
         {
             Err(invalid("thread.set requires a change"))
         } else {

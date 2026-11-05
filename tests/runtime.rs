@@ -2147,6 +2147,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     command(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            auto_compact_at: None,
             agents: None,
             title: None,
             thread_id: Some(accepted.thread_id.clone()),

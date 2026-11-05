@@ -467,6 +467,9 @@ pub struct ThreadSetOptions {
     /// Empty string explicitly clears effort.
     #[arg(long)]
     pub effort: Option<String>,
+    /// Proactive compaction threshold in tokens for this Thread; 0 disables it, an empty string restores the connection value.
+    #[arg(long, allow_hyphen_values = true)]
+    pub auto_compact_at: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = false)]
@@ -873,6 +876,7 @@ impl Cli {
                     cwd: path_option(a.cwd)?,
                     model: a.model,
                     effort: a.effort,
+                    auto_compact_at: a.auto_compact_at,
                 }),
             },
             CliCommand::Message { command } => match command {

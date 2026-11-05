@@ -469,6 +469,7 @@ async fn pending_accepted_and_held_titles_do_not_leak_other_threads_or_unselecte
 
 fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> Command {
     Command::ThreadSet(ThreadSetArgs {
+        auto_compact_at: None,
         agents: None,
         connection: None,
         thread_id: thread.map(Into::into),

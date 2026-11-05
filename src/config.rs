@@ -937,10 +937,10 @@ impl Compaction {
             && (1..=4096).contains(&self.summary_map_max_requests)
             && (1..=4096).contains(&self.summary_reduce_max_requests)
     }
-    /// The connection override wins; 0 means proactive compaction is off.
-    pub fn auto_at_tokens_for(&self, connection: Option<&Connection>) -> u64 {
-        connection
-            .and_then(|c| c.auto_at_tokens)
+    /// The Thread override wins, then the connection; 0 means proactive compaction is off.
+    pub fn auto_at_tokens_for(&self, thread: Option<u64>, connection: Option<&Connection>) -> u64 {
+        thread
+            .or_else(|| connection.and_then(|c| c.auto_at_tokens))
             .unwrap_or(self.auto_at_tokens)
     }
     pub fn summary_limit(&self, source: u64) -> u64 {

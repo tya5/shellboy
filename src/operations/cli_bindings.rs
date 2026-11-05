@@ -154,6 +154,7 @@ const MEANINGS: &[Meaning] = &[
             ("connection", FieldId::Connection),
             ("model", FieldId::Model),
             ("effort", FieldId::Effort),
+            ("auto_compact_at", FieldId::AutoCompactAt),
             ("agents", FieldId::Agents),
         ],
         None,

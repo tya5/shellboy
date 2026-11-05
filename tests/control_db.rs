@@ -198,6 +198,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
         execute(
             &store,
             Command::ThreadSet(ThreadSetArgs {
+                auto_compact_at: None,
                 agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
@@ -841,6 +842,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let changed = execute(
         &store,
         Command::ThreadSet(ThreadSetArgs {
+            auto_compact_at: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
@@ -855,6 +857,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let changed = execute(
         &store,
         Command::ThreadSet(ThreadSetArgs {
+            auto_compact_at: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
@@ -869,6 +872,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let cleared = execute(
         &store,
         Command::ThreadSet(ThreadSetArgs {
+            auto_compact_at: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id),
@@ -2077,5 +2081,100 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
         .unwrap();
     assert_eq!(before, after);
     assert_eq!(after.1, shellboy::storage::SCHEMA_VERSION);
+    store.database.shutdown().await.unwrap();
+}
+
+fn set_auto_compact(thread: &str, value: &str) -> Command {
+    Command::ThreadSet(ThreadSetArgs {
+        thread_id: Some(thread.into()),
+        auto_compact_at: Some(value.into()),
+        ..Default::default()
+    })
+}
+
+async fn get_thread(store: &Store, thread: &str) -> Value {
+    execute(
+        store,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.into()),
+        }),
+    )
+    .await
+    .result
+}
+
+#[tokio::test]
+async fn thread_auto_compact_override_sets_disables_clears_and_reports_effective_value() {
+    let (_root, store) = store().await;
+    let thread = create(&store, None).await.thread_id;
+    let initial = get_thread(&store, &thread).await;
+    assert_eq!(initial["auto_compact_at"], Value::Null);
+    assert_eq!(initial["effective_auto_compact_at"], 200_000);
+    let set = execute(&store, set_auto_compact(&thread, "50000")).await;
+    assert_eq!(set.result["auto_compact_at"], 50_000);
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(
+        (
+            got["auto_compact_at"].clone(),
+            got["effective_auto_compact_at"].clone()
+        ),
+        (50_000.into(), 50_000.into())
+    );
+    execute(&store, set_auto_compact(&thread, "0")).await;
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(
+        (
+            got["auto_compact_at"].clone(),
+            got["effective_auto_compact_at"].clone()
+        ),
+        (0.into(), 0.into())
+    );
+    execute(&store, set_auto_compact(&thread, "")).await;
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(got["auto_compact_at"], Value::Null);
+    assert_eq!(got["effective_auto_compact_at"], 200_000);
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_auto_compact_override_is_inherited_by_children_and_survives_connection_changes() {
+    let (_root, store) = store().await;
+    let parent = create(&store, None).await.thread_id;
+    execute(&store, set_auto_compact(&parent, "1234")).await;
+    let child = create(&store, Some(parent.clone())).await;
+    assert_eq!(child.auto_compact_at, Some(1234));
+    // A parent change after creation does not reach the existing child.
+    execute(&store, set_auto_compact(&parent, "")).await;
+    assert_eq!(
+        get_thread(&store, &child.thread_id).await["auto_compact_at"],
+        1234
+    );
+    let switched = execute(
+        &store,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(child.thread_id.clone()),
+            connection: Some("other".into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert_eq!(switched.result["connection"], "other");
+    assert_eq!(switched.result["auto_compact_at"], 1234);
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_auto_compact_rejects_invalid_values_like_other_thread_set_input() {
+    let (_root, store) = store().await;
+    let thread = create(&store, None).await.thread_id;
+    execute(&store, set_auto_compact(&thread, "7")).await;
+    for bad in ["-1", "1.5", "abc", " 5", "99999999999999999999"] {
+        let error = store
+            .execute(request(set_auto_compact(&thread, bad)), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad}");
+    }
+    assert_eq!(get_thread(&store, &thread).await["auto_compact_at"], 7);
     store.database.shutdown().await.unwrap();
 }

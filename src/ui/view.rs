@@ -25,6 +25,8 @@ pub struct ThreadView {
     /// Latest saved provider-reported usage; replaced only by an adopted snapshot.
     pub(super) context_usage: ContextUsage,
     pub effort: Option<String>,
+    /// This Thread's own proactive-compaction threshold, if it set one (#229).
+    pub(super) auto_compact_at: Option<u64>,
     pub title: String,
     pub state: String,
     pub draft: DraftSnapshot,
@@ -348,6 +350,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|c| c.default_effort.clone()),
+            auto_compact_at: None,
             title: super::i18n::local!(config.ui.language, "新しい会話", "New conversation").into(),
             state: "idle".into(),
             draft: DraftSnapshot::default(),
@@ -560,6 +563,7 @@ impl ThreadView {
         self.connection = Some(details.connection);
         self.model = Some(details.model);
         self.effort = details.effort;
+        self.auto_compact_at = details.auto_compact_at;
         self.title = details.title;
         self.run_id = details.run_id;
         self.turn_id = details.turn_id;

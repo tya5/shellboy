@@ -112,7 +112,8 @@ const HEADER_SQL: &str = "SELECT
       WHEN octet_length(t.agents_path)>?3 THEN 'agents_path'
       WHEN octet_length(t.updated_at)>?5 THEN 'updated_at'
       WHEN octet_length(r.id)>?5 THEN 'run_id'
-      WHEN octet_length(u.id)>?5 THEN 'turn_id' END
+      WHEN octet_length(u.id)>?5 THEN 'turn_id' END,
+ t.auto_compact_at
  FROM thread t LEFT JOIN run r ON r.thread_id=t.id AND r.state IN ('live','stopping')
  LEFT JOIN turn u ON u.thread_id=t.id AND u.run_id=r.id AND u.state IN ('preparing','running','waiting','recovery_wait')
  WHERE t.id=?1 AND t.deleted_at IS NULL";
@@ -149,6 +150,8 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         return Err(header_scalar_limit(&field));
     }
     let details = ThreadDetails {
+        auto_compact_at: row.get::<_, Option<i64>>(15)?.map(|v| v as u64),
+        effective_auto_compact_at: None,
         awaiting_reply: Vec::new(),
         last_end_message: None,
         last_input: None,

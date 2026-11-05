@@ -10,7 +10,7 @@ CREATE TABLE thread(
  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0), reasoning_epoch INTEGER NOT NULL DEFAULT 0 CHECK(reasoning_epoch>=0),
  cursor_node_id TEXT REFERENCES node(id), deleted_at TEXT, updated_at TEXT NOT NULL,
  selection_revision INTEGER NOT NULL DEFAULT 0 CHECK(selection_revision>=0),
- profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0));
+ profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0));
 
 CREATE INDEX threads_updated ON thread(deleted_at,updated_at DESC,id);
 
@@ -702,4 +702,5 @@ PRAGMA user_version=28;
 -- Startup recovery probes only the states eligible for interruption.
 CREATE INDEX model_attempt_active_recovery ON model_attempt(state) WHERE state IN ('preparing','inflight');
 INSERT INTO schema_migration(version,name) VALUES(29,'0029_active_attempt_recovery_index');
-PRAGMA user_version=29;
+INSERT INTO schema_migration(version,name) VALUES(30,'0030_thread_auto_compact_at');
+PRAGMA user_version=30;

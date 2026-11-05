@@ -72,6 +72,7 @@ impl Form {
             "connection" => FieldId::Connection,
             "model" => FieldId::Model,
             "effort" => FieldId::Effort,
+            "auto_compact_at" => FieldId::AutoCompactAt,
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "sender_label" => FieldId::SenderLabel,
@@ -1025,6 +1026,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Connection => local!(language, "接続名", "Connection name"),
         FieldId::Model => local!(language, "モデル名", "Model name"),
         FieldId::Effort => local!(language, "推論設定", "Reasoning effort"),
+        FieldId::AutoCompactAt => local!(language, "自動要約の閾値", "Auto-compaction threshold"),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
@@ -1278,6 +1280,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "未指定は既定・継承です。CLIの空文字は明示解除として扱います。",
             "Omission uses defaults or inheritance. An empty CLI value explicitly clears it."
+        ),
+        FieldId::AutoCompactAt => local!(
+            language,
+            "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字で接続の値へ戻します。",
+            "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
         ),
         FieldId::Title => local!(
             language,

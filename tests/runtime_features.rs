@@ -1071,6 +1071,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     request(
         &control,
         Command::ThreadSet(ThreadSetArgs {
+            auto_compact_at: None,
             agents: None,
             title: None,
             thread_id: Some(thread.clone()),
@@ -1135,6 +1136,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
             request(
                 &control,
                 Command::ThreadSet(ThreadSetArgs {
+                    auto_compact_at: None,
                     agents: None,
                     title: None,
                     thread_id: Some(thread.clone()),
@@ -3919,6 +3921,121 @@ async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
         assert!(!log.contains("current task"));
         server.abort();
     }
+}
+
+async fn set_thread_auto_compact(control: &Arc<Control>, thread: &str, value: &str) {
+    request(
+        control,
+        Command::ThreadSet(ThreadSetArgs {
+            thread_id: Some(thread.into()),
+            auto_compact_at: Some(value.into()),
+            ..Default::default()
+        }),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thread_auto_compact_override_replaces_the_connection_threshold_for_that_thread() {
+    // Connection value 100 would compact; the Thread's own 0 turns it off, and
+    // clearing returns to 100.
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    set_thread_auto_compact(&control, &thread, "0").await;
+    for (n, tokens) in [(0, 50), (1, 150), (2, 150)] {
+        send(&control, &thread, &format!("task {n}")).await;
+        let next = incoming(&control, &mut receive).await;
+        assert_ne!(
+            next.body["tools"],
+            json!([]),
+            "disabled Thread never summarizes"
+        );
+        next.reply
+            .send((200, answer_with_usage("saved answer", tokens)))
+            .unwrap();
+        settled(&control, &thread).await;
+    }
+    assert!(proactive_events(&control, &thread).await.is_empty());
+    set_thread_auto_compact(&control, &thread, "").await;
+    send(&control, &thread, "after clear").await;
+    let mut summaries = 0;
+    loop {
+        let next = incoming(&control, &mut receive).await;
+        if next.body["tools"] == json!([]) {
+            summaries += 1;
+            assert!(summaries <= 4, "bounded summary requests");
+            next.reply
+                .send((200, answer("## 目的\nSummarized")))
+                .unwrap();
+            continue;
+        }
+        next.reply
+            .send((200, answer_with_usage("done", 10)))
+            .unwrap();
+        break;
+    }
+    settled(&control, &thread).await;
+    assert_eq!(summaries, 1, "clearing restores the connection threshold");
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn thread_auto_compact_change_waits_for_the_next_boundary_and_never_alters_a_request_in_flight()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(root.path(), &url, "").await; // default 200000
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    send(&control, &thread, "task 0").await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, answer_with_usage("saved answer", 50)))
+        .unwrap();
+    settled(&control, &thread).await;
+    send(&control, &thread, "task 1").await;
+    let in_flight = incoming(&control, &mut receive).await;
+    // The request is already on the wire: lowering the threshold now changes nothing for it.
+    set_thread_auto_compact(&control, &thread, "100").await;
+    in_flight
+        .reply
+        .send((200, answer_with_usage("saved answer", 150)))
+        .unwrap();
+    settled(&control, &thread).await;
+    assert!(
+        proactive_events(&control, &thread).await.is_empty(),
+        "in-flight request is unchanged"
+    );
+    send(&control, &thread, "current task").await;
+    let mut summaries = 0;
+    loop {
+        let next = incoming(&control, &mut receive).await;
+        if next.body["tools"] == json!([]) {
+            summaries += 1;
+            assert!(summaries <= 4, "bounded summary requests");
+            next.reply
+                .send((200, answer("## 目的\nSummarized")))
+                .unwrap();
+            continue;
+        }
+        next.reply
+            .send((200, answer_with_usage("last answer", 10)))
+            .unwrap();
+        break;
+    }
+    settled(&control, &thread).await;
+    assert_eq!(summaries, 1, "the next boundary check uses the new value");
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

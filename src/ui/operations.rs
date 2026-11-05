@@ -1288,6 +1288,12 @@ impl Form {
                         String::new(),
                         Text,
                     ),
+                    f(
+                        "auto_compact_at",
+                        "自動要約の閾値（空=変更なし/0=停止/none=接続の値へ）",
+                        String::new(),
+                        Text,
+                    ),
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadSet(ThreadSetArgs {
@@ -1310,6 +1316,13 @@ impl Form {
                         connection: form.optional("connection")?,
                         model: form.optional("model")?,
                         effort: form.effort()?,
+                        auto_compact_at: form.optional("auto_compact_at")?.map(|value| {
+                            if value == "none" {
+                                String::new()
+                            } else {
+                                value
+                            }
+                        }),
                     }))
                 },
             ),

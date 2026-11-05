@@ -594,8 +594,9 @@ attempt, for example `^140K/200K v20K キャッシュ86%`.
   an unreported value shows `-`, the percentage is omitted when either side is
   unknown, and `^-` stays until the first response is adopted. After `/model`
   the value is `^-` again until the new model answers.
-- `/200K` is the effective `auto_at_tokens` of the Thread's connection (the
-  connection's own setting, else `[compaction] auto_at_tokens`). When it is `0`
+- `/200K` is the effective `auto_at_tokens` of the Thread (the Thread's own
+  `thread set --auto-compact-at`, else the connection's setting, else
+  `[compaction] auto_at_tokens`). When it is `0`
   (proactive compaction off) the denominator is not shown.
 - Units: below 1000 as is, then `10.2K`, `140K`, `1.2M` (rounded down).
 - At 80% or more of the threshold the text is drawn in the attention color; with

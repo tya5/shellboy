@@ -343,6 +343,16 @@ optional `connections.<name>.auto_at_tokens` override (the connection value wins
 0 disables for that connection). A section containing only this key keeps the
 default summary limits.
 
+Thread override (#229): `thread.auto_compact_at` (nullable integer, migration 30) is set by
+`thread set --auto-compact-at N|0|''` (N sets, 0 disables for the Thread, `''` clears) and
+wins over the connection and `[compaction]` values (`Compaction::auto_at_tokens_for`). The
+driver reads it at each request-boundary check, so a change applies from the next check and
+never to an in-flight request; the retry growth gate uses the value in effect at that check.
+Children and forks copy it at creation; a connection change keeps it; `compact list`
+`trigger.auto_at_tokens` stays the value that fired. `thread get` returns `auto_compact_at`
+(null if none) and `effective_auto_compact_at`; the TUI `/200K` shows the effective value.
+No restriction: the Thread's model may change its own value like other `thread set` fields.
+
 Trigger: only the provider-reported `input_tokens` of the Thread's latest
 completed attempt for its current connection/model, read with the same query as
 `context_usage.last_successful_attempt`. No character or token estimate is used.

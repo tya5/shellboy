@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 use shellboy::storage::{DbWorker, StorageError};
 
-const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
+const DROP_HOT_INDEXES: &str = "DROP INDEX shell_active_owner; DROP INDEX run_thread_created; DROP INDEX shell_terminal_time; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; DELETE FROM schema_migration WHERE version>=10; PRAGMA user_version=9;";
 
 fn schema(db: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
     db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE sql IS NOT NULL ORDER BY type,name")?
@@ -130,7 +130,7 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
     }).await.unwrap();
     worker.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX thread_parent; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; DELETE FROM schema_migration WHERE version>=17; PRAGMA user_version=16;
+    db.execute_batch("DROP INDEX thread_parent; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; DELETE FROM schema_migration WHERE version>=17; PRAGMA user_version=16;
         CREATE TRIGGER reject_parent_ledger BEFORE INSERT ON schema_migration WHEN NEW.version=17
         BEGIN SELECT RAISE(ABORT,'injected ledger failure after index creation'); END;").unwrap();
     db.close().unwrap();
@@ -204,7 +204,7 @@ async fn summary_usage_accounting_migration_matches_fresh_schema() {
         let path = root.path().join("summary-usage-upgrade.sqlite");
         DbWorker::open(&path).await.unwrap().shutdown().await.unwrap();
         let db = Connection::open(&path).unwrap();
-        db.execute_batch("DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; DELETE FROM schema_migration WHERE version>=18; PRAGMA user_version=17; INSERT INTO app_meta(key,value)VALUES('summary.usage.t.x','{\"requests\":1}');").unwrap();
+        db.execute_batch("DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; DELETE FROM schema_migration WHERE version>=18; PRAGMA user_version=17; INSERT INTO app_meta(key,value)VALUES('summary.usage.t.x','{\"requests\":1}');").unwrap();
         db.close().unwrap();
         let fresh = DbWorker::open(root.path().join("fresh-summary-usage.sqlite"))
             .await
@@ -236,7 +236,7 @@ async fn history_attempt_index_migration_from_24_matches_fresh() {
     let expected = fresh.call(|db| Ok(schema(db)?)).await.unwrap();
     fresh.shutdown().await.unwrap();
     let db = Connection::open(&path).unwrap();
-    db.execute_batch("DROP INDEX history_tool_group_attempt; DROP INDEX receipt_reply_pending; DELETE FROM schema_migration WHERE version>=25; PRAGMA user_version=24;").unwrap();
+    db.execute_batch("DROP INDEX history_tool_group_attempt; DROP INDEX receipt_reply_pending; ALTER TABLE thread DROP COLUMN auto_compact_at; DELETE FROM schema_migration WHERE version>=25; PRAGMA user_version=24;").unwrap();
     db.close().unwrap();
     let upgraded = DbWorker::open(&path).await.unwrap();
     assert_eq!(upgraded.call(|db| Ok(schema(db)?)).await.unwrap(), expected);

@@ -3714,6 +3714,7 @@ impl UiState {
                 view.connection = previous.connection.clone();
                 view.model = previous.model.clone();
                 view.effort = previous.effort.clone();
+                view.auto_compact_at = previous.auto_compact_at;
                 view.title =
                     i18n::local!(language, "依頼を編集して分岐", "Edit request and branch").into();
                 view.draft.cursor = text.len();
@@ -6678,6 +6679,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let context = view.thread_id.is_some().then(|| chrome::ContextBar {
         usage: view.context_usage,
         auto_at: state.config.compaction.auto_at_tokens_for(
+            view.auto_compact_at,
             view.connection
                 .as_deref()
                 .and_then(|name| state.config.connections.get(name)),
@@ -8656,6 +8658,8 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            auto_compact_at: None,
+            effective_auto_compact_at: None,
             awaiting_reply: Vec::new(),
             last_end_message: None,
             last_input: None,

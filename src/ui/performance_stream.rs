@@ -231,6 +231,7 @@ async fn stream_input_layout_and_db_fairness() {
                                 model: None,
                                 effort: None,
                                 title: Some(title),
+                                auto_compact_at: None,
                             }),
                         ))
                         .await;
