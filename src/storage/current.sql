@@ -698,3 +698,8 @@ SELECT g.id FROM tool_group g WHERE g.state<>'completed' OR EXISTS(
   SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)));
 INSERT INTO schema_migration(version,name) VALUES(28,'0028_tool_group_recovery_candidates');
 PRAGMA user_version=28;
+
+-- Startup recovery probes only the states eligible for interruption.
+CREATE INDEX model_attempt_active_recovery ON model_attempt(state) WHERE state IN ('preparing','inflight');
+INSERT INTO schema_migration(version,name) VALUES(29,'0029_active_attempt_recovery_index');
+PRAGMA user_version=29;

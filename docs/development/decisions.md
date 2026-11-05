@@ -3418,3 +3418,18 @@ spill was adopted: no earlier reasoning survives replay, giving the same
 drop-all provider shape as the approved full summary. Record the remaining need
 before and after. This implements the owner choice to summarize only what is
 needed; provider behavior remains unvalidated by paid Anthropic runs.
+
+## #219 interrupted-work 4.495 s follow-up
+
+The owner's v0.8.1 startup log records 4,495 ms for `interrupted_work`; the
+associated slow DB job identifies `interrupt_previous_attempts` and 3,029 ms
+statement elapsed, 69,547 fullscan steps and one updated row. `state.rs` uses a
+full-table state predicate. A fresh schema-28 read-only snapshot has 70,056
+attempts and three eligible; its same-copy UPDATE dropped from 292.5 ms cold /
+97.1 and 29.0 ms warm to 0.36 / 0.30 / 0.27 ms with a partial index, whose
+build took 30.2 ms. Therefore migration 29 adds an index on `state` restricted
+to `preparing`/`inflight`, preserving recovery semantics without a new marker
+or backfill. It must pass recovery-state behavior tests, planner verification,
+and both standard and all-OS CI. The owner's original per-step 4.495 s remains
+not fully reproduced; this index addresses the specifically logged 3.029 s
+statement, not unexplained remaining stage time.
