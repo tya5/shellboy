@@ -9834,10 +9834,14 @@ boundaries differ. The one snapshot was deleted after measurement.
 
 ### #204 HistorySearch validation batching (pending)
 
-- [ ] Synthetic tests compare scalar and batched witness validity and candidate
-  visibility across replacements, deleted ownership, forks, hidden and shared
-  sources, stale/tombstoned rows, and verify identical eligible top-k ordering.
-- [ ] One immutable read-only-source `VACUUM INTO` copy measures scalar versus
-  bounded batched validation on the same candidates and reports scope/environment.
-- [ ] Focused test, formatting, `cargo check --tests`, standard CI and 3-OS CI
-  pass on the final exact SHA; the snapshot is removed after measurement.
+- [x] Synthetic scalar/batch equivalence covers witness currentness and
+  visibility with stale/deleted/tombstoned rows, raw identity/tombstones,
+  completed and pending replacement sources, forks, hidden/deleted owners,
+  shared live roots, ownerless sources and cycles; eligible top-k order matches.
+- [x] One read-only-source `VACUUM INTO` snapshot (schema 27, 3.6 GiB) measured
+  6,723 visibility candidates and 11,477 witnesses in three paired runs on
+  macOS arm64. Median scalar validation was 2,716 ms (witness 333, visibility
+  2,383); batched was 2,620 ms (witness 211, visibility 2,409), a 3.5% total
+  reduction with visibility 1.1% slower. `quick_check` passed; snapshot deleted.
+- [ ] Focused tests, formatting and `cargo check --tests` pass locally. Standard
+  CI and 3-OS CI must pass on the same final exact SHA before acceptance.

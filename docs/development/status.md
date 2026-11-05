@@ -4752,8 +4752,20 @@ worker request. Focused tests and full validation are in progress.
 
 ### #204 HistorySearch validation batching (in progress)
 
-Proposal 2 design now specifies bounded (256-key) set-oriented validation while
-preserving the exact scalar witness-currentness and search-visibility predicates,
-initial eligibility SQL, ranking and fresh-snapshot refresh. The implementation
-and synthetic equivalence test are under development. Real-copy before/after
-measurement and hosted CI are pending; do not treat this entry as acceptance.
+Proposal 2 uses bounded batches (256 witnesses; 8192 visibility candidates) and
+preserves the initial eligibility SQL, scalar witness-currentness and visibility
+predicates, ranking, and fresh-snapshot refresh. Synthetic scalar/batch checks
+cover stale/deleted/tombstoned witnesses, raw identity/tombstones, completed and
+pending replacement sources, forks, hidden/deleted owners, shared live roots,
+ownerless sources and cycles; eligible top-k order is compared as well.
+
+On one disposable read-only-source VACUUM INTO snapshot (schema 27, 3.6 GiB;
+6,723 visibility candidates and 11,477 distinct witnesses), three paired runs
+on macOS arm64 measured scalar witness/visibility at [333,332,334] / [2448,2344,
+2383] ms and batched at [216,210,211] / [2428,2315,2409] ms. Median validation
+total fell from 2,716 to 2,620 ms (3.5%); witness checks improved 36.6%, while
+visibility was 1.1% slower. This is a modest local DB-only result, not an overall
+HistorySearch latency claim. The snapshot passed `quick_check` and schema 27
+verification and was deleted after the comparison. Focused equivalence tests,
+formatting and `cargo check --tests` pass; final hosted CI is pending and this
+entry is not acceptance.

@@ -612,7 +612,7 @@ mod validation_benchmark_tests {
         let path = std::env::var("HISTORY_SEARCH_SNAPSHOT").unwrap();
         let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
         db.pragma_update(None, "query_only", true).unwrap();
-        let mut statement = db.prepare("SELECT DISTINCT j.authorized_watermark,j.body_kind FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id AND j.state='done' AND j.space_id=c.space_id AND j.source_node_id=c.source_node_id AND j.source_revision=c.source_revision AND j.source_hash=c.content_hash AND j.span_start=c.span_start AND j.span_end=c.span_end JOIN node n ON n.id=c.source_node_id WHERE n.payload_json IS NOT NULL AND n.deleted_reason IS NULL AND n.payload_revision=c.source_revision").unwrap();
+        let mut statement = db.prepare("SELECT DISTINCT j.authorized_watermark,j.body_kind FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id AND j.state='done' AND j.space_id=c.space_id AND j.source_node_id=c.source_node_id AND j.source_revision=c.source_revision AND j.source_hash=c.content_hash AND j.span_start=c.span_start AND j.span_end=c.span_end JOIN node n ON n.id=c.source_node_id WHERE c.space_id=(SELECT value FROM app_meta WHERE key='index.active_space') AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL AND n.payload_revision=c.source_revision").unwrap();
         let rows = statement
             .query_map([], |row| {
                 Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?))
@@ -634,45 +634,110 @@ mod validation_benchmark_tests {
             witnesses.entry(witness).or_insert(kind);
         }
         let inputs: Vec<_> = witnesses.into_iter().collect();
+        let seed_valid = inputs
+            .iter()
+            .map(|(witness, kind)| witness_valid(&db, witness, kind).unwrap())
+            .collect::<Vec<_>>();
         let ids: Vec<_> = inputs
             .iter()
-            .map(|(w, _)| w.node_id.clone())
+            .zip(seed_valid)
+            .filter(|(_, valid)| *valid)
+            .map(|((witness, _), _)| witness.node_id.clone())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-
-        let started = Instant::now();
-        let old_witness: Vec<_> = inputs
-            .iter()
-            .map(|(w, kind)| witness_valid(&db, w, kind).unwrap())
-            .collect();
-        let old_witness_elapsed = started.elapsed();
-        let started = Instant::now();
-        let old_visible: Vec<_> = ids
-            .iter()
-            .map(|id| history::reachability::searchable(&db, id).unwrap())
-            .collect();
-        let old_visibility_elapsed = started.elapsed();
-
-        let started = Instant::now();
-        let new_witness = witnesses_valid_many(&db, &inputs).unwrap();
-        let new_witness_elapsed = started.elapsed();
-        let started = Instant::now();
-        let new_visible = ids
-            .chunks(8192)
-            .flat_map(|batch| history::reachability::searchable_many(&db, batch).unwrap())
-            .collect::<Vec<_>>();
-        let new_visibility_elapsed = started.elapsed();
-        assert_eq!(new_witness, old_witness);
-        assert_eq!(new_visible, old_visible);
+        let old_witness_run = || {
+            let started = Instant::now();
+            let values = inputs
+                .iter()
+                .map(|(witness, kind)| witness_valid(&db, witness, kind).unwrap())
+                .collect::<Vec<_>>();
+            (values, started.elapsed())
+        };
+        let old_visibility_run = || {
+            let started = Instant::now();
+            let values = ids
+                .iter()
+                .map(|id| history::reachability::searchable(&db, id).unwrap())
+                .collect::<Vec<_>>();
+            (values, started.elapsed())
+        };
+        let batch_witness_run = || {
+            let started = Instant::now();
+            let values = inputs
+                .chunks(256)
+                .flat_map(|batch| witnesses_valid_many(&db, batch).unwrap())
+                .collect::<Vec<_>>();
+            (values, started.elapsed())
+        };
+        let batch_visibility_run = || {
+            let started = Instant::now();
+            let values = ids
+                .chunks(8192)
+                .flat_map(|batch| history::reachability::searchable_many(&db, batch).unwrap())
+                .collect::<Vec<_>>();
+            (values, started.elapsed())
+        };
+        let mut old_witness_times = Vec::new();
+        let mut old_visibility_times = Vec::new();
+        let mut batch_witness_times = Vec::new();
+        let mut batch_visibility_times = Vec::new();
+        for iteration in 0..3 {
+            let (
+                old_witness,
+                old_witness_elapsed,
+                old_visible,
+                old_visibility_elapsed,
+                new_witness,
+                new_witness_elapsed,
+                new_visible,
+                new_visibility_elapsed,
+            ) = if iteration % 2 == 0 {
+                let (old_witness, old_witness_elapsed) = old_witness_run();
+                let (old_visible, old_visibility_elapsed) = old_visibility_run();
+                let (new_witness, new_witness_elapsed) = batch_witness_run();
+                let (new_visible, new_visibility_elapsed) = batch_visibility_run();
+                (
+                    old_witness,
+                    old_witness_elapsed,
+                    old_visible,
+                    old_visibility_elapsed,
+                    new_witness,
+                    new_witness_elapsed,
+                    new_visible,
+                    new_visibility_elapsed,
+                )
+            } else {
+                let (new_witness, new_witness_elapsed) = batch_witness_run();
+                let (new_visible, new_visibility_elapsed) = batch_visibility_run();
+                let (old_witness, old_witness_elapsed) = old_witness_run();
+                let (old_visible, old_visibility_elapsed) = old_visibility_run();
+                (
+                    old_witness,
+                    old_witness_elapsed,
+                    old_visible,
+                    old_visibility_elapsed,
+                    new_witness,
+                    new_witness_elapsed,
+                    new_visible,
+                    new_visibility_elapsed,
+                )
+            };
+            assert_eq!(new_witness, old_witness);
+            assert_eq!(new_visible, old_visible);
+            old_witness_times.push(old_witness_elapsed.as_millis());
+            old_visibility_times.push(old_visibility_elapsed.as_millis());
+            batch_witness_times.push(new_witness_elapsed.as_millis());
+            batch_visibility_times.push(new_visibility_elapsed.as_millis());
+        }
         eprintln!(
-            "history-search validation snapshot candidates={} witnesses={} old_witness_ms={} old_visibility_ms={} batch_witness_ms={} batch_visibility_ms={}",
+            "history-search validation snapshot candidates={} witnesses={} old_witness_ms={:?} old_visibility_ms={:?} batch_witness_ms={:?} batch_visibility_ms={:?}",
             ids.len(),
             inputs.len(),
-            old_witness_elapsed.as_millis(),
-            old_visibility_elapsed.as_millis(),
-            new_witness_elapsed.as_millis(),
-            new_visibility_elapsed.as_millis()
+            old_witness_times,
+            old_visibility_times,
+            batch_witness_times,
+            batch_visibility_times
         );
     }
 }

@@ -17,8 +17,8 @@ pub(crate) fn searchable(db: &rusqlite::Connection, id: &str) -> rusqlite::Resul
     db.prepare_cached(&sql)?.query_row([id], |row| row.get(0))
 }
 
-/// Evaluate searchable for a bounded set in one recursive query. The ordinal is
-/// part of the recursive key so roots cannot leak visibility across candidates.
+/// Evaluate searchable for a bounded set with shared reverse-closure queries.
+/// Per-source membership preserves each scalar result without per-node queries.
 pub(crate) fn searchable_many(
     db: &rusqlite::Connection,
     ids: &[String],
@@ -26,7 +26,7 @@ pub(crate) fn searchable_many(
     let input = serde_json::to_string(ids)
         .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
     let sql = format!(
-        "WITH RECURSIVE requested(k,id) AS (SELECT CAST(key AS INTEGER),value FROM json_each(?1)), live_sources(id) AS (SELECT n.id FROM node n WHERE {ROOT_PREDICATE} UNION SELECT rs.source_node_id FROM live_sources l JOIN replacement r ON r.output_node_id=l.id JOIN replacement_source rs ON rs.replacement_id=r.id), deleted_sources(id) AS (SELECT n.id FROM node n WHERE {DELETED_OWNER} UNION SELECT rs.source_node_id FROM deleted_sources d JOIN replacement r ON r.output_node_id=d.id JOIN replacement_source rs ON rs.replacement_id=r.id) SELECT q.k,EXISTS(SELECT 1 FROM live_sources l WHERE l.id=q.id) OR NOT EXISTS(SELECT 1 FROM deleted_sources d WHERE d.id=q.id) FROM requested q ORDER BY q.k"
+        "WITH RECURSIVE requested(k,id) AS (SELECT CAST(key AS INTEGER),value FROM json_each(?1)), live_sources(id) AS (SELECT n.id FROM node n WHERE ({ROOT_PREDICATE}) UNION SELECT rs.source_node_id FROM live_sources l JOIN replacement r ON r.output_node_id=l.id JOIN replacement_source rs ON rs.replacement_id=r.id), deleted_sources(id) AS (SELECT n.id FROM node n WHERE ({DELETED_OWNER}) UNION SELECT rs.source_node_id FROM deleted_sources d JOIN replacement r ON r.output_node_id=d.id JOIN replacement_source rs ON rs.replacement_id=r.id) SELECT q.k,EXISTS(SELECT 1 FROM live_sources l WHERE l.id=q.id) OR NOT EXISTS(SELECT 1 FROM deleted_sources d WHERE d.id=q.id) FROM requested q ORDER BY q.k"
     );
     let mut statement = db.prepare(&sql)?;
     let rows = statement.query_map([input], |row| {
@@ -51,10 +51,10 @@ mod batch_equivalence_tests {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,deleted_at) VALUES('live-a','/','/a','p','m','now',NULL),('live-b','/','/a','p','m','now',NULL),('deleted','/','/a','p','m','now','now');
-            INSERT INTO node(id,kind,created_at,payload_json,body_hash,deleted_reason) VALUES('root-a','user','now','{}','h',NULL),('root-b','user','now','{}','h',NULL),('shared','user','now','{}','h',NULL),('hidden','user','now','{}','h',NULL),('ownerless','user','now','{}','h',NULL),('pending-only','user','now','{}','h',NULL),('summary','summary','now','{}','h',NULL),('dead-summary','summary','now','{}','h',NULL),('tombstone','user','now',NULL,'h','collected');
-            INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('live-a',0,'root-a'),('live-a',1,'summary'),('live-b',0,'root-b'),('live-b',1,'shared'),('deleted',0,'hidden'),('deleted',1,'dead-summary');
-            INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('replace-live','summary','k','1','1','completed','now'),('replace-dead','dead-summary','k2','1','1','completed','now'),('unfinished','root-a','k3','1','1','pending','now');
-            INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) VALUES('replace-live',0,'shared',0),('replace-dead',0,'hidden',0),('unfinished',0,'pending-only',0);
+            INSERT INTO node(id,kind,created_at,payload_json,body_hash,deleted_reason) VALUES('root-a','user','now','{}','h',NULL),('root-b','user','now','{}','h',NULL),('shared','user','now','{}','h',NULL),('hidden','user','now','{}','h',NULL),('ownerless','user','now','{}','h',NULL),('pending-only','user','now','{}','h',NULL),('summary','summary','now','{}','h',NULL),('dead-summary','summary','now','{}','h',NULL),('cycle-a','user','now','{}','h',NULL),('cycle-b','user','now','{}','h',NULL),('tombstone','user','now',NULL,'h','collected');
+            INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('live-a',0,'root-a'),('live-a',1,'summary'),('live-b',0,'root-b'),('live-b',1,'shared'),('deleted',0,'hidden'),('deleted',1,'dead-summary'),('deleted',2,'shared');
+            INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at) VALUES('replace-live','summary','k','1','1','completed','now'),('replace-dead','dead-summary','k2','1','1','completed','now'),('unfinished','root-a','k3','1','1','pending','now'),('cycle-ab','cycle-b','k4','1','1','completed','now'),('cycle-ba','cycle-a','k5','1','1','completed','now');
+            INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision) VALUES('replace-live',0,'shared',0),('replace-dead',0,'hidden',0),('unfinished',0,'pending-only',0),('cycle-ab',0,'cycle-a',0),('cycle-ba',0,'cycle-b',0);
             INSERT INTO runtime_pin(id,instance_id,resource_kind,resource_id,generation,created_at) VALUES('pin','instance','node','ownerless',0,'now');").unwrap();
         let ids = [
             "root-a",
@@ -67,11 +67,15 @@ mod batch_equivalence_tests {
             "dead-summary",
             "tombstone",
             "missing",
+            "cycle-a",
+            "cycle-b",
         ]
         .map(str::to_owned);
         let hidden_owned = db
             .query_row(
-                &format!("SELECT EXISTS(SELECT 1 FROM node n WHERE n.id='hidden' AND {DELETED_OWNER})"),
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM node n WHERE n.id='hidden' AND {DELETED_OWNER})"
+                ),
                 [],
                 |row| row.get::<_, bool>(0),
             )
@@ -85,7 +89,7 @@ mod batch_equivalence_tests {
         assert_eq!(
             expected,
             [
-                true, true, true, false, true, true, true, false, false, false
+                true, true, true, false, true, true, true, false, true, true, true, true
             ]
         );
         let batched = searchable_many(&db, &ids).unwrap();
