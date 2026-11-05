@@ -278,6 +278,9 @@ pub(super) async fn drive(
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
         }
         let mut outcome = match &rate_lease {
+            _ if turn_binding.cancel.is_cancelled() => {
+                Err(model::ModelError::new("cancelled", "Model request was cancelled").into())
+            }
             model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             model::http::RateAdmission::Lease(_) => {
                 stream_response(
