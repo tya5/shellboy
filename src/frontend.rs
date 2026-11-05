@@ -981,6 +981,10 @@ async fn run_with_delivery(
     let mut ui_subscription = control.subscribe_ui();
     let mut tick = tokio::time::interval(Duration::from_millis(500));
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut gc_diagnostics_rx = control.gc.subscribe_history_diagnostics();
+    let mut gc_diagnostics_open = true;
+    let initial_gc_diagnostics = gc_diagnostics_rx.borrow_and_update().clone();
+    update(&updates, UiUpdate::GcDiagnostics(initial_gc_diagnostics)).await;
     let mut db_activity_rx = control.store.database.subscribe_activity();
     let mut db_activity = db_activity_rx.borrow_and_update().clone();
     let mut db_activity_open = true;
@@ -1227,6 +1231,14 @@ async fn run_with_delivery(
         .min()
         .map(|due| view_read_next.map_or(due, |global| due.max(global)));
         tokio::select! {
+            changed = gc_diagnostics_rx.changed(), if gc_diagnostics_open => {
+                if changed.is_err() {
+                    gc_diagnostics_open = false;
+                } else {
+                    let snapshot = gc_diagnostics_rx.borrow_and_update().clone();
+                    update(&updates, UiUpdate::GcDiagnostics(snapshot)).await;
+                }
+            },
             changed = db_activity_rx.changed(), if db_activity_open => {
                 if changed.is_err() {
                     db_activity_open = false;

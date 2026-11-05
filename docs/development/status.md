@@ -2,7 +2,7 @@
 
 ## History GC budget resumption (#225; in progress)
 
-Adaptive history stages and conservative retention of oversized indivisible nodes are under validation. Index deletion remains atomic with tombstoning because retry-fee observations do not filter tombstoned jobs. The GC diagnostics UI, final focused tests, sustained-write measurement, and CI remain pending.
+Adaptive history stages retain oversized indivisible nodes, and an in-memory GC snapshot is visible in the F1 guide. Index deletion remains atomic with tombstoning because retry-fee observations do not filter tombstoned jobs. Focused macOS tests and synthetic sustained writes pass; default and all-OS CI remain pending.
 
 ## Startup timing CLI (#212)
 

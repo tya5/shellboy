@@ -872,6 +872,7 @@ pub enum UiUpdate {
     MemoryProbe(crate::memory::UiMemoryReply),
     ProgramStatus(crate::program_status::Snapshot),
     DbWorkerActivity(crate::storage::DbWorkerActivity),
+    GcDiagnostics(Option<crate::gc::GcDiagnostics>),
 
     BrowserPatch {
         patch: Box<thread_patch::BrowserPatch>,
@@ -1796,6 +1797,8 @@ pub struct UiState {
     retention_passes: usize,
     animation: activity::Animation,
     db_activity: crate::storage::DbWorkerActivity,
+    gc_diagnostics: Option<crate::gc::GcDiagnostics>,
+    gc_help_second: Option<u64>,
     db_status: Option<String>,
     key_hints: key_hints::Cache,
     pub views: BTreeMap<String, ThreadView>,
@@ -1921,6 +1924,8 @@ impl UiState {
             bell: bell::Bell::default(),
             animation: activity::Animation::new(Instant::now()),
             db_activity: Default::default(),
+            gc_diagnostics: None,
+            gc_help_second: None,
             db_status: None,
             key_hints: key_hints::Cache::default(),
             views: BTreeMap::from([(active.clone(), view)]),
@@ -2545,6 +2550,12 @@ impl UiState {
     }
     fn apply_inner(&mut self, update: UiUpdate) {
         let update = match update {
+            UiUpdate::GcDiagnostics(snapshot) => {
+                self.gc_diagnostics = snapshot;
+                self.refresh_gc_help(Instant::now());
+                self.refresh_db_status(Instant::now());
+                return;
+            }
             UiUpdate::DbWorkerActivity(activity) => {
                 if self.db_activity != activity {
                     self.db_activity = activity;
@@ -2760,7 +2771,9 @@ impl UiState {
         };
         let mut retry_window = false;
         match update {
-            UiUpdate::DbWorkerActivity(_) => unreachable!("handled before per-view updates"),
+            UiUpdate::DbWorkerActivity(_) | UiUpdate::GcDiagnostics(_) => {
+                unreachable!("handled before per-view updates")
+            }
             UiUpdate::ConfirmationSourcesChanged => {
                 self.confirmation_cache.clear();
                 self.management.invalidate_index_preview();
@@ -4513,8 +4526,38 @@ impl UiState {
         self.dirty = true;
         actions
     }
+    fn general_help(&self, now: Instant) -> help::Page {
+        help::Page::guide(&self.config).with_gc(
+            self.gc_diagnostics.as_ref(),
+            now,
+            self.config.ui.language,
+        )
+    }
+
+    fn refresh_gc_help(&mut self, now: Instant) {
+        if !self.help_visible || !self.help_page.is_guide() || self.gc_diagnostics.is_none() {
+            self.gc_help_second = None;
+            return;
+        }
+        let second = now
+            .saturating_duration_since(self.gc_diagnostics.as_ref().unwrap().started)
+            .as_secs();
+        if self.gc_help_second != Some(second) {
+            self.gc_help_second = Some(second);
+            self.help_page = self.general_help(now);
+            self.help_cache.clear();
+            self.dirty = true;
+        }
+    }
+
     fn refresh_db_status(&mut self, now: Instant) {
-        let status = db_activity::status_label(&self.db_activity, now, self.config.ui.language);
+        let status = db_activity::status_label(&self.db_activity, now, self.config.ui.language)
+            .or_else(|| {
+                self.gc_diagnostics
+                    .as_ref()
+                    .filter(|gc| gc.completed.is_none())
+                    .map(|gc| format!("DB GC {} (F1)", gc.stage))
+            });
         if self.db_status != status {
             self.db_status = status;
             self.dirty = true;
@@ -4525,6 +4568,7 @@ impl UiState {
     /// or history revision is produced by the display clock.
     pub fn animation_tick(&mut self, now: Instant) {
         self.refresh_db_status(now);
+        self.refresh_gc_help(now);
         // Commit the existing UI clock before drawing: a delayed observation
         // cannot move an already displayed second back into the past.
         // Display clocks never change a persisted draft or source anchor.
@@ -4937,7 +4981,7 @@ impl UiState {
                     ..Default::default()
                 }))
             }
-            "/help" => self.show_help(help::Page::guide(&self.config)),
+            "/help" => self.show_help(self.general_help(Instant::now())),
             "/new" => self.new_chat(),
             "/threads" => {
                 let drafts = self.local_drafts(argument);
