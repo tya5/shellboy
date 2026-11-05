@@ -2659,3 +2659,89 @@ async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn successful_connection_probe_releases_queued_threads_without_serializing_requests() {
+    let mut fixture = Fixture::new(0, 10, 5_000).await;
+    fixture
+        .incoming()
+        .await
+        .reply
+        .send(Reply::error(429, "Retry-After: 5\r\n"))
+        .ok()
+        .unwrap();
+    assert_eq!(fixture.settled().await, "recovery_wait");
+    let mut turns = Vec::new();
+    for index in 0..3 {
+        let thread = request(
+            &fixture.control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                cwd: None,
+                parent_id: None,
+                connection: None,
+                model: None,
+                effort: None,
+            }),
+        )
+        .await["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let accepted: MessageAccepted = serde_json::from_value(
+            request(
+                &fixture.control,
+                Command::MessageSend(MessageSendArgs {
+                    expect_reply: false,
+                    sender_label: None,
+                    deliver: Deliver::Next,
+                    thread_id: Some(thread),
+                    text: format!("queued synthetic thread {index}"),
+                }),
+            )
+            .await,
+        )
+        .unwrap();
+        turns.push(accepted.turn_id.unwrap());
+    }
+    let probe = fixture.incoming().await;
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            fixture.requests.recv()
+        )
+        .await
+        .is_err(),
+        "only one probe may run before its result"
+    );
+    probe.reply.send(Reply::success()).ok().unwrap();
+    let earlier = fixture.incoming().await;
+    // Keep the earlier request in flight: the next queued Thread must still send.
+    let later = fixture.incoming().await;
+    earlier.reply.send(Reply::success()).ok().unwrap();
+    later.reply.send(Reply::success()).ok().unwrap();
+    crate::test_watchdog::watchdog("released Threads complete", async {
+        loop {
+            let turns = turns.clone();
+            let completed: i64 =
+                fixture
+                    .control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(db.query_row(
+                "SELECT count(*) FROM turn WHERE id IN (?1,?2,?3) AND state='completed'",
+                rusqlite::params![turns[0], turns[1], turns[2]], |r| r.get(0))?)
+                    })
+                    .await
+                    .unwrap();
+            if completed == 3 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    fixture.close().await;
+}

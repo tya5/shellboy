@@ -27,8 +27,10 @@ at headers, including when the body is stalled; an absent or invalid header
 uses connection-capped exponential backoff. A short synchronous critical
 section registers FIFO waiter tickets before asynchronous waiting. The earliest
 eligible waiter owns one probe; a completed non-429 probe clears its generation,
-while cancellation, timeout, and stale success cannot clear newer feedback.
-The gate does not serialize requests before rate feedback. No background worker,
+while cancellation, timeout, and stale success cannot clear newer feedback. Once
+the probe clears the cooldown, queued waiters are admitted in FIFO order without
+serializing their subsequent HTTP requests. The gate does not serialize requests
+before rate feedback. No background worker,
 new table, hidden transport retry, or autonomous resumption is introduced.
 
 Waiters release any Thread boundary before sleeping and reacquire/revalidate

@@ -9974,6 +9974,8 @@ gate tests, 3 boundary tests, 2 index-admission unit tests, 19 HTTP client tests
 (3 ignored), 4 #215 fault-matrix tests, 17 proactive integration tests, 10 index
 batch tests, and 35 Responses retry integration tests. Additional focused runs
 passed summary, quota, actual owner-restart, wait-accounting, typed history-search
-deferral and concurrent model-change/cancellation cases.
+deferral and concurrent model-change/cancellation cases. A synthetic three-Thread
+fixture also verifies that one successful probe releases queued requests without
+serializing their HTTP lifetimes and that all three Turns complete.
 Integration layout and occurrence-specific watchdog policy checks passed; native
 CI and independent review remain pending. No live-provider test was made.

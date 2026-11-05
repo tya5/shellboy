@@ -1182,5 +1182,13 @@
     "function": "proactive_spill_then_cancelled_connection_wait_preserves_adoption",
     "count": 1,
     "reason": "Synthetic proactive cancellation fixture: 250ms of a thirty-second floor checks the summary is not sent before stop."
+  },
+  {
+    "file": "tests/response_retries.rs",
+    "rule": "raw-timeout",
+    "fingerprint": "7bdb162e2497921d63ec61af2ee9f3ac19ba4a3c04fd5f8ac517a3a86739775d",
+    "function": "successful_connection_probe_releases_queued_threads_without_serializing_requests",
+    "count": 1,
+    "reason": "Synthetic multi-Thread probe test: a 100ms negative observation verifies no second request precedes the first probe result; the subsequent concurrency check uses the fixture watchdog."
   }
 ]
