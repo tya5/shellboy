@@ -477,7 +477,7 @@ async fn pin_added_after_marking_protects_summary_and_recursive_source() {
     .await
     .unwrap();
     let step = f.gc.history_step(&job).await.unwrap();
-    assert_eq!(step.stage, "sweep");
+    assert_eq!(step.stage, "cleanup");
     assert_eq!(step.nodes_tombstoned, 0);
     while !f.gc.history_step(&job).await.unwrap().complete {}
     f.db.call(|db| {
@@ -821,8 +821,8 @@ async fn changed_roots_protect_old_recursive_sources_and_leave_later_jobs_pendin
         Ok(())
     }).await.unwrap();
     let result = f.gc.history_step(&job).await.unwrap();
-    assert!(result.complete);
     assert_eq!(result.nodes_tombstoned, 1);
+    while !f.gc.history_step(&job).await.unwrap().complete {}
     f.db.call(|db| {
         assert_eq!(scalar(db,"SELECT COUNT(*) FROM node WHERE id IN ('source','nested','summary','later-debris') AND payload_json IS NOT NULL")?,4);
         assert_eq!(scalar(db,"SELECT COUNT(*) FROM gc_job WHERE id IN ('job','same-horizon') AND state='done'")?,2);
@@ -855,7 +855,7 @@ async fn late_pins_keep_sweep_advancing_and_protect_sources_beyond_the_pin_batch
     assert_eq!(collected, 128);
     let mut complete = false;
     let mut previous = 128;
-    for batch in 0..16 {
+    for batch in 0..32 {
         f.db.call(move |db| {
             let tx = db.transaction()?;
             for i in 0..140 {
@@ -873,12 +873,15 @@ async fn late_pins_keep_sweep_advancing_and_protect_sources_beyond_the_pin_batch
             Some(job.as_str())
         );
         let step = f.gc.history_step(&job).await.unwrap();
-        assert_eq!(step.stage, "sweep");
         collected += step.nodes_tombstoned;
         if step.complete {
             complete = true;
             break;
         }
+        if step.stage == "cleanup" || step.stage == "finish" {
+            continue;
+        }
+        assert_eq!(step.stage, "sweep");
         let job_id = job.clone();
         let cursor =
             f.db.call(move |db| {
@@ -1085,5 +1088,284 @@ async fn deleted_receipts_are_collected_in_finite_batches_but_live_parties_and_p
     })
     .await
     .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn history_gc_cleanup_is_resumable_for_many_marks() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<300) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'retained-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let mut cleanups = 0;
+    let mut completed = false;
+    for _ in 0..100 {
+        let step = f.gc.history_step(&job).await.unwrap();
+        if step.stage == "cleanup" {
+            cleanups += 1;
+        }
+        if step.complete {
+            completed = true;
+            break;
+        }
+    }
+    assert!(completed);
+    assert!(cleanups >= 3, "cleanup must advance in bounded units");
+    f.db.call(|db| {
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM node WHERE id LIKE 'retained-%' AND payload_json IS NOT NULL"
+            )?,
+            300
+        );
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM gc_job WHERE id='job' AND state='done'"
+            )?,
+            1
+        );
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_budget_measurement_with_concurrent_writes() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<10000) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'budget-root-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    // A deterministic expensive per-row operation makes the initial cleanup
+    // batch exceed the worker's real SQLite budget under foreground demand.
+    f.db.call(|db| {
+        db.execute_batch("CREATE TEMP TRIGGER gc_budget_fixture AFTER DELETE ON shellboy_gc_mark BEGIN SELECT SUM(payload_bytes) FROM node; END;")?;
+        Ok(())
+    }).await.unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writes = Arc::new(AtomicUsize::new(0));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        let writes = writes.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                writes.fetch_add(1, Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let (mut steps, mut deferred, mut scanned, mut complete) = (0, 0, 0, false);
+    while started.elapsed() < std::time::Duration::from_secs(45) && steps < 20000 {
+        let step = f.gc.history_step(&job).await.unwrap();
+        steps += 1;
+        deferred += usize::from(step.deferred);
+        scanned += step.scanned;
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    println!(
+        "BUDGET_MEASURE complete={complete} steps={steps} deferred={deferred} scanned={scanned} writes={} elapsed_ms={}",
+        writes.load(Ordering::Relaxed),
+        started.elapsed().as_millis()
+    );
+    f.db.shutdown().await.unwrap();
+    assert!(
+        complete,
+        "history GC did not finish under concurrent writes"
+    );
+    assert!(deferred > 0, "fixture did not trigger the VM-step budget");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_keeps_single_over_budget_reachability_candidate() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        let tx = db.transaction()?;
+        tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('oversized-source','user','now','{}',2)", [])?;
+        for i in 0..5000 {
+            let id = format!("consumer-{i}");
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES(?1,'summary','now','{}',2)", [&id])?;
+            tx.execute("INSERT INTO replacement VALUES(?1,?1,'input','1','1','cached','now')", [&id])?;
+            tx.execute("INSERT INTO replacement_source VALUES(?1,0,'oversized-source',0,NULL)", [&id])?;
+        }
+        tx.commit()?; Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writes = Arc::new(AtomicUsize::new(0));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        let writes = writes.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                writes.fetch_add(1, Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let (mut deferrals, mut steps, mut kept, mut complete) = (0, 0, 0, false);
+    while started.elapsed() < std::time::Duration::from_secs(45) && steps < 20000 {
+        let step = f.gc.history_step(&job).await.unwrap();
+        steps += 1;
+        deferrals += usize::from(step.deferred);
+        kept = f.db.call(|db| Ok(db.query_row("SELECT COALESCE(json_extract(cursor_json,'$.kept_count'),json_extract(error_json,'$.kept_over_budget'),0) FROM gc_job WHERE id='job'", [], |r| r.get::<_, i64>(0))?)).await.unwrap();
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    println!(
+        "OVERSIZED_CANDIDATE complete={complete} kept={kept} deferrals={deferrals} steps={steps} writes={} elapsed_ms={}",
+        writes.load(Ordering::Relaxed),
+        started.elapsed().as_millis()
+    );
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='oversized-source' AND payload_json IS NOT NULL")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND COALESCE(json_extract(cursor_json,'$.kept_ids[0]'),json_extract(error_json,'$.kept_ids[0]'))='oversized-source'")?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+    assert!(complete && kept > 0 && deferrals > 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_keeps_node_when_atomic_tombstone_exceeds_budget() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('expensive-tombstone','user','now','{}',2)", [])?;
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'fixture-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        db.execute_batch("CREATE TEMP TRIGGER costly_tombstone BEFORE UPDATE OF payload_json ON node WHEN OLD.id='expensive-tombstone' BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let (mut deferred, mut complete) = (0, false);
+    while started.elapsed() < std::time::Duration::from_secs(45) {
+        let step = f.gc.history_step(&job).await.unwrap();
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='expensive-tombstone' AND payload_json IS NOT NULL AND deleted_reason IS NULL")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_ids[0]')='expensive-tombstone'")?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+    assert!(
+        complete && deferred > 0,
+        "complete={complete}, deferred={deferred}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_gc_skips_a_single_over_budget_mark_cleanup() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<500) INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) SELECT 'mark-'||i,'turn','user','now','{}',2 FROM n", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let job = f.gc.start_history().await.unwrap().unwrap();
+    f.db.call(|db| {
+        db.execute_batch("CREATE TEMP TRIGGER costly_mark BEFORE DELETE ON shellboy_gc_mark WHEN OLD.node_id='mark-1' BEGIN SELECT count(*) FROM node a CROSS JOIN node b; END;")?;
+        Ok(())
+    }).await.unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let db = f.db.clone();
+        let stop = stop.clone();
+        tokio::spawn(async move {
+            while !stop.load(Ordering::Relaxed) {
+                db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let (mut deferred, mut complete) = (0, false);
+    while started.elapsed() < std::time::Duration::from_secs(45) {
+        let step = f.gc.history_step(&job).await.unwrap();
+        deferred += usize::from(step.deferred);
+        if step.complete {
+            complete = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    writer.await.unwrap();
+    f.db.call(|db| {
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM gc_job WHERE id='job' AND json_extract(error_json,'$.kept_marks')=1")?, 1);
+        assert_eq!(scalar(db, "SELECT COUNT(*) FROM node WHERE id='mark-1' AND payload_json IS NOT NULL")?, 1);
+        Ok(())
+    }).await.unwrap();
+    f.db.shutdown().await.unwrap();
+    assert!(
+        complete && deferred > 0,
+        "complete={complete}, deferred={deferred}"
+    );
+}
+
+#[tokio::test]
+async fn history_gc_discovers_pending_job_after_many_done_jobs_in_batches() {
+    let f = Fixture::new(Config::default()).await;
+    f.db.call(|db| {
+        db.execute("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000) INSERT INTO gc_job(id,kind,root_revision,state) SELECT 'done-'||i,'history',0,'done' FROM n", [])?;
+        Ok(())
+    }).await.unwrap();
+    f.job().await;
+    let mut pending_scans = 0;
+    let job = loop {
+        match f.gc.start_history().await.unwrap() {
+            Some(job) => break job,
+            None => pending_scans += 1,
+        }
+        assert!(pending_scans < 20);
+    };
+    assert_eq!(job, "job");
+    assert!(pending_scans >= 7);
+    assert_eq!(f.gc.start_history().await.unwrap().as_deref(), Some("job"));
     f.db.shutdown().await.unwrap();
 }

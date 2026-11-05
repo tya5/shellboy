@@ -21,6 +21,9 @@ registered once), language classification, record retention and diff checks pass
 Final same-tip default/three-OS CI results are reported with the follow-up SHA
 on #215. These fixtures do not validate live provider behavior or the separately reported storage and
 remeasurement failure paths.
+## History GC budget resumption (#225; in progress)
+
+On macOS via `rust-slot`, `cargo test --test integration gc:: -- --test-threads=1 --nocapture` passed 29 focused GC/index-space tests with one ignored. Under concurrent synthetic root-revision writes it completed in 2,747 steps with 5 budget deferrals, 40,001 scanned, 2,751 writes, and 11,277 ms elapsed. An oversized reverse-reachability candidate was retained with 8 deferrals, 5,056 steps, and 9,635 writes in 4,482 ms. This synthetic run does not establish a production-data performance bound. TUI diagnostics and both CI runs remain pending.
 
 ## Startup timing CLI (#212; SemVer review follow-up in progress)
 

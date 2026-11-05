@@ -13,6 +13,9 @@ all-target Clippy pass. Exact-tip default/three-OS CI results are reported
 separately on #215; no live provider, installed binary or owner data is used.
 Storage-failure/remeasurement recovery is a separate
 unverified risk, not claimed fixed by this follow-up.
+## History GC budget resumption (#225; in progress)
+
+Adaptive history stages and conservative retention of oversized indivisible nodes are under validation. Index deletion remains atomic with tombstoning because retry-fee observations do not filter tombstoned jobs. The GC diagnostics UI, final focused tests, sustained-write measurement, and CI remain pending.
 
 ## Startup timing CLI (#212)
 
