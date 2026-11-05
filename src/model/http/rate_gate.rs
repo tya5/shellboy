@@ -262,6 +262,21 @@ mod tests {
         drop(later.await.unwrap());
     }
     #[tokio::test(start_paused = true)]
+    async fn cancelling_the_oldest_waiter_unblocks_the_next_ticket() {
+        let gate = RateGate::new(60_000);
+        gate.throttle(None, gate.generation());
+        let Reservation::Waiting(first) = gate.reserve().unwrap() else {
+            panic!("expected waiter")
+        };
+        let Reservation::Waiting(second) = gate.reserve().unwrap() else {
+            panic!("expected waiter")
+        };
+        drop(first);
+        tokio::time::advance(Duration::from_secs(1)).await;
+        let lease = second.wait(&CancellationToken::new()).await.unwrap();
+        assert!(lease._permit.is_some());
+    }
+    #[tokio::test(start_paused = true)]
     async fn bounded_queue_recovers_capacity_when_a_waiter_is_dropped() {
         let gate = RateGate::new(60_000);
         gate.throttle(None, gate.generation());

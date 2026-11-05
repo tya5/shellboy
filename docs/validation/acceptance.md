@@ -9969,7 +9969,7 @@ space changes during admission, no-send attempt accounting and ordinary batch
 and search behavior. Existing explicit-usage-limit and #215 fault regressions
 are retained. These results do not establish live provider behavior, cross-profile
 coordination or cooldown persistence across owner restart. On macOS using the
-shared rust-slot, `cargo check --locked --tests` passed; focused runs passed 15
+shared rust-slot, `cargo check --locked --tests` passed; focused runs passed 16
 gate tests, 3 boundary tests, 2 index-admission unit tests, 19 HTTP client tests
 (3 ignored), 4 #215 fault-matrix tests, 17 proactive integration tests, 10 index
 batch tests, and 35 Responses retry integration tests. Additional focused runs
