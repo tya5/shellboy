@@ -57,6 +57,8 @@ pub(super) fn history_step(
         progress.revalidate_roots = true;
         report.root_revision = current;
     }
+    // Keep the last candidate identified until this unit commits: a budget
+    // interrupt may arrive while writing the cursor, after its work finished.
     match progress.stage {
         Stage::Reset => clean_marks(&tx, job, &mut progress, &mut report, batch, candidate, keep)?,
         Stage::Receipts => receipts_step(&tx, &mut progress, &mut report, batch, candidate, keep)?,
@@ -111,7 +113,6 @@ fn receipts_step(
         if tx.execute(&sql, [id]).map_err(sql_error)? == 1 {
             report.bytes_collected += (*bytes).max(0) as u64;
         }
-        *candidate.lock().expect("history candidate") = None;
         progress.last_rowid = *rowid;
     }
     report.scanned = rows.len() as u64;
@@ -156,11 +157,9 @@ fn roots_step(
             true
         } else {
             *candidate.lock().expect("history candidate") = Some(node.clone());
-            let root = root_query
+            root_query
                 .query_row([node], |row| row.get(0))
-                .map_err(sql_error)?;
-            *candidate.lock().expect("history candidate") = None;
-            root
+                .map_err(sql_error)?
         };
         if root {
             mark(tx, job, node)?;
@@ -209,7 +208,6 @@ fn provenance_step(
             params![node,replacement_cursor], |r| Ok((r.get(0)?,r.get(1)?)),
         ).optional().map_err(sql_error)?;
         let Some((replacement_rowid, replacement_id)) = replacement else {
-            *candidate.lock().expect("history candidate") = None;
             tx.execute(
                 "UPDATE shellboy_gc_mark SET expanded=1 WHERE job_id=?1 AND node_id=?2",
                 params![job, node],
@@ -237,7 +235,6 @@ fn provenance_step(
             sources.last().unwrap().0
         };
         tx.execute("UPDATE shellboy_gc_mark SET next_replacement_rowid=?3,next_ordinal=?4 WHERE job_id=?1 AND node_id=?2",params![job,node,next_replacement,next_ordinal]).map_err(sql_error)?;
-        *candidate.lock().expect("history candidate") = None;
         report.scanned += sources.len().max(1) as u64;
         budget = budget.saturating_sub(sources.len().max(1));
     }
@@ -306,7 +303,6 @@ fn sweep_step(
         if *bytes == 0 {
             *candidate.lock().expect("history candidate") = Some(node.clone());
             release_deleted_ownership(tx, node)?;
-            *candidate.lock().expect("history candidate") = None;
             continue;
         }
         let protected:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shellboy_gc_mark WHERE job_id=?1 AND node_id=?2) OR EXISTS(SELECT 1 FROM runtime_pin WHERE resource_kind IN ('node','history_node','source_node') AND resource_id=?2)",params![job,node],|row|row.get(0)).map_err(sql_error)?;
@@ -315,11 +311,9 @@ fn sweep_step(
         }
         let reachable = if let Some(query) = &mut current_roots {
             *candidate.lock().expect("history candidate") = Some(node.clone());
-            let result = query
+            query
                 .query_row([node], |row| row.get::<_, bool>(0))
-                .map_err(sql_error)?;
-            *candidate.lock().expect("history candidate") = None;
-            result
+                .map_err(sql_error)?
         } else {
             false
         };
@@ -333,7 +327,6 @@ fn sweep_step(
         // Keep the node if this transaction is interrupted before it commits.
         *candidate.lock().expect("history candidate") = Some(node.clone());
         tombstone_node(tx, node, kind, turn)?;
-        *candidate.lock().expect("history candidate") = None;
         report.nodes_tombstoned += 1;
         report.bytes_collected += bytes;
     }
@@ -370,7 +363,6 @@ fn clean_marks(
                 *candidate.lock().expect("history candidate") = Some(node.clone());
                 tx.execute("DELETE FROM shellboy_gc_mark WHERE rowid=?1", [rowid])
                     .map_err(sql_error)?;
-                *candidate.lock().expect("history candidate") = None;
             }
         }
         progress.last_rowid = *rowid;
