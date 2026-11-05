@@ -534,12 +534,14 @@ async fn summary_parts_count_toward_quota_and_explicitly_deleted_sources_invalid
     let live = serde_json::json!({"text":"live successful partial summary","sources":["shared"]})
         .to_string();
     let mixed=serde_json::json!({"text":"mixed source cached summary","sources":["shared","deleted_source"]}).to_string();
-    let expected = live.len() + mixed.len();
-    let (a, b) = (live, mixed);
+    // A reduce part stores the ordered union of its inputs' sources.
+    let reduce = serde_json::json!({"text":"reduce","stage":"reduce","round":1,"sources":["shared","deleted_source"]}).to_string();
+    let expected = live.len() + mixed.len() + reduce.len();
+    let (a, b, c) = (live, mixed, reduce);
     f.db.call(move |db| {
         db.execute(
-            "INSERT INTO app_meta VALUES('summary.part.live',?1),('summary.part.mixed',?2)",
-            params![a, b],
+            "INSERT INTO app_meta VALUES('summary.part.live',?1),('summary.part.mixed',?2),('summary.part.reduce',?3)",
+            params![a, b, c],
         )?;
         Ok(())
     })
@@ -560,7 +562,7 @@ async fn summary_parts_count_toward_quota_and_explicitly_deleted_sources_invalid
     f.job().await;
     let result = f.gc.collect(StorageCategory::History, now()).await.unwrap();
     assert_eq!(result.nodes_tombstoned, 1);
-    assert_eq!(result.summary_cache_parts_collected, 1);
+    assert_eq!(result.summary_cache_parts_collected, 2);
     assert!(result.summary_cache_bytes_collected > 0);
     f.db.call(|db| {
         assert_eq!(
@@ -574,6 +576,13 @@ async fn summary_parts_count_toward_quota_and_explicitly_deleted_sources_invalid
             scalar(
                 db,
                 "SELECT COUNT(*) FROM app_meta WHERE key='summary.part.mixed'"
+            )?,
+            0
+        );
+        assert_eq!(
+            scalar(
+                db,
+                "SELECT COUNT(*) FROM app_meta WHERE key='summary.part.reduce'"
             )?,
             0
         );

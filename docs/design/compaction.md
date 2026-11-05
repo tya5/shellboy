@@ -224,6 +224,11 @@ characters, then consolidate again until one final summary remains. Never split
 a part: an oversized part is sent alone and counted in the existing summary
 usage record as `oversized_reduce_parts` without storing its contents.
 
+Prompts deduplicate goals/constraints, keep only the latest confirmed state,
+retain decisions/reasons, unresolved work, uncertainty and source node IDs.
+Original payloads, replacement sources, cancellation and transactional CAS
+adoption remain unchanged. Per D-017, automatic stage 2 shares these bounds.
+
 Summary parts are cache records in `app_meta` (`summary.part.<digest>`); the key
 has no Thread ID. Each record stores `text`, `sources`, `cache_key`, the
 normalized `raw_response`, and (#232) `stage` (`map`, or `reduce` with `round`).
@@ -236,10 +241,7 @@ fields of older records as null, reports a missing record as `not_retained`,
 and never reconstructs. A retry with the same key overwrites the part, so the
 reader shows the current record. A fork shares node rows and copies the model
 settings, so it computes the same map keys for a shared prefix and reuses the
-parent's parts (tested, S2). Parts are never nodes and are not indexed.Prompts deduplicate goals/constraints, keep only the latest confirmed state,
-retain decisions/reasons, unresolved work, uncertainty and source node IDs.
-Original payloads, replacement sources, cancellation and transactional CAS
-adoption remain unchanged. Per D-017, automatic stage 2 shares these bounds.
+parent's parts (tested, S2). Parts are never nodes and are not indexed.
 
 `[compaction] summary_max_chars` and `summary_max_percent` select the smaller
 limit, floored at 2,000 Unicode characters. An absent section defaults to 20,000

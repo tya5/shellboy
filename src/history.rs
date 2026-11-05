@@ -674,19 +674,21 @@ pub fn read_node(
     } else {
         "history.get"
     };
-    let start = if let Some(token) = &args.cursor {
-        PageCursor::decode(
+    let (start, cursor_watermark) = if let Some(token) = &args.cursor {
+        let cursor = PageCursor::decode(
             token,
             cursor_scope,
             &args.node_id,
             row.revision as u64,
             Some(encoding),
-        )?
-        .last_sort_key
-        .parse::<usize>()
-        .map_err(|_| ApiError::new(ErrorCode::CursorExpired, "invalid body position"))?
+        )?;
+        let start = cursor
+            .last_sort_key
+            .parse::<usize>()
+            .map_err(|_| ApiError::new(ErrorCode::CursorExpired, "invalid body position"))?;
+        (start, Some(cursor.watermark))
     } else {
-        0
+        (0, None)
     };
     if encoding != "UTF-8" {
         return Err(ApiError::new(
@@ -705,6 +707,15 @@ pub fn read_node(
             })?;
         let (info, text) = crate::compaction::inspect_parts(connection, &value)?;
         parts_info = Some(info);
+        // Part records are mutable cache rows: a collected or overwritten
+        // part changes the rebuilt text, so a stale cursor must not misalign.
+        if cursor_watermark.is_some_and(|mark| mark != text.len() as u64) {
+            return Err(ApiError::new(
+                ErrorCode::CursorExpired,
+                "summary parts changed since the cursor was issued",
+            )
+            .hint("restart reading without the cursor"));
+        }
         text
     } else if let Some(body) = &row.payload {
         if matches!(

@@ -171,7 +171,6 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
         .unwrap()
         .unwrap();
     let parts = parts.unwrap();
-    println!("{}", serde_json::to_string_pretty(&parts).unwrap());
     let items = parts["items"].as_array().unwrap();
     assert_eq!(parts["reduce_keys_recorded"], true);
     assert_eq!(items.len(), 4 + 5);
@@ -221,6 +220,35 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
     let again = edit(&f, &args("n3")).await.unwrap();
     assert_eq!(lines(&log), requests_before);
     assert_eq!(again.compact.model_requests, Some(0));
+    // A cursor from before a part disappears must expire, not misalign.
+    let cursor = body.next_cursor.clone();
+    let key = items[0]["key"].as_str().unwrap().to_owned();
+    let node = path[0].clone();
+    let read = |cursor: Option<String>| {
+        let node = node.clone();
+        f.db.call(move |db| {
+            Ok(crate::history::read_node(
+                db,
+                &crate::protocol::HistoryGetArgs {
+                    end_message_only: false,
+                    parts: true,
+                    node_id: node,
+                    limit_bytes: 200,
+                    cursor,
+                    encoding: "utf-8".into(),
+                },
+            ))
+        })
+    };
+    assert!(read(cursor.clone()).await.unwrap().is_ok());
+    f.db.call(move |db| {
+        db.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let error = read(cursor).await.unwrap().unwrap_err();
+    assert_eq!(error.code, ErrorCode::CursorExpired);
     let requests: Vec<Value> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()

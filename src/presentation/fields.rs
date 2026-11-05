@@ -21,6 +21,7 @@ fn field_name(key: &str) -> &str {
         "group_id" => "呼出し群ID",
         "summary_format" => "要約形式",
         "summary_part_keys" => "要約part参照",
+        "summary_reduce_keys" => "要約reduce参照",
         "elapsed_ms" => "実行時間（ms）",
         "item" => "元の項目",
         "output" => "返却結果",
