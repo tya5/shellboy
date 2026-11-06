@@ -1,10 +1,11 @@
 # Event subscription and the external RPC contract (#243, #244)
 
-Status: adopted in principle by the user (2026-11-06); stages A1 and B are implemented
-(see 5), the rest is not. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
+Status: adopted in principle by the user (2026-11-06); stages A1, B and E3 plan A are implemented
+(see 5, 2.5), the rest is not. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
 User decisions on stage B (#243): long-polls share the ordinary request slots (Q6), models
 may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
-Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved).
+Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved),
+implemented in 2.5. Plan B (a persistent streaming response) is built only if A proves not smooth enough.
 
 Context (user decision 2026-11-06): the Web UI is a separate project
 (`shellboy-web`, a Rust bridge on the same machine that speaks the existing
@@ -24,7 +25,7 @@ re-read saved facts.
 | `EngineEvent::Changed{thread_id, recovery}` | `Control::changed_with_recovery` (`src/control.rs:393-402`), via `publish_event` (`src/control/ui_events.rs:84-89`) | `tokio::broadcast`, capacity 256 (`control.rs:254`), plus a separate 256-slot UI broadcast | TUI frontend; tests |
 | `changed: Notify` | same call, `notify_waiters()` | wake-only, no payload | every `wait` loop; also woken by request completion (`RequestGuard::drop`), shutdown |
 | `shell_output_changed: Notify` | after raw chunk + `saved_sequence` commit (`wait.rs:1508`) | wake-only | `shell_output` waits; TUI live output |
-| `EngineEvent::Stream{thread_id, node_id(attempt), text, stream_char_offset}` | `src/control/driver/request.rs:336` | text deltas, never saved | TUI only (selected Thread) |
+| `EngineEvent::Stream{thread_id, node_id(attempt), text, reasoning, stream_char_offset}` | `Control::stream_delta`, called from `src/control/driver/request.rs` | text and reasoning deltas, never saved | TUI (selected Thread); the same call feeds `events.wait` text (2.5) |
 | `EngineEvent::ModelReceive / Notice / Error` | driver | ephemeral | TUI |
 
 `Changed` is published after the commit that changed a Thread: every mutation
@@ -211,8 +212,8 @@ stage E1, only if measurement shows follow-up reads dominate.
 
 Shell output bytes are not Thread hints (#28 intentionally uses the separate
 output `Notify`); clients use `shell read` / `wait shell_output` for live output.
-Model text deltas (`EngineEvent::Stream`) are never saved and are not covered;
-see E3.
+Model text deltas (`EngineEvent::Stream`) are never saved and are not Thread hints;
+a client asks for them with `include_text` (2.5).
 
 CLI (implemented): `shellboy events wait [--after CURSOR] [--thread ID]... [--timeout-ms N]`
 prints one JSON result per call; a `--follow` loop is not implemented (clients loop). Also usable by
@@ -226,6 +227,91 @@ refresh can mask a missing call today. Stage B must add a test per mutation
 family (send/held/cancel, run/turn transitions, tool start/end, compaction,
 create/fork/rewind/delete, reply, recovery) asserting the clock advanced for
 the affected Thread(s), and treat a gap as a bug in the producer.
+
+### 2.5 Live model text on `events.wait` (E3 plan A)
+
+`events.wait` with `include_text: true` also returns unsaved text being written now. It is an
+in-memory, lossy preview: never saved, never a source of truth. Saved output is what stays.
+
+Extending `events.wait` rather than adding an operation: a client wanting changes and text needs
+one poll and one cursor, so it holds one of the 24 shared slots, not two, and a hint cannot be
+delayed by a text wait or the reverse. Both are computed in one lock, so the pair is consistent.
+
+Request: `include_text: bool`, default false. Result gains `live_text`, present only when asked:
+
+```json
+{"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,
+ "live_text":[{"thread_id":"T","attempt_id":"A","gap":false,
+   "deltas":[{"offset":5,"reasoning":false,"text":" こんに😀"},
+             {"offset":10,"reasoning":true,"text":"hmm"}]}]}
+```
+
+`status` is the new value `text` when only text is new (`changed` wins when both are, and carries the
+text too). Only clients that asked for text can see it. A poll also returns `timeout` with live
+attempts listed and no deltas. `live_text` lists every attempt in the filter holding text, sorted
+by Thread ID, including those with nothing new.
+
+Offsets, from what the code does (`stream_response`): `offset` is `EngineEvent::Stream`'s
+`stream_char_offset`, the count of **Unicode scalar values** already streamed by this attempt. It is
+not bytes and not UTF-16 units. It counts reasoning and refusal text as well as ordinary text in
+arrival order, so it is not a position in the saved output, and unknown events do not advance it.
+It starts at 0 in each `stream_response` call. The HTTP client makes one request per call and a retry
+is a new call with a new `attempt_id`, so a retried attempt restarts at 0 under a different ID.
+`EngineEvent::Stream` already carries reasoning, so reasoning text is included, marked by `reasoning`.
+Refusal text arrives as `reasoning:false`. Adjacent deltas of one kind merge in a reply.
+
+Multibyte: deltas are decoded JSON strings, so a character split across network reads never reaches
+the buffer (test: half a character on the wire is invisible). The buffer drops whole deltas, and an
+oversized delta keeps its tail cut on a character boundary, with `offset` advanced by the characters
+dropped. Text can still split a grapheme cluster between deltas; a client concatenates.
+
+Client rule, complete:
+
+1. Keep one preview per Thread: the attempt ID and the concatenated non-reasoning (and if shown,
+   reasoning) text.
+2. `baseline` or `resync_required`: discard every preview, then apply the reply. These replies carry
+   everything retained, so a client arriving mid-attempt starts from the retained tail.
+3. For each `live_text` entry: if `attempt_id` differs from the preview's or `gap` is true, discard
+   the preview first. Append `deltas`. A `gap` means text was lost: show the tail as incomplete or
+   hide it until saved output exists.
+4. A Thread with a preview and no entry in a reply: no text is held for it (the attempt ended, or was
+   dropped at the attempt bound). Discard the preview and read saved facts; a `changes` hint follows
+   the commit of any ended attempt. Text not yet read when an attempt ends is lost, by design.
+5. A Thread added to the filter later: take a new baseline, as with changes.
+
+Cursor: unchanged, opaque, one position. Each delta takes the next value of the clock's `seq`, without
+becoming a change entry. A plain poll's cursor moves past text it never sees, as it does past filtered
+changes. A `more` reply returns text only up to its cursor, so nothing repeats or is skipped.
+
+State record (AGENTS.md). Need: Web M1 shows text as it is written (user decision), and only the
+owner has it. Owner: `ChangeClock`, in `Control`, dropped with it, same mutex; no new worker, queue,
+table or dependency, and no per-client buffer. Bound, constants: `MAX_ATTEMPT_TEXT_BYTES` 64 KiB per
+attempt (the TUI's window size), charged text bytes plus the 40-byte record per delta, and
+`MAX_LIVE_TEXT_ATTEMPTS` 16, so at most 1 MiB charged. Oldest deltas go first and raise that attempt's
+`floor`; past 16 attempts the least recently written loses its entry and re-enters with a gap on its
+next delta. Concurrent attempts have no other limit today, so this bound can bite. A compile-time
+assertion keeps 16 x 64 KiB x 6 (the JSON worst case, control characters) plus 1 MiB inside the 8 MiB
+frame, so all retained text fits one reply and text needs no paging. Termination: an RAII guard in
+`stream_response` frees the entry on every exit (return, cancel, dropped future), before the outcome
+is saved. Memory measurements are in acceptance.md.
+
+Write path: `Control::stream_delta` appends under the lock, publishes the existing event and
+`notify_waiters` on a separate `text_changed` Notify. No DB work and no await. The lock is held for memory
+updates and copies, never across `.await` or I/O; JSON encoding and socket writes happen outside it,
+so a reader that stops reading holds nothing the driver needs. Deltas do not touch `changed`, which
+wakes `wait` loops and plain polls. Only polls with `include_text` wait on `text_changed`. Each new delta
+ends a waiting text poll, so a client's request rate follows the model's delta rate at most, one
+round trip at a time; deltas arriving meanwhile merge. A bridge may pace itself.
+
+A reader that stops reading costs the server, not the driver. Reply writes have no deadline (`src/ipc.rs`,
+true of every operation), so a client that never reads a reply larger than its socket buffer holds one of the
+32 connection slots until it disconnects or the owner stops; its ordinary permit is released when the request
+finishes. Text makes such replies more common, up to about 6 MiB at worst. Not changed here; recheck if a stalled client
+is seen in practice.
+
+Limits on what this shows: the driver's event loop stops at response end and can leave at most its 32
+queued events undelivered, as for the TUI, so a preview's last text can be missing; saved output
+covers it. Compaction and other model calls that do not go through `stream_response` produce no text.
 
 ## 3. Chat and TUI
 
@@ -360,7 +446,8 @@ or breaking stays a review decision.
 | C | chat uses `events.wait`; before/after measurements (§3) recorded in validation | none |
 | A2 | Protocol 3: `record!` split (tolerant results), tolerant `Welcome`/`Endpoint` decode, `Welcome.capabilities`, version policy section in protocol.md; supersede PR1-10 | handshake field |
 | D | `schemars`, command→result match, `shellboy protocol schema`, committed schema + drift test, contract section | one dependency |
-| E (measure first) | E1 per-Thread digest in `changes`; E2 persistent multi-frame stream; E3 live text deltas for Web (in-memory, lossy, explicit gap, falls back to saved output); E4 durable typed change log (schema change) | each needs its own decision |
+| E3 plan A (done, #243: `src/control/change_clock.rs`, `tests/events_text.rs`, 2.5) | `events.wait` `include_text`, `live_text`, `shellboy events wait --text` | bounded per-attempt text in the clock, one `Notify` |
+| E (measure first) | E1 per-Thread digest in `changes`; E2 persistent multi-frame stream (also E3 plan B, only if A proves not smooth enough); E4 durable typed change log (schema change) | each needs its own decision |
 
 A1 and B are the smallest valuable first steps: B alone removes chat polling.
 A2 and D must land before `shellboy-web` depends on the RPC.
@@ -375,7 +462,8 @@ A2 and D must land before `shellboy-web` depends on the RPC.
   chats plus a bridge reduce capacity. A dedicated small class would change the
   documented 28-permit budget; decide after measurement (Q6, answered for now: shared slots).
 - Coalescing hides intermediate states; documented, durable facts remain.
-- Without E3, the Web UI cannot show token streaming like the TUI.
+- E3's preview is lossy by design (2.5): more than 16 attempts streaming at once, or a reader behind by
+  more than 64 KiB charged, sees gaps. Polling per delta costs a connection per reply on the current transport.
 - Protocol 3 breaks every mixed-release pair once (acceptable pre-1.0 under
   the current same-release rule, but it is a visible break).
 - Schema truthfulness is limited by `Value` fields until they are typed.
@@ -388,9 +476,7 @@ A2 and D must land before `shellboy-web` depends on the RPC.
    range so a bridge can lag one release?
 3. May models use `events.wait` (Agent Guide), or is it for humans and
    external clients only?
-4. Is live token streaming required in the first Web milestone? If yes, E3
-   needs a design (bounded per-attempt buffer, explicit gaps) before the Web
-   project starts.
+4. Is live token streaming required in the first Web milestone? Yes (user, 2026-11-06); see 2.5.
 5. How should `shellboy-web` obtain types: generate from the JSON Schema,
    depend on this crate by git (pulls the TUI stack), or split a small
    protocol crate?

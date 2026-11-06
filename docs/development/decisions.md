@@ -3725,3 +3725,42 @@ family in `tests/events_wait.rs`. Recheck when: measurement shows follow-up read
 Hint-completeness findings (fixed in the same change): `message.send` that is queued or held
 (no wake), `thread.prune` (non-dry-run) and `attachment.add` that is not delivered live
 committed without `changed()`; each now reports its Thread in `changed_threads`.
+
+## D-243-2: Live model text on `events.wait` (2026-11-07)
+
+Decision (E3 plan A, user's choice for Web M1): unsaved text is an opt-in part of `events.wait`
+(`include_text`, `live_text`, `status:"text"`), held inside `ChangeClock`. Plan B (a persistent stream)
+was not built; it follows only if A proves not smooth enough.
+
+Why this shape, smallest first:
+
+- Same operation, not a new one: a client wanting changes and text otherwise needs two long-polls and
+  two of the 24 shared slots, or loses hints while waiting for text. One lock makes the pair consistent.
+- Deltas take clock sequence numbers, so the existing one cursor positions both, with no per-Thread
+  positions in the cursor or request, no client-side offset bookkeeping and no cursor version change.
+- A separate `text_changed` Notify, because `changed` wakes every `wait` loop, some of which read the
+  database. A delta rate on `changed` would turn model speed into DB load for clients that never asked.
+- The whole retained state fits one frame by constants (compile-time assertion), so text needs no
+  paging, no `more` of its own and no second truncation rule.
+- Whether an attempt is live is level-triggered: absent from `live_text` means no text held. There are no
+  tombstones, no "ended" event to retain, and the same rule covers ended and dropped attempts.
+
+State record (need, bound, owner, termination): events-and-external-protocol.md 2.5. Bounds are constants:
+64 KiB charged per attempt, including 40 bytes per delta so one-byte deltas cannot escape the bound, and 16
+attempts. Measured heap is above the charged figure, 1.49 MiB at most for 16 attempts (see acceptance.md): deque
+capacity is uncharged, and only the charged figure is a stated bound.
+
+Weaker judgments, with their recheck conditions:
+
+- 16 attempts is a choice, not derived from a limit: concurrent attempts have no other cap. Past it the least
+  recently written attempt loses its entry and re-enters with `gap:true`, and under sustained overload they
+  take turns. Recheck if Web users stream more than 16 Threads at once.
+- 64 KiB charged holds about 1500 small deltas. A client that loops one poll stays ahead in the mock
+  measurement; recheck if real clients report gaps.
+- Reasoning text is included because `EngineEvent::Stream` already carries it, marked per delta. A client
+  showing only answer text filters on the flag. Recheck if it should be withheld from external clients.
+- Adding a required struct field: any code building `EventsWaitArgs` by literal, such as a chat client
+  change in progress (stage C), needs `include_text: false` when it merges.
+- `status --memory` does not report this buffer; add it if the bound ever needs watching in the field.
+
+Recheck plan B when: poll round trips or connection cost visibly limit smoothness in the Web client.
