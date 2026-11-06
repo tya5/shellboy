@@ -1,4 +1,4 @@
-# Thread Organization: Re-parenting, Archive, Folders, Pin (Study)
+# Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
 Status: **study, not adopted** (2026-11-06, issue #222). Nothing here changes the
 adopted design until the user accepts a stage. Code references are to
@@ -38,7 +38,8 @@ Completed); no surveyed product offers arbitrary re-parenting.
   ownership of their next Runs) and a "folder Thread" is a real Thread that a
   child's progress report (`thread get` → `parent_id` → `message send`) would wake
   and bill. Folders, pin and archive are separate, flat per-Thread attributes.
-- Recommended order: **Stage 1 archive**, Stage 2 re-parent, Stage 3 folder,
+- **User decision 2026-11-06: no folders.** Parent tree for meaningful relations, tags for placement/cross-cutting groups, automatic grouping by cwd. Stage 3 below is Tags.
+- Recommended order: **Stage 1 archive**, Stage 2 re-parent, Stage 3 tags (was folder),
   Stage 4 pin. Tags (many per Thread) and ownership transfer are not recommended.
 
 ## 1. What `parent_id` does today
@@ -256,32 +257,32 @@ The page SQL must repeat the partial-index predicates literally; verify with
 `threads_updated`. The cursor scope string includes the archived mode so a cursor
 cannot move between modes.
 
-### Folder (stage 3)
+### Tags and cwd grouping (stage 3) — replaces folders (user decision 2026-11-06)
 
-Simplest model that serves folders and groups: **one optional folder name per
-Thread**, `thread.folder TEXT` (NULL = none), one line, trimmed, ≤128 Unicode
-scalars, no control characters (same validation style as `title`). Folders exist
-by membership: no folder table, no empty folders, no rename operation (rename =
-re-file the members by IDs). Flat: a `/` in a name is just a character; nesting
-semantics are not proposed.
+The user decided against folders: with free re-parenting, nesting is expressed by
+the parent tree; flat placement and cross-cutting grouping are tags; project-style
+grouping comes from the working directory automatically. Roles are separated so
+each concept keeps one meaning:
 
-- Set: `thread set --folder NAME` / `--folder ''` (clear); bulk via the same
-  ID-list shape as archive (`thread.archive` generalizes to a small
-  `thread.organize {thread_ids, archived?, folder?, pinned?, descendants}` if the
-  user prefers one bulk command; see open questions).
-- Inherited at create, fork and rewind from the parent (creation-time copy, like
-  cwd), so a delegated tree lands in its parent's folder by default.
-- List: `thread list --folder NAME` (and `--folder ''` for unfiled), combined with
-  the archived mode; index `thread(folder,updated_at DESC,id) WHERE deleted_at IS
-  NULL`.
-- Folder names: `thread folders [--limit N --cursor]` returns distinct names in
-  name order from the index (paged ≤200). Member counts are not returned
-  (unbounded); the Web UI shows counts of what it fetched.
+- **Parent/child** (re-parent, stage 2): meaningful relations only — delegation,
+  reports, run ownership of the next Runs, usage `--include-children`,
+  `delete --descendants`, branch family. Not used merely to place a Thread.
+- **Tags** (many per Thread): placement and cross-cutting views ("customer A",
+  "bug hunt"). Needs one small table `thread_tag(thread_id, tag)` with primary key
+  `(thread_id, tag)` and an index on `(tag, thread_id)`; tag text validated like
+  `title` (one line, trimmed, ≤128 Unicode scalars, no control characters), at
+  most 64 tags per Thread. Operations: `thread tag --thread T --add TAG… --remove
+  TAG…` (also bulk by up to 200 IDs), `thread list --tag TAG` (repeatable =
+  AND; a single OR form only if needed later), `thread tags [--limit --cursor]`
+  for distinct tag names (paged ≤200, no unbounded member counts). Tags are not
+  inherited at create/fork/rewind by default (placement is the user's choice);
+  revisit if delegated trees should carry them. Deleting a Thread deletes its tag
+  rows in the same transaction.
+- **cwd grouping**: the list can group by the Thread's working directory (no
+  storage; `thread list --cwd PATH` filter and a group-by option in the TUI/Web).
 
-Why not tags (many per Thread): needs a `thread_tag` table, add/remove operations,
-AND/OR filter semantics, and tag-list paging; none of the surveyed products needs
-more than one container per session plus state grouping. Tags can be added later
-without changing folders.
+Bulk "archive everything with tag X" is `thread list --tag X` then
+`thread archive` with those IDs (no filter-driven bulk writes).
 
 ### Pin (stage 4)
 
@@ -294,7 +295,7 @@ archived Thread is hidden even if pinned (open question: unpin on archive).
 ### Migrations
 
 One migration per stage, after 31: `0032_thread_archive`, then
-`0033_thread_folder` and `0034_thread_pin` (or one 0033 for both if they land
+`0033_thread_tags` (table `thread_tag`) and `0034_thread_pin` (or one 0033 for both if they land
 together). Columns on `thread`, partial indexes as above, `storage/current.sql`
 updated. No new table, worker, queue or event kind; changes publish the existing
 `Changed` notification.
