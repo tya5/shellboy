@@ -3784,26 +3784,42 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
     proactive_partial_spill_fixture(true, None).await;
 }
 
-/// #248: a closed-range summary that was rejected without adopting anything is
-/// not repeated while the current Turn only appends tool output. The oversized
-/// protected request makes the forecast coverage-limited, so no per-source mark
-/// can prove "nothing new"; the closed range ends before the current Turn and
-/// is therefore unchanged by appended tool groups.
+/// #248: with an oversized (coverage-limited) current Turn and tool calls whose
+/// short error output cannot shrink, every summary stage that fails is tried
+/// once in the Turn, however long the Turn keeps growing above the threshold.
 #[tokio::test]
-async fn proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_grows() {
-    rejected_summaries_under_growth("echo grow").await;
+async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
+    let counts = growing_turn_with_failing_summaries(|| (200, answer(" "))).await;
+    assert_eq!(
+        counts,
+        (1, 1, 2),
+        "empty summaries: closed, active, requests"
+    );
 }
 
-/// Empty tool output variant: stage rejections stay at most one per Turn. The
-/// blocked-repeat state for an active summary rejected under unknown coverage
-/// is unit-tested in `proactive_guard` (the fixture's active spill always adopts,
-/// which has its own pending-target gate).
+/// A provider 400 on every summary request is a non-cancelled failure too; it
+/// must not turn into one real request per tool round.
 #[tokio::test]
-async fn proactive_rejected_active_summary_is_not_repeated_as_the_current_turn_grows() {
-    rejected_summaries_under_growth(if cfg!(windows) { "$null" } else { "true" }).await;
+async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
+    let counts = growing_turn_with_failing_summaries(|| {
+        (
+            400,
+            json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
+        )
+    })
+    .await;
+    assert!(
+        counts.0 <= 1 && counts.1 <= 1 && counts.2 <= 2,
+        "{counts:?}"
+    );
 }
 
-async fn rejected_summaries_under_growth(command: &'static str) {
+/// Returns rejected closed summaries, rejected active summaries and summary
+/// (tool-free) requests over 16 rounds. Also checks that an explicit compact
+/// is not subject to the proactive block.
+async fn growing_turn_with_failing_summaries(
+    summary_reply: fn() -> (u16, Value),
+) -> (u32, u32, u32) {
     crate::test_watchdog::watchdog("proactive rejected summary gate", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
@@ -3817,49 +3833,48 @@ async fn rejected_summaries_under_growth(command: &'static str) {
             settled(&control, &target).await;
         }
         send(&control, &target, &"protected current ".repeat(70_000)).await;
-        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]});
-        for index in 0..3 {
-            let request = incoming(&control, &mut receive).await;
-            assert_ne!(request.body["tools"], json!([]));
-            request.reply.send((200, tool(index, if index == 2 { 200 } else { 100 }))).unwrap();
-        }
-        let summary = incoming(&control, &mut receive).await;
-        assert_eq!(summary.body["tools"], json!([]), "the threshold starts the closed summary");
-        summary.reply.send((200, answer(" "))).unwrap();
-        // The Turn keeps growing at or above the threshold for 16 more tool
-        // rounds. Every summary request is rejected (empty). Under unknown
-        // coverage each stage may be rejected at most once in this Turn.
+        // An unknown tool name returns a short error, so no spill can shrink it.
+        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"nope","arguments":"{}"}]});
         let mut summaries = 0;
-        for index in 3..19 {
+        for index in 0..19 {
             let request = incoming(&control, &mut receive).await;
             if request.body["tools"] == json!([]) {
                 summaries += 1;
-                request.reply.send((200, answer(" "))).unwrap();
-                // The summary attempt continues to its ordinary request.
+                request.reply.send(summary_reply()).unwrap();
                 let ordinary = incoming(&control, &mut receive).await;
                 ordinary.reply.send((200, tool(index, 200 + index))).unwrap();
                 continue;
             }
-            request.reply.send((200, tool(index, 200 + index))).unwrap();
+            request.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap();
         }
         let last = incoming(&control, &mut receive).await;
         last.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        let (mut closed_rejected, mut active_rejected) = (0, 0);
+        let (mut closed, mut active) = (0, 0);
         for event in &events {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
             let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
             let record: Value = serde_json::from_str(&record).unwrap();
-            closed_rejected += (record["stages"]["closed_summary"]["outcome"] == "rejected") as u32;
-            active_rejected += (record["stages"]["active_summary"]["outcome"] == "rejected") as u32;
+            closed += (record["stages"]["closed_summary"]["outcome"] == "rejected") as u32;
+            active += (record["stages"]["active_summary"]["outcome"] == "rejected") as u32;
         }
-        eprintln!("summaries={summaries} closed_rejected={closed_rejected} active_rejected={active_rejected} events={}", events.len());
-        assert_eq!(closed_rejected, 1, "one rejected closed summary per Turn: {events:#?}");
-        assert!(active_rejected <= 1, "one rejected active summary per Turn: {events:#?}");
-        assert!(summaries <= 2, "summary requests over 16 rounds: {summaries}");
+        // A later attempt's stage record names the block (compact list).
+        let blocked = events.len() > 2 && {
+            let attempt = events[0]["attempt_id"].as_str().unwrap().to_owned();
+            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
+            let record: Value = serde_json::from_str(&record).unwrap();
+            record["stages"]["closed_summary"]["skipped"] == "blocked_by_earlier_rejection"
+        };
+        assert!(blocked, "the stage record must say it was blocked: {events:#?}");
+        // The block is proactive-only: an explicit compact still issues a summary.
+        request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
+        let explicit = incoming(&control, &mut receive).await;
+        assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
+        let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-    }).await.unwrap();
+        (closed, active, summaries)
+    }).await.unwrap()
 }
 
 /// Two completed Turns (input 50 then `second`), then a third request. Returns

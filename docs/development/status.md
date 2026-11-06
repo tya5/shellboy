@@ -46,6 +46,14 @@ Missing `changed()` found and fixed: queued/held `message.send`, `thread.prune`,
 Not done: protocol 3/capabilities (A2), schema (D), live text
 deltas (E3, user wants them in Web M1, plan A first). See D-243-1.
 ## Repeated rejected closed summary (#248; on branch issue-248/repeat-gate, CI pending)
+## Repeated rejected summaries (#248; on branch issue-248/repeat-gate-r3, CI pending)
+
+A failed (not cancelled) closed or active summary stage is blocked for the rest of the
+Turn under unknown coverage, held Run-locally in `ProactiveBudget` (D-248-1). Visible as
+`skipped: blocked_by_earlier_rejection` in `compact list`. Open: finding 2a (over-limit
+cached reduce output), known-coverage repeats and empty no-safe-reduction passes (follow-up
+issues). Resume: land after CI; #248 stays open until the follow-ups are split out.
+
 ## Repeated rejected summaries (#248; on branch issue-248/repeat-gate-r2, CI pending)
 
 Guard remembers deterministic closed and active summary rejections per Turn under unknown

@@ -365,7 +365,11 @@ configured `auto_at_tokens` (default 200,000; `compact list` shows
 `reason: "proactive_threshold"`). You may change your own Thread's threshold with
 `shellboy thread set --auto-compact-at N` (`0` turns it off for this Thread, `''`
 returns to the configured value); `thread get` shows `auto_compact_at` and
-`effective_auto_compact_at`. It applies from the next request boundary. Do not answer it with repeated
+`effective_auto_compact_at`. It applies from the next request boundary. If an automatic
+summary fails (not cancelled) in a Turn whose coverage is unknown, that stage is not tried
+again in the same Turn; `compact list` shows `skipped: "blocked_by_earlier_rejection"`.
+Explicit `compact --summary --from NODE --to NODE` is not blocked and a new Turn starts
+fresh; lower the range or raise `summary_max_chars` before retrying. Do not answer it with repeated
 `compact --maximal`; that drops role context and cache hits. Do targeted range
 edits only when still needed.
 An active-Turn summary may cover user messages delivered during the work. Its

@@ -20,6 +20,42 @@ pub(super) struct ProactiveBudget {
     /// summary; if a fresh measurement is still at or above the threshold,
     /// the active-Turn summary goes first in the next attempt.
     prefix_adopted: bool,
+    /// #248: summary stages rejected earlier in this Turn.
+    blocks: Blocks,
+}
+
+/// A summary stage that failed (not cancelled) is not tried again in the same
+/// Turn while the forecast is unknown, until that stage adopts a summary. The
+/// Run-local state is simply lost on restart (one more attempt is allowed).
+#[derive(Default)]
+struct Blocks {
+    turn: String,
+    closed: bool,
+    active: bool,
+}
+
+impl Blocks {
+    fn note(&mut self, turn: &str, closed: Option<&str>, active: Option<&str>) {
+        if self.turn != turn {
+            *self = Self {
+                turn: turn.to_owned(),
+                ..Self::default()
+            };
+        }
+        for (flag, outcome) in [(&mut self.closed, closed), (&mut self.active, active)] {
+            match outcome {
+                Some("rejected") => *flag = true,
+                Some("adopted") => *flag = false,
+                _ => {}
+            }
+        }
+    }
+    fn closed_for(&self, turn: &str) -> bool {
+        self.turn == turn && self.closed
+    }
+    fn active_for(&self, turn: &str) -> bool {
+        self.turn == turn && self.active
+    }
 }
 
 /// One automatic attempt's identity for the #226 recoverable record.
@@ -283,6 +319,12 @@ pub(super) async fn maybe_compact(
         .as_ref()
         .is_some_and(|candidate| candidate.mutable_protection);
     let no_target = marks.as_ref().is_some_and(Vec::is_empty);
+    // Under known marks the per-source evidence already separates new from tried.
+    let unknown = marks.is_none();
+    let (closed_blocked, active_blocked) = (
+        unknown && budget.blocks.closed_for(&snapshot.turn),
+        unknown && budget.blocks.active_for(&snapshot.turn),
+    );
     let has_kind = |kind: &str| match &budget.guard {
         Some(previous) => previous.has_new_kind(marks.as_deref(), kind),
         None => marks
@@ -303,6 +345,7 @@ pub(super) async fn maybe_compact(
             && !evidence.exhausted_active))
         && has_kind("spill:");
     let summary_new = !evidence.insufficient_prefix
+        && !closed_blocked
         && has_kind("summary:")
         && !(marks.is_none()
             && budget
@@ -312,12 +355,7 @@ pub(super) async fn maybe_compact(
     let middle_new = if evidence.exhausted_active {
         widened_active
     } else {
-        (has_kind("middle:") || (calibrated && has_kind("partial:")))
-            && !(marks.is_none()
-                && budget
-                    .guard
-                    .as_ref()
-                    .is_some_and(|guard| guard.blocks_unknown_middle(snapshot)))
+        !active_blocked && (has_kind("middle:") || (calibrated && has_kind("partial:")))
     };
     let active_spill_new = calibrated && spill_new;
     let any_summary_new = middle_new || summary_new;
@@ -677,20 +715,30 @@ pub(super) async fn maybe_compact(
             }
         }
     }
+    for (stage, blocked) in [
+        ("closed_summary", closed_blocked),
+        ("active_summary", active_blocked),
+    ] {
+        if blocked
+            && stages[stage]["ran"] == false
+            && matches!(
+                stages[stage]["skipped"].as_str(),
+                Some("not_reached" | "no_new_target")
+            )
+        {
+            stages[stage]["skipped"] = json!("blocked_by_earlier_rejection");
+        }
+    }
+    budget.blocks.note(
+        &snapshot.turn,
+        stages["closed_summary"]["outcome"].as_str(),
+        stages["active_summary"]["outcome"].as_str(),
+    );
     observation["stages"] = stages;
     observation["steps"] = json!({"spill_attempted": target_plan.is_some() || (spill_new && !open_loop), "spill_adopted": spill_counts.spilled > 0, "fresh_measurement": target_plan.is_some(), "summary_selection": !summary_scope.is_empty(), "summary_bundling": observation["summary"]["model_requests"].as_u64().is_some_and(|n| n > 0)});
     let adopted = observation["outcome"] == "adopted";
     let summary_rejected = observation.get("summary_error").is_some();
     let summary_deferred = observation["summary_deferred"] == true;
-    let stage_outcome = |stage: &str| observation["stages"][stage]["outcome"].as_str();
-    let closed_rejected = stage_outcome("closed_summary") == Some("rejected");
-    let active_rejected = stage_outcome("active_summary") == Some("rejected");
-    let active_summary_adopted = stage_outcome("active_summary") == Some("adopted");
-    let closed_untouched = observation["stages"]["closed_summary"]["ran"] == false
-        && observation["stages"]["closed_spill"]["adopted_groups"]
-            .as_u64()
-            .unwrap_or(0)
-            == 0;
     budget.prefix_adopted = adopted && !summary_rejected && summary_scope == "prefix";
     if !adopted || summary_rejected || (summary_deferred && preserve_guard_after_spill) {
         let rejection = observation
@@ -722,7 +770,7 @@ pub(super) async fn maybe_compact(
                     None => {
                         let revision = guard::current_revision(control, &snapshot.thread).await?;
                         current.mark_refresh(revision);
-                        if summary_rejected {
+                        if summary_rejected && !slot.stop.is_cancelled() {
                             current.freeze_summary_for_current_turn(
                                 guard::anchor_is_current_turn(
                                     control,
@@ -741,22 +789,6 @@ pub(super) async fn maybe_compact(
                         .as_ref()
                         .is_some_and(|candidate| candidate.mutable_protection),
                 );
-            }
-            // #248: only deterministic rejections are remembered; a cancel or a
-            // transient provider failure may succeed on the next boundary.
-            let deterministic = reason == Reason::RejectedInvalidState;
-            if !adopted && deterministic && closed_rejected {
-                current.freeze_summary_for_current_turn(
-                    guard::anchor_is_current_turn(
-                        control,
-                        latest_tool_anchor.clone(),
-                        &snapshot.turn,
-                    )
-                    .await?,
-                );
-            }
-            if (deterministic && active_rejected) || (adopted && active_summary_adopted) {
-                current.set_active_summary_rejected(deterministic && active_rejected);
             }
             if summary_deferred && adopted {
                 current.set_reason(reason);
@@ -787,25 +819,6 @@ pub(super) async fn maybe_compact(
                 )
             }
             _ => {}
-        }
-    } else if let Some(mut kept) = budget
-        .guard
-        .clone()
-        .filter(|saved| closed_untouched && saved.keeps_through_active_adoption(&snapshot.turn))
-    {
-        // #248: the adoption changed only active-Turn content. Keep the
-        // evidence about the closed range and rebase its witness.
-        let revision = guard::current_revision(control, &snapshot.thread).await?;
-        if active_summary_adopted {
-            kept.set_active_summary_rejected(false);
-        }
-        kept.mark_refresh(revision);
-        let reason = kept.reason;
-        if guard::save(control, snapshot, revision as u64, &kept, reason).await? {
-            budget.guard = Some(kept);
-            budget.status_context = Some((snapshot.run.clone(), snapshot.turn.clone()));
-        } else {
-            budget.guard = None;
         }
     } else {
         guard::clear(control, &snapshot.thread).await?;
@@ -1197,4 +1210,25 @@ async fn summarize_once(
         no_target: true,
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod block_tests {
+    use super::Blocks;
+
+    #[test]
+    fn only_failed_uncancelled_stages_block_until_they_adopt_or_the_turn_changes() {
+        let mut blocks = Blocks::default();
+        blocks.note("t1", Some("cancelled"), Some("no_target"));
+        assert!(!blocks.closed_for("t1") && !blocks.active_for("t1"));
+        blocks.note("t1", Some("rejected"), None);
+        assert!(blocks.closed_for("t1") && !blocks.active_for("t1"));
+        blocks.note("t1", None, Some("rejected"));
+        assert!(blocks.closed_for("t1") && blocks.active_for("t1"));
+        assert!(!blocks.closed_for("t2"), "another Turn is never blocked");
+        blocks.note("t1", Some("adopted"), None);
+        assert!(!blocks.closed_for("t1") && blocks.active_for("t1"));
+        blocks.note("t2", None, None);
+        assert!(!blocks.active_for("t1") && !blocks.active_for("t2"));
+    }
 }

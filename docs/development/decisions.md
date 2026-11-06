@@ -3727,24 +3727,29 @@ Hint-completeness findings (fixed in the same change): `message.send` that is qu
 committed without `changed()`; each now reports its Thread in `changed_threads`.
 ## D-248-1: Rejected closed summary is frozen for the current Turn (2026-11-06)
 ## D-248-1: Rejected summaries are remembered per Turn under unknown coverage (2026-11-07)
+## D-248-1: A failed summary stage is not repeated in the same Turn (2026-11-07)
 
-Decision: with a coverage-limited forecast (`marks:null`), a deterministic rejection
-(`invalid_state` only; not cancellation or transient failures) is remembered in the
-guard by two booleans (`summary_frozen_current_turn` for the closed range, new serde-
-default `active_summary_rejected` for the active-Turn summary). No counter, table or
-worker. The closed flag is set when nothing was adopted and the closed summary stage was
-rejected. An adoption that touched only active stages (closed spill not adopted, closed
-summary not run) keeps the guard and rebases its witness (`mark_refresh`) instead of
-clearing it; a displayed status after such an adoption is the existing saved-guard
-status. Any closed-range adoption, a new Turn or a path rewrite drops the flags; an
-adopted active summary resets the active flag. Reason: r1 (freeze only) was erased by the
-next adopted active spill, and the active spill's epoch bump changes the summary part
-key, so cached parts missed and real map/reduce requests were spent every two boundaries
-(review of r1). Accepted trade-off: a later, wider closed range in the same Turn stays
-blocked until a path rewrite or new Turn (policy.rs summary range can widen). Target:
-at most one rejected attempt per summary stage per Turn under unknown coverage; spill
-passes may still start per boundary. Not measured: real-Turn cost after the fix needs live
-snapshots, which a read-only copy cannot replay without API calls. Recheck when: a real
-Turn shows more than one rejected attempt per stage, or finding 2a is fixed.
-Prompt-cache risk: active spills change the replayed prefix (reasoning epoch bump); that
-existed before this change and is not altered by it.
+Decision (one rule): under a coverage-limited forecast (`marks:null`), any non-cancelled
+failure of a summary stage (closed or active) blocks that stage for the rest of the Turn,
+until that stage adopts a summary. State: a Run-local `Blocks` value in `ProactiveBudget`
+(turn id plus two booleans). No counter, serde field, table, worker or witness coupling;
+restart or a new Turn allows one more attempt, and an overflow-recovery rewrite does not
+reset it (accepted: it only suppresses proactive summaries for that Turn). A cancelled
+stage never blocks, and the older freeze at the adopted-spill plus rejected-summary save
+is also skipped on cancellation. Why one rule: provider 400s on reduce are built as
+`invalid_state` (`budget.error`), so classifying "deterministic" misjudged them, and a
+provider 400 on every summary gave 10 real closed requests with the active stage never
+reached (r2 review). Why a Run-local value instead of guard fields (r2's form, which
+needed `mark_refresh`, a witness-extension carry and a keep branch): it survives our own
+closed/active adoptions without any of that and is a net deletion; the closed stage also
+cannot be rejected a second time after a closed spill clears the guard. Accepted cost: an
+outage blocks proactive summaries for that Turn; request-level retries already ran and
+overflow recovery still works. A wider closed range later in the same Turn stays blocked.
+Visibility: the blocked stage's record in `compact list` says `skipped:
+"blocked_by_earlier_rejection"` (the existing `skipped` field); the explicit `compact`
+path does not read the block. Bound: at most one rejected attempt per summary stage per
+Turn under unknown coverage; spill passes may still start at every boundary.
+Prompt-cache note: on the #248 Thread the active stage was never reached, so its cost is
+unknown; with the block, an active spill (reasoning-epoch bump) can still run at every
+boundary after the rejections. That cost is unmeasured. Recheck when: a real Turn shows
+more than one rejected attempt per stage, or finding 2a is fixed.

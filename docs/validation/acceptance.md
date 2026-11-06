@@ -49,6 +49,7 @@ resync after the 4096-Thread floor end to end (unit test only), clock memory byt
 with many concurrent long-polls, Windows named-pipe long-poll latency.
 ## Repeated rejected closed summary (#248, 2026-11-06)
 ## Repeated rejected closed summary (#248, 2026-11-07, r2)
+## Repeated rejected summaries (#248, 2026-11-07, r3)
 
 Real data (read-only `VACUUM INTO` copy, deleted after): Thread 38fcb3e3, one Turn,
 301 automatic attempts 03:58-05:28 UTC (200 in the reported hour). Each attempt record
@@ -63,12 +64,16 @@ over-limit output is deterministic; not changed (follow-up). 2b: active stages w
 reached (`prefix_first`). The three single-request cycles (34387187, eab639b4, ea5a1f3e)
 are the designed pair: prefix summary adopted with verification `insufficient`, then the
 active stage `met`.
-Synthetic (fixture with an oversized current Turn, 16 further tool rounds, every summary
-rejected): r1 had 8 rejected closed summaries (the freeze was erased by adopted active
-spills); r2 has 1 closed and 1 active rejection and 1 summary request, 17 attempts (spill
-passes still start). Not verified on real data after the fix, and the real-Turn cost cannot
-be replayed from a copy without API calls. The active-summary repeat block has a unit test
-only; the integration fixture cannot make the active spill a no-op.
+Synthetic (oversized current Turn, unknown tool name so spills cannot shrink, 19 rounds):
+empty summaries give 1 rejected closed, 1 rejected active and 2 summary requests; a
+provider 400 on every summary gives at most 1 per stage; the blocked stage record says
+`blocked_by_earlier_rejection`; an explicit `compact` afterwards still issues a summary
+request (the block is proactive-only and Run-local). Disabling either block makes the
+scripted tests hang at the watchdog (more summary requests than scripted), so they fail
+without the change. `Blocks` has a unit test (cancelled never blocks, adoption unblocks,
+new Turn resets). Not verified on real data after the fix; real-Turn cost cannot be replayed
+from a copy without API calls. Out of scope: known-coverage repeats (7 closed / 13 active,
+synthetic) and empty no-safe-reduction passes.
 
 ## Storage vacuum (#238)
 

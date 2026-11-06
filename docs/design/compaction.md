@@ -435,22 +435,15 @@ the selected path while coverage remains unknown, its exact committed selection
 revision permits the guard to refresh its own witness without treating that
 replacement as new input. When the newest tool anchor belongs to the current
 protected Turn, later appended groups there do not unfreeze that rejected older
-summary; an intervening path rewrite or new Turn is evaluated again. This freeze
-is also recorded when the closed-range (older Turns) summary was rejected without
-adopting anything (#248), but only for a deterministic rejection (`invalid_state`),
-never for a cancellation or transient provider failure. Appended current-Turn tool
-output does not add older summary sources, so under unknown coverage the same
-rejected closed summary is not attempted again at each tool boundary; a later,
-wider closed range in the same Turn stays blocked until a path rewrite or a new Turn.
-The freeze survives an adoption that touched only active stages (the witness is
-rebased like a partial spill); it is dropped by any closed-range adoption. A second
-flag records a deterministically rejected active-Turn summary under unknown coverage:
-it blocks further active summaries until a summary adoption, a new Turn or a path
-rewrite. Per Turn this yields at most one rejected attempt per summary stage under
-unknown coverage; spill passes may still start at every boundary and are not counted.
-Active spills bump the reasoning epoch, which is part of the summary part key, so a
-closed summary retried after such a spill cannot reuse cached parts and spends real
-requests; the flags above avoid that repeat. The latest tool group, every active-Turn user input, the latest completed
+summary; an intervening path rewrite or new Turn is evaluated again. A separate Run-local rule
+(#248) covers unknown coverage: any non-cancelled failure of a summary stage (closed or
+active) blocks that stage for the rest of the Turn until it adopts a summary; a
+cancellation never blocks. A restart or a new Turn allows one more attempt. The blocked
+stage's attempt record says `skipped: "blocked_by_earlier_rejection"`. Explicit compact is
+unaffected. Per Turn this gives at most one rejected attempt per summary stage under
+unknown coverage; spill passes may still start at every boundary, and a spill that bumps
+the reasoning epoch changes the summary part key (cost unmeasured). A wider closed range
+later in the same Turn stays blocked. The latest tool group, every active-Turn user input, the latest completed
 Turn, pending receipts and held deliveries retain their existing protections.
 The active-Turn summary remains eligible only through the #182 plan (all tool
 rounds of the Turn); its evidence is separate from the older-Turn summary
