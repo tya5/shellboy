@@ -32,6 +32,7 @@ mod coverage;
 mod queue;
 pub(crate) mod saved_view;
 mod search;
+mod shrink;
 mod source;
 mod space_gc;
 mod split;
@@ -822,7 +823,7 @@ impl IndexService {
                 })
                 .unwrap_or_else(|| "unknown".into())
         });
-        let current = json!({
+        let mut current = json!({
         "active_space":active,
         "profile":profile,
         "model":model,
@@ -831,6 +832,10 @@ impl IndexService {
         "paused":pause.is_some(), "paused_at":paused_at, "pause_id":pause_id,
         "pause_kind":pause_kind}
         );
+        // Only for int8: a model sees why `distance` values changed scale.
+        if let Some(scale) = space.as_ref().and_then(|s| s.int8_scale) {
+            current["int8_scale"] = json!(scale);
+        }
 
         let key = IndexKeys::observed(thread);
         let before = meta(tx, &key)
@@ -1323,12 +1328,14 @@ impl IndexService {
         if cancel.is_cancelled() {
             return Ok(false);
         }
+        // One bounded conversion unit per round, without holding back paid work.
+        let converted = self.shrink_unit().await?;
         for key in self.identity_keys() {
             if self.process_key(key, cancel.clone()).await? {
                 return Ok(true);
             }
         }
-        Ok(false)
+        Ok(converted)
     }
     async fn process_key(&self, key: String, cancel: CancellationToken) -> Result<bool, ApiError> {
         if cancel.is_cancelled() {

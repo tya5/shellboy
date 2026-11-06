@@ -274,6 +274,11 @@ impl Control {
                 ErrorCode::InvalidState,
                 "Cannot encode index probe",
             ),
+            Command::IndexShrink(args) => encode_result(
+                self.index.shrink(args).await?,
+                ErrorCode::InvalidState,
+                "Cannot encode index conversion",
+            ),
             Command::IndexStatus(args) => encode_result(
                 self.index.status(args).await?,
                 ErrorCode::InvalidState,

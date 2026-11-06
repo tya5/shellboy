@@ -64,6 +64,9 @@ walk (1,024 steps) in the write transaction; live Runs keep their owner (no owne
 tui, thread-browser, protocol, delegation (ownership wording), agent-guide, thread-organization
 "Stage 2 as implemented"; decision D-222-2. Not started: stage 3 (tags). Pin was dropped by the user.
 Resume point: all-OS CI on the final SHA, then owner review.
+## Int8 index conversion (#253; on branch issue-253/int8-index-2, CI pending)
+
+`shellboy index shrink [--dry-run|--cancel]` (`index.shrink`) converts the active float32 space to a new int8 space without any API call, through the existing candidate lifecycle and index workers (`src/index/shrink.rs`, durable record `index.shrink.<space>`). Migration 33: nullable `index_space.int8_scale`, logical bytes by element size, index `chunks_job`. New embeddings and queries in that space use the saved scale and saturate at ±127. Measurements: 1/4 scan bytes, 98.77% top-10 agreement on real vectors with chunks as proxy queries. The user's real database was read only (`mode=ro`) and not converted; the conversion there is the user's decision. Migration number may need renumbering if #222 stage 2 lands first. Not done: `/index` screen key, cold-cache timing, real-query quality. Resume: exact-tip default and all-OS CI.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 

@@ -9,6 +9,7 @@ pub(crate) fn collect_inactive_spaces(db: &mut Connection) -> Result<u64, Storag
          WHERE s.state='inactive'
          AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key='index.active_space' AND value=s.id)
          AND NOT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=s.id AND state='running')
+         AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key='index.shrink.'||s.id)
          AND NOT EXISTS(SELECT 1 FROM app_meta g JOIN app_meta r
              ON g.key='index.group.'||substr(r.key,length('index.rebuild.')+1)||'.'||r.value
              WHERE r.key GLOB 'index.rebuild.*' AND g.value=s.id)

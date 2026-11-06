@@ -328,7 +328,7 @@ the `db_job_slow` names.
   | Run retired (`retire_driver`) | Drafts, Raw (and EndedRuns above) |
   | Clipboard image saved ready, or its creation failed | Managed |
   | Runtime pins released (`PinLease` drop) | Managed, Raw |
-  | Index space transitions (`select_space`, rebuild start, candidate activation on authorization drain or adoption) | InactiveSpaces |
+  | Index space transitions (`select_space`, rebuild start, candidate activation on authorization drain or adoption, end or cancel of an int8 conversion) | InactiveSpaces |
   | `require_capacity` observing the logical cap | every GC kind (backstop) |
   | Startup (default `Signals`) and explicit `storage collect` | every kind / the category's kinds |
 

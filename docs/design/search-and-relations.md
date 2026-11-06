@@ -20,6 +20,64 @@ provider embeddingはmodel名によらず、HTTP clientで単位L2長へ正規�
 
 distanceは利用中の索引spaceのL2距離で、小さいほど近い。確率や正答率ではなく、異なるembedding model／space間では比較しない。閾値指定は今回導入しない。filterはquery embeddingを生成する前にすべて適用するという意味ではなく、DB内のベクトル順位付け前に適用する。
 
+## Int8 conversion (#253)
+
+`index shrink` converts the active float32 space to a new int8 space without calling an embedding API, so a search reads a quarter of the vector bytes. Explicit, with `--dry-run` as the preview; never automatic. The surface is an operation on size, not a tuning knob: no scale, percentile or precision setting exists, and no model name is consulted. `rebuild --dimensions` is unchanged and independent.
+
+**Scale.** One global multiplier per space, `int8_scale = 127 / max|element|` over all the source vectors at conversion. Stored value = `round(element × int8_scale)` clipped to ±127 (symmetric). The scale is saved in `index_space.int8_scale` when the int8 space is created and never changes. A later element beyond the range saturates: a new embedding or a query is never refused or rescaled for it. See the measurements below for why the simple global maximum was kept.
+
+**Lifecycle.** The existing candidate/active lifecycle, with no new worker, queue or table. The existing index workers run one bounded unit per round on the background lane, alongside and not ahead of paid work. Phases:
+
+1. `scale`: pages of vectors, tracking the largest absolute element. Ends by creating the `candidate` space with the scale, and copying its request mode and query fingerprint from the source.
+2. `copy`: pages in `vec_row_id` order. Each vector is quantized and inserted with the same row ID, with a new job and chunk row and the preview, keeping the source witness, in the unit's transaction. Search on the old space is untouched. Capacity is checked after each unit's copy (see the logical cap below).
+3. Switch, when no chunk is ahead of the cursor and no job of the source is `running` (a claim in flight could still add a vector, and its billed result should not bounce off an inactive space): source `inactive`, candidate takes the source's `active` or `paused` state, active pointer moves, all in one transaction.
+4. `sweep`: pages moving the source's `pending`, `failed` and `split` jobs to the new space; their saved inputs stay valid and no API is called by the move. Inactive spaces are never claimed, so they would otherwise be stranded. Then the record ends and the old space becomes collectable by the existing GC.
+
+**Completeness without a count.** New source vectors take row IDs above the cursor: `adopt_vector_tx` allocates `max(MAX+1, cursor+1)`, because plain `MAX+1` can reuse a deleted row ID behind the cursor. Source deletion already removes vectors in every space, the candidate included. So "no chunk ahead of the cursor" proves the candidate holds every eligible chunk, with an indexed seek rather than a scan. A chunk whose job is not `done` is skipped: search ignores it.
+
+**New state.** `index.shrink.<source space>` in app_meta. Need: resumable progress and the failure record. Bound: one small JSON row; starting refuses while one exists. Owner: the index workers, which read it by key-range seek each round. End of life: removed on completion, on `--cancel`, or when the source stops being active in `scale`/`copy` (`select_space` or a finished rebuild: the later explicit choice wins, the candidate is retired). It also protects the source from `collect_inactive_spaces` until the sweep ends. `index_space.int8_scale` (schema 33): need: the value must stay with the space; bound: one REAL per space; owner and end of life: the space. A column rather than app_meta because the logical-byte triggers need the element size in SQL.
+
+**Failure and interruption.** Every unit commits its work and cursor together, so an interruption loses at most one unit and resumes by itself on the next owner start. A failed unit rolls back, saves `error` in the record and stops without pausing indexing; `index status` shows it. `index shrink` clears it and resumes at the cursor; `--cancel` retires the candidate. Only when the failure cannot even be saved does it reach the existing index worker pause. A rebuild runs independently of a conversion, in either order: a float32 candidate that activates first ends the conversion, failed or not, and retires its candidate; one that activates later replaces the int8 space, as any later choice does. Rebuild always creates float32.
+
+**The logical cap.** A maintenance operation must not stop conversations. At the cap new work is held, and the index worker saves a pause that discards queued jobs, so a conversion must not be what gets there. Each copy unit checks capacity after its copy, so the check sees the unit's uncommitted bytes. A unit that crosses the limit rolls back and saves only the conversion's failure, with no pause and no discarded job; because a partial candidate would still hold the owner next to the cap, it is retired at once and a later run starts over. The check does not reserve room: a conversion may fill the space up to the cap, and conversation writes made after that can still reach it by themselves.
+
+**Search.** vec0 reads a bare JSON query as float32 and refuses it on an int8 column, so the query, insert and exact-fallback SQL wrap the parameter in `vec_int8(...)` for an int8 space and are byte-identical for float32. The rowid-IN KNN of #240 and `vec_distance_L2` work unchanged on int8 in sqlite-vec 0.1.9 (test `pinned_sqlite_vec_supports_int8_knn_rowid_filter_exact_and_delete`). The pinned crate's build defines neither `SQLITE_VEC_ENABLE_NEON` nor AVX, so distance uses the scalar float accumulation on every platform. A query embedding is quantized with the space's scale in both `history search` and history-backed `rag search`.
+
+**`distance`.** L2 between the stored values of the space it came from, as reported by vec0: for int8, in integer steps, so around hundreds where float32 gives around 1. It is not rescaled: a division by the scale would present an estimate as a measured value and would still not be comparable across spaces. The contract is unchanged: it orders results within one space; no thresholds; no comparison across spaces, including before and after a conversion. RAG fusion uses ranks, not distances, so history hits from an int8 space merge unchanged.
+
+**Accounting.** `vector_payload_bytes`, the logical index counter and storage observations use `dimension × 1` for int8. While both spaces exist the counter holds both.
+
+**Not reversible by itself.** Existing GC collects the inactive source after the switch. Returning to float32 needs a paid rebuild; the preview says so.
+
+**Measurements.** Facts from 2026-11-07 on macOS ARM64, release profile, one temporary database holding a copy of 44,038 real 3,072-dimension unit vectors (32,779 distinct); no API call, no conversion of a real database. Query vectors are existing chunks, a proxy: real queries were not measured.
+
+Rank agreement with the float32 top-k, exact duplicates removed (they make top-k ties look like misses), self excluded, 300 queries (mean / worst / 5th percentile):
+
+| Scale | Top 10 | Top 50 | Elements saturated |
+|---|---|---|---|
+| Global max (127/0.2234), adopted | 98.77 / 80 / 90 | 98.92 / 94 / 96 | 0 |
+| Max of 1,024 evenly spaced vectors | 98.80 / 90 / 90 | 98.92 / 94 / 96 | 2e-8 |
+| Max of 256 evenly spaced vectors | 98.60 / 90 / 90 | 98.85 / 96 / 96 | 3.5e-7 |
+| Value at about the 99.99th percentile | 99.07 / 90 / 90 | 99.14 / 96 / 98 | 9e-4 |
+| Value at about the 99th percentile | 98.80 / 90 / 90 | 98.83 / 92 / 96 | 9e-3 |
+| Per-dimension max | 96.23 / 70 / 90 | 96.30 / 86 / 92 | 0 |
+| sqlite-vec `vec_quantize_int8` unit range | 94.90 / 70 / 80 | 95.54 / 84 / 90 | 0 |
+| Truncate to 768 dimensions and normalize (same bytes) | 92.67 / 60 / 80 | 92.16 / 78 / 84 | n/a |
+
+The global scale is right: per-dimension scaling distorts L2 and is worse; percentile variants differ by about the noise of 300 queries (roughly 0.2 points of standard error) and would add a histogram and saturation of existing data for no measured gain. Unit-range quantization does lose resolution as expected, though less than feared. Future vectors: with the scale taken from the oldest half, 0 of 16,390 newer vectors had any saturated element. Queries were not measured for saturation.
+
+| | float32 | int8 |
+|---|---|---|
+| Bytes one KNN scan reads (vector chunks) | 553,648,128 | 138,412,032 (exactly 1/4) |
+| KNN scan, warm cache, k=4096 with rowid IN, 5 queries | 292-396 ms | 189-192 ms |
+| Whole ranking in this fixture, warm cache | 695-756 ms | 623-659 ms |
+
+The fixture has one node per chunk (44,038 nodes), so its non-KNN share is larger than a real index with fewer nodes. Cold-cache time, the main case for reading fewer bytes, was not measured (no way to drop the OS cache here without elevated rights).
+
+Conversion of the 44,038 vectors: 2,757 units, 109 s of unit time. Scale units: median 30 ms, max 78 ms. Copy units (32 vectors): median 49 ms, p99 95 ms, max 128 ms. Most VM steps in one unit: 14,336 of the 131,072 budget. A foreground write every 50 ms during the conversion waited: median 19 ms, p99 54 ms, max 75 ms. These are facts, not bounds. The database grew by 44,192 pages (181 MB) while both spaces existed, more than the 138 MB of vectors because of the job, chunk and preview rows.
+
+Collecting the old space took 137 s before this change and 0.85 s after it: deleting each job checked the `embedding_chunk.job_id` foreign key by scanning every chunk of the remaining space, which is quadratic when two large spaces coexist. Migration 33 adds the index `chunks_job`. This also speeds up collection after any rebuild. Collection still runs as one transaction; on a busy owner a foreground request past the step budget defers it, and it runs again at the next mark, startup or `storage collect`.
+
 ## provenanceと区間
 
 検索結果の従来のnode_id/excerpt/distance/spansを維持し、基本provenanceとして保存kind・作成時刻・source_revisionを返す。原文getでも同じprovenanceを取得できる。Turn／Run／生成元Threadを確定できる場合はIDを返し、不明なものへ仮IDや最新Runを付けない。生成元の任意IDは記録されたTurnとのjoinで確定できる範囲に限る。共有nodeの生成元と採用先を混同しない。Thread指定時は `thread_scope: {thread_id, on_current_path}` を各hitに返し、現在pathに採用されたnodeと、圧縮元として対象になったnodeを区別する。Thread未指定時はこのfieldを省略し、全体検索から採用先を推定しない。nodeに存在しない更新時刻は捏造しない。

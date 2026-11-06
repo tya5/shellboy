@@ -92,7 +92,8 @@ ThreadList,
     Status,
     MessageCancel,
     IndexPreview,
-    IndexProbe;
+    IndexProbe,
+    IndexShrink;
     Exec,ConfigInit,ConfigCheck,DocsList,DocsGet,DocsSearch,RagInit,RagSourceAdd,RagSourceList,RagSourceRemove,RagIndex,RagIngest,RagStatus,RagInspect,RagSearch,RagGet,
 }
 /// Display-field references; not command routing or a public protocol target.
@@ -1858,6 +1859,18 @@ impl Form {
                     }))
                 },
             ),
+            OpKind::IndexShrink => (
+                vec![
+                    f("dry_run", "実行対象だけを確認", "true".into(), Boolean),
+                    f("cancel", "実行中の変換をやめる", "false".into(), Boolean),
+                ],
+                |form, _| {
+                    Ok(Command::IndexShrink(IndexShrinkArgs {
+                        dry_run: form.boolean("dry_run")?,
+                        cancel: form.boolean("cancel")?,
+                    }))
+                },
+            ),
             OpKind::IndexBackfill => (index_fields(operation), |form, _cwd| {
                 Ok(Command::IndexBackfill(form.index_args()?))
             }),
@@ -2620,6 +2633,11 @@ mod tests {
                 json!({"scope":"threads","thread_ids":[id(1)]}),
             ),
             (OpKind::IndexProbe, "index.probe", json!({})),
+            (
+                OpKind::IndexShrink,
+                "index.shrink",
+                json!({"dry_run":true,"cancel":false}),
+            ),
         ];
         assert_eq!(
             OpKind::OWNER,
@@ -2652,6 +2670,7 @@ mod tests {
             "index.retry",
             "index.rebuild",
             "index.probe",
+            "index.shrink",
             "storage.collect",
         ]);
         let mut names = std::collections::HashSet::new();
@@ -2704,6 +2723,7 @@ mod tests {
                         | "index.status"
                         | "index.preview"
                         | "index.probe"
+                        | "index.shrink"
                         | "index.backfill"
                         | "index.retry"
                         | "index.rebuild"
@@ -2731,6 +2751,7 @@ mod tests {
                         | "index.retry"
                         | "index.preview"
                         | "index.probe"
+                        | "index.shrink"
                         | "storage.collect"
                         | "storage.status"
                         | "shell.get"
@@ -3362,10 +3383,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 64);
+        assert_eq!(rows.len(), 65);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            64
+            65
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3377,7 +3398,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 64);
+        assert_eq!(operations.rows().len(), 65);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

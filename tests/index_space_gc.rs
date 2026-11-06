@@ -39,7 +39,7 @@ impl Fixture {
             let id = format!("space-{number:03}");
             let table = format!("shellboy_vec_{number:032x}");
             db.execute_batch(&format!("CREATE VIRTUAL TABLE {table} USING vec0(embedding float[2]); INSERT INTO {table}(rowid,embedding)VALUES(1,'[1,2]');"))?;
-            db.execute("INSERT INTO index_space VALUES(?1,'connection','model',2,'splitter',?2,?3)", params![id,state,table])?;
+            db.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES(?1,'connection','model',2,'splitter',?2,?3)", params![id,state,table])?;
             db.execute("INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES(?1,?1,'source',0,'message','hash',0,1,?2)", params![id,if running {"running"} else {"done"}])?;
             db.execute("INSERT INTO embedding_chunk VALUES(?1,?1,?1,'source',0,0,1,'hash',1)", [&id])?;
             for (key,value) in [

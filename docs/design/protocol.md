@@ -263,10 +263,20 @@ other IndexArgs commands reject it. There is no dimension configuration default.
 Index status exposes saved `paused_at`/`pause_id`, up to 200 `spaces` with
 `spaces_total`/`spaces_truncated`, and the newest 32 `probes`. Each space carries
 its connection/model, observed `dimension`, optional `requested_dimensions`,
-segment count, state/selection and `vector_payload_bytes`. Payload bytes mean
-float32 values only, not database/WAL or reclaimable storage. Missing historical
+segment count, state/selection, `vector_payload_bytes` and, for an int8 space,
+`int8_scale`. Payload bytes mean vector values only (4 bytes per element for float32,
+1 for int8), not database/WAL or reclaimable storage. Missing historical
 pause time remains unknown. Probe observations are per endpoint/model/request
 mode, not a provider capability catalogue. See [index operations](index-operations.md).
+
+## Index shrink (#253)
+
+`index.shrink` is a cancellable runtime command with ordinary operation receipts and optional
+`dry_run` and `cancel` booleans (both together are refused). It never sends an embedding
+request. Index status adds an optional `shrink` (source_space, target_space, phase, source_segments,
+target_segments, started_at, error) and an optional `int8_scale` per space; `vector_payload_bytes`
+follows the element size. Additive; protocol version unchanged. See
+[search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 

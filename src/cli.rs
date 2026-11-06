@@ -322,6 +322,11 @@ pub enum IndexCommand {
     Rebuild(IndexRebuildOptions),
     /// Send one fixed embedding input (may incur charges) and retain its result.
     Probe(IndexProbeOptions),
+    /// Shrink the active index to a quarter of its vector bytes without any API call.
+    #[command(
+        after_help = "Explicit only; nothing converts automatically. Preview first, then run:\n  shellboy index shrink --dry-run\n  shellboy index shrink\n  shellboy index status   # progress in `shrink`, result in `spaces`\n\nConverts the stored vectors of the active index to 8-bit values (int8) with a scale taken from those vectors. No embedding API is called and no history is read. Search keeps using the old index until the new one is complete; a failure or `--cancel` leaves the old one in place, and running `index shrink` again resumes. Afterwards rank order changes slightly, `distance` has a different scale, new embeddings and search queries use the same fixed scale (larger values saturate), and the old index is removed by storage collection, so returning to full precision requires a paid `index rebuild`. Unlike `index rebuild`, it costs nothing and keeps the dimension. Guide: shellboy docs get --id shellboy/history-and-search"
+    )]
+    Shrink(IndexShrinkOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum StorageCommand {
@@ -863,6 +868,15 @@ pub struct IndexRebuildOptions {
     pub dimensions: Option<usize>,
 }
 #[derive(Debug, Clone, Args)]
+pub struct IndexShrinkOptions {
+    /// Report the effect and sizes without changing anything.
+    #[arg(long, conflicts_with = "cancel")]
+    pub dry_run: bool,
+    /// Stop a running conversion and discard its partial result.
+    #[arg(long)]
+    pub cancel: bool,
+}
+#[derive(Debug, Clone, Args)]
 pub struct IndexProbeOptions {
     #[arg(long)]
     pub dimensions: Option<usize>,
@@ -1274,6 +1288,10 @@ impl Cli {
                 IndexCommand::Backfill(a) => C::IndexBackfill(a.into()),
                 IndexCommand::Retry(a) => C::IndexRetry(a.into()),
                 IndexCommand::Rebuild(a) => C::IndexRebuild(a.into()),
+                IndexCommand::Shrink(a) => C::IndexShrink(wire::IndexShrinkArgs {
+                    dry_run: a.dry_run,
+                    cancel: a.cancel,
+                }),
                 IndexCommand::Probe(a) => C::IndexProbe(wire::IndexProbeArgs {
                     dimensions: a.dimensions,
                 }),

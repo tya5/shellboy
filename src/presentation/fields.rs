@@ -86,6 +86,7 @@ fn field_name(key: &str) -> &str {
         "pause_kind" => "停止理由",
         "requested_dimensions" => "要求次元数",
         "dimension" => "実測次元数",
+        "int8_scale" => "8ビット化の倍率",
         "vector_payload_bytes" => "ベクトル本体（bytes）",
         "spaces_total" => "保持空間数",
         "spaces_truncated" => "空間一覧の省略あり",

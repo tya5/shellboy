@@ -122,6 +122,7 @@ impl Form {
             "excludes" => FieldId::Excludes,
             "clear_excludes" => FieldId::ClearExcludes,
             "dry_run" => FieldId::DryRun,
+            "cancel" => FieldId::ShrinkCancel,
             "exclude_node" => FieldId::ExcludeNode,
             "search_mode" => FieldId::SearchMode,
             "ingest_kind" => FieldId::IngestKind,
@@ -652,6 +653,13 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "索引 · 接続と次元を試す",
             "Index · Probe connection and dimensions"
         ),
+        OperationId::IndexShrink => {
+            local!(
+                language,
+                "索引 · 小さくする",
+                "Index · Shrink without API calls"
+            )
+        }
         OperationId::StorageStatus => local!(language, "保存 · 状態", "Storage · Status"),
         OperationId::StorageCollect => local!(language, "保存 · 回収", "Storage · Collect"),
         OperationId::Exec => local!(
@@ -697,6 +705,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
 
 fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -> &'static str {
     match id {
+        OperationId::IndexShrink => local!(
+            language,
+            "選択中の索引をAPIを使わず8ビットへ変換し、検索で読むベクトル量を約4分の1にします。完成まで古い索引で検索を続けます。完全な精度へ戻すには有料の作り直しが必要です。",
+            "Convert the active index to 8-bit values without any API call, so a search reads about a quarter of the vector bytes. Search keeps using the old index until the new one is complete. Returning to full precision requires a paid rebuild."
+        ),
         OperationId::CompactList => local!(
             language,
             "保存された圧縮の履歴を期間で絞って表示します。新しい圧縮は要求しません。",
@@ -1022,6 +1035,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
 
 fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
     match id {
+        FieldId::ShrinkCancel => local!(
+            language,
+            "実行中の変換をやめる",
+            "Stop the running conversion"
+        ),
         FieldId::SettlementStates => local!(
             language,
             "会話の観測状態",
@@ -1184,6 +1202,11 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
 
 fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
     match id {
+        FieldId::ShrinkCancel => local!(
+            language,
+            "途中の結果を捨て、古い索引をそのまま使い続けます。",
+            "Discard the partial result and keep using the old index."
+        ),
         FieldId::SettlementStates => local!(
             language,
             "thread_settledのstatesを空白で区切ります。フォーム初期値はcompleted recovery_wait failed stoppedです。CLIではconditions-jsonのstates配列で明示します。",

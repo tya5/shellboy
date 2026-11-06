@@ -127,13 +127,15 @@ async fn all_public_cli_operations_map_to_shared_typed_contracts() {
         (&["index", "preview", "--scope", "all"], "index.preview"),
         (&["index", "retry"], "index.retry"),
         (&["index", "rebuild", "--thread", "t"], "index.rebuild"),
+        (&["index", "shrink", "--dry-run"], "index.shrink"),
+        (&["index", "shrink", "--cancel"], "index.shrink"),
         (&["storage", "status"], "storage.status"),
         (
             &["storage", "collect", "--category", "raw"],
             "storage.collect",
         ),
     ];
-    assert_eq!(cases.len(), 46);
+    assert_eq!(cases.len(), 48);
     for (args, name) in cases {
         let command = convert(args).await;
         assert_eq!(serde_json::to_value(command).unwrap()["command"], *name);
@@ -430,6 +432,13 @@ async fn invalid_flags_limits_wait_json_and_unselected_backfill_never_become_ope
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         assert!(!error.message.contains("hidden"));
     }
+}
+
+#[test]
+fn index_shrink_flags_map_to_one_operation_and_exclude_each_other() {
+    let parsed = Cli::try_parse_from(["shellboy", "index", "shrink", "--dry-run", "--cancel"]);
+    assert!(parsed.is_err(), "--dry-run conflicts with --cancel");
+    assert!(Cli::try_parse_from(["shellboy", "index", "shrink"]).is_ok());
 }
 
 #[test]

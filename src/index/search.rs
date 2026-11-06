@@ -190,7 +190,8 @@ impl IndexService {
             .into_iter()
             .next()
             .expect("one validated query vector");
-        let query = serde_json::to_string(&vector)
+        let query = space
+            .encode_vector(&vector)
             .map_err(|_| err(ErrorCode::InvalidState, "Cannot encode query vector"))?;
         reader::rank(
             self.database.path().to_path_buf(),
@@ -206,7 +207,7 @@ impl IndexService {
 // vec0 accepts rowid-IN candidate sets (sqlite-vec 0.1.9). Validate source
 // witnesses and absolute timestamps before handing candidates to KNN. The ID
 // list is linear in eligible chunks; no vectors/previews are loaded into Rust.
-fn filtered_hits(
+pub(super) fn filtered_hits(
     db: &Connection,
     space: &Space,
     query: &str,
@@ -344,7 +345,7 @@ fn ranked_hits(
     let sql = format!("SELECT c.source_node_id,c.span_start,c.span_end,j.body_kind,v.distance,m.value,c.source_revision,c.content_hash
         FROM {} v JOIN embedding_chunk c ON c.vec_row_id=v.rowid AND c.space_id=?1 JOIN embedding_job j ON j.id=c.job_id
         LEFT JOIN app_meta m ON m.key=?5||c.id
-        WHERE v.embedding MATCH ?2 AND k=?3 AND v.rowid IN (SELECT value FROM json_each(?4)) ORDER BY v.distance",space.table);
+        WHERE v.embedding MATCH {} AND k=?3 AND v.rowid IN (SELECT value FROM json_each(?4)) ORDER BY v.distance",space.table,space.vector_sql("?2"));
     // One vec0 scan of the largest allowed k (#240): every scan reads the whole
     // chunk table, so the old k*2 re-scans dominated. The former doubling
     // schedule is replayed over the ordered rows by `pick_nodes`.
@@ -479,7 +480,8 @@ pub(crate) fn rag_hits(
                 "History embedding space is unavailable",
             )
         })?;
-    let query = serde_json::to_string(vector)
+    let query = space
+        .encode_vector(vector)
         .map_err(|_| err(ErrorCode::InvalidArgument, "Invalid query embedding"))?;
     filtered_hits(
         db,
@@ -600,11 +602,11 @@ fn exact_filtered_hits(
     candidates: &str,
     cancel: Option<&CancellationToken>,
 ) -> Result<Vec<IndexHit>, ApiError> {
-    let sql = format!("SELECT c.source_node_id,c.span_start,c.span_end,j.body_kind,vec_distance_L2(v.embedding,?2) AS distance,m.value,c.source_revision,c.content_hash
+    let sql = format!("SELECT c.source_node_id,c.span_start,c.span_end,j.body_kind,vec_distance_L2(v.embedding,{}) AS distance,m.value,c.source_revision,c.content_hash
         FROM embedding_chunk c JOIN {} v ON v.rowid=c.vec_row_id JOIN embedding_job j ON j.id=c.job_id
         LEFT JOIN app_meta m ON m.key=?4||c.id
         WHERE c.space_id=?1 AND c.vec_row_id IN (SELECT value FROM json_each(?3))
-        ORDER BY distance,c.source_node_id,c.span_start,c.span_end,j.body_kind,c.id",space.table);
+        ORDER BY distance,c.source_node_id,c.span_start,c.span_end,j.body_kind,c.id",space.vector_sql("?2"),space.table);
     let mut statement = db.prepare(&sql).map_err(sql_error)?;
     let mut rows = statement
         .query(params![

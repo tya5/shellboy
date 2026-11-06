@@ -63,6 +63,10 @@ column and two partial list indexes; archive is organization metadata only. See
 Re-parenting (#222 stage 2, no schema change) lets `thread set --parent` move a Thread under another live
 Thread or detach it; live Run ownership is never transferred. See the same documents.
 
+Conversation schema33 (#253) adds the nullable `index_space.int8_scale` column;
+logical index bytes follow the element size. Explicit, API-free conversion of the
+active space to int8: [search and relations](search-and-relations.md#int8-conversion-253).
+
 ## History GC diagnostics (#225)
 
 The DB footer links to F1, where a bounded in-memory snapshot shows history GC

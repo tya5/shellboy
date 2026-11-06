@@ -84,8 +84,12 @@ generated vector-table identifiers before DDL. Drop vectors and associated
 chunks/jobs/input/preview/query/request-mode metadata in the same transaction;
 rollback retains the whole batch. Report `inactive_index_spaces_collected`
 separately from reclaimed source vectors. This does not delete conversation
-originals, promise physical SQLite/WAL shrink or automatically collect a space
-when switching. See [index operations](index-operations.md).
+originals or promise physical SQLite/WAL shrink. Space transitions mark this work, so
+maintenance also collects an inactive space without a command soon after a switch
+([storage](storage.md)); an old space is not kept for a later return. See
+[index operations](index-operations.md). The source of a running
+int8 conversion is also protected, by its `index.shrink.<space>` record, until its
+unfinished jobs have moved ([#253](search-and-relations.md#int8-conversion-253)).
 
 
 ## Finished submission copies (#60)

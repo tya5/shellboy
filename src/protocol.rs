@@ -905,6 +905,8 @@ pub enum Command {
     IndexRebuild(IndexArgs),
     #[serde(rename = "index.probe")]
     IndexProbe(IndexProbeArgs),
+    #[serde(rename = "index.shrink")]
+    IndexShrink(IndexShrinkArgs),
     #[serde(rename = "storage.status")]
     StorageStatus(StorageArgs),
     #[serde(rename = "storage.collect")]
@@ -1185,8 +1187,18 @@ states!(ManagedFileState {
     Failed
 });
 args!(#[derive(Default)] IndexProbeArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize> });
-args!(IndexStatus { #[serde(default)] auto_history: bool, auto_kinds: Vec<String>, #[serde(default)] held_auto_history: u64, #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation> });
-args!(IndexSpaceStatus { space_id: String, connection: String, model: String, dimension: usize, requested_dimensions: Option<usize>, segments: u64, vector_payload_bytes: u64, state: String, selected: bool });
+args!(IndexStatus { #[serde(default)] auto_history: bool, auto_kinds: Vec<String>, #[serde(default)] held_auto_history: u64, #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation>, #[serde(default, skip_serializing_if = "Option::is_none")] shrink: Option<IndexShrinkStatus> });
+args!(IndexSpaceStatus { space_id: String, connection: String, model: String, dimension: usize, requested_dimensions: Option<usize>, segments: u64, vector_payload_bytes: u64, state: String, selected: bool, #[serde(default, skip_serializing_if = "Option::is_none")] int8_scale: Option<f64> });
+args!(IndexShrinkStatus { source_space: String, target_space: Option<String>, phase: String, source_segments: u64, target_segments: u64, started_at: String, error: Option<Value> });
+args!(
+    #[derive(Default)]
+    IndexShrinkArgs {
+        #[serde(default)]
+        dry_run: bool,
+        #[serde(default)]
+        cancel: bool
+    }
+);
 args!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
 args!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64> });
 args!(Accepted { accepted: bool });

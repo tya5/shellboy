@@ -70,6 +70,12 @@ all valid members in one transaction with individual source/space witness checks
 The configured embedding request_timeout_ms applies once to the whole request;
 query embeddings remain single-input.
 
+## Explicit int8 conversion (#253)
+
+`index shrink` re-encodes the active space without any API call; design in
+[search and relations](search-and-relations.md#int8-conversion-253). A candidate rebuild
+always creates a float32 space. Dimension changes stay with `rebuild --dimensions`.
+
 ## Explicit dimension operation
 
 IndexArgs gains optional dimensions, valid only for rebuild; IndexProbeArgs has

@@ -482,7 +482,7 @@ async fn retry_preview_matches_current_targets_and_reports_unread_admissions() {
         let profile = splitter.strip_prefix("unicode-paragraph-v1:").unwrap();
         db.execute("UPDATE embedding_job SET state='failed' WHERE source_node_id IN ('alpha','beta')", [])?;
         for (id,state,job) in [("retired", "inactive", "retired-job"), ("candidate", "candidate", "candidate-job")] {
-            db.execute("INSERT INTO index_space SELECT ?1,profile_id,model_id,dimension,splitter_version,?2,?3 FROM index_space WHERE id=?4", params![id,state,format!("unused-{id}"),active])?;
+            db.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) SELECT ?1,profile_id,model_id,dimension,splitter_version,?2,?3 FROM index_space WHERE id=?4", params![id,state,format!("unused-{id}"),active])?;
             db.execute("INSERT INTO embedding_job SELECT ?1,?2,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,'failed',attempts,error_json,next_attempt_at,authorized_watermark FROM embedding_job WHERE source_node_id='alpha' AND space_id=?3", params![job,id,active])?;
             db.execute("INSERT INTO app_meta SELECT ?1,value FROM app_meta WHERE key=(SELECT 'index.input.'||id FROM embedding_job WHERE source_node_id='alpha' AND space_id=?2)", params![format!("index.input.{job}"),active])?;
         }

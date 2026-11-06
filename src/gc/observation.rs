@@ -230,22 +230,23 @@ pub(crate) fn read_tx(
             examined,
         });
     }
-    let mut statement=db.prepare("SELECT (SELECT dimension FROM index_space s WHERE s.id=c.space_id) FROM embedding_chunk c ORDER BY c.rowid LIMIT ?1").map_err(sql_error)?;
+    let mut statement=db.prepare("SELECT (SELECT dimension FROM index_space s WHERE s.id=c.space_id),(SELECT CASE WHEN s.int8_scale IS NULL THEN 4 ELSE 1 END FROM index_space s WHERE s.id=c.space_id) FROM embedding_chunk c ORDER BY c.rowid LIMIT ?1").map_err(sql_error)?;
     let dimensions = statement
         .query_map([(limits.rows_per_index + 1) as i64], |row| {
-            row.get::<_, Option<i64>>(0)
+            Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, Option<i64>>(1)?))
         })
         .map_err(sql_error)?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(sql_error)?;
     let examined = dimensions.len();
-    let complete = examined <= limits.rows_per_index && dimensions.iter().all(Option::is_some);
+    let complete =
+        examined <= limits.rows_per_index && dimensions.iter().all(|row| row.0.is_some());
     let bytes = dimensions
         .into_iter()
         .take(limits.rows_per_index)
-        .map(|dimension| {
+        .map(|(dimension, element_bytes)| {
             nonnegative(dimension).and_then(|n| {
-                n.checked_mul(4)
+                n.checked_mul(element_bytes.unwrap_or(4) as u64)
                     .ok_or_else(|| crate::storage::save_error("vector byte count overflow"))
             })
         })
@@ -814,7 +815,7 @@ mod tests {
     #[test]
     fn small_complete_prefixes_match_full_cli_totals_and_reclaimable_eligibility() {
         let db = db();
-        db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('n','message','now','{}');INSERT INTO app_meta(key,value)VALUES('revisit.t','saved revisit'),('index.fixture','saved index');INSERT INTO managed_file(id,absolute_path,state,raw_size,created_at)VALUES('f','/f','ready',17,'now');INSERT INTO index_space VALUES('s','p','m',3,'v','active','v');INSERT INTO embedding_chunk VALUES('c','j','s','n',0,0,1,'hash',1);").unwrap();
+        db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('n','message','now','{}');INSERT INTO app_meta(key,value)VALUES('revisit.t','saved revisit'),('index.fixture','saved index');INSERT INTO managed_file(id,absolute_path,state,raw_size,created_at)VALUES('f','/f','ready',17,'now');INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('s','p','m',3,'v','active','v');INSERT INTO embedding_chunk VALUES('c','j','s','n',0,0,1,'hash',1);").unwrap();
         execution(&db, "expired", "exited");
         execution(&db, "pinned", "exited");
         execution(&db, "live", "running");
@@ -1127,7 +1128,7 @@ mod tests {
     #[test]
     fn saved_vector_sum_overflow_is_never_an_exact_logical_total() {
         let db = db();
-        db.execute_batch("INSERT INTO index_space VALUES('huge','p','m',4000000000000000000,'v','active','v');INSERT INTO embedding_chunk VALUES('a','j','huge','n',0,0,1,'h',1),('b','j','huge','n',0,0,1,'h',2);").unwrap();
+        db.execute_batch("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('huge','p','m',4000000000000000000,'v','active','v');INSERT INTO embedding_chunk VALUES('a','j','huge','n',0,0,1,'h',1),('b','j','huge','n',0,0,1,'h',2);").unwrap();
         let result =
             prepare(read_tx(&db, Limits::default(), &Retention::default(), Utc::now()).unwrap());
         assert_eq!(result.index.bytes, u64::MAX);

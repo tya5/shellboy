@@ -216,7 +216,7 @@ A pause notice in conversation history is a saved **stop record**, not a current
 
 ### Inspecting and explicitly changing embedding dimensions
 
-Read `shellboy index status` first. Each retained space reports its connection/model, measured `dimension`, optional `requested_dimensions`, resident segment count and `vector_payload_bytes`. The latter is only `segments × dimension × 4` bytes of float32 vector payload. It is not the SQLite file, WAL, allocation, reclaimable capacity, or an exact disk-space saving. Candidate rebuilds temporarily coexist with the active space. Old vectors are kept until you ask for them to be removed (paid indexes are never collected automatically); a smaller dimension may reduce search quality.
+Read `shellboy index status` first. Each retained space reports its connection/model, measured `dimension`, optional `requested_dimensions`, resident segment count and `vector_payload_bytes`. The latter is only `segments × dimension × 4` bytes of float32 vector payload (`× 1` for an int8 space, see [Shrinking the index](#shrinking-the-index-without-api-calls)). It is not the SQLite file, WAL, allocation, reclaimable capacity, or an exact disk-space saving. Candidate rebuilds temporarily coexist with the active space. Old vectors are kept until you ask for them to be removed (paid indexes are never collected automatically); a smaller dimension may reduce search quality.
 
 If the user authorizes a support test, run one explicit probe:
 
@@ -237,6 +237,35 @@ shellboy index status
 The dimension is frozen for the candidate and subsequent active-space ingestion/query requests; returned vector lengths must match. The first real authorized source validates the candidate without an extra hidden probe. Refusal stops that candidate, preserving the old active vectors. Rebuild without `--dimensions` retains the current matching active space's request mode; a changed endpoint/model defaults to native mode. Status includes up to 200 retained spaces and the newest 32 probe observations, so inspect total/truncation fields instead of assuming the lists are exhaustive.
 
 Every embedding the provider returns (indexed text and search queries, for every model) is scaled to unit L2 length before it is stored or compared, so L2 ranking follows semantic closeness at any dimension and any vector length. This matters when you reduce dimensions: Gemini `gemini-embedding-001` returns unit-length vectors only at 3,072 dimensions, and reduced sizes (768/1,536) are not normalized by the provider. Existing unit-length spaces (such as the 3,072-dimension one) behave identically and need no rebuild. A zero-length or non-finite vector is a failure, never repaired silently. A space built before this change at a reduced dimension holds unnormalized vectors, so rebuild it to benefit.
+
+### Shrinking the index without API calls
+
+`index shrink` converts the active index to 8-bit values (int8), so a search reads about a quarter of the vector bytes. It calls no embedding API and reads no history: it re-encodes the vectors already saved. It never runs by itself.
+
+```sh
+shellboy index shrink --dry-run   # effect and sizes; changes nothing
+shellboy index shrink             # start, or resume after a failure
+shellboy index status             # progress in `shrink`, result in `spaces`
+shellboy index shrink --cancel    # stop and keep the old index
+```
+
+| | `index shrink` | `index rebuild` |
+|---|---|---|
+| Embedding API | None, free | Every segment, charged |
+| Source text | Not read | Re-read and re-split |
+| Model, dimension, coverage | Unchanged | Can change |
+| Precision | int8 | float32 |
+
+What to expect:
+
+- Search keeps using the old index until the new one is complete. A failure, `--cancel`, a restart or reaching the logical data limit leaves the old one in place, without pausing indexing or holding new work; a restart continues where it stopped, and after a failure `index shrink` continues (after the data limit it starts over, because the partial index was given back to keep room for conversations). While it runs, the database holds both, so it needs a quarter of the vector bytes extra (`temporary_extra_vector_payload_bytes` in the preview), plus its bookkeeping rows.
+- Afterwards the old index is removed by storage collection, automatically or with `storage collect --category index`. Returning to full precision then needs a paid `index rebuild`. The database file does not shrink by itself; freed pages are reused, and `storage vacuum` returns them explicitly.
+- The order of results changes slightly. On one real index of 32,779 distinct segments, 98.8% of a search's top 10 stayed the same when segments themselves stood in for queries; real queries were not measured. By the time you can search the new index, the old one is about to be collected or already gone, so a comparison afterwards cannot fall back on it. For a first conversion of a real index, copy the database while the owner is stopped, then check real searches you care about straight after the switch.
+- New text and search queries are converted with the same fixed factor, chosen from your vectors when the conversion ran and shown as `int8_scale` in `index status`. An element beyond that range is clipped to ±127 (saturation) rather than failing. On that same index none was clipped when the factor came from the oldest half of the vectors and was applied to the newer half.
+- `distance` is the L2 distance between the stored integers, so values are around hundreds instead of around 1. As before, it only orders results within one space. Do not compare it across spaces or with a threshold.
+- A later `index rebuild` builds a float32 index again; shrink it again if you want.
+
+`vector_payload_bytes` in `index status` is `segments × dimension × 1` for an int8 space.
 
 IndexSpaces are separated by connection, embedding model, observed dimensions, and related settings. Configuration changes do not silently delete old spaces; failed rebuild candidates preserve the old active space. Historical content needs explicit backfill/rebuild to enter the new space. Automatically detecting a changed model behind an alias is not guaranteed.
 

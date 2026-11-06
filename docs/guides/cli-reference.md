@@ -257,6 +257,18 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned descendants without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
 
+### Index size
+
+`shellboy index shrink [--dry-run | --cancel]` converts the active index to int8 from its saved vectors. No embedding API call, explicit only. See [Shrinking the index](history-and-search.md#shrinking-the-index-without-api-calls).
+
+| Form | Main result and conditions |
+|---|---|
+| `index shrink --dry-run` | Changes nothing. `state` (`ready`, `running`, `failed`, `already_int8`, `empty`, `no_active_index`), space_id/connection/model/dimension/int8_scale, segments, vector_payload_bytes, vector_payload_bytes_after, temporary_extra_vector_payload_bytes, unfinished_jobs_moved, embedding_requests (always 0), conversion, effects |
+| `index shrink` | Accepted with `state` `started`, `resumed` (a saved failure was cleared) or `running`; refused with `invalid_state` for an already int8 or empty index or no active index. The work continues in the background; follow `shrink` in `index status` (phase `scale`, `copy`, `sweep`, source_segments, target_segments, error; `error.code` `storage_limit` means it reached the logical limit, gave its partial index back, paused nothing, and starts over when run again) |
+| `index shrink --cancel` | Stops before the switch, keeps the old index, retires the partial one. Refused when nothing runs or after the switch |
+
+Each space in `index status` adds `int8_scale` when it is int8: stored value = round(element × int8_scale), clipped to ±127. `vector_payload_bytes` is then `segments × dimension × 1`. `distance` is L2 between stored values within that space, not comparable across spaces.
+
 ### Storage (2 operations, plus standalone `check` and `vacuum`)
 
 Common flag: `[--category raw|managed-images|history|index|all]`. Omitted collect uses all; status provides overall information.

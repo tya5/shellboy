@@ -71,7 +71,7 @@ named_jobs! {
     AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentRemove => attachment_remove,
     Compact => compact, ContextEdit => context_edit, IndexStatus => index_status,
     IndexPreview => index_preview, IndexBackfill => index_backfill, IndexRetry => index_retry,
-    IndexRebuild => index_rebuild, IndexProbe => index_probe, StorageStatus => storage_status,
+    IndexRebuild => index_rebuild, IndexProbe => index_probe, IndexShrink => index_shrink, StorageStatus => storage_status,
     StorageCollect => storage_collect,
 }
 
@@ -158,6 +158,7 @@ impl Kind {
             | Kind::IndexRetry
             | Kind::IndexRebuild
             | Kind::IndexProbe
+            | Kind::IndexShrink
             | Kind::StorageStatus
             | Kind::StorageCollect => Runtime,
         }
@@ -194,7 +195,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            52,
+            53,
             "classify new kinds and update this ratchet"
         );
     }

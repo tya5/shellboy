@@ -11,6 +11,28 @@ pub(super) struct Space {
     pub(super) splitter: String,
     pub(super) state: String,
     pub(super) table: String,
+    /// `None`: float32. `Some`: int8 with this fixed multiplier (#253).
+    pub(super) int8_scale: Option<f64>,
+}
+impl Space {
+    /// SQL for one bound vector of this space's element type. vec0 reads a bare
+    /// JSON or blob parameter as float32, so int8 needs the subtype function.
+    pub(super) fn vector_sql(&self, parameter: &str) -> String {
+        match self.int8_scale {
+            Some(_) => format!("vec_int8({parameter})"),
+            None => parameter.to_owned(),
+        }
+    }
+    /// The JSON value of one embedding as this space stores and compares it.
+    pub(super) fn encode_vector(&self, vector: &[f32]) -> Result<String, serde_json::Error> {
+        match self.int8_scale {
+            Some(scale) => serde_json::to_string(&shrink::quantize(vector, scale)),
+            None => serde_json::to_string(vector),
+        }
+    }
+    pub(super) fn element_bytes(&self) -> u64 {
+        if self.int8_scale.is_some() { 1 } else { 4 }
+    }
 }
 pub(super) use crate::history::RawWitness;
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -110,7 +132,7 @@ pub(super) fn valid_table(table: &str) -> Result<(), StorageError> {
     Ok(())
 }
 pub(super) fn load_space(db: &Connection, id: &str) -> Result<Option<Space>, StorageError> {
-    let index_space_sql = "SELECT id,profile_id,model_id,dimension,splitter_version,state,vec_table_name FROM index_space WHERE id=?1";
+    let index_space_sql = "SELECT id,profile_id,model_id,dimension,splitter_version,state,vec_table_name,int8_scale FROM index_space WHERE id=?1";
     db.query_row(index_space_sql, [id], |row| {
         Ok(Space {
             id: row.get(0)?,
@@ -122,6 +144,7 @@ pub(super) fn load_space(db: &Connection, id: &str) -> Result<Option<Space>, Sto
             splitter: row.get(4)?,
             state: row.get(5)?,
             table: row.get(6)?,
+            int8_scale: row.get(7)?,
         })
     })
     .optional()
@@ -244,6 +267,7 @@ pub(super) fn ensure_space(
         splitter,
         state: state.into(),
         table,
+        int8_scale: None,
     })
 }
 pub(super) fn witness_valid(
@@ -302,9 +326,15 @@ pub(super) fn adopt_vector_tx(
         [&space.id],
         |row| row.get(0),
     )?;
-    let encoded = serde_json::to_string(vector).map_err(|_| serde_error())?;
+    // MAX+1 can reuse a deleted row ID behind a running conversion's cursor.
+    let row = row.max(shrink::first_unread_row(tx, &space.id)?);
+    let encoded = space.encode_vector(vector).map_err(|_| serde_error())?;
     tx.execute(
-        &format!("INSERT INTO {}(rowid,embedding)VALUES(?1,?2)", space.table),
+        &format!(
+            "INSERT INTO {}(rowid,embedding)VALUES(?1,{})",
+            space.table,
+            space.vector_sql("?2")
+        ),
         params![row, encoded],
     )?;
     let chunk = id();

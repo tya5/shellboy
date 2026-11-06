@@ -39,7 +39,7 @@ pub(super) fn enrich(
         )? as u64;
         let bytes = count
             .checked_mul(space.dimension as u64)
-            .and_then(|n| n.checked_mul(4))
+            .and_then(|n| n.checked_mul(space.element_bytes()))
             .ok_or_else(serde_error)?;
         status.spaces.push(IndexSpaceStatus {
             space_id: id.clone(),
@@ -51,8 +51,10 @@ pub(super) fn enrich(
             vector_payload_bytes: bytes,
             state: space.state,
             selected: status.space_id.as_deref() == Some(&id),
+            int8_scale: space.int8_scale,
         });
     }
+    status.shrink = shrink::status(db)?;
     let mut q=db.prepare("SELECT value FROM app_meta WHERE key LIKE 'index.probe.%' ORDER BY json_extract(value,'$.checked_at') DESC,key DESC LIMIT 32")?;
     for value in q.query_map([], |r| r.get::<_, String>(0))? {
         status

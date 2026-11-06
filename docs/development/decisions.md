@@ -81,6 +81,21 @@ spill nodes created by compaction were never authorized. Chosen:
 - A summary or spill stored by compaction is registered at adoption but does not wake the index
   worker; the record is drained at the next wake (any later message, tool result or reply) or
   at owner start. Accepted: no extra wiring for a small, delay-tolerant item.
+## D-253: Int8 conversion as an explicit operation with a global scale (#253, 2026-11-07)
+
+Measured table and lifecycle: [search and relations](../design/search-and-relations.md#int8-conversion-253). Choices, with the ones of weaker confidence marked:
+
+- Surface: `index shrink [--dry-run|--cancel]`, an operation on size. No scale, percentile or precision setting exists. "Shrink" avoids "compact", which means conversation compaction here.
+- Scale: global `127/max|element|` over the full source, saved with the space. Percentile and sample scales were within noise; per-dimension was worse. Full-pass max costs one more read pass (41 s of 109 s on 44,038 vectors) and gives "no existing vector saturates". Weak: one outlier vector would coarsen every other element. Not seen in real data (unit length, per-vector max 0.18 to 0.21). Recheck if status shows a much smaller `int8_scale` than expected or quality complaints follow a mixed-model or pre-#250 space.
+- `distance` stays raw integer L2 rather than divided by the scale: a division would present an estimate as a measurement and invite comparison across spaces. Weak: values jump from around 1 to around hundreds, which may surprise a reader. The context `index_state` observation, status and guides say so. Recheck if models or users misread it.
+- Migration 33 instead of app_meta: logical-byte triggers need the element size in SQL. Adds one nullable column and index `chunks_job`, found by measuring collection (137 s to 0.85 s). The index was not in the brief; kept because the old space's collection is part of this flow and a rebuild benefits as well.
+- Row IDs: `adopt_vector_tx` allocates above the conversion cursor, so completeness needs only an index seek. Rejected: counting at the switch (O(n), breaks on skipped chunks) and dual writes (a second write path during conversion).
+- Unfinished source jobs move to the new space after the switch instead of being re-enqueued or stranded. A re-selected old space would not have them; existing GC removes it anyway.
+- One-way in practice: existing GC collects the old space after the switch, so going back needs a paid rebuild. The preview states it. Weak: keeping the old space until an explicit collect would allow a free return but would hold 4× the bytes the user asked to shed. Recheck if users want to compare before committing.
+- `index rebuild` always creates float32. Recheck if users expect rebuild to keep int8.
+- At the logical cap the unit rolls back and retires the partial candidate rather than keeping it for a resume: at the cap new work is held and the worker pause discards queued jobs, and a kept candidate would hold the owner next to it. Weak: there is no reserve, so a conversion that fills the space to just below the cap leaves little room until the old space is collected. A preflight or reserve would need a chosen margin. Recheck if a conversion near the cap ever holds a conversation.
+- No refusal while a rebuild is in progress: the `index.rebuild.*` marker survives a failed rebuild and would block shrink forever, and the two are safe together because the later switch wins.
+- TUI: reachable through the generated operations screen only; the `/index` management screen has no key for it.
 
 ## Search speed: single KNN scan and two-stage visibility (#240, 2026-11-06)
 

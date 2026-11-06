@@ -7,6 +7,9 @@ impl<'a> IndexKeys<'a> {
     pub(super) const INPUT_PREFIX: &'static str = "index.input.";
     pub(super) const BOOT_PREFIX: &'static str = "index.bootstrap.";
     pub(super) const PREVIEW_PREFIX: &'static str = "index.preview.";
+    /// `[SHRINK_START, SHRINK_END)`: the at most one int8 conversion record.
+    pub(super) const SHRINK_START: &'static str = "index.shrink.";
+    pub(super) const SHRINK_END: &'static str = "index.shrink/";
     pub(super) fn new(profile: &'a str) -> Self {
         Self(profile)
     }
@@ -63,6 +66,9 @@ impl<'a> IndexKeys<'a> {
     pub(super) fn splitter(self) -> String {
         format!("{}:{}", super::SPLITTER, self.0)
     }
+    pub(super) fn shrink(source_space: &str) -> String {
+        format!("{}{source_space}", Self::SHRINK_START)
+    }
     pub(super) fn input(job: &str) -> String {
         format!("{}{job}", Self::INPUT_PREFIX)
     }
@@ -105,6 +111,7 @@ mod tests {
             (keys.bootstrap_range().0, "index.bootstrap.profile:日本."),
             (keys.bootstrap_range().1, "index.bootstrap.profile:日本/"),
             (keys.splitter(), "unicode-paragraph-v1:profile:日本"),
+            (IndexKeys::shrink("space:1"), "index.shrink.space:1"),
             (IndexKeys::input("job:1"), "index.input.job:1"),
             (IndexKeys::preview("chunk:1"), "index.preview.chunk:1"),
             (

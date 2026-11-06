@@ -460,6 +460,7 @@ fn read_status(
         spaces_total: 0,
         spaces_truncated: false,
         probes: Vec::new(),
+        shrink: None,
     };
     let mut spaces = HashSet::new();
     if let Some(space) = &selected {
@@ -783,7 +784,7 @@ mod tests {
     }
     fn add_space(db: &Connection, id: &str, state: &str, key: &str) {
         db.execute(
-            "INSERT INTO index_space VALUES(?1,'p','m',3,?2,?3,?4)",
+            "INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES(?1,'p','m',3,?2,?3,?4)",
             params![
                 id,
                 IndexKeys::new(key).splitter(),

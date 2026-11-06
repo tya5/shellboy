@@ -482,6 +482,15 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::IndexShrink,
+        &["index", "shrink"],
+        &[
+            ("dry_run", FieldId::DryRun),
+            ("cancel", FieldId::ShrinkCancel),
+        ],
+        None,
+    ),
+    (
         OperationId::StorageStatus,
         &["storage", "status"],
         &[("category", FieldId::Category)],

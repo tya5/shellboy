@@ -153,7 +153,7 @@ mod tests {
         "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%' OR key LIKE 'summary.usage.%'",
         "SELECT COALESCE(SUM(length(bytes)),0) FROM output_chunk",
         "SELECT COALESCE(SUM(raw_size),0) FROM managed_file WHERE state<>'deleted'",
-        "SELECT COALESCE(SUM(s.dimension*4),0) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id",
+        "SELECT COALESCE(SUM(s.dimension*(CASE WHEN s.int8_scale IS NULL THEN 4 ELSE 1 END)),0) FROM embedding_chunk c JOIN index_space s ON s.id=c.space_id",
         "SELECT COALESCE(SUM(length(CAST(value AS BLOB))),0) FROM app_meta WHERE key LIKE 'index.%'",
     ];
 
@@ -183,7 +183,7 @@ INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,
 INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES('g','c',0,'shell','{"command":"echo 日本語"}','completed');
 INSERT INTO output_chunk VALUES('x',0,'stdout',0,x'00ff80fe','now');
 INSERT INTO managed_file(id,absolute_path,state,raw_size,created_at)VALUES('ready','/ready','ready',17,'now'),('deleting','/deleting','deleting',19,'now'),('deleted','/deleted','deleted',999,'now'),('creating','/creating','creating',NULL,'now'),('failed','/failed','failed',23,'now');
-INSERT INTO index_space VALUES('s1','p','m',3,'v','active','vec1'),('s2','p','m',7,'v','inactive','vec2'),('empty','p','m',9223372036854775807,'v','candidate','empty_vec');
+INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('s1','p','m',3,'v','active','vec1'),('s2','p','m',7,'v','inactive','vec2'),('empty','p','m',9223372036854775807,'v','candidate','empty_vec');
 INSERT INTO embedding_chunk VALUES('c1','j1','s1','n',0,0,1,'hash',1),('c2','j2','s1','n',0,1,2,'hash',2),('c3','j3','s2','n',0,0,1,'hash',1);
 INSERT INTO app_meta(key,value)VALUES('summary.part.fixture','summary 日本語'),('wait.pending.fixture','wait 🌿'),('compact.result.fixture','compact 日本語'),('revisit.fixture','revisit 日本語'),('index.preview.fixture','preview 🌿'),('index.input.fixture','input 日本語'),('index.bootstrap.bad','broken JSON'),('unrelated.fixture','large uncounted 日本語');
 "#).unwrap();

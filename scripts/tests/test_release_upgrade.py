@@ -29,7 +29,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
             "CREATE INDEX threads_visible_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL;\n"
             "CREATE INDEX threads_archived_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NOT NULL;\n")
         self.assertEqual(base.count(archive_indexes), 1)
-        db.executescript(base.replace(suffix, '').replace(column, '').replace(archive_indexes, ''))
+        int8_scale = ", int8_scale REAL CHECK(int8_scale IS NULL OR int8_scale>0)"
+        self.assertEqual(base.count(int8_scale), 1)
+        chunks_job = "CREATE INDEX chunks_job ON embedding_chunk(job_id);\n"
+        self.assertEqual(base.count(chunks_job), 1)
+        db.executescript(base.replace(suffix, '').replace(column, '').replace(archive_indexes, '').replace(int8_scale, '').replace(chunks_job, ''))
         for ident, parent in [('parent', None), ('child', 'parent')]:
             db.execute('INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) '
                        'VALUES(?,?,?,?,?,?,?)', (ident, parent, '/synthetic', '', 'fixture', 'mock', '2026-11-01T00:00:00Z'))
@@ -320,11 +324,21 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'partial list indexes'):
             checks.check_migration(db, before, 31, 32)
 
-    def test_arguments_default_to_public_v090_schema31_and_target32(self):
+    def test_schema32_to33_adds_nullable_int8_scale_and_preserves_rows(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 32)
+        before, records = self.upgrade(db, 32, 33)
+        self.assertEqual(checks.ledger(db), before + [(33, '0033_index_int8_scale')])
+        self.assertEqual(checks.snapshot(db), records)
+        db.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name,int8_scale) VALUES('q','p','m',2,'v','inactive','shellboy_vec_q',127.0)")
+        with self.assertRaisesRegex(AssertionError, 'float32'):
+            checks.check_migration(db, before, 32, 33)
+
+    def test_arguments_default_to_public_v090_schema31_and_target33(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.9.0', 31, checks.CARGO_VERSION, 32))
+                         ('0.9.0', 31, checks.CARGO_VERSION, 33))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
@@ -335,9 +349,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 32))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 33))
         release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 32))
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 33))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])
