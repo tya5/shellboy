@@ -45,6 +45,11 @@ resume, resync after restart, timeout, disconnect/shutdown, one test per mutatio
 Missing `changed()` found and fixed: queued/held `message.send`, `thread.prune`, `attachment.add` (not live), the post-`next()` commit in the driver (review F1), `run.stop` stopping.
 Not done: protocol 3/capabilities (A2), schema (D), live text
 deltas (E3, user wants them in Web M1, plan A first). See D-243-1.
+## Repeated rejected closed summary (#248; on branch issue-248/repeat-gate, CI pending)
+
+Guard now freezes a rejected, non-adopted closed-range summary for the current Turn
+(D-248-1), with an integration regression test. Open: 2a (over-limit cached reduce
+output, no code change) is reported in the validation record. Resume: land after CI.
 
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
 

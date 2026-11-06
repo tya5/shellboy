@@ -728,6 +728,20 @@ pub(super) async fn maybe_compact(
                         .is_some_and(|candidate| candidate.mutable_protection),
                 );
             }
+            // #248: a closed-range summary that adopted nothing leaves the
+            // same range, parts and limit while the current Turn only appends
+            // tool output. Reuse the existing freeze so that unknown coverage
+            // does not repeat it at every tool boundary.
+            if !adopted && summary_scope == "prefix" && rejection.is_some() {
+                current.freeze_summary_for_current_turn(
+                    guard::anchor_is_current_turn(
+                        control,
+                        latest_tool_anchor.clone(),
+                        &snapshot.turn,
+                    )
+                    .await?,
+                );
+            }
             if summary_deferred && adopted {
                 current.set_reason(reason);
             } else {

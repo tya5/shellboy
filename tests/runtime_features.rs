@@ -3784,6 +3784,81 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
     proactive_partial_spill_fixture(true, None).await;
 }
 
+/// #248: a closed-range summary that was rejected without adopting anything is
+/// not repeated while the current Turn only appends tool output. The oversized
+/// protected request makes the forecast coverage-limited, so no per-source mark
+/// can prove "nothing new"; the closed range ends before the current Turn and
+/// is therefore unchanged by appended tool groups.
+#[tokio::test]
+async fn proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_grows() {
+    crate::test_watchdog::watchdog("proactive rejected summary gate", async move {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let options = "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
+        let owner = proactive_owner(root.path(), &url, options).await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        for text in ["hi", "yo"] {
+            send(&control, &target, text).await;
+            incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
+            settled(&control, &target).await;
+        }
+        send(&control, &target, &"protected current ".repeat(70_000)).await;
+        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"shell","arguments":json!({"command":"echo grow"}).to_string()}]});
+        for index in 0..3 {
+            let request = incoming(&control, &mut receive).await;
+            assert_ne!(request.body["tools"], json!([]));
+            request.reply.send((200, tool(index, if index == 2 { 200 } else { 100 }))).unwrap();
+        }
+        let summary = incoming(&control, &mut receive).await;
+        assert_eq!(summary.body["tools"], json!([]), "the threshold starts the closed summary");
+        summary.reply.send((200, answer(" "))).unwrap();
+        // The Turn keeps growing at or above the threshold. The unchanged closed
+        // range is not summarized again; only the growing active Turn may be
+        // tried, and it is a different stage with its own new sources.
+        let mut summaries = 0;
+        for index in 3..9 {
+            let request = incoming(&control, &mut receive).await;
+            if request.body["tools"] == json!([]) {
+                summaries += 1;
+                request.reply.send((200, answer(" "))).unwrap();
+                continue;
+            }
+            request.reply.send((200, tool(index, 200 + index))).unwrap();
+        }
+        let last = incoming(&control, &mut receive).await;
+        if last.body["tools"] == json!([]) {
+            summaries += 1;
+            last.reply.send((200, answer(" "))).unwrap();
+            let last = incoming(&control, &mut receive).await;
+            last.reply.send((200, answer("finished"))).unwrap();
+        } else {
+            last.reply.send((200, answer("finished"))).unwrap();
+        }
+        settled(&control, &target).await;
+        let events = proactive_events(&control, &target).await;
+        assert!(summaries <= 2, "summary requests after the rejection: {summaries}");
+        // Oldest first: a rejected closed summary may be attempted again only
+        // after something was adopted (the path then changed), never directly.
+        let mut rejected_pending = false;
+        let mut closed_attempts = 0;
+        for event in events.iter().rev() {
+            let attempt = event["attempt_id"].as_str().unwrap().to_owned();
+            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
+            let record: Value = serde_json::from_str(&record).unwrap();
+            if record["stages"]["closed_summary"]["ran"] == true {
+                closed_attempts += 1;
+                assert!(!rejected_pending, "same rejected closed range repeated without an adoption: {events:#?}");
+                rejected_pending = record["stages"]["closed_summary"]["outcome"] == "rejected";
+            } else if record["outcome"] == "adopted" {
+                rejected_pending = false;
+            }
+        }
+        assert!(closed_attempts >= 1, "{events:#?}");
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+    }).await.unwrap();
+}
+
 /// Two completed Turns (input 50 then `second`), then a third request. Returns
 /// how many summary (tool-free) requests preceded the third ordinary request.
 async fn proactive_third_turn(

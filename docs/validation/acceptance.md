@@ -47,6 +47,24 @@ exit, run stop and retry, recovery wait, adopted compaction, attachment add/remo
 created from queued input while another Thread holds the provider rate gate). Not verified:
 resync after the 4096-Thread floor end to end (unit test only), clock memory bytes, behaviour
 with many concurrent long-polls, Windows named-pipe long-poll latency.
+## Repeated rejected closed summary (#248, 2026-11-06)
+
+Real data (read-only `VACUUM INTO` copy, deleted after): Thread 38fcb3e3, one Turn,
+301 automatic attempts 03:58-05:28 UTC (200 in the reported hour). Each attempt record
+has `midturn: prefix_first`, error `invalid_state` "Summary still exceeds its limit after
+reduction", `model_requests/reduce_requests: 0`, `summary_characters 2343 > limit 2000`,
+`target_plan.remove_characters` about 4.28M of 5.24M input characters. Saved guard:
+`marks:null`, `summary_frozen_current_turn:false`, `invalid_state:463`. Cause: unknown
+coverage treats each new tool frontier as new, and the closed summary ran first and
+returned its error before any active stage ran. 2a (inference from zero requests with
+reduce rounds configured >= 1): every reduce round is served from the part cache, whose
+over-limit output is deterministic, so retries cannot succeed; not changed here. The floor
+2000 applies to the summary including appended source-ID lines. 2b: the active stages were
+never reached (`prefix_first`). The three single-request cycles (threads 34387187, eab639b4,
+ea5a1f3e) are the designed pair: prefix summary adopted with verification `insufficient`
+(source 8k-76k characters vs 211k-255k to remove), then the active stage `met`.
+Synthetic: `proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_grows`
+fails without the change and passes with it. Not verified on real data after the fix.
 
 ## Storage vacuum (#238)
 
