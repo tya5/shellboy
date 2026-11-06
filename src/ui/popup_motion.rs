@@ -80,7 +80,7 @@ impl UiState {
             overlay::Overlay::Branches => self
                 .branches
                 .as_mut()
-                .is_some_and(|panel| panel.wheel(delta as isize)),
+                .is_some_and(|panel| panel.wheel(delta)),
             overlay::Overlay::Details => {
                 let view = &self.views[&self.active];
                 self.details

@@ -558,7 +558,8 @@ fn emit(
         return;
     };
     // Group by the node they diverged at, points in path order; unknown last.
-    let mut groups: Vec<(Option<(i64, &str)>, Vec<usize>)> = Vec::new();
+    type Point<'a> = Option<(i64, &'a str)>;
+    let mut groups: Vec<(Point<'_>, Vec<usize>)> = Vec::new();
     let mut sorted = kids.clone();
     sorted.sort_by_key(|k| {
         (

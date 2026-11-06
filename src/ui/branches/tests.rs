@@ -371,7 +371,7 @@ fn a_next_page_appends_and_keeps_the_selection() {
     panel.accept(&more, true);
     assert_eq!(panel.selected_thread(), Some("a"));
     assert_eq!(thread_order(&panel).last(), Some(&"z"));
-    assert!(render(&panel, 100, 24).contains("Showing") == false);
+    assert!(!render(&panel, 100, 24).contains("Showing"));
 }
 
 #[test]
