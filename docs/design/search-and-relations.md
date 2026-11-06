@@ -14,7 +14,7 @@
 
 Thread条件は「そのThreadが現在採用するpathと、そこからcompleted summary/spill置換の出典を再帰的に辿ったnode」を意味する。共有nodeはどちらのforkからも対象にできるが、親Threadの未採用分岐へ広げない。圧縮によって保護された元の原文も検索できる。存在しない／削除済みThreadは空配列で隠さずThreadNotFoundを返す。
 
-filterを満たす集合を順位付けの対象にする。全体の上位だけを取ってからfilterして、実際には存在する一致を取り逃がす実装にはしない。固定sqlite-vecの能力を実測し、索引形式を複製しない。DB workerで有限の結果を返し、候補の本文／ベクトル全件をRustへ載せない。候補chunk IDの配列とwitness検証cacheは候補数に比例する。sqlite-vec 0.1.9のrowid INによって適格集合へ絞ってからL2 KNNを実行し、node単位にまとめるためkを最大4096まで拡大する。それでも同一nodeのchunkで埋まる場合だけ、適格集合内の正確なL2走査へ切り替える。候補metadata走査はO(chunks)、fallbackはO(chunks×dimension)になり得る。
+filterを満たす集合を順位付けの対象にする。全体の上位だけを取ってからfilterして、実際には存在する一致を取り逃がす実装にはしない。固定sqlite-vecの能力を実測し、索引形式を複製しない。DB workerで有限の結果を返し、候補の本文／ベクトル全件をRustへ載せない。候補chunk IDの配列とwitness検証cacheは候補数に比例する。sqlite-vec 0.1.9のrowid INによって適格集合へ絞ってからL2 KNNを実行する。vec0は1回のscanが全chunkを読むため(#240)、scanは`min(適格数, 4096)`件の1回だけにする。node単位にまとめるため、従来のk=limit*8から倍々に拡大する段階(最大4096)をその順序付き行の先頭から再現し、各nodeのspanは`limit`個のnodeが揃った段階までの行だけから作る(結果は従来のscanし直しと同一)。hit組み立て(provenance/thread_scope)は最終的に返すnodeだけで行う。それでも同一nodeのchunkで埋まる場合だけ、適格集合内の正確なL2走査へ切り替える。候補metadata走査はO(chunks)、fallbackはO(chunks×dimension)になり得る。
 
 distanceは利用中の索引spaceのL2距離で、小さいほど近い。確率や正答率ではなく、異なるembedding model／space間では比較しない。閾値指定は今回導入しない。filterはquery embeddingを生成する前にすべて適用するという意味ではなく、DB内のベクトル順位付け前に適用する。
 
@@ -80,6 +80,13 @@ receipt/添付delivery/replacementに属することを保存関係から確定�
 所有関係が未記録の独立sourceへ生成元Threadを推測せず、現行の全体検索を維持する。
 thread_pathだけを見て未採用履歴や圧縮元を排除しない。source→consumerは既存reverse indexを使い、
 循環はUNIONで有限化する。意味検索は同一nodeの判定を一回の検索内で再利用し、KNN前に除外する。
+判定は2段で行う(#240): 先にconsumer閉包のroot存在だけを調べ、真ならそこで可視とする(`A OR B`のAが真)。
+rootが偽のときだけ従来の全規則(root OR 削除所有者なし AND 非prune元)を評価する。1文にまとめると閉包CTEが
+2箇所から参照されて毎回全閉包がMATERIALIZEされ、短絡しない。
+既知の潜在コスト(実測、未対策): rootが偽のnodeでは`DELETED_OWNER`側が閉包全体に対して評価され、
+`thread_replacement`に自動indexを作る計画になり約25 ms/nodeだった(単独測定、6,723 node=172 s)。
+利用者DBでは全nodeがrootで可視のため発火しない。削除済みThread由来・所有者なしnodeが多いDBで
+検索が遅くなり得る。フォローアップissueで扱う。
 新table/cache worker/公開filter/課金は追加しない。
 
 Thread論理削除時は最後のthread_path/thread_replacementを所有証拠として保持する。

@@ -11,6 +11,15 @@ before/after sizes. No schema, setting or table change. In-place VACUUM keeps th
 file inode, a reader holding the WAL is detected (refused before, error after), so docs-and-rag history references stay valid (unix test). Tests: five unit
 tests in `vacuum.rs` and `cli_process::storage_vacuum_cli_*`. Resume point:
 exact-tip default and all-OS CI.
+## Search speed (#240; branch `issue-240/search-speed`, CI pending)
+
+Two measured fixes: `searchable` checks the live root first and falls back to the
+full rule only when false; `ranked_hits` does one vec0 scan of `min(count, 4096)`
+and replays the former k doubling stages over the ordered rows, building hit
+provenance only for returned nodes. Tests: `two_stage_searchable_equals_full_rule_on_synthetic_graphs`
+and `single_scan_equals_doubling_rescans`. Before/after on the owner-DB copy is
+in the #240 comment. Not done: `DELETED_OWNER` cost when roots are false
+(follow-up issue); eligibility/witness steps (low share).
 
 ## Thread prune (#235; implemented, CI pending)
 
