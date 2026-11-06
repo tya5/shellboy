@@ -2550,6 +2550,13 @@ fn stop_run(
         for run in &result.stop_runs {
             tx.execute("UPDATE run SET state='stopping',stop_reason='explicit_stop' WHERE id=?1 AND state='live'",[run]).map_err(sql_error)?;
             tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run]).map_err(sql_error)?;
+            // The stopping state is visible now; do not wait for reply_grace (#243).
+            let thread: String = tx
+                .query_row("SELECT thread_id FROM run WHERE id=?1", [run], |r| r.get(0))
+                .map_err(sql_error)?;
+            if !result.changed_threads.contains(&thread) {
+                result.changed_threads.push(thread);
+            }
             super::attachment_delivery::hold_run_tx(tx, run)?;
             tx.execute("UPDATE receipt SET state='held',hold_reason='stopping',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now]).map_err(sql_error)?;
         }
@@ -4957,7 +4964,8 @@ mod driverless_child_stop_notification_tests {
                 parent_notifications,
                 usize::from(!fail_drain && parent_state != "completed")
             );
-            assert_eq!(child_notifications, 1);
+            // One hint when the stopping state commits (#243) and one after the drain.
+            assert_eq!(child_notifications, 2);
             assert_eq!(errors, usize::from(fail_drain));
             assert!(
                 nudge.notified().now_or_never().is_none(),

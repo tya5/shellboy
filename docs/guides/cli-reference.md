@@ -293,8 +293,11 @@ Rules:
 - `resync_required` means the owner restarted or the cursor is older than the bounded
   window (the latest 4096 changed Threads are kept). Re-read everything you display,
   then continue with the returned `cursor`. A client is never silently left with a gap.
+- A cursor moves past changes to Threads your `--thread` filter excluded. When you add a Thread
+  to the filter later, read it once yourself; the old cursor will not report its earlier changes.
 - `--thread` accepts up to 64 IDs (omit for all Threads). A cursor ahead of the owner or
   malformed is `invalid_argument`; start again without `--after`.
+- At owner shutdown a pending poll ends with an error (`read_only: true`, `request_may_have_been_applied: false`); the next poll on the restarted owner returns `resync_required`.
 - No receipt is kept; after a lost reply simply ask again with the same cursor.
   The owner keeps no per-client buffer. The call holds one ordinary request slot while it
   waits; a bridge serving several clients should share one long-poll.
