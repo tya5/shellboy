@@ -147,7 +147,11 @@ const MEANINGS: &[Meaning] = &[
     (
         OperationId::ThreadRewind,
         &["thread", "rewind"],
-        &[("thread_id", FieldId::Thread), ("node_id", FieldId::Node)],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("node_id", FieldId::Node),
+            ("exclude_node", FieldId::ExcludeNode),
+        ],
         None,
     ),
     (

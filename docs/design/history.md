@@ -78,7 +78,7 @@ a context marker's `original_order` honoured) and the path is cut at NODE; a
 `pruned` replacement or a reclaimed original is refused as target_unavailable.
 Shell side effects are not undone; the result lists shell executions of T's Runs
 started after NODE's creation time and child Threads whose first own activity (or
-fork node) is after it, each as count plus up to 20 items. See
+fork node) is after it, each as count plus up to 20 items, and unanswered replies to messages T sent. `exclude_node` ends the path at the node just before NODE. The latest attempt's input size is treated as pending (stale) when none of its output nodes is on the path, so a rewind never feeds proactive compaction a pre-cut size. A path above 200,000 nodes is refused (`input_limit`); a summarized-range expansion may add up to 65,536 nodes beyond it. Deleting the branch child frees nothing while T's Turns own the nodes (`thread prune` releases originals). See
 [the study](thread-prune-rewind-branches.md) R1 and the cost record in
 [decisions](../development/decisions.md).
 

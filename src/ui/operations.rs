@@ -1257,12 +1257,25 @@ impl Form {
                     }))
                 },
             ),
-            OpKind::ThreadRewind => (vec![thread(), node()], |form, _cwd| {
-                Ok(Command::ThreadRewind(ThreadRewindArgs {
-                    thread_id: Some(form.owned("thread")?),
-                    node_id: form.owned("node")?,
-                }))
-            }),
+            OpKind::ThreadRewind => (
+                vec![
+                    thread(),
+                    node(),
+                    f(
+                        "exclude_node",
+                        "このノードを含めず直前で止める",
+                        "false".into(),
+                        Boolean,
+                    ),
+                ],
+                |form, _cwd| {
+                    Ok(Command::ThreadRewind(ThreadRewindArgs {
+                        thread_id: Some(form.owned("thread")?),
+                        node_id: form.owned("node")?,
+                        exclude_node: form.boolean("exclude_node")?,
+                    }))
+                },
+            ),
             OpKind::ThreadDelete => (
                 vec![
                     thread(),

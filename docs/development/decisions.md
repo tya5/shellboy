@@ -3592,7 +3592,7 @@ one operation = child fork + attachment delete + `select_path` + boundary check)
 Cost is linear (about 20 us per path node). It runs in one writer transaction, so
 the number is also how long the DB writer is occupied. These are observations, not
 promises. Limit: rewind refuses a path above `PATH_LIMIT` = 200,000 nodes
-(`storage_limit`), declared as the writer bound (about 4 s by the table). Revisit if
+(`input_limit` with `path_nodes`/`limit` details), declared as the writer bound (about 4 s by the table). Revisit if
 real Threads approach it or a cheaper truncate (delete only `ordinal>k`, share the
 prefix) is wanted; the fork copy is the other half of the cost. Child "started
 after NODE" is by time (first own node, or fork node), so a fork extended later is

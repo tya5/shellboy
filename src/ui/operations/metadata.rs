@@ -120,6 +120,7 @@ impl Form {
             "excludes" => FieldId::Excludes,
             "clear_excludes" => FieldId::ClearExcludes,
             "dry_run" => FieldId::DryRun,
+            "exclude_node" => FieldId::ExcludeNode,
             "search_mode" => FieldId::SearchMode,
             "ingest_kind" => FieldId::IngestKind,
             "source_file" => FieldId::SourceFile,
@@ -1128,6 +1129,11 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "Clear existing exclusions"
         ),
         FieldId::DryRun => local!(language, "実行対象だけを確認", "Preview targets only"),
+        FieldId::ExcludeNode => local!(
+            language,
+            "このノードを含めず直前で止める",
+            "Stop just before this node"
+        ),
         FieldId::SearchMode => local!(language, "検索・索引方式", "Search or index mode"),
         FieldId::IngestKind => local!(language, "登録本文の種類", "Ingested content kind"),
         FieldId::SourceFile => local!(language, "元資料ファイル", "Source material file"),
@@ -1548,6 +1554,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "操作を適用せず、対象や変更の見込みを確認します。",
             "Inspect intended targets and changes without applying the operation."
+        ),
+        FieldId::ExcludeNode => local!(
+            language,
+            "指定ノードを残さず、その直前のノードを新しい末尾にします。依頼を選んで、その依頼の前へ戻すときに使います。",
+            "Do not keep the specified node; the node just before it becomes the new end. Use it to rewind to before a chosen request."
         ),
         FieldId::SearchMode => local!(
             language,

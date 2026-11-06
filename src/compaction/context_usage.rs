@@ -75,8 +75,10 @@ fn latest_query() -> String {
         CASE WHEN octet_length(a.id)<=?2 THEN a.id END, {},
         CASE WHEN octet_length(a.started_at)<=?2 THEN a.started_at END,
         CASE WHEN octet_length(a.ended_at)<=?2 THEN a.ended_at END,
-        EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
-          WHERE tr.thread_id=t.id AND r.created_at>a.started_at),
+        (EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
+          WHERE tr.thread_id=t.id AND r.created_at>a.started_at)
+          -- #236: a rewind removed this attempt's output from the path, so its input size is stale
+          OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
         COALESCE(octet_length(a.id)>?2 OR octet_length(a.started_at)>?2
           OR COALESCE(octet_length(a.ended_at)>?2,0),0)
         FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
@@ -488,6 +490,58 @@ mod tests {
         assert_eq!(scope, ("t".into(), "p".into(), "m".into()));
         assert_eq!(saved, compactor.context_metrics("t").await.unwrap());
         db.shutdown().await.unwrap();
+    }
+    /// #236: a rewind that removes the latest attempt's output from the path
+    /// makes its input size stale (pending), so no proactive trigger fires.
+    #[tokio::test]
+    async fn rewound_away_attempt_is_pending_in_canonical_and_bounded_reads() {
+        let (_root, db, compactor) = fixture().await;
+        attempt(
+            &db,
+            "a1",
+            "completed",
+            "p",
+            "m",
+            Some(
+                json!({"input_tokens":190000,"input_tokens_details":{"cached_tokens":0}})
+                    .to_string(),
+            ),
+            "2026-01-01T00:00:00Z",
+        )
+        .await;
+        db.call(|db| {
+            db.execute_batch("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('keep','u','message','now','{}',2),('out','u','assistant_response','now','{}',2);
+                INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('a1',0,'message','completed','{}','out');
+                INSERT INTO thread_path VALUES('t',0,'keep'),('t',1,'out');")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        fn pending(db: &rusqlite::Connection) -> bool {
+            let canonical = read_context_usage_tx(db, "t", None).unwrap();
+            let (_, tokens, canonical_pending) = canonical.latest_reported_input().unwrap();
+            assert_eq!(tokens, Some(190000));
+            let bounded =
+                prepare_context_usage(read_context_usage_tx(db, "t", Some(512)).unwrap()).0;
+            assert_eq!(
+                bounded["last_successful_attempt"]["next_request_pending"],
+                json!(canonical_pending)
+            );
+            canonical_pending
+        }
+        assert!(!db.call(move |db| Ok(pending(db))).await.unwrap());
+        // The rewind drops the attempt's output node from the path.
+        db.call(|db| {
+            db.execute("DELETE FROM thread_path WHERE node_id='out'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        assert!(db.call(move |db| Ok(pending(db))).await.unwrap());
+        assert_eq!(
+            compactor.context_metrics("t").await.unwrap()["last_successful_attempt"]["next_request_pending"],
+            json!(true)
+        );
     }
 }
 

@@ -971,6 +971,19 @@ mod contract_tests {
         assert_eq!(ui.view().agents_path, "original.md");
     }
     #[test]
+    fn rewind_sends_the_picked_request_and_lets_the_owner_pick_the_path_node_before_it() {
+        let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
+        // No saved Thread: an error, not an action.
+        assert!(ui.slash("/rewind req").is_empty());
+        ui.active_view_mut().thread_id = Some("saved".into());
+        // An id that is not loaded is still sent: the owner resolves it.
+        assert!(matches!(ui.slash("/rewind req").as_slice(),
+            [UiAction::Command(Command::ThreadRewind(a))]
+                if a.thread_id.as_deref() == Some("saved") && a.node_id == "req" && a.exclude_node));
+        // No argument and no loaded request: nothing to pick.
+        assert!(ui.slash("/rewind").is_empty());
+    }
+    #[test]
     fn agents_selection_reply_preserves_newer_text_and_rejects_stale_generation() {
         let mut ui = UiState::new(&Config::default(), std::env::temp_dir());
         let actions = ui.slash("/agents role.md");

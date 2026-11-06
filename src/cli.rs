@@ -474,6 +474,9 @@ pub struct ThreadRewindOptions {
     /// The node that becomes the end of the selected path.
     #[arg(long = "node")]
     pub node_id: String,
+    /// Do not keep NODE: the node just before it becomes the end (rewind to before a request).
+    #[arg(long)]
+    pub exclude_node: bool,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadSetOptions {
@@ -911,6 +914,7 @@ impl Cli {
                 ThreadCommand::Rewind(a) => C::ThreadRewind(wire::ThreadRewindArgs {
                     thread_id: a.thread_id,
                     node_id: a.node_id,
+                    exclude_node: a.exclude_node,
                 }),
                 ThreadCommand::Set(a) => C::ThreadSet(Box::new(wire::ThreadSetArgs {
                     agents: path_option(a.agents)?,

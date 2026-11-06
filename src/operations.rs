@@ -256,6 +256,7 @@ pub(crate) enum FieldId {
     Excludes,
     ClearExcludes,
     DryRun,
+    ExcludeNode,
     SearchMode,
     IngestKind,
     SourceFile,
@@ -1011,6 +1012,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         discovery: Discovery::None,
     },
     FieldSpec {
+        id: FieldId::ExcludeNode,
+        default_origin: DefaultOrigin::Literal,
+        label: "このノードを含めず直前で止める",
+        help: "指定ノードを残さず、その直前のノードを新しい末尾にします。依頼を選んで、その依頼の前へ戻すときに使います。",
+        kind: FieldType::Boolean,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
         id: FieldId::SearchMode,
         default_origin: DefaultOrigin::Literal,
         label: "検索・索引方式",
@@ -1230,7 +1239,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Thread, FieldId::Node],
+        fields: &[FieldId::Thread, FieldId::Node, FieldId::ExcludeNode],
     },
     OperationSpec {
         id: OperationId::ThreadSet,

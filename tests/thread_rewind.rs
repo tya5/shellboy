@@ -100,11 +100,21 @@ impl Fixture {
         node: &str,
         caller: Option<Origin>,
     ) -> Result<Value, ApiError> {
+        self.rewind_with(thread, node, false, caller).await
+    }
+    async fn rewind_with(
+        &self,
+        thread: Option<&str>,
+        node: &str,
+        exclude_node: bool,
+        caller: Option<Origin>,
+    ) -> Result<Value, ApiError> {
         let request = Request::new(
             format!("instance:{}", uuid::Uuid::new_v4()),
             Command::ThreadRewind(ThreadRewindArgs {
                 thread_id: thread.map(str::to_owned),
                 node_id: node.into(),
+                exclude_node,
             }),
         );
         self.store
@@ -416,6 +426,11 @@ async fn omitted_thread_targets_the_caller_and_is_refused_while_its_run_is_live(
     let error = f.rewind(None, "n2", Some(origin("T"))).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidState);
     assert_eq!(error.details.as_ref().unwrap()["run_id"], "mine");
+    let hint = error.hint.as_deref().unwrap();
+    assert!(
+        hint.contains("thread fork") && hint.contains("/rewind"),
+        "{hint}"
+    );
     assert_eq!(f.query(|db| ids(db, "T").len()).await, 4);
     // Once that Run is over, the omitted --thread resolves to the caller.
     f.query(|db| {
@@ -426,6 +441,64 @@ async fn omitted_thread_targets_the_caller_and_is_refused_while_its_run_is_live(
     let value = f.rewind(None, "n2", Some(origin("T"))).await.unwrap();
     assert_eq!(value["thread_id"], "T");
     assert_eq!(f.query(|db| ids(db, "T")).await, ["n1", "n2"]);
+}
+
+#[tokio::test]
+async fn exclude_node_ends_the_path_just_before_the_picked_request() {
+    let f = Fixture::new([plain(5), n_path(5)].concat()).await;
+    // The first node has nothing before it.
+    let error = f
+        .rewind_with(Some("T"), "n1", true, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(f.query(|db| ids(db, "T").len()).await, 5);
+    let value = f.rewind_with(Some("T"), "n4", true, None).await.unwrap();
+    assert_eq!(value["node_id"], "n3");
+    assert_eq!(f.query(|db| ids(db, "T")).await, ["n1", "n2", "n3"]);
+}
+
+#[tokio::test]
+async fn exclude_node_works_inside_a_summarized_range_too() {
+    let f = Fixture::new(summarized("completed")).await;
+    // b excluded: the path ends at a, with the summary expanded.
+    let value = f.rewind_with(Some("T"), "b", true, None).await.unwrap();
+    assert_eq!(value["rewound_into_summarized_range"], true);
+    assert_eq!(f.query(|db| ids(db, "T")).await, ["x", "a"]);
+}
+
+#[tokio::test]
+async fn every_candidate_summary_is_tried_not_only_the_newest() {
+    // A newer replacement lists b too but its output is not on the path.
+    let script = [
+        summarized("completed"),
+        node("dead", "summary", 9, "{\"text\":\"d\"}"),
+        "INSERT INTO replacement VALUES('r2','dead','k2','1','1','completed','zzzz');INSERT INTO replacement_source VALUES('r2',0,'b',0,NULL);INSERT INTO thread_replacement VALUES('T','r2');".into(),
+    ]
+    .concat();
+    let f = Fixture::new(script).await;
+    f.rewind(Some("T"), "b", None).await.unwrap();
+    assert_eq!(f.query(|db| ids(db, "T")).await, ["x", "a", "b"]);
+}
+
+#[tokio::test]
+async fn result_lists_unanswered_replies_to_messages_the_thread_sent() {
+    let script = [
+        plain(4),
+        n_path(4),
+        "INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('other','','/w','/w','p','m','now');
+         INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,result_json,created_at)VALUES
+          ('rc1','op1','{\"kind\":\"model\",\"thread_id\":\"T\"}','other','n2','applied','{\"reply\":{\"state\":\"pending\"}}','2026-01-01'),
+          ('rc2','op2','{\"kind\":\"model\",\"thread_id\":\"T\"}','other','n3','applied','{\"reply\":{\"state\":\"answered\"}}','2026-01-01');".into(),
+    ]
+    .concat();
+    let f = Fixture::new(script).await;
+    let value = f.rewind(Some("T"), "n2", None).await.unwrap();
+    let replies = &value["pending_replies_to_sent_messages"];
+    assert_eq!(replies["count"], 1);
+    assert_eq!(replies["items"][0]["message_id"], "n2");
+    assert_eq!(replies["items"][0]["target_thread_id"], "other");
+    assert!(value["note"].as_str().unwrap().contains("shell_ended"));
 }
 
 /// Measurement for decisions.md, not a gate (wall-clock numbers are facts, not

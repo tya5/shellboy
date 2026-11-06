@@ -33,11 +33,13 @@ fn invalid_state(message: &str) -> ApiError {
 }
 
 /// Rewind `thread` so its selected path ends at `node`; the previous full path
-/// is kept as the new child Thread `branch_id`.
+/// is kept as the new child Thread `branch_id`. With `exclude_node` the path
+/// ends at the node just before `node` (rewind to before a chosen request).
 pub fn rewind_thread(
     tx: &Transaction<'_>,
     thread: &str,
     node: &str,
+    exclude_node: bool,
     branch_id: &str,
     now: &str,
 ) -> Result<Value, ApiError> {
@@ -63,6 +65,7 @@ pub fn rewind_thread(
         return Err(invalid_state(
             "Thread has a live Run; stop it (run stop) or wait for it to end before rewinding",
         )
+        .hint("a Run cannot rewind the Thread it is running in: use `shellboy thread fork --thread THREAD --node NODE` to continue from an earlier point in a new Thread, or ask the user to run /rewind")
         .details(json!({"run_id": run})));
     }
     let queued: i64 = tx
@@ -88,9 +91,11 @@ pub fn rewind_thread(
         .map_err(sql_error)?;
     if length as usize > PATH_LIMIT {
         return Err(ApiError::new(
-            ErrorCode::StorageLimit,
+            ErrorCode::InputLimit,
             "selected path is too long to rewind in one operation",
-        ));
+        )
+        .hint("compact the Thread first, or continue from an earlier point with `shellboy thread fork --thread THREAD --node NODE`")
+        .details(json!({"path_nodes": length, "limit": PATH_LIMIT})));
     }
     let old_path = selected_ids(tx, thread).map_err(storage_error)?;
     let Some(old_end) = old_path.last().cloned() else {
@@ -98,7 +103,16 @@ pub fn rewind_thread(
     };
     let revision = selection_revision(tx, thread, ThreadScope::Live).map_err(sql_error)?;
 
-    let (new_path, expanded) = target_path(tx, thread, node, &old_path)?;
+    let (mut new_path, expanded) = target_path(tx, thread, node, &old_path)?;
+    if exclude_node {
+        new_path.pop();
+        if new_path.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidArgument,
+                "nothing comes before this node; there is no earlier point to rewind to",
+            ));
+        }
+    }
     if new_path.len() == old_path.len() && new_path == old_path {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -128,6 +142,7 @@ pub fn rewind_thread(
         now,
     )?;
     let children = child_facts(tx, thread, branch_id, &boundary_time)?;
+    let replies = pending_replies_sent(tx, thread)?;
 
     // 2. Attachments whose source message leaves the path are not sent.
     let common = old_path
@@ -158,7 +173,8 @@ pub fn rewind_thread(
         "attachment_selections_removed": removed_attachments,
         "shell_executions_after_node": shells,
         "child_threads_after_node": children,
-        "note": "Conversation only: shell side effects are not undone.",
+        "pending_replies_to_sent_messages": replies,
+        "note": "Conversation only: shell side effects are not undone. Background shells started before the rewind may still deliver shell_ended to this Thread, and replies to messages it sent may still arrive.",
     }))
 }
 
@@ -192,51 +208,22 @@ fn target_path(
         .enumerate()
         .map(|(i, id)| (id.as_str(), i))
         .collect();
-    // Follow the node up through the summaries this Thread holds until one is on the path.
-    let mut chain: Vec<(String, String)> = Vec::new();
-    let mut current = node.to_owned();
-    loop {
-        if chain.len() >= EXPANSION_DEPTH {
-            return Err(invalid_state("summary nesting is too deep to rewind into"));
-        }
-        let rows = {
-            let mut statement = tx
-                .prepare_cached("SELECT r.id,r.output_node_id,r.state FROM replacement r JOIN thread_replacement tr ON tr.replacement_id=r.id AND tr.thread_id=?1 JOIN replacement_source s ON s.replacement_id=r.id WHERE s.source_node_id=?2 AND r.state IN ('completed','pruned') ORDER BY r.created_at DESC,r.id LIMIT 16")
-                .map_err(sql_error)?;
-            statement
-                .query_map(params![thread, current], |r| {
-                    Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    ))
-                })
-                .map_err(sql_error)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(sql_error)?
-        };
-        let chosen = rows
-            .iter()
-            .find(|(_, output, _)| positions.contains_key(output.as_str()))
-            .or_else(|| rows.first());
-        let Some((replacement, output, state)) = chosen else {
-            return Err(ApiError::new(
-                ErrorCode::InvalidArgument,
-                "node is neither on the Thread's selected path nor inside a summary or spill this Thread holds",
-            ));
-        };
-        if state == "pruned" {
-            return Err(ApiError::new(
+    // Follow the node up through the summaries this Thread holds until one is on
+    // the path, trying every candidate (innermost first in `chain`).
+    let mut saw_pruned = false;
+    let Some(chain) = find_chain(tx, thread, node, &positions, 0, &mut saw_pruned)? else {
+        return Err(if saw_pruned {
+            ApiError::new(
                 ErrorCode::TargetUnavailable,
                 "This range's originals were pruned (thread prune) and are not retained; rewind cannot go back into it",
-            ));
-        }
-        chain.push((replacement.clone(), output.clone()));
-        if positions.contains_key(output.as_str()) {
-            break;
-        }
-        current = output.clone();
-    }
+            )
+        } else {
+            ApiError::new(
+                ErrorCode::InvalidArgument,
+                "node is neither on the Thread's selected path nor inside a summary or spill this Thread holds",
+            )
+        });
+    };
     let mut path = old_path.to_vec();
     let mut expanded_from = usize::MAX;
     for (replacement, output) in chain.iter().rev() {
@@ -389,6 +376,80 @@ fn child_facts(
                 "thread_id": r.get::<_, String>(0)?,
                 "title": r.get::<_, String>(1)?,
                 "started_at": r.get::<_, String>(2)?,
+            }))
+        })
+        .map_err(sql_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(sql_error)?;
+    Ok(json!({"count": count, "items": items, "truncated": count > LIST_LIMIT}))
+}
+
+type Chain = Vec<(String, String)>;
+
+/// Depth-first over the held summaries that list `current` as a source; the
+/// result is the chain (replacement, output) from the innermost summary to one
+/// whose output is on the path. A pruned candidate is remembered, not fatal.
+fn find_chain(
+    tx: &Transaction<'_>,
+    thread: &str,
+    current: &str,
+    positions: &HashMap<&str, usize>,
+    depth: usize,
+    saw_pruned: &mut bool,
+) -> Result<Option<Chain>, ApiError> {
+    if depth >= EXPANSION_DEPTH {
+        return Err(invalid_state("summary nesting is too deep to rewind into"));
+    }
+    let rows = {
+        let mut statement = tx
+            .prepare_cached("SELECT r.id,r.output_node_id,r.state FROM replacement r JOIN thread_replacement tr ON tr.replacement_id=r.id AND tr.thread_id=?1 JOIN replacement_source s ON s.replacement_id=r.id WHERE s.source_node_id=?2 AND r.state IN ('completed','pruned') ORDER BY r.created_at DESC,r.id LIMIT 16")
+            .map_err(sql_error)?;
+        statement
+            .query_map(params![thread, current], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(sql_error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_error)?
+    };
+    for (replacement, output, state) in rows {
+        if state == "pruned" {
+            *saw_pruned = true;
+            continue;
+        }
+        if positions.contains_key(output.as_str()) {
+            return Ok(Some(vec![(replacement, output)]));
+        }
+        if let Some(mut chain) = find_chain(tx, thread, &output, positions, depth + 1, saw_pruned)?
+        {
+            chain.insert(0, (replacement, output));
+            return Ok(Some(chain));
+        }
+    }
+    Ok(None)
+}
+
+/// Reply-expected messages this Thread sent that are still unanswered: their
+/// replies can land in the Thread after the rewind.
+fn pending_replies_sent(tx: &Transaction<'_>, thread: &str) -> Result<Value, ApiError> {
+    const WHERE: &str = "FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(sender_json,'$.thread_id')=?1";
+    let count: i64 = tx
+        .query_row(&format!("SELECT count(*) {WHERE}"), [thread], |r| r.get(0))
+        .map_err(sql_error)?;
+    let items = tx
+        .prepare(&format!(
+            "SELECT message_node_id,target_thread_id,created_at {WHERE} ORDER BY created_at,rowid LIMIT ?2"
+        ))
+        .map_err(sql_error)?
+        .query_map(params![thread, LIST_LIMIT], |r| {
+            Ok(json!({
+                "message_id": r.get::<_, String>(0)?,
+                "target_thread_id": r.get::<_, String>(1)?,
+                "created_at": r.get::<_, String>(2)?,
             }))
         })
         .map_err(sql_error)?

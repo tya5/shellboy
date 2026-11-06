@@ -5037,8 +5037,8 @@ impl UiState {
                 }
             }
             "/rewind" => {
-                // Pick a past request like /edit; the path is cut back to the
-                // node just before it. The owner refuses while work is live.
+                // Pick a past request like /edit; the path is cut back to just
+                // before it. The owner refuses while work is live.
                 let request = if argument.is_empty() {
                     self.view().navigation.anchor.node_id.clone().or_else(|| {
                         self.view()
@@ -5051,19 +5051,22 @@ impl UiState {
                 } else {
                     Some(argument.into())
                 };
-                let before = request.and_then(|request| {
-                    let nodes = self.view().nodes();
-                    let index = nodes.iter().position(|node| node.node_id == request)?;
-                    (nodes[index].role == "user" && index > 0)
-                        .then(|| nodes[index - 1].node_id.clone())
+                // The owner picks the path node just before the request.
+                let not_a_request = request.as_ref().is_some_and(|request| {
+                    self.view()
+                        .nodes()
+                        .iter()
+                        .any(|node| &node.node_id == request && node.role != "user")
                 });
-                if let (Some(thread_id), Some(node_id)) = (thread_id, before) {
+                if let (Some(thread_id), Some(node_id), false) = (thread_id, request, not_a_request)
+                {
                     vec![UiAction::Command(Command::ThreadRewind(ThreadRewindArgs {
                         thread_id: Some(thread_id),
                         node_id,
+                        exclude_node: true,
                     }))]
                 } else {
-                    self.command_error(i18n::local!(self.config.ui.language, "/rewind [user-node-id] は読み込み済みの過去の依頼とその直前の履歴が必要です。範囲外は shellboy thread rewind を使います", "/rewind [user-node-id] needs a loaded earlier request with history before it; use `shellboy thread rewind` for anything else"))
+                    self.command_error(i18n::local!(self.config.ui.language, "/rewind [user-node-id] は保存済みの過去の依頼で使えます", "/rewind [user-node-id] requires an earlier saved request"))
                 }
             }
             "/index" => self.index_command(argument),

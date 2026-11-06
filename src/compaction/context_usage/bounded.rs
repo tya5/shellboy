@@ -32,7 +32,8 @@ pub(super) fn query() -> String {
  SELECT CASE WHEN octet_length(a.id)<=?2 THEN a.id END, {},
  CASE WHEN octet_length(a.started_at)<=?2 THEN a.started_at END,
  CASE WHEN octet_length(a.ended_at)<=?2 THEN a.ended_at END,
- EXISTS(SELECT 1 FROM edits WHERE octet_length(created_at)<=?2 AND created_at>a.started_at),
+ (EXISTS(SELECT 1 FROM edits WHERE octet_length(created_at)<=?2 AND created_at>a.started_at)
+ OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id) AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p ON p.thread_id=?1 AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
  COALESCE(octet_length(a.id)>?2 OR octet_length(a.started_at)>?2
  OR COALESCE(octet_length(a.ended_at)>?2,0),0),
  selected.native_rowid IS NULL AND (SELECT count(*) FROM recent_turns)=33,
