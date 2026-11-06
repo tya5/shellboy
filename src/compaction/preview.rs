@@ -710,14 +710,9 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
                 "Summary connection is not configured",
             ));
         }
-        let connection = config.connections.get(&snapshot.profile);
         let mut limits = config.compaction.clone();
-        limits.segment_chars = config
-            .compaction
-            .segment_chars_for(loaded.thread_segment_chars, connection);
-        limits.reduce_rounds = config
-            .compaction
-            .reduce_rounds_for(loaded.thread_reduce_rounds, connection);
+        limits.segment_chars = snapshot.segment_chars;
+        limits.reduce_rounds = snapshot.reduce_rounds;
         if let Some(n) = args.segment_chars {
             limits.segment_chars = n as usize;
         }
@@ -970,7 +965,15 @@ pub(crate) fn read_tx(
     }
     let mut budget = TEXT;
     let mut sql = 0;
-    let loaded = load(db, thread, args, &mut budget, &mut sql)?;
+    let mut loaded = load(db, thread, args, &mut budget, &mut sql)?;
+    // Resolve like the owner's snapshot: Thread, then connection, then [compaction].
+    let connection = config.connections.get(&loaded.snapshot.profile);
+    loaded.snapshot.segment_chars = config
+        .compaction
+        .segment_chars_for(loaded.thread_segment_chars, connection);
+    loaded.snapshot.reduce_rounds = config
+        .compaction
+        .reduce_rounds_for(loaded.thread_reduce_rounds, connection);
     let mut plan = make_plan(&loaded, args, config);
     if let Some(summary) = &mut plan.summary {
         sql += 1;

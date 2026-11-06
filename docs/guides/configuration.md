@@ -761,7 +761,7 @@ summary part (one model request) and the size reduce requests are packed to;
 limit is rejected. The value in effect is the first one set of: the single summary's
 `compact --summary --segment-chars N --reduce-rounds N`, the Thread's
 `thread set --segment-chars N --reduce-rounds N` (`''` clears), the connection's,
-then `[compaction]`. Out-of-range values are rejected at every level. Parts made at
+then `[compaction]`. Out-of-range values are rejected at every level. A conversation group larger than `segment_chars` cannot be split: the summary stops before any request, so with a small value one long message or unspilled tool result makes every automatic summary for that Thread fail until the value is raised (`compact --dry-run` shows the refusal before any cost). A smaller value also means more reduce requests and rounds, which can reach `summary_reduce_max_requests` or `reduce_rounds` before the map budget. Parts made at
 one size are not reused at another size except where the covered nodes coincide. Each
 `compact list` item records the values it used (`metrics.segment_chars`,
 `metrics.reduce_rounds`, with `metrics.summary_limit`), so a change can be compared

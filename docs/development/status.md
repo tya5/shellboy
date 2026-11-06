@@ -67,7 +67,7 @@ sweep also collects parts whose `sources` is missing, empty or invalid.
 `history get --node SUMMARY --parts` reads them (CLI only; the TUI form gained
 the matching `parts` field). S2 (fork reuses parent map parts) is tested and
 holds. Resume point: CI on the final SHA, then owner review. TUI view is later.
-## Summary part size and reduce rounds (#231; implemented, CI pending)
+## Summary part size and reduce rounds (#231; implemented, CI passed)
 
 Migration 31 adds nullable `thread.segment_chars` / `thread.reduce_rounds`; the former constants
 `SEGMENT_CHARS` (64,000) and `REDUCE_ROUNDS` (4) resolve `[compaction]` -> `connections.<name>`
@@ -75,7 +75,7 @@ Migration 31 adds nullable `thread.segment_chars` / `thread.reduce_rounds`; the 
 like the #229 threshold (bounds 2,000..=1,000,000 and 1..=16, D-231-1). Results and `compact list`
 metrics record the values used; the dry-run echoes them; the Agent Guide documents the
 observe/change/re-measure method without target numbers. The upgrade checker now targets schema 31.
-Resume point: CI on the final SHA, then owner review.
+Independent review found no code bugs; doc fixes applied. Default and all-OS CI passed on the final tip (run IDs in the hand-off). Resume point: owner review and landing.
 
 ## Per-Thread auto-compaction threshold (#229; implemented, CI pending)
 

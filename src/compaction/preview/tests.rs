@@ -592,6 +592,89 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
 }
 
 #[tokio::test]
+async fn explicit_summary_uses_its_own_segment_size_records_it_and_leaves_the_thread_unset() {
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        let mut buffer = [0; 8192];
+        loop {
+            let n = socket.read(&mut buffer).await.unwrap();
+            assert!(n > 0);
+            request.extend_from_slice(&buffer[..n]);
+            assert!(request.len() < 1_048_576);
+            if let Some(i) = request.windows(4).position(|b| b == b"\r\n\r\n") {
+                let header = String::from_utf8_lossy(&request[..i]);
+                let length: usize = header
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|s| s.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                if request.len() >= i + 4 + length {
+                    break;
+                }
+            }
+        }
+        let body=json!({"id":"summary-fixture","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"short summary"}]}],"usage":{"input_tokens":20,"output_tokens":3,"total_tokens":23}}).to_string();
+        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await.unwrap();
+        1usize
+    });
+    let mut f = Fixture::new().await;
+    f.text("a", &"a".repeat(5000)).await;
+    f.text("b", &"b".repeat(5000)).await;
+    f.text("tail", "current").await;
+    let mut c = config();
+    let connection = c.connections.get_mut("p").unwrap();
+    connection.base_url = format!("http://{address}/v1");
+    connection.api_key_env = None;
+    connection.response_max_retries = 0;
+    f.compactor = Compactor::new(f.db.clone(), Arc::new(c));
+    let result = f
+        .compactor
+        .edit(
+            "t",
+            &crate::protocol::ContextEditArgs {
+                thread_id: Some("t".into()),
+                action: ContextEditAction::Summary,
+                from_node_id: Some("a".into()),
+                to_node_id: Some("b".into()),
+                max_chars: None,
+                max_percent: None,
+                segment_chars: Some(70_000),
+                reduce_rounds: Some(2),
+            },
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    // The call's own values were used and recorded (they feed `compact list`).
+    assert_eq!(result.compact.segment_chars, Some(70_000));
+    assert_eq!(result.compact.reduce_rounds, Some(2));
+    assert_eq!(server.await.unwrap(), 1);
+    // The Thread itself stays unset.
+    let stored =
+        f.db.call(|db| {
+            Ok(db.query_row(
+                "SELECT segment_chars,reduce_rounds FROM thread WHERE id='t'",
+                [],
+                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(stored, (None, None));
+    f.close().await;
+}
+
+#[tokio::test]
 async fn hidden_marker_after_multi_source_tool_groups_uses_group_not_node_ordinal() {
     let f = Fixture::new().await;
     f.tools().await;
