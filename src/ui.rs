@@ -57,6 +57,7 @@ mod message_queue;
 mod models;
 #[allow(dead_code)]
 pub(crate) mod observation_notice;
+mod rewind;
 pub use message_queue::{PendingMessage, PendingMessages, ReplyTarget, SubmittedMessage};
 #[cfg(test)]
 mod scroll_characterization_tests;
@@ -686,6 +687,12 @@ pub enum UiAction {
         generation: u64,
         draft_revision: u64,
     },
+    /// `thread rewind` for the one-key rewind (#246): first as `--dry-run` for
+    /// the confirmation, then (Y) for real. The result returns as `RewindResult`.
+    Rewind {
+        request_id: u64,
+        args: ThreadRewindArgs,
+    },
     /// One page of `thread branches` for the branch panel (#237).
     LoadBranches {
         thread_id: String,
@@ -1252,6 +1259,11 @@ pub enum UiUpdate {
         append: bool,
         result: Result<serde_json::Value, String>,
     },
+    RewindResult {
+        request_id: u64,
+        args: ThreadRewindArgs,
+        result: Result<serde_json::Value, String>,
+    },
     EditRequestLoaded {
         thread_id: String,
         node_id: String,
@@ -1324,6 +1336,11 @@ enum Confirmation {
         detail: String,
     },
     ThreadDeletion(thread_deletion::DeletionDialog),
+    /// One-key rewind (#246): the owner's dry-run facts, executed on Y.
+    Rewind {
+        args: ThreadRewindArgs,
+        facts: rewind::RewindFacts,
+    },
     EditStop {
         draft_id: String,
         revision: u64,
@@ -1859,6 +1876,10 @@ pub struct UiState {
     models: Option<models::ModelPicker>,
     branches: Option<branches::BranchPanel>,
     next_branches_request: u64,
+    /// One-key rewind (#246): the request awaiting the owner, and the undo offer.
+    next_rewind_request: u64,
+    rewind_pending: Option<u64>,
+    rewind_undo: Option<rewind::RewindUndo>,
     queue_popup: message_queue::QueuePopup,
     send_now: bool,
     immediate_chord: bool,
@@ -1986,6 +2007,9 @@ impl UiState {
             models: None,
             branches: None,
             next_branches_request: 0,
+            next_rewind_request: 0,
+            rewind_pending: None,
+            rewind_undo: None,
             queue_popup: message_queue::QueuePopup::default(),
             send_now: false,
             immediate_chord: false,
@@ -3710,6 +3734,11 @@ impl UiState {
             } => {
                 self.branches_loaded(request_id, append, result);
             }
+            UiUpdate::RewindResult {
+                request_id,
+                args,
+                result,
+            } => self.rewind_result(request_id, args, result),
             UiUpdate::EditRequestLoaded {
                 thread_id,
                 node_id,
@@ -5085,11 +5114,8 @@ impl UiState {
                 });
                 if let (Some(thread_id), Some(node_id), false) = (thread_id, request, not_a_request)
                 {
-                    vec![UiAction::Command(Command::ThreadRewind(ThreadRewindArgs {
-                        thread_id: Some(thread_id),
-                        node_id,
-                        exclude_node: true,
-                    }))]
+                    // Same confirmation as the history key (#246).
+                    self.begin_rewind(thread_id, node_id)
                 } else {
                     self.command_error(i18n::local!(self.config.ui.language, "/rewind [user-node-id] は保存済みの過去の依頼で使えます", "/rewind [user-node-id] requires an earlier saved request"))
                 }
@@ -5983,6 +6009,7 @@ impl UiState {
             Some(Confirmation::ThreadDeletion(_)) => {
                 unreachable!("thread deletion owns its confirmation")
             }
+            Some(Confirmation::Rewind { args, .. }) => self.execute_rewind(args),
             Some(Confirmation::ForceQuit) => vec![UiAction::ForceQuit],
             None => vec![],
         }

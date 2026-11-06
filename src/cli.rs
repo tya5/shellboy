@@ -185,7 +185,7 @@ pub enum ThreadCommand {
     Prune(ThreadPruneOptions),
     /// Cut this Thread's selected path back to a node; the removed part stays as a child Thread.
     #[command(
-        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or queued messages, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. Attachments whose message leaves the path are not sent."
+        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or queued messages, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. Attachments whose message leaves the path are not sent. `--dry-run` reports the same facts (removed range, what is not undone) without changing anything."
     )]
     Rewind(ThreadRewindOptions),
     /// Show the branch tree: Threads forked, edited or rewound from this one, and where they diverge.
@@ -492,6 +492,9 @@ pub struct ThreadRewindOptions {
     /// Do not keep NODE: the node just before it becomes the end (rewind to before a request).
     #[arg(long)]
     pub exclude_node: bool,
+    /// Report what the rewind would remove and not undo, without changing anything.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadSetOptions {
@@ -935,6 +938,7 @@ impl Cli {
                     thread_id: a.thread_id,
                     node_id: a.node_id,
                     exclude_node: a.exclude_node,
+                    dry_run: a.dry_run,
                 }),
                 ThreadCommand::Set(a) => C::ThreadSet(Box::new(wire::ThreadSetArgs {
                     agents: path_option(a.agents)?,

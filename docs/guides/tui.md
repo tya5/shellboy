@@ -281,7 +281,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/cwd`, `/cwd PATH` | Show/change working directory |
 | `/fork [NODE_ID]` | New Thread sharing history through the specified node |
 | `/edit [USER_NODE_ID]` | Load the original request into a separate editing draft; branch on send |
-| `/rewind [USER_NODE_ID]` | Move this conversation back to just before an earlier request (same Thread, ID and title); the removed part stays as a child conversation, so opening that child undoes it. Conversation only: shell side effects are not undone and the result lists later shell executions and child conversations. Refused while work is running or messages are queued. |
+| `/rewind [USER_NODE_ID]` | Move this conversation back to just before an earlier request (same Thread, ID and title); the removed part stays as a child conversation, so opening that child undoes it. It asks for [confirmation](#rewind-from-the-history) first, like the `r` key. Conversation only: shell side effects are not undone. Refused while work is running or messages are queued. |
 | `/branches [THREAD_ID]` | Open the branch panel: the tree of this conversation's branches (see [Branches](#branches)) |
 | `/compact` | Request spill/summary at a safe boundary |
 | `/search QUERY` | Conversation search in the active embedding space |
@@ -312,6 +312,28 @@ A branch is a child conversation (a Thread) made by `/fork`, `/edit` or `/rewind
 **In the conversation.** Where branches diverge, one muted row follows the last shared message: `↳ 2/3 ⋯ current "make CI pass"`. `2/3` is the alternative shown (the order is by when its first message was written); `current` marks the one this conversation follows, `branch` another (Japanese: `今の会話`, `別の会話`; the panel uses the same words, plus `parent` / `親`) and the quoted text is that alternative's last request (for the current one, this conversation's own last request). A conversation that was rewound shows itself ending at the point next to the removed part. Select the message in history focus (Tab, then Up/Down); `←` / `→` move through the alternatives (previewing never switches), and Enter opens the previewed one when it is not the current one (on the current alternative Enter keeps its usual meaning). The marker belongs to the node where the paths diverge: the arrow keys and Enter act when that node is the selected history item (a node folded into a grouped item, such as a notice group, is reached through its own item). Markers are read with each history page of up to 128 nodes; a branch made after the page was loaded appears when the page is read again.
 
 **Branch panel.** `/branches` or F8 `会話 | 分岐の木` opens it (F11 and F12 are not used). Rows are drawn with `├─ └─ │` (`+- \- |` when the terminal does not draw them as single-width): each conversation, then its divergence points in path order (the quoted request at the point), then the branches that diverged there; only points and tips are listed. A row shows the state (`current`, `parent`, `branch`; `running`; `pruned` when the originals were released with `thread prune`), the last request, and, at 64 columns or more, the time and number of messages. Below 64 columns those move to the detail lines under the list. Keys: Up/Down/PgUp/PgDn/Home/End select, Enter opens the selected conversation, F forks from its tip (`thread fork`), P opens the prune form (`会話 | 原文の解放`) with that conversation and its tip filled in and the dry run selected, N reads the next page, Esc closes. At most 256 conversations are listed per family, read in pages of 200; when the limit cuts the tree the panel says so. Comparing branches is not part of the panel yet.
+
+## Rewind from the history
+
+In the conversation, press Tab and Up/Down to select one of your own requests, then press **`r`** (shown as `r Rewind` in the key help and listed in F1 under the rewind entry). The conversation goes back to just before that request: the same as `/rewind` and `shellboy thread rewind --exclude-node`. `r` does nothing on other items (the status says to select a request). No other key of the history focus uses `r`.
+
+Nothing changes yet. The owner reads the facts with `shellboy thread rewind --dry-run` (the same rewind run and rolled back, so refusals such as a running Run or queued messages appear here too) and Shellboy shows a confirmation:
+
+```
+Rewind this conversation to just before this request?
+
+Removed range: 2 turns, 14 nodes
+Not undone:
+  Shell executions after this request: 3
+  File changes are not undone
+  Child conversations started after it: 1
+  Pending replies to sent messages: none
+Undo: the removed part stays as a branch conversation. Right after rewinding, Alt+U opens it (so does /branches)
+```
+
+The Japanese screen shows the same facts (`外れる範囲`, `戻らないもの`, `取り消し`). Y rewinds; N or Esc cancels without writing anything. Counts come from the owner; the confirmation is not shown if the owner's answer lacks one of them. Shell executions and child conversations are counted from the time of the request; file changes made by shell commands are never undone.
+
+After Y, the footer notice reads `Rewound to before the request. Alt+U undoes it (opens the removed branch)`, and `Alt+U` appears in the key help while the input is empty. **Alt+U** opens the branch conversation that holds the removed part (the same conversation `/branches` lists); it works once, in the conversation that was rewound, and not when the configured send or newline key is Alt+U. Plain letters cannot be used there because they would be typed into the draft.
 
 ## Overlays and selection mode
 

@@ -339,6 +339,20 @@ impl UiState {
             self.toggle_focused_region();
             return vec![];
         }
+        if self.composer_active()
+            && key.code == KeyCode::Char('u')
+            && key.modifiers == KeyModifiers::ALT
+            && self.rewind_undo_available()
+            && !key_matches(&self.config.ui.send_key, key)
+            && !self
+                .config
+                .ui
+                .newline_keys
+                .iter()
+                .any(|binding| key_matches(binding, key))
+        {
+            return self.undo_rewind();
+        }
         if let Some(actions) = self.region_key(key) {
             return actions;
         }
@@ -757,6 +771,7 @@ pub(super) fn confirmation_text(
                 UiLanguage::En => format!("Confirm index operation{sep}{action}\n{detail}"),
             })
         }
+        Confirmation::Rewind { facts, .. } => Some(facts.text(language)),
         Confirmation::StaleIndex { detail } => Some(match language {
             UiLanguage::Ja => format!(
                 "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"

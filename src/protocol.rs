@@ -546,7 +546,9 @@ args!(ThreadRewindArgs {
     thread_id: Option<String>,
     node_id: String,
     #[serde(default, skip_serializing_if = "is_false")]
-    exclude_node: bool
+    exclude_node: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    dry_run: bool
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] auto_compact_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] segment_chars: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] reduce_rounds: Option<String> });
 args!(MessageSendArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });

@@ -1396,6 +1396,7 @@ impl Store {
                     &id,
                     &args.node_id,
                     args.exclude_node,
+                    args.dry_run,
                     &branch,
                     now,
                 )?;
@@ -1404,8 +1405,10 @@ impl Store {
                     .map_err(sql_error)?;
                 value["title"] = json!(thread_display_title(tx, &id, &stored)?);
                 let mut result = MutationResult::value(value)?;
-                result.changed_threads.push(id);
-                result.changed_threads.push(branch);
+                if !args.dry_run {
+                    result.changed_threads.push(id);
+                    result.changed_threads.push(branch);
+                }
                 Ok(result)
             }
             Command::ThreadDeletePreview(args) => {

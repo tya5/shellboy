@@ -5010,3 +5010,16 @@ carry the same hint as maps, committed tests for a fatal failure with a
 sibling in flight and for split ordering, design text states which failures
 cancel in-flight requests. Resume point: exact-tip default and all-OS CI, then
 integration; no live-provider behavior is claimed.
+
+## #246 One-key rewind (in progress)
+
+`r` on a selected request in the history focus, and `/rewind`, now read the owner's
+facts with `thread rewind --dry-run` (the real rewind in a rolled-back savepoint;
+adds `removed` nodes/turns) and show a confirmation (removed range; shell executions
+after the request, file changes not undone, child conversations, pending replies;
+undoable as a branch). Y rewinds, N/Esc writes nothing. Afterwards the footer notice
+offers Alt+U, which opens the removed branch. Tests: dry run writes nothing and
+reports the real rewind's facts, key dispatch and conflicts, confirmation text in
+both languages across terminal width policies and 100/60/40/28 columns, cancel, undo.
+Decision D-246-1. Resume point: exact-tip default and all-OS CI, then integration.
+Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).

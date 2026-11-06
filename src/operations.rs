@@ -1249,7 +1249,12 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
-        fields: &[FieldId::Thread, FieldId::Node, FieldId::ExcludeNode],
+        fields: &[
+            FieldId::Thread,
+            FieldId::Node,
+            FieldId::ExcludeNode,
+            FieldId::DryRun,
+        ],
     },
     OperationSpec {
         id: OperationId::ThreadSet,

@@ -131,6 +131,7 @@ impl Fixture {
                 thread_id: Some(thread.into()),
                 node_id: node.into(),
                 exclude_node: false,
+                dry_run: false,
             }))
             .await
             .unwrap();

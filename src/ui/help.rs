@@ -897,8 +897,29 @@ impl Page {
             ),
             local!(
                 config.ui.language,
-                "同じ会話を以前の依頼の直前に戻す。切り取った部分は子会話に残る（実行中は不可。シェルの副作用は戻らない）",
-                "Move this conversation back to just before an earlier request; the removed part stays as a child conversation (not while running; shell side effects are not undone)"
+                "同じ会話を以前の依頼の直前に戻す。実行前に消える範囲と戻らないものを確認する。切り取った部分は子会話に残る（実行中は不可。シェルの副作用は戻らない）",
+                "Move this conversation back to just before an earlier request; confirms the removed range and what is not undone first. The removed part stays as a child conversation (not while running; shell side effects are not undone)"
+            ),
+        );
+        page.entry(
+            &crate::ui::text_width::glyphs::formatted!(
+                "{} → {}",
+                "{} > {}",
+                Action::History.binding(config),
+                Action::Rewind.binding(config)
+            ),
+            local!(
+                config.ui.language,
+                "選んだ依頼の手前まで戻す（/rewindと同じ。確認してから実行）",
+                "Rewind to just before the selected request (same as /rewind; confirms first)"
+            ),
+        );
+        page.entry(
+            &Action::Undo.binding(config),
+            local!(
+                config.ui.language,
+                "戻した直後に押すと、切り取った枝の会話を開いて元に戻す",
+                "Right after a rewind, opens the removed branch conversation to undo it"
             ),
         );
         page.entry(

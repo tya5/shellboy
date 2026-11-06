@@ -35,7 +35,43 @@ fn invalid_state(message: &str) -> ApiError {
 /// Rewind `thread` so its selected path ends at `node`; the previous full path
 /// is kept as the new child Thread `branch_id`. With `exclude_node` the path
 /// ends at the node just before `node` (rewind to before a chosen request).
+///
+/// With `dry_run` the very same operation runs inside a savepoint that is
+/// rolled back, so the facts and every refusal are exactly what a real rewind
+/// would report, and nothing is written (#246). The result then has
+/// `"dry_run": true` and names no branch Thread (none exists).
 pub fn rewind_thread(
+    tx: &Transaction<'_>,
+    thread: &str,
+    node: &str,
+    exclude_node: bool,
+    dry_run: bool,
+    branch_id: &str,
+    now: &str,
+) -> Result<Value, ApiError> {
+    if !dry_run {
+        return rewind_inner(tx, thread, node, exclude_node, branch_id, now);
+    }
+    tx.execute_batch("SAVEPOINT rewind_dry_run")
+        .map_err(sql_error)?;
+    let outcome = rewind_inner(tx, thread, node, exclude_node, branch_id, now);
+    tx.execute_batch("ROLLBACK TO rewind_dry_run; RELEASE rewind_dry_run")
+        .map_err(sql_error)?;
+    let mut value = outcome?;
+    if let Some(object) = value.as_object_mut() {
+        object.remove("branch_thread_id");
+        object.insert("dry_run".into(), json!(true));
+        object.insert(
+            "undo".into(),
+            json!(
+                "not executed; a real rewind keeps the removed part as a branch Thread you can open"
+            ),
+        );
+    }
+    Ok(value)
+}
+
+fn rewind_inner(
     tx: &Transaction<'_>,
     thread: &str,
     node: &str,
@@ -150,6 +186,15 @@ pub fn rewind_thread(
         .zip(&new_path)
         .take_while(|(a, b)| a == b)
         .count() as i64;
+    // The range that leaves the path (read before the rewrite): nodes, and the
+    // Turns that own them.
+    let removed_turns: i64 = tx
+        .query_row(
+            "SELECT count(DISTINCT n.turn_id) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2",
+            params![thread, common],
+            |r| r.get(0),
+        )
+        .map_err(sql_error)?;
     let removed_attachments = tx
         .execute(
             "DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT a.id FROM attachment_ref a JOIN thread_path p ON p.node_id=a.source_node_id AND p.thread_id=?1 WHERE p.ordinal>=?2)",
@@ -169,6 +214,7 @@ pub fn rewind_thread(
         "branch_thread_id": branch_id,
         "undo": format!("open Thread {branch_id}; it holds the removed part"),
         "path_nodes": {"before": old_path.len(), "after": new_path.len()},
+        "removed": {"nodes": old_path.len() as i64 - common, "turns": removed_turns},
         "rewound_into_summarized_range": expanded,
         "attachment_selections_removed": removed_attachments,
         "shell_executions_after_node": shells,

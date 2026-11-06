@@ -1294,12 +1294,14 @@ impl Form {
                         "false".into(),
                         Boolean,
                     ),
+                    f("dry_run", "実行対象だけを確認", "false".into(), Boolean),
                 ],
                 |form, _cwd| {
                     Ok(Command::ThreadRewind(ThreadRewindArgs {
                         thread_id: Some(form.owned("thread")?),
                         node_id: form.owned("node")?,
                         exclude_node: form.boolean("exclude_node")?,
+                        dry_run: form.boolean("dry_run")?,
                     }))
                 },
             ),

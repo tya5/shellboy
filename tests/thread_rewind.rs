@@ -109,12 +109,24 @@ impl Fixture {
         exclude_node: bool,
         caller: Option<Origin>,
     ) -> Result<Value, ApiError> {
+        self.rewind_args(thread, node, exclude_node, false, caller)
+            .await
+    }
+    async fn rewind_args(
+        &self,
+        thread: Option<&str>,
+        node: &str,
+        exclude_node: bool,
+        dry_run: bool,
+        caller: Option<Origin>,
+    ) -> Result<Value, ApiError> {
         let request = Request::new(
             format!("instance:{}", uuid::Uuid::new_v4()),
             Command::ThreadRewind(ThreadRewindArgs {
                 thread_id: thread.map(str::to_owned),
                 node_id: node.into(),
                 exclude_node,
+                dry_run,
             }),
         );
         self.store
@@ -532,4 +544,61 @@ async fn rewind_path_cost() {
             "path {size}: rewind to the middle {first:?}; second rewind (path {cut}) {second:?}"
         );
     }
+}
+
+/// Every row of the tables a rewind could touch, as one comparable string.
+fn dump(db: &Connection) -> String {
+    let mut out = String::new();
+    for sql in [
+        "SELECT id||'|'||title||'|'||COALESCE(cursor_node_id,'')||'|'||selection_revision||'|'||COALESCE(parent_thread_id,'') FROM thread ORDER BY id",
+        "SELECT thread_id||'|'||ordinal||'|'||node_id FROM thread_path ORDER BY thread_id,ordinal",
+        "SELECT id||'|'||turn_id FROM node ORDER BY id",
+        "SELECT thread_id||'|'||attachment_id FROM attachment_selection ORDER BY 1",
+    ] {
+        let rows: Vec<String> = db
+            .prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        out.push_str(&rows.join("\n"));
+        out.push('\n');
+    }
+    out
+}
+
+#[tokio::test]
+async fn dry_run_reports_the_facts_of_the_real_rewind_and_writes_nothing() {
+    let f = Fixture::new([plain(6), n_path(6)].concat()).await;
+    let before = f.query(dump).await;
+    let preview = f
+        .rewind_args(Some("T"), "n4", true, true, None)
+        .await
+        .unwrap();
+    assert_eq!(f.query(dump).await, before, "dry run wrote something");
+    assert_eq!(preview["dry_run"], true);
+    assert!(preview.get("branch_thread_id").is_none());
+    assert_eq!(preview["path_nodes"], json!({"before":6,"after":3}));
+    assert_eq!(preview["removed"], json!({"nodes":3,"turns":1}));
+    // Refusals are the real ones and also leave nothing behind.
+    let error = f
+        .rewind_args(Some("T"), "n6", false, true, None)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(f.query(dump).await, before);
+    // The real rewind then reports the same facts.
+    let real = f.rewind_with(Some("T"), "n4", true, None).await.unwrap();
+    for key in [
+        "path_nodes",
+        "removed",
+        "shell_executions_after_node",
+        "child_threads_after_node",
+        "pending_replies_to_sent_messages",
+    ] {
+        assert_eq!(preview[key], real[key], "{key}");
+    }
+    assert!(real["branch_thread_id"].is_string());
+    assert!(real.get("dry_run").is_none());
 }

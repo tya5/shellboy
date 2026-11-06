@@ -980,8 +980,8 @@ mod contract_tests {
         ui.active_view_mut().thread_id = Some("saved".into());
         // An id that is not loaded is still sent: the owner resolves it.
         assert!(matches!(ui.slash("/rewind req").as_slice(),
-            [UiAction::Command(Command::ThreadRewind(a))]
-                if a.thread_id.as_deref() == Some("saved") && a.node_id == "req" && a.exclude_node));
+            [UiAction::Rewind { args: a, .. }]
+                if a.thread_id.as_deref() == Some("saved") && a.node_id == "req" && a.exclude_node && a.dry_run));
         // No argument and no loaded request: nothing to pick.
         assert!(ui.slash("/rewind").is_empty());
     }

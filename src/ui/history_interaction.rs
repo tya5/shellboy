@@ -333,6 +333,7 @@ impl UiState {
             code if key_hints::Action::Original.matches(code) => {
                 Some(self.open_history_details(false, true))
             }
+            code if key_hints::Action::Rewind.matches(code) => Some(self.rewind_selected()),
             code if key_hints::Action::Copy.matches(code) => Some(
                 self.selected_history_item()
                     .map(|item| UiAction::Copy {

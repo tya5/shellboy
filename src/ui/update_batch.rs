@@ -19,6 +19,7 @@ impl UiUpdate {
             | Self::NodeWindow { .. }
             | Self::EditRequestLoaded { .. }
             | Self::BranchesLoaded { .. }
+            | Self::RewindResult { .. }
             | Self::SavedMessage { .. } => true,
             // Scoped updates delegate to apply, which owns the inner effect.
             Self::RetainedInspectionStarted { .. }

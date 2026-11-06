@@ -47,6 +47,10 @@ pub(super) enum Action {
     Execute,
     Submit,
     Refresh,
+    /// On a selected request in the history view (#246).
+    Rewind,
+    /// Right after a rewind: open the removed branch (#246).
+    Undo,
 }
 impl Action {
     // Bindings remain input identities, independent of translated descriptions.
@@ -74,7 +78,8 @@ impl Action {
             Self::Operations => "a",
             Self::Choose | Self::Display | Self::Execute | Self::Submit => "Enter",
             Self::Complete | Self::NextField => "Tab",
-            Self::Refresh => "r",
+            Self::Refresh | Self::Rewind => "r",
+            Self::Undo => "Alt+U",
         }
     }
     pub fn spec(self) -> (&'static str, &'static str) {
@@ -138,6 +143,16 @@ impl Action {
             Self::Execute => local!(language, "実行", "Run"),
             Self::Submit => local!(language, "送信", "Send"),
             Self::Refresh => local!(language, "再取得", "Refresh"),
+            Self::Rewind => local!(
+                language,
+                "選択した依頼の手前まで会話を戻す（確認あり。外れた部分は枝として残る）",
+                "Rewind the conversation to just before the selected request (confirms first; the removed part stays as a branch)"
+            ),
+            Self::Undo => local!(
+                language,
+                "直前の巻き戻しを元に戻す（切り取った枝を開く）",
+                "Undo the last rewind (opens the removed branch)"
+            ),
         }
     }
     fn short_label(self, language: crate::config::UiLanguage) -> &'static str {
@@ -168,6 +183,8 @@ impl Action {
             Self::Display => local!(language, "表示", "Show"),
             Self::Execute => local!(language, "実行", "Run"),
             Self::Refresh => local!(language, "再取得", "Refresh"),
+            Self::Rewind => local!(language, "巻き戻し", "Rewind"),
+            Self::Undo => local!(language, "元に戻す", "Undo rewind"),
         }
     }
     pub fn binding(self, config: &Config) -> String {
@@ -198,9 +215,11 @@ impl Action {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Context {
     Empty,
+    EmptyUndo,
     Typing,
     Running,
     History,
+    HistoryRequest,
     HistoryNotice,
     HistoryNoticeGroup,
     LiveWork,
@@ -226,9 +245,11 @@ impl Context {
         use Action::*;
         match self {
             Self::Empty => &[Commands, History, Threads],
+            Self::EmptyUndo => &[Undo, Commands, History, Threads],
             Self::Typing => &[Send, Newline],
             Self::Running => &[Interrupt, Stop],
             Self::History => &[Copy, Code, Original],
+            Self::HistoryRequest => &[Rewind, Copy, Code, Original],
             Self::HistoryNotice => &[FollowNotice, Copy, Original],
             Self::HistoryNoticeGroup => &[Toggle, Copy, Original],
             Self::LiveWork => &[Toggle, Back],
@@ -422,6 +443,15 @@ impl UiState {
                 {
                     Context::HistoryNotice
                 }
+                Some(super::ItemKey::Node(id))
+                    if self
+                        .view()
+                        .nodes()
+                        .iter()
+                        .any(|node| node.node_id == *id && node.role == "user") =>
+                {
+                    Context::HistoryRequest
+                }
                 _ => Context::History,
             },
             None if self.view().live_work.region.active => Context::LiveWork,
@@ -436,6 +466,9 @@ impl UiState {
                 && self.view().thread_id.is_some() =>
             {
                 Context::Running
+            }
+            None if self.view().draft.text.is_empty() && self.rewind_undo_available() => {
+                Context::EmptyUndo
             }
             None if self.view().draft.text.is_empty() => Context::Empty,
             None => Context::Typing,
@@ -515,6 +548,8 @@ mod tests {
             (Action::Execute, "Enter", "実行"),
             (Action::Submit, "Enter", "送信"),
             (Action::Refresh, "r", "再取得"),
+            (Action::Rewind, "r", "巻き戻し"),
+            (Action::Undo, "Alt+U", "元に戻す"),
         ];
         for (action, binding, label) in cases {
             assert_eq!(action.spec(), (binding, label), "{action:?}");
@@ -531,6 +566,8 @@ mod tests {
             Context::Typing,
             Context::Running,
             Context::History,
+            Context::HistoryRequest,
+            Context::EmptyUndo,
             Context::Selection,
             Context::Original { next: true },
             Context::Popup,

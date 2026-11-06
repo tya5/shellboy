@@ -3643,3 +3643,20 @@ still be caller-chosen; only the key, not its value, is shown). Frames without a
 usable ID still close silently. Impact: no version change, no new table/worker/queue.
 Recheck when: protocol 3 adds capabilities (study A2), which should let clients avoid
 sending unsupported fields at all.
+## D-246-1: One-key rewind: `r`, confirmation from `--dry-run`, undo on Alt+U (2026-11-06)
+
+Decision: (1) The history focus gets `r` (Rewind) on a selected user request; no other
+key of that focus uses `r` (c, b, o, Space, Enter, Tab/Esc, arrows; F-keys pass through).
+`/rewind` takes the same preview and confirmation. (2) The confirmation shows facts
+read from the owner, never computed in the UI: `thread rewind --dry-run` runs the real
+rewind inside a SAVEPOINT that is rolled back (no second implementation of the facts,
+refusals and boundary checks to drift; no write survives, tested by a table dump).
+The UI refuses to show a confirmation when one fact is missing. (3) The undo offer is
+the footer notice (`operation_notice`, an existing component) plus `Alt+U` in the key
+help while the input is empty. A plain letter cannot work there because it is typed
+into the draft; Alt chords already own Alt+D/Alt+W in the composer and honour the
+configured send/newline bindings the same way. The undo only opens the branch Thread
+(always valid), is scoped to the rewound conversation and used once. Impact: one new
+`UiAction`/`UiUpdate` pair, no table, worker, queue or glyph. Recheck when: a terminal
+where Alt+U is unusable is reported (macOS Terminal without "Option as Meta"), or the
+user wants undo reachable without the keyboard enhancement of Alt.

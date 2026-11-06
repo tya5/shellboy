@@ -2146,6 +2146,26 @@ async fn run_with_delivery(
                                 .await;
                         });
                     }
+                    UiAction::Rewind { request_id, args } => {
+                        // #246: the dry run for the confirmation, then the real
+                        // rewind; both are the owner's `thread.rewind`.
+                        let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                            let message = i18n::local!(language, "履歴操作を準備中です。完了後に再操作してください", "Preparing a history operation. Wait for completion, then try again");
+                            command_outcome::<()>(&updates, submission, &Err(ApiError::new(ErrorCode::InvalidState, message))).await;
+                            update(&updates, UiUpdate::RewindResult { request_id, args, result: Err(message.into()) }).await;
+                            continue;
+                        };
+                        let command = Command::ThreadRewind(args.clone());
+                        let observe = management.observe(&command);
+                        let control = control.clone();
+                        let outcomes = updates.worker();
+                        spawn_work(&mut workers, permit, async move {
+                            let response = management_request(&control, command, observe).await;
+                            let result = management_outcome(&response).map(|()| response.unwrap_or_default());
+                            command_outcome(&outcomes, submission, &result).await;
+                            update(&outcomes, UiUpdate::RewindResult { request_id, args, result: result.map_err(|error| error.message) }).await;
+                        });
+                    }
                     UiAction::LoadEditRequest {
                         thread_id,
                         node_id,
