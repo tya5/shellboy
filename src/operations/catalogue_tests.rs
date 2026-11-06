@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 72, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 73, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -72,6 +72,14 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .iter()
             .any(|binding| binding.path.join(" ") == "chat"),
         "chat must not be offered as a TUI form"
+    );
+    // Change-hint long-poll (#243): a scripting/bridge call, never a TUI form.
+    assert!(leaves.remove("events wait").is_some());
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path.join(" ") == "events wait"),
+        "events wait must not be offered as a TUI form"
     );
     // Standalone explicit maintenance (#238): owner-stopped, never a TUI form.
     let vacuum = leaves

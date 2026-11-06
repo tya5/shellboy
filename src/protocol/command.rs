@@ -47,6 +47,7 @@ impl Command {
             Self::RunStop(_) => ("run.stop", CommandRoute::Database),
             Self::TurnGet(_) => ("turn.get", CommandRoute::Database),
             Self::Wait(_) => ("wait", CommandRoute::Runtime),
+            Self::EventsWait(_) => ("events.wait", CommandRoute::Runtime),
             Self::HistoryList(_) => ("history.list", CommandRoute::Database),
             Self::HistoryGet(_) => ("history.get", CommandRoute::Database),
             Self::HistorySearch(_) => ("history.search", CommandRoute::Runtime),
@@ -92,6 +93,7 @@ impl Command {
             | Self::HistorySearch(_)
             | Self::ShellGet(_)
             | Self::ShellRead(_)
+            | Self::EventsWait(_)
             | Self::IndexBackfill(_)
             | Self::IndexRetry(_)
             | Self::IndexRebuild(_)
@@ -172,6 +174,7 @@ impl Command {
             | Self::RunStop(_)
             | Self::TurnGet(_)
             | Self::Wait(_)
+            | Self::EventsWait(_)
             | Self::HistoryList(_)
             | Self::HistoryGet(_)
             | Self::HistorySearch(_)
@@ -230,6 +233,7 @@ impl Command {
             | Self::RunGet(_)
             | Self::TurnGet(_)
             | Self::Wait(_)
+            | Self::EventsWait(_)
             | Self::HistoryList(_)
             | Self::HistoryGet(_)
             | Self::HistorySearch(_)
@@ -274,6 +278,7 @@ impl Command {
             | Self::ShellGet(_)
             | Self::ShellRead(_)
             | Self::AttachmentList(_)
+            | Self::EventsWait(_)
             | Self::IndexStatus(_)
             | Self::IndexPreview(_)
             | Self::StorageStatus(_) => true,

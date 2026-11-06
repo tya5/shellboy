@@ -20,6 +20,17 @@ Known: Ctrl+A on a subtree of 129-256 conversations overflows the browser's 128-
 changed-ID set (`src/frontend/browser.rs`), so the list resyncs with a "change could not be
 retained" notice; the list is correct, only the notice is misleading. The key choice (Ctrl+A,
 Ctrl+G) goes back to the user (D-222-1 follow-up). Resume point: CI on the final SHA, then owner review.
+## Change hints `events.wait` (#243 stage B; on branch issue-243/events-wait, CI pending)
+
+`Control` keeps an in-memory, bounded (4096 Threads) change clock advanced from
+`Control::changed`; `events.wait` / `shellboy events wait` long-polls it (receipt-free, no
+DB access, ordinary request slot, models allowed). Cursor = owner instance id + sequence;
+other instance or a cursor below the eviction floor returns `resync_required`. Tests:
+`src/control/change_clock.rs` units and `tests/events_wait.rs` (ordering, merging, paging,
+resume, resync after restart, timeout, disconnect/shutdown, one test per mutation family).
+Missing `changed()` found and fixed: queued/held `message.send`, `thread.prune`, `attachment.add` (not live).
+Not done: chat still polls (stage C); protocol 3/capabilities (A2), schema (D), live text
+deltas (E3, user wants them in Web M1, plan A first). See D-243-1.
 
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
 

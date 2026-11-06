@@ -578,7 +578,7 @@ impl Store {
                         if !live && !held { super::attachment_delivery::apply_pending_tx(tx,&target_id,now)?; }
                         let attached=crate::attachments::list_tx(tx,&target_id)?.into_iter().filter(|a|a.source_node_id==source).collect::<Vec<_>>();
                         let mut result=MutationResult::value(attached)?;
-                        if live && !held { result.quiet_wake_threads.push(target_id); }
+                        if live && !held { result.quiet_wake_threads.push(target_id); } else { result.changed_threads.push(target_id); }
                         Ok(result)
                     },
                 ))
@@ -1383,7 +1383,12 @@ impl Store {
                         .signals()
                         .mark_all(&crate::maintenance::Work::DELETION);
                 }
-                MutationResult::value(value)
+                let mut result = MutationResult::value(value)?;
+                if !args.dry_run {
+                    // Pruning tombstones originals the Thread read; observers re-read (#243).
+                    result.changed_threads.push(id);
+                }
+                Ok(result)
             }
             Command::ThreadBranches(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
@@ -1888,6 +1893,9 @@ impl Store {
             } else {
                 result.quiet_wake_threads.push(id);
             }
+        } else {
+            // Queued or held messages change saved delivery state without a wake (#243).
+            result.changed_threads.push(id);
         }
         Ok(result)
     }

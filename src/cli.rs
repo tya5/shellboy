@@ -90,6 +90,11 @@ pub enum CliCommand {
     },
     /// Wait for any condition; timeout does not stop the target.
     Wait(WaitOptions),
+    /// Wait for saved-state change hints (a cursor over per-Thread change order).
+    Events {
+        #[command(subcommand)]
+        command: EventsCommand,
+    },
     /// Inspect original history and search the active embedding space.
     History {
         #[command(subcommand)]
@@ -119,6 +124,25 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: StorageCommand,
     },
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum EventsCommand {
+    /// Long-poll: return which Threads changed after CURSOR, or time out. Re-read saved facts afterwards.
+    Wait(EventsWaitOptions),
+}
+#[derive(Debug, Clone, Args)]
+#[command(
+    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters."
+)]
+pub struct EventsWaitOptions {
+    /// Cursor from a previous events wait; omit for a baseline.
+    #[arg(long)]
+    pub after: Option<String>,
+    /// Only report this Thread; repeat for up to 64 Threads.
+    #[arg(long = "thread")]
+    pub thread_ids: Vec<String>,
+    #[arg(long, default_value_t = wire::DEFAULT_WAIT_TIMEOUT_MS)]
+    pub timeout_ms: u64,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum UsageCommand {
@@ -1032,6 +1056,13 @@ impl Cli {
                 })?,
                 timeout_ms: a.timeout_ms,
                 after: a.after,
+            }),
+            CliCommand::Events {
+                command: EventsCommand::Wait(a),
+            } => C::EventsWait(wire::EventsWaitArgs {
+                after: a.after,
+                thread_ids: a.thread_ids,
+                timeout_ms: a.timeout_ms,
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {
