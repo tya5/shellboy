@@ -2030,6 +2030,40 @@ mod tests {
     }
 
     #[test]
+    fn answered_run_kept_live_by_one_shell_paints_the_shell_state_and_elapsed_time() {
+        // #255: after the Turn ended, the only visible reason the Run has not
+        // completed is its owned shell. Nothing here asserts a wall-clock bound.
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let at = Instant::now();
+            let mut config = Config::default();
+            config.ui.language = language;
+            let mut ui = UiState::new(&config, PathBuf::from("/"));
+            ui.select_thread("thread".into());
+            let mut work = snapshot(at);
+            work.shells = 1;
+            work.children = 0;
+            work.waits = Some(0);
+            work.overflow = 0;
+            work.rows.truncate(1);
+            work.rows[0].label = "until false; do sleep 1; done".into();
+            set_work(&mut ui, Some(work), 1, at);
+            let (text, panel_height) = screen_at(&mut ui, 120, 24);
+            assert!(panel_height > 0, "{text}");
+            let row = text
+                .lines()
+                .find(|line| line.contains("until false; do sleep 1; done"))
+                .unwrap_or_else(|| panic!("{text}"));
+            let (state, elapsed, count) = match language {
+                UiLanguage::En => ("Running", "900s", "Shells: 1"),
+                UiLanguage::Ja => ("実行中", "15分0秒", "shell 1"),
+            };
+            assert!(row.contains(state), "{language:?}: {row}");
+            assert!(row.contains(elapsed), "{language:?}: {row}");
+            assert!(text.contains(count), "{language:?}: {text}");
+        }
+    }
+
+    #[test]
     fn height_is_constant_across_zero_two_zero_works_and_empty_heading_does_not_blink() {
         let at = Instant::now();
         let mut ui = UiState::new(&japanese_config(), PathBuf::from("/"));
