@@ -1,7 +1,8 @@
 # Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
-Status: **study, not adopted** (2026-11-06, issue #222). Nothing here changes the
-adopted design until the user accepts a stage. Code references are to
+Status: **study; stage 1 (archive) adopted and implemented** (2026-11-06, issue
+#222, migration 32). Stages 2-4 are not adopted: nothing in them changes the
+adopted design until the user accepts the stage. Code references are to
 `origin/main` at `cbd4c76edf`.
 
 Scope: #222 (relax child-Thread restrictions, change a Thread's parent freely)
@@ -357,6 +358,43 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
 
 Not recommended: ownership transfer of live Runs; folder Threads; tags (for now);
 filter-driven bulk writes; automatic archiving.
+
+## Stage 1 as implemented (archive, migration 32)
+
+Decisions of the user (2026-11-06) and the resulting contract. This section is the
+adopted design for stage 1; the sections above remain the study.
+
+- Column `thread.archived_at TEXT` (NULL = not archived) and two partial indexes
+  `threads_visible_updated` and `threads_archived_updated`, both on
+  `(updated_at DESC, id DESC)` (the study wrote `id`; `id DESC` matches the
+  `ORDER BY` so the page needs no sort). Archive is metadata only: no history,
+  node, attachment, GC root or `root_revision` change and no storage freed.
+- Wire: `thread.archive` and `thread.unarchive` (two commands with the same args
+  `{thread_ids, descendants}` instead of one command with a flag, so each
+  operation maps to one CLI path and one F8 form); `thread.list` gains
+  `archived: exclude|include|only`; `ThreadSummary` and `ThreadDetails` gain
+  `archived_at`. No `thread.organize`; no filter-driven bulk write.
+- Selection: up to 200 explicit IDs (`input_limit` beyond); omitted IDs target the
+  calling Thread like the other Thread commands. With `descendants` the bounded
+  recursive walk over live Threads selects the current subtree; more than 256
+  Threads in all is refused with `input_limit` and nothing changes (a write must
+  not be silently partial). Unknown or deleted IDs are reported in `not_found`;
+  none found is `thread_not_found`.
+- A live Run does not block archiving (user decision; the Run continues and
+  `status`/Watch still show it), so the study's "skipped" list does not exist.
+- Writes set `archived_at` and bump `revision` only; `updated_at` is untouched so
+  the list order does not move. Changes publish `changed_threads` for the changed
+  Threads.
+- Auto-unarchive: the single new-Run branch of `assign_message` clears
+  `archived_at` and records a `thread_unarchived` context entry
+  (`{reason:"run_started"}`). Queued, held and `--deliver complete` messages do not.
+- List cursors are bound to the archived mode through the scope string; a cursor
+  from another mode is `cursor_expired`.
+- TUI: Ctrl+A archives (with descendants, no confirmation: reversible) or, in the
+  archived list, unarchives; Ctrl+G toggles the archived list. See
+  [thread browser](thread-browser.md). Watch is unaffected.
+- Not done: pin, tags, re-parent (stages 2-4), automatic archiving, archive state
+  in `/branches`, and the archived marker in the TUI header.
 
 ## Risks
 

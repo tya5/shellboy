@@ -54,6 +54,8 @@ ThreadList,
     ThreadDelete,
     ThreadPrune,
     ThreadRewind,
+    ThreadArchive,
+    ThreadUnarchive,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -1117,6 +1119,12 @@ impl Form {
                 {
                     let mut v = list();
                     v.push(f("query", "絞込み", String::new(), Text));
+                    v.push(f(
+                        "archived",
+                        "アーカイブ済み（空=隠す）",
+                        String::new(),
+                        Choice(&["", "include", "only"]),
+                    ));
                     v
                 },
                 |form, _cwd| {
@@ -1124,6 +1132,10 @@ impl Form {
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                         query: form.optional("query")?,
+                        archived: form
+                            .optional("archived")?
+                            .and_then(|value| ArchivedFilter::parse(&value))
+                            .unwrap_or_default(),
                     }))
                 },
             ),
@@ -1303,6 +1315,23 @@ impl Form {
                         exclude_node: form.boolean("exclude_node")?,
                         dry_run: form.boolean("dry_run")?,
                     }))
+                },
+            ),
+            OpKind::ThreadArchive | OpKind::ThreadUnarchive => (
+                vec![
+                    thread(),
+                    f("descendants", "子孫も対象", "false".into(), Boolean),
+                ],
+                |form, _cwd| {
+                    let args = ThreadArchiveArgs {
+                        thread_ids: vec![form.owned("thread")?],
+                        descendants: form.boolean("descendants")?,
+                    };
+                    Ok(if form.operation == OpKind::ThreadArchive {
+                        Command::ThreadArchive(args)
+                    } else {
+                        Command::ThreadUnarchive(args)
+                    })
                 },
             ),
             OpKind::ThreadDelete => (
@@ -2404,6 +2433,16 @@ mod tests {
                 json!({"thread_id":id(1),"node_id":id(2)}),
             ),
             (
+                OpKind::ThreadArchive,
+                "thread.archive",
+                json!({"thread_ids":[id(1)]}),
+            ),
+            (
+                OpKind::ThreadUnarchive,
+                "thread.unarchive",
+                json!({"thread_ids":[id(1)]}),
+            ),
+            (
                 OpKind::ThreadSet,
                 "thread.set",
                 json!({"thread_id":id(1),"model":"model"}),
@@ -2565,6 +2604,8 @@ mod tests {
             "thread.delete",
             "thread.prune",
             "thread.rewind",
+            "thread.archive",
+            "thread.unarchive",
             "thread.set",
             "message.send",
             "message.reply",
@@ -2678,6 +2719,8 @@ mod tests {
                     "thread.create"
                         | "thread.fork"
                         | "thread.rewind"
+                        | "thread.archive"
+                        | "thread.unarchive"
                         | "thread.delete"
                         | "thread.set"
                         | "message.send"
@@ -3258,10 +3301,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 62);
+        assert_eq!(rows.len(), 64);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            62
+            64
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3273,7 +3316,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 62);
+        assert_eq!(operations.rows().len(), 64);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

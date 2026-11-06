@@ -752,6 +752,7 @@ mod frame_delivery_tests {
                 limit: 1,
                 cursor: None,
                 query: None,
+                archived: Default::default(),
             }),
             None,
             None,

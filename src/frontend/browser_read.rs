@@ -287,6 +287,7 @@ mod tests {
                 query: None,
                 cursor: None,
                 limit: 50,
+                archived: Default::default(),
             },
         )
         .unwrap();

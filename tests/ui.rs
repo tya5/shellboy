@@ -3011,6 +3011,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
         next_cursor: None,
         threads: (0..30)
             .map(|i| shellboy::protocol::ThreadSummary {
+                archived_at: None,
                 last_end_message: None,
                 last_input: None,
                 activity: shellboy::activity::ActivityPhase::Idle,

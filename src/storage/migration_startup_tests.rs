@@ -2,7 +2,7 @@ use super::*;
 use migration_integrity::{Check, pending, persist};
 
 fn downgrade_copy(db: &Connection, version: i64) {
-    db.execute_batch("DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds;")
+    db.execute_batch("DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; ALTER TABLE thread DROP COLUMN archived_at;")
         .unwrap();
     if version < 26 {
         db.execute_batch("DROP INDEX IF EXISTS receipt_reply_pending;")

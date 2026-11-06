@@ -57,6 +57,10 @@ no new index/migration is required for that B+C query. F separately requires
 the parent index; see [storage](storage.md). Historical version
 notes below describe their own releases, not the current schema number.
 
+Conversation schema32 (#222 stage 1) adds the nullable `thread.archived_at`
+column and two partial list indexes; archive is organization metadata only. See
+[thread organization](thread-organization.md) and [thread browser](thread-browser.md).
+
 ## History GC diagnostics (#225)
 
 The DB footer links to F1, where a bounded in-memory snapshot shows history GC

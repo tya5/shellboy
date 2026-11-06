@@ -195,6 +195,16 @@ pub enum ThreadCommand {
     Branches(ThreadBranchesOptions),
     /// Inspect deletion blockers and direct references without deleting anything.
     DeletePreview(ThreadDeleteOptions),
+    /// Hide Threads from the default list without deleting anything; reversible.
+    #[command(
+        after_help = "Archive is organization only: history, search, usage and receiving messages are unchanged, and it frees no storage (`thread delete` is separate). Hidden from `thread list` unless `--archived include|only`. A new Run on an archived Thread unarchives it. Nothing is archived automatically.\n  shellboy thread archive --thread ID [--thread ID ...] [--descendants]\n\nUp to 200 explicit IDs; `--descendants` adds the current subtree (a selection over 256 Threads is refused with input_limit). Omitting --thread archives the calling Thread. To archive many finished Threads, list first, then pass the IDs:\n  shellboy thread list --limit 200\n  shellboy thread archive --thread ID1 --thread ID2\n\nAllowed while a Run is live (it keeps running; `status` and Watch still show it). Does not change updated_at, so list order does not move. Result: archived, already, not_found."
+    )]
+    Archive(ThreadArchiveOptions),
+    /// Return archived Threads to the default list.
+    #[command(
+        after_help = "  shellboy thread unarchive --thread ID [--thread ID ...] [--descendants]\n\nSame selection rules as `thread archive`. Result: unarchived, already, not_found. Find archived Threads with `shellboy thread list --archived only`."
+    )]
+    Unarchive(ThreadArchiveOptions),
     Set(ThreadSetOptions),
     /// Debug: assemble a saved Thread's request without sending it; read-only, no owner.
     #[command(
@@ -308,6 +318,18 @@ pub struct ListOptions {
     pub cursor: Option<String>,
     #[arg(long)]
     pub query: Option<String>,
+    /// Archived Threads: exclude (default, hidden), include, or only.
+    #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
+    pub archived: wire::ArchivedFilter,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ThreadArchiveOptions {
+    /// Thread to archive; repeat for up to 200. Omitted means the calling Thread.
+    #[arg(long = "thread")]
+    pub thread_ids: Vec<String>,
+    /// Also select the Thread's descendants (at most 256 Threads in all; larger selections are refused).
+    #[arg(long)]
+    pub descendants: bool,
 }
 #[derive(Debug, Clone, Args)]
 #[command(
@@ -646,6 +668,14 @@ pub struct HistoryGetOptions {
     #[arg(long, default_value = wire::DEFAULT_ENCODING)]
     pub encoding: String,
 }
+impl ValueEnum for wire::ArchivedFilter {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[Self::Exclude, Self::Include, Self::Only]
+    }
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(clap::builder::PossibleValue::new(self.as_str()))
+    }
+}
 impl ValueEnum for wire::Deliver {
     fn value_variants<'a>() -> &'a [Self] {
         &[Self::Now, Self::Complete]
@@ -896,6 +926,15 @@ impl Cli {
                     limit: a.limit,
                     cursor: a.cursor,
                     query: a.query,
+                    archived: a.archived,
+                }),
+                ThreadCommand::Archive(a) => C::ThreadArchive(wire::ThreadArchiveArgs {
+                    thread_ids: a.thread_ids,
+                    descendants: a.descendants,
+                }),
+                ThreadCommand::Unarchive(a) => C::ThreadUnarchive(wire::ThreadArchiveArgs {
+                    thread_ids: a.thread_ids,
+                    descendants: a.descendants,
                 }),
                 ThreadCommand::Get(a) => C::ThreadGet(wire::ThreadTarget {
                     thread_id: a.thread_id,

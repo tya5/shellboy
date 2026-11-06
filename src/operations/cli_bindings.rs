@@ -83,6 +83,7 @@ const MEANINGS: &[Meaning] = &[
             ("limit", FieldId::Limit),
             ("cursor", FieldId::Cursor),
             ("query", FieldId::Query),
+            ("archived", FieldId::Archived),
         ],
         None,
     ),
@@ -162,6 +163,24 @@ const MEANINGS: &[Meaning] = &[
             ("node_id", FieldId::Node),
             ("exclude_node", FieldId::ExcludeNode),
             ("dry_run", FieldId::DryRun),
+        ],
+        None,
+    ),
+    (
+        OperationId::ThreadArchive,
+        &["thread", "archive"],
+        &[
+            ("thread_ids", FieldId::Thread),
+            ("descendants", FieldId::Descendants),
+        ],
+        None,
+    ),
+    (
+        OperationId::ThreadUnarchive,
+        &["thread", "unarchive"],
+        &[
+            ("thread_ids", FieldId::Thread),
+            ("descendants", FieldId::Descendants),
         ],
         None,
     ),

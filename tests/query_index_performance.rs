@@ -138,6 +138,7 @@ async fn performance_native_wait_and_thread_page_indexes() {
                     limit: 50,
                     cursor: None,
                     query: None,
+                    archived: Default::default(),
                 }),
             )
             .await;

@@ -170,6 +170,7 @@ impl<W: Write> Chat<'_, W> {
                 limit: 1,
                 cursor: None,
                 query: None,
+                archived: Default::default(),
             }),
             None,
             self.origin.clone(),

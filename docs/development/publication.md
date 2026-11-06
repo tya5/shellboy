@@ -505,7 +505,7 @@ a separate release gate. No migration was added since v0.7.2.
 
 The candidate checker defaults to public v0.8.0 (schema 27), expected v0.8.1 and target schema 28. Migration `0028_tool_group_recovery_candidates` adds recovery candidate markers. Run the owner-controlled upgrade check separately on an owned disposable fixture; CI alone is not that check.
 
-## Next-release synthetic upgrade check (schema 29)
+## Next-release synthetic upgrade check (schema 31)
 
-The checker defaults to public v0.8.3 (schema 29) and target schema 31; the expected version defaults to the Cargo.toml package version. Migration `0030_thread_auto_compact_at` adds one nullable integer column to `thread`, and `0031_thread_summary_parameters` adds two (`segment_chars`, `reduce_rounds`); existing rows stay NULL. Run it on an owned disposable fixture; CI alone is not that check.
+The checker defaults to public v0.9.0 (schema 31) and target schema 32 (migration `0032_thread_archive` adds the nullable `thread.archived_at` column and two partial list indexes; existing rows stay unarchived). Older public versions remain selectable with `--old-version`. Earlier text: the checker defaulted to public v0.8.3 (schema 29) and target schema 31; the expected version defaults to the Cargo.toml package version. Migration `0030_thread_auto_compact_at` adds one nullable integer column to `thread`, and `0031_thread_summary_parameters` adds two (`segment_chars`, `reduce_rounds`); existing rows stay NULL. Run it on an owned disposable fixture; CI alone is not that check.
 

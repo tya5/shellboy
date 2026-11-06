@@ -580,6 +580,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
             limit: 1,
             cursor: None,
             query: None,
+            archived: Default::default(),
         }),
     )
     .await;
@@ -592,6 +593,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
             limit: 200,
             cursor: first.next_cursor.clone(),
             query: None,
+            archived: Default::default(),
         }),
     )
     .await;
@@ -607,6 +609,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
                 limit: 1,
                 cursor: first.next_cursor,
                 query: Some("changed".into()),
+                archived: Default::default(),
             })),
             None,
         )

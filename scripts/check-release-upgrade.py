@@ -23,8 +23,8 @@ import time
 CARGO_VERSION = next(line.split('"')[1] for line in (Path(__file__).resolve().parents[1] / 'Cargo.toml').read_text(encoding='utf-8').splitlines() if line.startswith('version = '))
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)}
-PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29}
+           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32)}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29, '0.9.0': 31}
 
 
 def read_only_uri(path, stopped=False):
@@ -156,12 +156,19 @@ def check_migration(db, before, start, target):
         for name in ('segment_chars', 'reduce_rounds'):
             assert name in columns and columns[name][2] == 'INTEGER' and not columns[name][3], f'thread.{name} differs from migration 31'
             assert db.execute(f'SELECT count(*) FROM thread WHERE {name} IS NOT NULL').fetchone()[0] == 0, 'migration 31 must leave every Thread on the default summary parameters'
+    if target >= 32:
+        columns = {row[1]: row for row in db.execute('PRAGMA table_info(thread)')}
+        assert 'archived_at' in columns and columns['archived_at'][2] == 'TEXT' and not columns['archived_at'][3], 'thread.archived_at differs from migration 32'
+        assert db.execute('SELECT count(*) FROM thread WHERE archived_at IS NOT NULL').fetchone()[0] == 0, 'migration 32 must leave every Thread unarchived'
+        indexes = {row[1]: row[2] for row in db.execute("SELECT type,name,sql FROM sqlite_master WHERE type='index' AND name IN ('threads_visible_updated','threads_archived_updated')")}
+        assert set(indexes) == {'threads_visible_updated', 'threads_archived_updated'}, 'migration 32 must create both partial list indexes'
+        assert all('WHERE' in sql for sql in indexes.values()), 'archive list indexes must be partial'
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31) and target in (14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32) and target in (14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
@@ -174,12 +181,12 @@ def parse_args(argv=None):
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.8.3')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31), default=None,
+    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.9.0')
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31), default=31,
-                        help='31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32), default=32,
+                        help='32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

@@ -3669,3 +3669,20 @@ dumps every table except the executor's own request journal (`operation_receipt`
 (`root_revision`), edges and thread revisions. The undo offer ends at the next
 submission in the Thread, when its selection revision moves beyond the rewind's own
 +1, or when the Thread is left; Alt+U also needs an empty draft.
+
+## D-222-1: Archive wire shape, caps and indexes (2026-11-06)
+
+Decision: archive is two commands (`thread.archive`, `thread.unarchive`) with the same
+args instead of the study's single command with an `archived` flag; a `--descendants`
+selection above 256 Threads (explicit IDs included) is refused with `input_limit` and
+changes nothing; unknown IDs are listed in `not_found` and only an empty selection is
+`thread_not_found`; the partial indexes are `(updated_at DESC, id DESC)` to match the
+list `ORDER BY`; migration 32 is `IndexOnly`. Reason: one operation per CLI path and F8
+form keeps the operation catalogue one-to-one; a silent partial write over a capped
+subtree would be a surprise for a model that tidies by IDs; the study's `id` ascending
+index would need a sort for `id DESC`. TUI keys Ctrl+A (archive/unarchive) and Ctrl+G
+(archived list) are free in the Thread list (checked against the browser, the overlay
+dispatcher and the global keys Ctrl+Q/Ctrl+C/F1/F2). Impact: Watch keeps showing
+archived Threads with live work. Recheck when: real users archive subtrees over 256
+Threads (a continuation cursor would be needed) or Watch should hide archived work.
+

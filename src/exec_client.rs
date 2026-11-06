@@ -160,6 +160,7 @@ impl Session {
                     limit: 1,
                     cursor: None,
                     query: None,
+                    archived: Default::default(),
                 }),
                 None,
                 self.origin.clone(),

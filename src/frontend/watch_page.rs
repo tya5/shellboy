@@ -667,6 +667,7 @@ mod tests {
                     limit: 50,
                     cursor: cursor.clone(),
                     query: None,
+                    archived: Default::default(),
                 },
             )
             .unwrap();

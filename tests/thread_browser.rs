@@ -3,6 +3,7 @@ use shellboy::{config::Config, protocol::ThreadSummary, ui::*};
 
 fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
     ThreadSummary {
+        archived_at: None,
         last_end_message: None,
         last_input: None,
         activity: shellboy::activity::ActivityPhase::Idle,
