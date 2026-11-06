@@ -404,16 +404,18 @@ answer text
 The end message is printed as plain text: Markdown is not rendered, terminal control characters are
 removed, and chat never emits color escapes, so `NO_COLOR` is always honoured. `--until` selects
 the end of the wait with the same vocabulary as `exec --result`: `turn-end` (default; the Turn's
-end message), `run-end` (the Run's last end message) or `reply` (sends an expected-reply message
+end message), `run-end` (the Run's last end message; progress follows the Run's current Turn, so later Turns of the Run are shown) or `reply` (sends an expected-reply message
 and prints the reply). `--timeout-ms` is a per-message deadline (default none); expiry prints one
 notice and returns to the prompt without stopping the work. An abnormal end (Turn or Run stopped
-or failed, `recovery_wait`, a message with no assigned Turn) prints one notice line and returns to
+or failed, `recovery_wait` including a wait reporting it, a wait target becoming unavailable, a message the finished Turn did not apply (held), a missing or deleted end message, a message with no assigned Turn) prints one notice line and returns to
 the prompt; chat never retries.
 
 Interruption: the first Ctrl+C while a message is being followed requests `run stop` for that
 message's Run, exactly like Ctrl+C in the TUI (Esc, the Turn-only interrupt, has no chat
 equivalent), and keeps following until the Turn ends. A second Ctrl+C leaves the client and
-touches nothing further. Ctrl+C at the prompt, `/exit` and EOF (Ctrl+D) also leave the client.
+touches nothing further. After a `--timeout-ms` expiry the Run can still be live: the first Ctrl+C at the
+prompt then stops it (`[stop] stopping the Run that timed out`) and a second leaves; if no Run is live,
+Ctrl+C at the prompt leaves. `/exit` and EOF (Ctrl+D) also leave the client.
 Leaving never stops the owner or any work except the Run stopped by the first Ctrl+C. With piped
 stdin, chat exits after EOF once the last message's wait has ended.
 
@@ -434,7 +436,7 @@ authority, as with `--sender-label`.
 failures also appear on stderr. Every line has exactly these keys; unavailable facts are `null`:
 `type`, `thread_id`, `run_id`, `turn_id`, `message_id`, `execution_id`, `node_id`, `state`, `summary`,
 `exit_code`, `at`, `text`. IDs are filled once known. `at` is the owner's saved shell
-start/end time for tool events and `null` otherwise or when unknown.
+start/end time for tool events, `null` otherwise or when the start time is not known.
 
 | `type` | when | notable fields |
 | --- | --- | --- |

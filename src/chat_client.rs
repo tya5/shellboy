@@ -119,6 +119,8 @@ struct Chat<'a, W: Write> {
     run: Option<String>,
     turn: Option<String>,
     message: Option<String>,
+    /// Run whose wait timed out; a prompt-time Ctrl+C stops it if still live.
+    timed_out_run: Option<String>,
 }
 
 enum Flow {
@@ -262,13 +264,31 @@ impl<W: Write> Chat<'_, W> {
         let mut interrupted = 0u32;
         let mut last_state = None;
         let mut tools: HashMap<String, bool> = HashMap::new();
+        let mut turn = turn.to_owned();
         loop {
+            // Run-scoped waits follow the Run's current Turn, which can change.
+            let run_facts: Option<RunDetails> = if self.until == ResultMode::TurnEnd {
+                None
+            } else {
+                let run = self
+                    .run
+                    .clone()
+                    .ok_or_else(|| ChatError::new(6, "no Run"))?;
+                Some(
+                    self.call(Command::RunGet(RunTarget { run_id: run }))
+                        .await?,
+                )
+            };
+            if let Some(current) = run_facts.as_ref().and_then(|r| r.turn_id.clone()) {
+                turn = current;
+            }
             let facts: TurnDetails = self
                 .call(Command::TurnGet(TurnTarget {
-                    turn_id: turn.into(),
+                    turn_id: turn.clone(),
                 }))
                 .await?;
-            self.tool_progress(turn, &mut tools).await?;
+            self.turn = Some(turn.clone());
+            self.tool_progress(&turn, &mut tools).await?;
             if last_state != Some(facts.state) {
                 last_state = Some(facts.state);
                 self.emit(
@@ -281,42 +301,22 @@ impl<W: Write> Chat<'_, W> {
                 );
             }
             if facts.state == TurnState::RecoveryWait {
-                let hint = facts.recovery_hint.clone().unwrap_or_default();
-                self.emit(
-                    Event {
-                        kind: "notice",
-                        state: Some("recovery_wait".into()),
-                        summary: Some(short(&hint)),
-                        ..Default::default()
-                    },
-                    format!(
-                        "[notice] the Turn needs explicit recovery (shellboy run retry --run RUN_ID); not retried automatically. {}",
-                        short(&hint)
-                    ),
-                );
-                return Ok(Flow::Ended(4));
+                return Ok(self.recovery_wait(&facts.recovery_hint.clone().unwrap_or_default()));
             }
             if self.until == ResultMode::TurnEnd {
                 match facts.state {
                     TurnState::Completed => {
-                        return self.end_message(facts.end_message_node_id).await;
+                        return self.completed(facts.end_message_node_id).await;
                     }
                     TurnState::Stopped | TurnState::Failed => {
                         return Ok(self.abnormal(&name(&facts.state)));
                     }
                     _ => {}
                 }
-            } else {
-                let run = self
-                    .run
-                    .clone()
-                    .ok_or_else(|| ChatError::new(6, "no Run"))?;
-                let run_facts: RunDetails = self
-                    .call(Command::RunGet(RunTarget { run_id: run }))
-                    .await?;
+            } else if let Some(run_facts) = run_facts {
                 match run_facts.state {
                     RunState::Completed if self.until == ResultMode::RunEnd => {
-                        return self.end_message(run_facts.end_message_node_id).await;
+                        return self.completed(run_facts.end_message_node_id).await;
                     }
                     RunState::Completed => return self.reply_message().await,
                     RunState::Stopped | RunState::Failed => {
@@ -343,6 +343,7 @@ impl<W: Write> Chat<'_, W> {
                             },
                             "[notice] timed out waiting; the work was not stopped",
                         );
+                        self.timed_out_run = self.run.clone();
                         return Ok(Flow::Ended(5));
                     }
                     left.as_millis().clamp(1, 1_000) as u64
@@ -351,7 +352,7 @@ impl<W: Write> Chat<'_, W> {
             };
             let condition = if self.until == ResultMode::TurnEnd {
                 WaitCondition::TurnCompleted {
-                    turn_id: turn.into(),
+                    turn_id: turn.clone(),
                 }
             } else {
                 WaitCondition::RunEnded {
@@ -379,9 +380,96 @@ impl<W: Write> Chat<'_, W> {
                             "[stop] stopping the Run; press Ctrl+C again to leave chat");
                     }
                 }
-                result = wait => { result?; }
+                result = wait => {
+                    match result?.status {
+                        WaitStatus::RecoveryWait => {
+                            return Ok(self.recovery_wait("the wait reported recovery_wait"));
+                        }
+                        WaitStatus::Unavailable => {
+                            return Ok(self.abnormal("unavailable"));
+                        }
+                        // Satisfied, interrupted and timeout are observations; the next pass reads state.
+                        _ => {}
+                    }
+                }
             }
         }
+    }
+
+    /// True when a still-live Run was asked to stop.
+    async fn stop_timed_out_run(&mut self) -> Result<bool, ChatError> {
+        let Some(run) = self.timed_out_run.take() else {
+            return Ok(false);
+        };
+        let facts: RunDetails = self
+            .call(Command::RunGet(RunTarget {
+                run_id: run.clone(),
+            }))
+            .await?;
+        if facts.state != RunState::Live {
+            return Ok(false);
+        }
+        let _: Value = self
+            .call(Command::RunStop(RunTarget {
+                run_id: run.clone(),
+            }))
+            .await?;
+        self.run = Some(run);
+        self.emit(
+            Event {
+                kind: "run_stopping",
+                state: Some("stopping".into()),
+                ..Default::default()
+            },
+            "[stop] stopping the Run that timed out; press Ctrl+C again to leave chat",
+        );
+        Ok(true)
+    }
+
+    fn recovery_wait(&mut self, hint: &str) -> Flow {
+        let hint = short(hint);
+        self.emit(
+            Event {
+                kind: "notice",
+                state: Some("recovery_wait".into()),
+                summary: Some(hint.clone()),
+                ..Default::default()
+            },
+            format!(
+                "[notice] the Turn needs explicit recovery (shellboy run retry --run RUN_ID); not retried automatically. {hint}"
+            ),
+        );
+        Flow::Ended(4)
+    }
+
+    /// A completed Turn or Run proves the answer only if this message was applied.
+    async fn completed(&mut self, node: Option<String>) -> Result<Flow, ChatError> {
+        let details: MessageDetails = self
+            .call(Command::MessageGet(MessageTarget {
+                message_id: self.message.clone().unwrap_or_default(),
+            }))
+            .await?;
+        if details.delivery_status != DeliveryStatus::Applied {
+            return Ok(self.held(&details));
+        }
+        self.end_message(node).await
+    }
+
+    fn held(&mut self, details: &MessageDetails) -> Flow {
+        let state = name(&details.delivery_status);
+        self.emit(
+            Event {
+                kind: "notice",
+                state: Some(state.clone()),
+                summary: Some("message was not applied by the finished Turn".into()),
+                ..Default::default()
+            },
+            format!(
+                "[notice] message {} is {state}, not applied; the finished Turn is not its answer. Inspect it with `shellboy message get --message {}`",
+                details.message_id, details.message_id
+            ),
+        );
+        Flow::Ended(4)
     }
 
     fn abnormal(&mut self, state: &str) -> Flow {
@@ -404,6 +492,9 @@ impl<W: Write> Chat<'_, W> {
                 message_id: message,
             }))
             .await?;
+        if details.delivery_status != DeliveryStatus::Applied {
+            return Ok(self.held(&details));
+        }
         let reply = details.reply.unwrap_or(Value::Null);
         match (reply["state"].as_str(), reply["node_id"].as_str()) {
             (Some("replied"), Some(node)) => self.end_message(Some(node.to_owned())).await,
@@ -441,6 +532,7 @@ impl<W: Write> Chat<'_, W> {
                 .or_else(|| text_of(&item["command_excerpt"]))
                 .map(|s| short(&s))
                 .unwrap_or_default();
+            let known = item["started_at_known"].as_bool().unwrap_or(false);
             let state = item["state"].as_str().unwrap_or("running").to_owned();
             let finished = !matches!(state.as_str(), "starting" | "running" | "stopping");
             if !seen.contains_key(id) {
@@ -451,7 +543,7 @@ impl<W: Write> Chat<'_, W> {
                         execution_id: Some(id.into()),
                         state: Some("running".into()),
                         summary: Some(summary.clone()),
-                        at: text_of(&item["started_at"]),
+                        at: known.then(|| text_of(&item["started_at"])).flatten(),
                         ..Default::default()
                     },
                     format!("[tool] {summary}"),
@@ -467,7 +559,7 @@ impl<W: Write> Chat<'_, W> {
                         state: Some(state.clone()),
                         summary: Some(summary),
                         exit_code: code,
-                        at: text_of(&item["ended_at"]),
+                        at: known.then(|| text_of(&item["ended_at"])).flatten(),
                         ..Default::default()
                     },
                     match code {
@@ -481,8 +573,9 @@ impl<W: Write> Chat<'_, W> {
     }
 
     async fn end_message(&mut self, node: Option<String>) -> Result<Flow, ChatError> {
-        let node =
-            node.ok_or_else(|| ChatError::new(6, "Completed Turn has no saved end message"))?;
+        let Some(node) = node else {
+            return Ok(self.abnormal("no_end_message"));
+        };
         let mut cursor = None;
         let mut text = String::new();
         for _ in 0..65 {
@@ -497,10 +590,7 @@ impl<W: Write> Chat<'_, W> {
                 }))
                 .await?;
             if page.tombstone_reason.is_some() {
-                return Err(ChatError::new(
-                    4,
-                    "Saved end message is no longer available",
-                ));
+                return Ok(self.abnormal("end_message_unavailable"));
             }
             text.push_str(&page.text);
             if text.len() > ANSWER_LIMIT {
@@ -536,14 +626,21 @@ impl<W: Write> Chat<'_, W> {
     }
 }
 
+enum Read {
+    Message(String),
+    /// EOF with nothing pending, or `/exit`.
+    Done,
+    Interrupt,
+}
+
 /// Read one message: a trailing backslash continues onto the next line.
-/// Returns None at EOF with nothing pending, on `/exit`, or on Ctrl+C.
+/// A Ctrl+C is reported to the caller, which decides whether it stops a Run or exits.
 async fn read_message<R: AsyncBufRead + Unpin, W: Write>(
     input: &mut R,
     out: &mut W,
     prompt: bool,
     interrupts: &mut mpsc::Receiver<()>,
-) -> Option<String> {
+) -> Read {
     let mut message: Vec<String> = Vec::new();
     loop {
         if prompt {
@@ -553,7 +650,7 @@ async fn read_message<R: AsyncBufRead + Unpin, W: Write>(
         let mut line = String::new();
         let read = tokio::select! {
             biased;
-            _ = interrupts.recv() => return None,
+            _ = interrupts.recv() => return Read::Interrupt,
             read = input.read_line(&mut line) => read,
         };
         if !matches!(read, Ok(n) if n > 0) {
@@ -564,7 +661,7 @@ async fn read_message<R: AsyncBufRead + Unpin, W: Write>(
         }
         let line = line.trim_end_matches(['\n', '\r']);
         if message.is_empty() && line.trim() == "/exit" {
-            return None;
+            return Read::Done;
         }
         match line.strip_suffix('\\') {
             Some(rest) => message.push(rest.to_owned()),
@@ -575,9 +672,9 @@ async fn read_message<R: AsyncBufRead + Unpin, W: Write>(
         }
     }
     if message.is_empty() {
-        return None;
+        return Read::Done;
     }
-    Some(message.join("\n"))
+    Read::Message(message.join("\n"))
 }
 
 pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
@@ -624,6 +721,7 @@ pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
         run: None,
         turn: None,
         message: None,
+        timed_out_run: None,
     };
     let result: Result<u8, ChatError> = async {
         chat.connect().await?;
@@ -640,16 +738,25 @@ pub async fn run<R: AsyncBufRead + Unpin, W: Write>(
         let mut worst = 0u8;
         loop {
             let prompt = env.stdin_is_tty && !options.json;
-            let Some(text) =
-                read_message(&mut input, &mut *chat.out, prompt, &mut env.interrupts).await
-            else {
-                return Ok(worst);
-            };
+            let text =
+                match read_message(&mut input, &mut *chat.out, prompt, &mut env.interrupts).await {
+                    Read::Message(text) => text,
+                    Read::Done => return Ok(worst),
+                    Read::Interrupt => {
+                        // After a timeout the Run may still be live: the first Ctrl+C
+                        // stops it (TUI parity), a second one leaves.
+                        if chat.stop_timed_out_run().await? {
+                            continue;
+                        }
+                        return Ok(worst);
+                    }
+                };
             if text.trim().is_empty() {
                 continue;
             }
             chat.run = None;
             chat.turn = None;
+            chat.timed_out_run = None;
             match chat.exchange(text, &create, &mut env.interrupts).await? {
                 Flow::Exit => return Ok(worst),
                 Flow::Ended(code) => worst = worst.max(code),

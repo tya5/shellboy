@@ -199,7 +199,7 @@ fn sender_fields_for(
     let kind = match sender.kind {
         crate::protocol::SenderKind::Model => "model (verified Origin)",
         crate::protocol::SenderKind::ExternalCli => "external_cli",
-        crate::protocol::SenderKind::Human => "human (TUI)",
+        crate::protocol::SenderKind::Human => "human",
         crate::protocol::SenderKind::Unknown => "unknown",
     };
     let mut fields = vec![(

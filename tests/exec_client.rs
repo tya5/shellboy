@@ -232,6 +232,21 @@ impl Fixture {
                 .unwrap();
         (accepted, request)
     }
+    async fn queued_chat(&self, thread: &str) {
+        let target = thread.to_owned();
+        crate::test_watchdog::watchdog("tests/exec_client.rs: queued_chat", async {
+            loop {
+                let id = target.clone();
+                let count = self.owner.db.call(move |db| Ok(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(sender_json,'$.kind')='external_cli'", [id], |r| r.get::<_, i64>(0))?)).await.unwrap();
+                if count > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
     async fn queued_exec(&self, thread: &str) {
         let mut events = self.control.subscribe();
         let target = thread.to_owned();
@@ -1290,4 +1305,224 @@ async fn chat_without_owner_exits_six_and_suggests_serve() {
         .unwrap();
     assert_eq!(output.status.code(), Some(6), "{output:?}");
     assert!(String::from_utf8_lossy(&output.stderr).contains("shellboy serve"));
+}
+
+#[derive(Clone, Default)]
+struct SharedOut(Arc<std::sync::Mutex<Vec<u8>>>);
+impl std::io::Write for SharedOut {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl SharedOut {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+    }
+    async fn until_contains(&self, needle: &str) {
+        crate::test_watchdog::watchdog("chat output", async {
+            while !self.text().contains(needle) {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_run_end_provider_failure_and_recovery_wait_end_with_four_not_a_polling_loop() {
+    for status in [400u16, 500] {
+        let mut fixture = Fixture::new().await;
+        let mut command = chat_command(&fixture, &["--json", "--until", "run-end"]);
+        let mut child = command.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"work\n")
+            .await
+            .unwrap();
+        let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+        let request = fixture.next(&mut child).await;
+        request
+            .reply
+            .send(http(
+                status,
+                json!({"error":{"message":"synthetic","type":"server_error"}}),
+            ))
+            .unwrap();
+        let output = crate::test_watchdog::watchdog("chat run-end failure", child)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(4), "{status}: {output:?}");
+        let lines = json_lines(&output);
+        let notices: Vec<&Value> = lines.iter().filter(|l| l["type"] == "notice").collect();
+        println!(
+            "status {status}: {:?}",
+            notices
+                .iter()
+                .map(|n| n["state"].clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(notices.len(), 1, "exactly one notice: {lines:?}");
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_existing_turn_message_that_is_not_applied_is_a_held_notice() {
+    let mut fixture = Fixture::new().await;
+    let (accepted, initial) = fixture.active().await;
+    let mut command = chat_command(&fixture, &["--json", "--thread", &accepted.thread_id]);
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"added\n")
+        .await
+        .unwrap();
+    let child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+    // Once the added message is saved, keep its receipt held while the Run proceeds; the
+    // finished Turn then is not the answer to that message.
+    fixture.queued_chat(&accepted.thread_id).await;
+    let db = fixture.owner.db.clone();
+    let thread = accepted.thread_id.clone();
+    let holder = tokio::spawn(async move {
+        loop {
+            let thread = thread.clone();
+            let _ = db
+                .call(move |db| {
+                    db.execute(
+                        "UPDATE receipt SET state='held' WHERE target_thread_id=?1 AND json_extract(sender_json,'$.kind')='external_cli'",
+                        [thread],
+                    )?;
+                    Ok(())
+                })
+                .await;
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    });
+    initial.reply.send(answer("initial answer")).unwrap();
+    let responder = tokio::spawn({
+        let mut incoming = std::mem::replace(&mut fixture.incoming, mpsc::channel(1).1);
+        async move {
+            while let Some(request) = incoming.recv().await {
+                let _ = request.reply.send(answer("later answer"));
+            }
+        }
+    });
+    let output = crate::test_watchdog::watchdog("chat held", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let lines = json_lines(&output);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l["type"] == "notice" && l["state"] == "held"),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l["type"] == "end_message"),
+        "{lines:?}"
+    );
+    holder.abort();
+    responder.abort();
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_ctrl_c_at_the_prompt_stops_a_run_left_live_by_a_timeout_then_second_leaves() {
+    let mut fixture = Fixture::new().await;
+    let (signal, interrupts) = mpsc::channel(4);
+    let (mut feed, reader) = tokio::io::duplex(1024);
+    let data = fixture.root.path().join("data");
+    let cwd = fixture.root.path().to_path_buf();
+    let out = SharedOut::default();
+    let mut writer = out.clone();
+    let mut options = chat_options(false);
+    options.timeout_ms = Some(300);
+    let task = tokio::spawn(async move {
+        shellboy::chat_client::run(
+            options,
+            &data,
+            &cwd,
+            None,
+            tokio::io::BufReader::new(reader),
+            &mut writer,
+            shellboy::chat_client::ChatEnv {
+                stdin_is_tty: false,
+                interrupts,
+            },
+        )
+        .await
+    });
+    feed.write_all(b"slow\n").await.unwrap();
+    let _pending = crate::test_watchdog::watchdog("chat live request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    out.until_contains("timed out").await;
+    signal.send(()).await.unwrap();
+    out.until_contains("[stop] stopping the Run that timed out")
+        .await;
+    signal.send(()).await.unwrap();
+    let code = crate::test_watchdog::watchdog("chat leave", task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(code, 5);
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_second_ctrl_c_during_follow_leaves_without_further_stops() {
+    let mut fixture = Fixture::new().await;
+    let (signal, interrupts) = mpsc::channel(4);
+    let (mut feed, reader) = tokio::io::duplex(1024);
+    let data = fixture.root.path().join("data");
+    let cwd = fixture.root.path().to_path_buf();
+    let out = SharedOut::default();
+    let mut writer = out.clone();
+    let task = tokio::spawn(async move {
+        shellboy::chat_client::run(
+            chat_options(false),
+            &data,
+            &cwd,
+            None,
+            tokio::io::BufReader::new(reader),
+            &mut writer,
+            shellboy::chat_client::ChatEnv {
+                stdin_is_tty: false,
+                interrupts,
+            },
+        )
+        .await
+    });
+    feed.write_all(b"work\n").await.unwrap();
+    let _pending = crate::test_watchdog::watchdog("chat live request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    signal.send(()).await.unwrap();
+    signal.send(()).await.unwrap();
+    let code = crate::test_watchdog::watchdog("chat double", task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let text = out.text();
+    println!("{text}");
+    assert!(text.contains("[stop] stopping the Run"));
+    assert!(code == 0 || code == 4, "{code}");
+    drop(feed);
+    fixture.close().await;
 }
