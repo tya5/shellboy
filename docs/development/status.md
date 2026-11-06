@@ -103,8 +103,7 @@ cursor as change hints. In-memory and lossy, with explicit `gap`; held in `Chang
 attempt and 16 attempts, freed by a guard when the attempt's stream ends. No worker, queue, table or
 dependency. Deltas use a separate `text_changed` Notify, so `wait` loops and plain polls are not woken. Design:
 events-and-external-protocol.md 2.5; decisions D-243-2; facts in acceptance.md. Not done: plan B, `status --memory`
-reporting, and the Web client itself. A chat change building `EventsWaitArgs` by literal needs
-`include_text: false` when it merges. Resume point: CI on the branch tip, then owner review.
+reporting, and the Web client itself. Resume point: CI on the branch tip, then owner review.
 
 ## Unit-length embeddings (#250; on branch issue-250/normalize-embeddings, CI pending)
 

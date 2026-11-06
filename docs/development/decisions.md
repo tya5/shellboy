@@ -3961,8 +3961,8 @@ Weaker judgments, with their recheck conditions:
   measurement; recheck if real clients report gaps.
 - Reasoning text is included because `EngineEvent::Stream` already carries it, marked per delta. A client
   showing only answer text filters on the flag. Recheck if it should be withheld from external clients.
-- Adding a required struct field: any code building `EventsWaitArgs` by literal, such as a chat client
-  change in progress (stage C), needs `include_text: false` when it merges.
+- Adding a required struct field: chat, which builds `EventsWaitArgs` by literal, states `include_text: false`,
+  so it never receives text or `status:"text"`.
 - `status --memory` does not report this buffer; add it if the bound ever needs watching in the field.
 
 Recheck plan B when: poll round trips or connection cost visibly limit smoothness in the Web client.

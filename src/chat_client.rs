@@ -273,6 +273,7 @@ impl<W: Write> Chat<'_, W> {
                 after: None,
                 thread_ids: self.thread.clone().into_iter().collect(),
                 timeout_ms: 0,
+                include_text: false,
             }))
             .await?;
         self.cursor = Some(result.cursor);
@@ -291,6 +292,7 @@ impl<W: Write> Chat<'_, W> {
                     after: Some(after),
                     thread_ids: self.thread.clone().into_iter().collect(),
                     timeout_ms,
+                    include_text: false,
                 }))
                 .await?;
             after = result.cursor;
