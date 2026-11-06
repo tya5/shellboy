@@ -11,7 +11,7 @@ where branches diverge (history item selected: left/right preview, Enter opens),
 the `/branches` panel (`ui/branches.rs`: Enter open, F fork, P prune form, N more).
 Bounds: 256 Threads per family, 32 ancestors, 200 items per page, 256 rows to find a
 last request, 160-character excerpts, markers on pages of at most 128 nodes. Only
-existing glyphs are used (`◉ ↳ ⋯ ├─ └─ │ ⬦` and their fallbacks). Tests:
+existing glyphs are used (`◉ ↳ ⋯ ├─ └─ │` and their fallbacks). Tests:
 `src/history/branches/tests.rs`, `src/ui/branches/tests.rs`,
 `ui::history_interaction` branch tests, `tests/thread_branches.rs`. Decision:
 D-237-1. Not done: compare, markers on live-streamed tail nodes (they appear on the

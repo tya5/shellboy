@@ -7012,55 +7012,30 @@
     "reason": "Reviewed ThreadBranches catalogue arm: the Japanese label/meaning has its English pair in ui/operations/metadata.rs (same wording, rustfmt braces defeat the automatic pair proof).",
     "source_tokens_sha256": "ceb13bdf5a5a67e63ae4042d5a3cbb9e00dbf72aecf0554487074b9f47f61675"
   },
-  "src/presentation/branch_marker.rs:d854bfccff8ade24:1": {
-    "category": "a",
-    "reason": "Reviewed branch marker: Japanese side of a (current?, English?) match whose English arms are in the same match.",
-    "source_tokens_sha256": "f80e3157ecfc6905a1d00a9a2beaaefad1864cb1573f3315e8294bcb17ad819b"
-  },
-  "src/presentation/branch_marker.rs:a119aa399efc5d2a:1": {
-    "category": "a",
-    "reason": "Reviewed branch marker: Japanese side of a (current?, English?) match whose English arms are in the same match.",
-    "source_tokens_sha256": "f80e3157ecfc6905a1d00a9a2beaaefad1864cb1573f3315e8294bcb17ad819b"
-  },
   "src/presentation/branch_marker.rs:b0c6985ec939b9d1:1": {
     "category": "a",
     "reason": "Reviewed branch marker: Japanese side of a (current?, English?) match whose English arms are in the same match.",
-    "source_tokens_sha256": "f80e3157ecfc6905a1d00a9a2beaaefad1864cb1573f3315e8294bcb17ad819b"
-  },
-  "src/ui/branches.rs:1c802d113beec35f:1": {
-    "category": "a",
-    "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "34bb28a34309e03546ce2dd00d7d7397eb0db4e24eb39dcdddd612d55ebae97f"
-  },
-  "src/ui/branches.rs:6785acb9335c8a33:1": {
-    "category": "a",
-    "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "34bb28a34309e03546ce2dd00d7d7397eb0db4e24eb39dcdddd612d55ebae97f"
-  },
-  "src/ui/branches.rs:5cd17007e4726561:2": {
-    "category": "a",
-    "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "34bb28a34309e03546ce2dd00d7d7397eb0db4e24eb39dcdddd612d55ebae97f"
+    "source_tokens_sha256": "fb3f050e2e03c3ba219291a97bc6574051a003f8a58dac5c898606b1e2dd25d9"
   },
   "src/ui/branches.rs:cfafaad8d2833cf9:1": {
     "category": "a",
     "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "34bb28a34309e03546ce2dd00d7d7397eb0db4e24eb39dcdddd612d55ebae97f"
+    "source_tokens_sha256": "00c0fcdc1d63d0277d25dc9da838221e4f8103a6e6ba360325561c0fea47895c"
   },
   "src/ui/branches.rs:9f9a9a570e8c7988:1": {
     "category": "a",
     "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "34bb28a34309e03546ce2dd00d7d7397eb0db4e24eb39dcdddd612d55ebae97f"
+    "source_tokens_sha256": "00c0fcdc1d63d0277d25dc9da838221e4f8103a6e6ba360325561c0fea47895c"
   },
   "src/ui/branches.rs:7c3fe5f7f01a3282:1": {
     "category": "a",
     "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "9212e45bd03f58b93ca27fbeeb0d83582dd746760504d9ed2c982397acf3a81e"
+    "source_tokens_sha256": "3ab2d52206ed18a6305b09da7ac17f21071fd6ac1e2501fea48bbd3504cb0f03"
   },
   "src/ui/branches.rs:8ad7f589ba7df4f7:1": {
     "category": "a",
     "reason": "Reviewed branch panel: Japanese side of a language match or if-else whose English branch is adjacent.",
-    "source_tokens_sha256": "9212e45bd03f58b93ca27fbeeb0d83582dd746760504d9ed2c982397acf3a81e"
+    "source_tokens_sha256": "3ab2d52206ed18a6305b09da7ac17f21071fd6ac1e2501fea48bbd3504cb0f03"
   },
   "src/ui/db_activity.rs:fb4360fe6688780a:1": {
     "category": "a",

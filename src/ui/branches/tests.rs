@@ -287,21 +287,18 @@ fn many_branches_scroll_so_the_selection_stays_visible() {
 }
 
 #[test]
-fn pruned_originals_and_running_show_as_state_words_with_the_existing_summary_mark() {
+fn pruned_originals_and_running_show_as_state_words_without_new_glyphs() {
     let mut value = sample();
     value["items"][1]["pruned_originals"] = json!(true);
     value["items"][2]["running"] = json!(true);
     let text = with_glyphs(|| render(&panel(UiLanguage::En, &value), 110, 24));
-    assert!(
-        text.contains("branch ⬦ pruned \"try with mocks\""),
-        "{text}"
-    );
+    assert!(text.contains("branch pruned \"try with mocks\""), "{text}");
     assert!(
         text.contains("branch running \"split the module\""),
         "{text}"
     );
     let ja = with_glyphs(|| render(&panel(UiLanguage::Ja, &value), 110, 24));
-    assert!(ja.contains("⬦ 原文解放済"), "{ja}");
+    assert!(ja.contains("原文解放済") && !ja.contains('⬦'), "{ja}");
     assert!(ja.contains("実行中"), "{ja}");
 }
 
@@ -469,10 +466,12 @@ mod owner {
             append: false,
             result: Err("storage busy".into()),
         });
-        assert!(matches!(
-            ui.branches.as_ref().unwrap().load,
-            Load::Failed(_)
-        ));
+        // Rows already read stay; the error goes to the detail lines.
+        assert!(matches!(ui.branches.as_ref().unwrap().load, Load::Ready));
+        assert_eq!(
+            ui.branches.as_ref().unwrap().page_error.as_deref(),
+            Some("storage busy")
+        );
     }
 
     #[test]
@@ -543,4 +542,45 @@ mod owner {
         assert!(ui.branches.is_none());
         assert!(ui.composer_active());
     }
+}
+
+#[test]
+fn a_failed_next_page_keeps_the_loaded_rows_and_names_the_error() {
+    let mut first = sample();
+    first["next_cursor"] = json!("cursor-1");
+    let mut panel = panel(UiLanguage::En, &first);
+    assert!(matches!(
+        panel.key(key(KeyCode::Char('n'))),
+        Outcome::Load { .. }
+    ));
+    panel.begin_page(2);
+    let loading = render(&panel, 100, 24);
+    assert!(loading.contains("Loading the next page"), "{loading}");
+    assert!(loading.contains("fix the tests"), "{loading}");
+    panel.fail("storage busy".into());
+    let text = render(&panel, 100, 24);
+    assert!(text.contains("fix the tests"), "{text}");
+    assert!(
+        text.contains("Could not read the next page: storage busy"),
+        "{text}"
+    );
+    assert!(
+        matches!(panel.key(key(KeyCode::Char('n'))), Outcome::Load { .. }),
+        "N retries"
+    );
+}
+
+#[test]
+fn marker_and_panel_share_the_state_words() {
+    use crate::presentation::branch_marker::BranchState;
+    for (state, en, ja) in [
+        (BranchState::Current, "current", "今の会話"),
+        (BranchState::Parent, "parent", "親"),
+        (BranchState::Branch, "branch", "別の会話"),
+    ] {
+        assert_eq!(state.word(UiLanguage::En), en);
+        assert_eq!(state.word(UiLanguage::Ja), ja);
+    }
+    let text = with_glyphs(|| render(&panel(UiLanguage::Ja, &sample()), 100, 24));
+    assert!(text.contains("別の会話 \"try with mocks\""), "{text}");
 }

@@ -3606,10 +3606,10 @@ event, worker, queue or migration (branches are Threads, user decision). The
 divergence node is found by bisection over `thread_path` point lookups instead of
 storing a fork node; payload bytes are not summed (`bytes` null); the family is
 capped at 256 Threads with the ancestor chain always kept; the cursor is an offset
-bound to `root_revision`. Reason: the bounded reads are the whole cost of the view,
+bound to a fingerprint of the listed tree (not `root_revision`, which every append bumps). Reason: the bounded reads are the whole cost of the view,
 and a stored fork point would need a migration for data (the shared prefix) that the
 paths already hold. Impact: the shown divergence can be the bisection's boundary
-after a compaction rewrote a path before it (documented in History); a family above
+after a compaction rewrote a path before it (documented in History; only when both paths were separately compacted over the same range); a family above
 256 Threads is shown in part with `family_truncated`; a tip's last request is
 searched only 256 path rows back. TUI choices: the inline marker reuses the
 `compaction_note` slot pattern rather than a new item kind, so Enter on a node with

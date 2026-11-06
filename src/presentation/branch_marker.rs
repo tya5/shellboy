@@ -8,6 +8,35 @@ use crate::ui::text_width::{UnicodeWidthStr, glyphs};
 /// Characters of an alternative's last request shown in the row.
 const EXCERPT_COLUMNS: usize = 40;
 
+/// The relation of a conversation to the viewed one; the marker and the branch
+/// panel use this one vocabulary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BranchState {
+    Current,
+    Parent,
+    Branch,
+}
+impl BranchState {
+    /// From `thread branches` `state` (`current`, `ancestor`, anything else a branch).
+    pub fn from_wire(state: &str) -> Self {
+        match state {
+            "current" => Self::Current,
+            "ancestor" => Self::Parent,
+            _ => Self::Branch,
+        }
+    }
+    pub fn word(self, language: UiLanguage) -> &'static str {
+        match (self, language) {
+            (Self::Current, UiLanguage::En) => "current",
+            (Self::Parent, UiLanguage::En) => "parent",
+            (Self::Branch, UiLanguage::En) => "branch",
+            (Self::Current, UiLanguage::Ja) => "今の会話",
+            (Self::Parent, UiLanguage::Ja) => "親",
+            (Self::Branch, UiLanguage::Ja) => "別の会話",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Alt {
     pub thread_id: String,
@@ -56,12 +85,12 @@ impl BranchMarker {
     }
     pub fn render(&self, language: UiLanguage) -> String {
         let en = language == UiLanguage::En;
-        let which = match (self.preview == self.current, en) {
-            (true, true) => "current",
-            (true, false) => "今の枝",
-            (false, true) => "branch",
-            (false, false) => "別の枝",
-        };
+        let which = if self.preview == self.current {
+            BranchState::Current
+        } else {
+            BranchState::Branch
+        }
+        .word(language);
         let excerpt = match self
             .alternatives
             .get(self.preview)
@@ -128,13 +157,13 @@ mod tests {
         );
         assert_eq!(
             m.render(UiLanguage::Ja),
-            "↳ 2/3 ⋯ 今の枝 \"try with mocks\""
+            "↳ 2/3 ⋯ 今の会話 \"try with mocks\""
         );
         m.step(-1);
         assert_eq!(m.render(UiLanguage::En), "↳ 1/3 ⋯ branch \"fix the tests\"");
         assert_eq!(m.target(), Some("a"));
         m.step(2);
-        assert_eq!(m.render(UiLanguage::Ja), "↳ 3/3 ⋯ 別の枝 (依頼なし)");
+        assert_eq!(m.render(UiLanguage::Ja), "↳ 3/3 ⋯ 別の会話 (依頼なし)");
         m.step(1);
         assert_eq!(m.preview, 0, "wraps around");
     }

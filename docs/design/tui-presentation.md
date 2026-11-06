@@ -550,7 +550,7 @@ display only and read one `thread branches` result on the DB worker.
 **Inline marker.** `NodePresentation.branch_marker` is attached by the page enrich
 (`frontend/branch_markers.rs`) to the node where branches diverge and drawn as one
 muted row after the node, like the compaction note: `↳ p/n ⋯ <current|branch>
-"excerpt"` (`今の枝` / `別の枝`). Glyphs are the existing `↳` (child) and `⋯` (wait);
+"excerpt"` (`今の会話` / `別の会話`, the same words as the panel via `BranchState::word`). Glyphs are the existing `↳` (child) and `⋯` (wait);
 the excerpt is clipped by display width (40 columns). The row wraps with the common
 indented wrap and keeps its mark with `p/n` by a no-break space. The previewed
 alternative is display state: `←` / `→` on a selected history item rewrite the marker's
@@ -560,8 +560,8 @@ or cache is added; the seal hash includes the marker.
 
 **Panel.** `Overlay::Branches` (`ui/branches.rs`) is a popup like the model picker:
 `panel_recorded` frame, `popup::list` rows, up to three detail lines below. Rows use
-only `◉` (heading), `├─ └─ │` with their existing ASCII forms, `⬦` for pruned
-originals, and words for states. Wide rows (>= 64 columns) carry time and size;
+only `◉` (heading) and `├─ └─ │` with their existing ASCII forms; states,
+including pruned originals, are words (`⬦` means a summary and is not reused). Wide rows (>= 64 columns) carry time and size;
 narrow rows keep the tree prefix, state word and excerpt and leave the rest to the
 detail lines. The prefix is trimmed from the outside (ellipsis) so that at least 24
 columns remain for the state and excerpt. F8 keeps its usual ownership (the panel

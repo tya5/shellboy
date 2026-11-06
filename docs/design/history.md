@@ -98,23 +98,30 @@ or queue; they read what exists (`src/history/branches.rs`, one DB-worker read).
   selected paths share. Paths are prefixes of each other until they diverge, so it
   is found by bisection over `(thread_id, ordinal)` point lookups (about
   2 log2 N lookups). The probe at ordinal 0 must agree first, otherwise
-  `divergence_unknown = no_shared_prefix`. After a compaction rewrote either
-  path before the divergence the result is the bisection's boundary, not a
-  proven first mismatch; documented, not guarded. A rewind child extends its parent
-  (`parent_continues = false`).
+  `divergence_unknown = no_shared_prefix`. Bisection assumes agree-then-disagree. A
+  wrong point is possible only when a stretch of disagreement is followed by
+  ordinals that agree again, which needs a replacement that keeps later ordinals in
+  place (for example both paths separately compacted the same range into stretches
+  of equal length); a one-sided compaction shifts later ordinals and stays
+  different. Documented, not guarded. A rewind child extends its parent
+  (`parent_continues = false`), which holds only until the rewound Thread writes
+  again.
 - **Size and time.** `path_nodes` is `MAX(ordinal)+1` (ordinals are contiguous),
   O(log N); payload bytes are not summed (`bytes` null). The tip time is the tip
   node's `created_at`. The last request is the newest `kind='user'` node within 256
   path rows of the tip; payloads over 64 KiB are not parsed.
 - **Paging.** Items are the family list in that order. The cursor is the offset,
-  bound to `root_revision`: every fork/rewind/edit bumps it, so a cursor from
-  before expires (`cursor_expired`) instead of mixing two trees.
+  bound to a fingerprint of the listed tree (ordered Thread and parent pairs plus
+  the truncation flags). It expires (`cursor_expired`) only when the tree changes,
+  not on appends in any Thread (those bump `root_revision`, which is not used).
 - **Inline markers.** `markers()` runs with each history page enrich (at most 128
   nodes): the ancestor chain and their direct children only, grouped by
   (parent, divergence node); the alternatives at a point are the parent and each
   child that diverged there, ordered by the creation time of their first node after
   it; a point is shown only for a node on the page and only when the viewed Thread
-  follows one of the alternatives. A Thread with no parent and no child costs one
+  follows one of the alternatives. The followed alternative shows the viewed
+  Thread's own last request. Divergence points come from lookups alone; tip scans
+  and flags are read only for Threads of a point on the page. A Thread with no parent and no child costs one
   existence read. Markers are cosmetic: a failed read leaves the ordinary rows.
 - **Deleted parents.** A child of a deleted parent is a family root without a
   divergence; deleted children are not listed. Deleting a branch child does not

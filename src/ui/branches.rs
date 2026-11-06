@@ -3,11 +3,12 @@
 //! listed. Opening, forking and pruning reuse the existing operations.
 //!
 //! Glyphs come from the existing vocabulary only: `◉` heading, `├─ └─ │` tree
-//! (with their ASCII fallbacks), `⬦` for pruned originals.
+//! (with their ASCII fallbacks); states are words.
 use super::i18n::local;
 use super::popup;
 use super::text_width::{UnicodeWidthStr, glyphs};
 use crate::config::UiLanguage;
+use crate::presentation::branch_marker::BranchState;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{Frame, layout::Rect, text::Line};
 use serde_json::Value;
@@ -91,6 +92,10 @@ pub(super) struct BranchPanel {
     pub(super) request_id: u64,
     pub(super) viewed: String,
     load: Load,
+    /// A next page is being read; the loaded rows stay visible.
+    loading_more: bool,
+    /// The last next-page read failed; shown in the detail lines.
+    page_error: Option<String>,
     entries: Vec<Entry>,
     next_cursor: Option<String>,
     family_truncated: bool,
@@ -108,6 +113,8 @@ impl BranchPanel {
             request_id,
             viewed,
             load: Load::Loading,
+            loading_more: false,
+            page_error: None,
             entries: Vec::new(),
             next_cursor: None,
             family_truncated: false,
@@ -125,7 +132,12 @@ impl BranchPanel {
     }
     pub(super) fn begin_page(&mut self, request_id: u64) {
         self.request_id = request_id;
-        self.load = Load::Loading;
+        self.page_error = None;
+        if self.entries.is_empty() {
+            self.load = Load::Loading;
+        } else {
+            self.loading_more = true;
+        }
     }
     /// Take one page (`append` continues the previous one).
     pub(super) fn accept(&mut self, value: &Value, append: bool) {
@@ -141,6 +153,8 @@ impl BranchPanel {
         self.family_truncated = value["family_truncated"] == true;
         self.ancestors_truncated = value["ancestors_truncated"] == true;
         self.load = Load::Ready;
+        self.loading_more = false;
+        self.page_error = None;
         let keep = self.selected_thread().map(str::to_owned);
         self.rows = build_rows(&self.entries);
         self.selected = keep
@@ -150,7 +164,13 @@ impl BranchPanel {
             .unwrap_or(0);
     }
     pub(super) fn fail(&mut self, message: String) {
-        self.load = Load::Failed(message);
+        self.loading_more = false;
+        if self.entries.is_empty() {
+            self.load = Load::Failed(message);
+        } else {
+            // Keep what was read; a retry is N again.
+            self.page_error = Some(message);
+        }
     }
     fn row_of(&self, thread: &str) -> Option<usize> {
         self.rows.iter().position(|row| match row.kind {
@@ -236,7 +256,7 @@ impl BranchPanel {
                         node_id,
                     }),
                 'n' => match (&self.load, &self.next_cursor) {
-                    (Load::Ready, Some(cursor)) => Outcome::Load {
+                    (Load::Ready, Some(cursor)) if !self.loading_more => Outcome::Load {
                         cursor: cursor.clone(),
                     },
                     _ => Outcome::None,
@@ -294,21 +314,14 @@ impl BranchPanel {
     }
     fn state_word(&self, entry: &Entry) -> String {
         let en = self.language == UiLanguage::En;
-        let mut word = match (entry.state.as_str(), en) {
-            ("current", true) => "current",
-            ("current", false) => "今の会話",
-            ("ancestor", true) => "parent",
-            ("ancestor", false) => "親",
-            (_, true) => "branch",
-            (_, false) => "分岐",
-        }
-        .to_owned();
+        let mut word = BranchState::from_wire(&entry.state)
+            .word(self.language)
+            .to_owned();
         if entry.running {
             word.push_str(if en { " running" } else { " 実行中" });
         }
         if entry.pruned {
-            word.push(' ');
-            word.push_str(crate::presentation::rows::RowKind::Summary.mark());
+            // A word only: the summary mark means a summary, not released originals.
             word.push_str(if en { " pruned" } else { " 原文解放済" });
         }
         word
@@ -383,6 +396,21 @@ impl BranchPanel {
             } else {
                 format!("{}件目の後で分岐", ordinal + 1)
             });
+        }
+        if let Some(error) = &self.page_error {
+            lines.push(match self.language {
+                UiLanguage::Ja => format!("続きを読めませんでした: {error}"),
+                UiLanguage::En => format!("Could not read the next page: {error}"),
+            });
+        } else if self.loading_more {
+            lines.push(
+                local!(
+                    self.language,
+                    "続きを読み込んでいます",
+                    "Loading the next page"
+                )
+                .to_owned(),
+            );
         }
         if self.family_truncated || self.ancestors_truncated {
             lines.push(

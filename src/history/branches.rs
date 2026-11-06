@@ -13,9 +13,12 @@
 //! - last-request search: [`SCAN_ROWS`] path rows back from the tip;
 //! - bisection: about `2 * log2(path length)` point lookups per branch.
 //!
-//! After a compaction rewrote either path the shared prefix is the point the
-//! bisection finds; it is exact while neither path was rewritten before the
-//! divergence.
+//! Bisection assumes the paths agree up to the divergence and disagree after it.
+//! A wrong point is possible only when a stretch of disagreement is followed by
+//! ordinals that agree again, which needs a replacement that keeps later ordinals
+//! in place (for example both paths separately compacted the same range into
+//! stretches of equal length). A one-sided compaction shifts later ordinals, so
+//! they stay different.
 use std::collections::HashSet;
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -282,6 +285,34 @@ fn exists(db: &Connection, sql: &str, thread: &str) -> Result<bool, ApiError> {
         .map_err(sql_error)
 }
 
+/// Where a child leaves its parent: lookups only, no payload is read.
+struct Point {
+    node_id: String,
+    ordinal: i64,
+    parent_continues: bool,
+}
+type Located = (Option<Point>, Option<&'static str>);
+fn locate(db: &Connection, member: &Member, length: i64) -> Result<Located, ApiError> {
+    let Some(parent) = &member.parent else {
+        return Ok((None, None));
+    };
+    let parent_len = path_len(db, parent)?;
+    let Some(end) = shared_end(db, &member.id, parent, length, parent_len)? else {
+        return Ok((None, Some("no_shared_prefix")));
+    };
+    let node_id = node_at(db, &member.id, end)?.ok_or_else(|| {
+        ApiError::new(ErrorCode::InvalidState, "branch divergence node is missing")
+    })?;
+    Ok((
+        Some(Point {
+            node_id,
+            ordinal: end,
+            parent_continues: parent_len > end + 1,
+        }),
+        None,
+    ))
+}
+
 fn item(
     db: &Connection,
     member: &Member,
@@ -309,24 +340,16 @@ fn item(
     } else {
         None
     };
-    let (mut divergence, mut unknown) = (None, None);
-    if let Some(parent) = &member.parent {
-        let parent_len = path_len(db, parent)?;
-        match shared_end(db, &member.id, parent, length, parent_len)? {
-            Some(end) => {
-                let node_id = node_at(db, &member.id, end)?.ok_or_else(|| {
-                    ApiError::new(ErrorCode::InvalidState, "branch divergence node is missing")
-                })?;
-                divergence = Some(Divergence {
-                    request: last_request(db, &member.id, end)?,
-                    node_id,
-                    ordinal: end,
-                    parent_continues: parent_len > end + 1,
-                });
-            }
-            None => unknown = Some("no_shared_prefix"),
-        }
-    }
+    let (point, unknown) = locate(db, member, length)?;
+    let divergence = match point {
+        Some(point) => Some(Divergence {
+            request: last_request(db, &member.id, point.ordinal)?,
+            node_id: point.node_id,
+            ordinal: point.ordinal,
+            parent_continues: point.parent_continues,
+        }),
+        None => None,
+    };
     Ok(BranchItem {
         thread_id: member.id.clone(),
         title: (!member.title.trim().is_empty()).then(|| member.title.clone()),
@@ -360,14 +383,24 @@ fn item(
     })
 }
 
-fn root_revision(db: &Connection) -> Result<u64, ApiError> {
-    db.query_row(
-        "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",
-        [],
-        |r| r.get::<_, i64>(0),
-    )
-    .map(|v| v.max(0) as u64)
-    .map_err(sql_error)
+/// Identity of the listed tree: the ordered (Thread, parent) pairs and the
+/// truncation flags. A cursor is valid exactly while this is unchanged, so
+/// appends in any Thread (which bump `root_revision`) do not expire it.
+fn fingerprint(family: &Family) -> u64 {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for member in &family.members {
+        hasher.update(member.id.as_bytes());
+        hasher.update([0]);
+        hasher.update(member.parent.as_deref().unwrap_or("").as_bytes());
+        hasher.update([1]);
+    }
+    hasher.update([
+        family.family_truncated as u8,
+        family.ancestors_truncated as u8,
+    ]);
+    let digest = hasher.finalize();
+    u64::from_le_bytes(digest[..8].try_into().expect("8 bytes"))
 }
 
 /// `thread branches`: one page of the family tree plus its bounds.
@@ -383,7 +416,7 @@ pub fn branches(
         ));
     }
     let family = family(db, requested, Scope::Full)?;
-    let revision = root_revision(db)?;
+    let revision = fingerprint(&family);
     let filter = serde_json::to_string(&(requested, "branches")).map_err(|_| expired())?;
     let offset = match &args.cursor {
         Some(token) => {
@@ -462,28 +495,10 @@ pub struct Marker {
     pub current: usize,
 }
 
-/// Group the family into divergence points. Alternatives at a point are the
-/// parent (the Thread the children diverged from) and each child that diverged
-/// there, ordered by when their first node after the point was written.
-fn group(items: &[BranchItem], lineage: &[String]) -> Vec<(String, String, Vec<usize>)> {
-    let mut groups: Vec<(String, String, Vec<usize>)> = Vec::new();
-    for (index, item) in items.iter().enumerate() {
-        let (Some(divergence), Some(parent)) = (&item.divergence, &item.parent_thread_id) else {
-            continue;
-        };
-        match groups
-            .iter_mut()
-            .find(|(p, n, _)| p == parent && n == &divergence.node_id)
-        {
-            Some((_, _, members)) => members.push(index),
-            None => groups.push((parent.clone(), divergence.node_id.clone(), vec![index])),
-        }
-    }
-    groups.retain(|(parent, _, _)| lineage.contains(parent));
-    groups
-}
-
 /// Markers for the nodes of `thread`'s path that appear in `nodes`.
+///
+/// Divergence points come from lookups alone; the tip scan, JSON parse and run
+/// and prune flags are read only for the Threads of a point that is on the page.
 pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Marker>, ApiError> {
     let wanted: HashSet<&str> = nodes.iter().map(String::as_str).collect();
     // A Thread with no parent and no child has no divergence point.
@@ -496,26 +511,57 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
         return Ok(Vec::new());
     }
     let family = family(db, thread, Scope::Local)?;
-    let items = family
-        .members
-        .iter()
-        .map(|member| item(db, member, thread, &family.chain))
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut out = Vec::new();
-    for (parent, anchor, children) in group(&items, &family.chain) {
-        if !wanted.contains(anchor.as_str()) {
+    // (parent, anchor node) -> (child index, divergence ordinal), for points on the page.
+    type PagePoint = (String, String, Vec<(usize, i64)>);
+    let mut points: Vec<PagePoint> = Vec::new();
+    for (index, member) in family.members.iter().enumerate() {
+        let Some(parent) = &member.parent else {
+            continue;
+        };
+        if !family.chain.contains(parent) {
             continue;
         }
-        let parent_index = items.iter().position(|i| i.thread_id == parent);
-        let mut order: Vec<usize> = parent_index.into_iter().chain(children).collect();
+        let length = path_len(db, &member.id)?;
+        let (Some(point), _) = locate(db, member, length)? else {
+            continue;
+        };
+        if !wanted.contains(point.node_id.as_str()) {
+            continue;
+        }
+        match points
+            .iter_mut()
+            .find(|(p, n, _)| p == parent && n == &point.node_id)
+        {
+            Some((_, _, kids)) => kids.push((index, point.ordinal)),
+            None => points.push((parent.clone(), point.node_id, vec![(index, point.ordinal)])),
+        }
+    }
+    let mut cache: Vec<Option<BranchItem>> = vec![None; family.members.len()];
+    let mut load = |index: usize| -> Result<BranchItem, ApiError> {
+        if cache[index].is_none() {
+            cache[index] = Some(item(db, &family.members[index], thread, &family.chain)?);
+        }
+        Ok(cache[index].clone().expect("loaded"))
+    };
+    let viewed = family
+        .members
+        .iter()
+        .position(|m| m.id == thread)
+        .expect("the requested Thread is listed");
+    let mut out = Vec::new();
+    for (parent, anchor, kids) in points {
+        let ordinal = kids[0].1;
+        let parent_index = family
+            .members
+            .iter()
+            .position(|m| m.id == parent)
+            .expect("a parent in the chain is listed");
+        let mut indexes: Vec<usize> = vec![parent_index];
+        indexes.extend(kids.iter().map(|(i, _)| *i));
         // Write order of each alternative's first node after the divergence point.
-        let ordinal = items[order[order.len() - 1]]
-            .divergence
-            .as_ref()
-            .map_or(0, |d| d.ordinal);
         let mut keyed = Vec::new();
-        for index in order.drain(..) {
-            let id = &items[index].thread_id;
+        for index in indexes {
+            let id = &family.members[index].id;
             let first: Option<String> = match node_at(db, id, ordinal + 1)? {
                 Some(next) => db
                     .query_row("SELECT created_at FROM node WHERE id=?1", [next], |r| {
@@ -529,45 +575,46 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
             keyed.push((first.unwrap_or_default(), id.clone(), index));
         }
         keyed.sort();
-        let alternatives: Vec<Alternative> = keyed
-            .iter()
-            .map(|(_, _, index)| {
-                let item = &items[*index];
-                Alternative {
-                    thread_id: item.thread_id.clone(),
-                    title: item.title.clone(),
-                    excerpt: item
-                        .tip
-                        .as_ref()
-                        .and_then(|t| t.last_request.as_ref())
-                        .and_then(|r| r.text.clone()),
-                    running: item.running,
-                    pruned_originals: item.pruned_originals,
-                }
-            })
-            .collect();
         // The deepest lineage member among the alternatives is the one followed.
-        let current = alternatives
+        let Some(current) = keyed
             .iter()
             .enumerate()
-            .filter_map(|(i, a)| {
+            .filter_map(|(i, (_, id, _))| {
                 family
                     .chain
                     .iter()
-                    .position(|c| c == &a.thread_id)
+                    .position(|c| c == id)
                     .map(|depth| (depth, i))
             })
             .max()
-            .map(|(_, i)| i);
-        if let Some(current) = current
-            && alternatives.len() > 1
-        {
-            out.push(Marker {
-                anchor_node_id: anchor,
-                alternatives,
-                current,
+            .map(|(_, i)| i)
+        else {
+            continue;
+        };
+        if keyed.len() < 2 {
+            continue;
+        }
+        let mut alternatives = Vec::new();
+        for (position, (_, _, index)) in keyed.iter().enumerate() {
+            // The followed alternative shows the viewed Thread's own last request.
+            let source = load(if position == current { viewed } else { *index })?;
+            alternatives.push(Alternative {
+                thread_id: family.members[*index].id.clone(),
+                title: source.title.clone(),
+                excerpt: source
+                    .tip
+                    .as_ref()
+                    .and_then(|t| t.last_request.as_ref())
+                    .and_then(|r| r.text.clone()),
+                running: source.running,
+                pruned_originals: source.pruned_originals,
             });
         }
+        out.push(Marker {
+            anchor_node_id: anchor,
+            alternatives,
+            current,
+        });
     }
     Ok(out)
 }

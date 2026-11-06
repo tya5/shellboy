@@ -1098,7 +1098,7 @@ mod tests {
         let squash = |text: String| text.replace(['\n', '\u{a0}', ' '], "");
         for (language, current, branch) in [
             (UiLanguage::En, "current", "branch"),
-            (UiLanguage::Ja, "今の枝", "別の枝"),
+            (UiLanguage::Ja, "今の会話", "別の会話"),
         ] {
             let mut ui = branch_ui(language);
             for width in [100u16, 40] {

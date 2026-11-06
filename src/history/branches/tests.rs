@@ -45,6 +45,20 @@ fn path(db: &Connection, thread: &str, nodes: &[&str]) {
         .unwrap();
     }
 }
+fn path_extend(db: &Connection, thread: &str, id: &str) {
+    node(
+        db,
+        id,
+        "user",
+        "2026-11-01T09:00:00Z",
+        &format!("text of {id}"),
+    );
+    db.execute(
+        "INSERT INTO thread_path(thread_id,ordinal,node_id)SELECT ?1,COALESCE(MAX(ordinal)+1,0),?2 FROM thread_path WHERE thread_id=?1",
+        params![thread, id],
+    )
+    .unwrap();
+}
 fn args(limit: u32, cursor: Option<String>) -> ThreadBranchesArgs {
     ThreadBranchesArgs {
         thread_id: None,
@@ -291,11 +305,16 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
             .code,
         ErrorCode::CursorExpired
     );
+    // An append in any Thread bumps root_revision but does not change the tree.
     db.execute(
         "UPDATE app_meta SET value='1' WHERE key='root_revision'",
         [],
     )
     .unwrap();
+    path_extend(&db, "c4", "u:later");
+    assert!(branches(&db, "r", &args(2, Some(cursor.clone()))).is_ok());
+    // A created Thread changes the tree and expires the cursor.
+    thread(&db, "c5", Some("r"), "c5");
     assert_eq!(
         branches(&db, "r", &args(2, Some(cursor))).unwrap_err().code,
         ErrorCode::CursorExpired
@@ -424,4 +443,40 @@ fn bisection_uses_logarithmic_lookups_on_a_long_path() {
     let value = read(&db, "p");
     assert_eq!(find(&value, "c")["divergence"]["ordinal"], 2999);
     assert_eq!(find(&value, "c")["divergence"]["parent_continues"], true);
+}
+
+#[test]
+fn the_followed_alternative_shows_the_viewed_threads_own_last_request() {
+    let db = db();
+    thread(&db, "p", None, "P");
+    thread(&db, "s", Some("p"), "S");
+    thread(&db, "t", Some("p"), "T");
+    path(&db, "p", &["u:1", "a:1", "u:2", "a:2", "u:p-late"]);
+    path(&db, "s", &["u:1", "a:1", "u:s", "a:s"]);
+    path(&db, "t", &["u:1", "a:1", "u:2", "a:2", "u:t-own"]);
+    let marks = markers(&db, "t", &["a:1".to_string(), "a:2".to_string()]).unwrap();
+    let first = marks.iter().find(|m| m.anchor_node_id == "a:1").unwrap();
+    // At a:1 P and S diverge; T follows P's shared prefix, so P is the followed alternative.
+    let followed = &first.alternatives[first.current];
+    assert_eq!(followed.thread_id, "p");
+    assert_eq!(followed.excerpt.as_deref(), Some("text of u:t-own"));
+    let other = first
+        .alternatives
+        .iter()
+        .find(|a| a.thread_id == "s")
+        .unwrap();
+    assert_eq!(other.excerpt.as_deref(), Some("text of u:s"));
+}
+
+#[test]
+fn markers_ignore_points_that_are_not_on_the_page() {
+    let db = db();
+    thread(&db, "r", None, "R");
+    thread(&db, "c", Some("r"), "C");
+    path(&db, "r", &["u:1", "a:1", "u:2"]);
+    path(&db, "c", &["u:1", "a:1", "u:c"]);
+    // Full items read the run table; a page without a point must not need it.
+    db.execute_batch("DROP TABLE run").unwrap();
+    assert!(markers(&db, "r", &["u:2".to_string()]).unwrap().is_empty());
+    assert!(markers(&db, "r", &["a:1".to_string()]).is_err());
 }
