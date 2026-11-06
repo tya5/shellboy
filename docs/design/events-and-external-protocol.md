@@ -1,7 +1,7 @@
 # Event subscription and the external RPC contract (#243, #244)
 
-Status: adopted in principle by the user (2026-11-06); stages A1 and B are implemented
-(see 5), the rest is not. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
+Status: adopted in principle by the user (2026-11-06); stages A1, B and C are implemented
+(see 5; C measured in docs/validation/acceptance.md), the rest is not. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
 User decisions on stage B (#243): long-polls share the ordinary request slots (Q6), models
 may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
 Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved).
@@ -357,7 +357,7 @@ or breaking stays a review decision.
 |---|---|---|
 | A1 | Reply typed `invalid_argument` for decodable unknown command/field instead of closing; regression test (done, D-244-1) | none |
 | B (done, #243: `src/control/change_clock.rs`, `tests/events_wait.rs`) | `ChangeClock` + `events.wait` + `shellboy events wait`; tests: ordering, coalescing, `more`, filter, baseline, resume, floor → resync, instance change → resync, forged cursor, timeout 0, disconnect, shutdown, hint completeness per mutation family; protocol/CLI docs | one bounded in-memory map in `Control`, one operation |
-| C | chat uses `events.wait`; before/after measurements (§3) recorded in validation | none |
+| C (done, #243: `src/chat_client.rs`) | chat uses `events.wait`; before/after measurements (§3) recorded in validation. Chosen details: baseline taken after thread creation and before every `message.send`; one cursor per process, filter = the shown Thread; `changed`/`resync_required` re-read, `timeout` does not; `more` drained with timeout 0; call length min(30000, deadline); an owner without `events.wait` is an error (no fallback, no reconnect) | none |
 | A2 | Protocol 3: `record!` split (tolerant results), tolerant `Welcome`/`Endpoint` decode, `Welcome.capabilities`, version policy section in protocol.md; supersede PR1-10 | handshake field |
 | D | `schemars`, command→result match, `shellboy protocol schema`, committed schema + drift test, contract section | one dependency |
 | E (measure first) | E1 per-Thread digest in `changes`; E2 persistent multi-frame stream; E3 live text deltas for Web (in-memory, lossy, explicit gap, falls back to saved output); E4 durable typed change log (schema change) | each needs its own decision |

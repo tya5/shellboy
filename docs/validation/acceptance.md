@@ -1,5 +1,35 @@
 # Validation record
 
+## Chat on events.wait (#243 stage C)
+
+Measured on macOS (Darwin 25.3, arm64, release builds, temporary data dir, local Python mock
+provider returning tool calls, no paid API, real data dir untouched). Before = main 9af5429d, after =
+this branch; both with the same temporary client-side request counter. `ps` CPU of the chat and owner
+processes over a 60 s window while a `sleep 70` tool ran (idle) and tool-line latency over 20 tools
+(`sleep 0.37..1.45 s`; latency = chat line arrival minus the saved `started_at`/`ended_at` in the
+`--json` line, so it excludes the time before the owner saved the fact):
+
+| | before (poll) | after (events.wait) |
+|---|---|---|
+| chat requests in 60 s idle | 180 (60 `turn get`, 60 `shell list`, 60 `wait`) | 2 (`events wait`, the 30 s timeouts) |
+| chat CPU in 60 s | 0.06 s | 0.00 s |
+| owner CPU in 60 s | 0.71 s | 0.01 s |
+| tool start line latency p50 / p95 / max | 617 / 831 / 1020 ms | 8 / 11 / 13 ms |
+| tool finish line latency p50 / p95 / max | 617 / 818 / 837 ms | 16 / 19 / 19 ms |
+| requests for the 20-tool session | 20 `turn get`, 20 `shell list`, 19 `wait` | 42 `events wait`, 42 `turn get`, 42 `shell list` |
+
+One run each, one machine; CPU has `ps` resolution of 10 ms; no bounds are asserted. The 20-tool
+session shows the cost of hints: about two reads per tool (start and finish) instead of one per second.
+
+Verified by tests (macOS local; CI for ubuntu/macOS/windows is recorded in the branch report):
+idle follow sends one held `events.wait` and no `run get`/`turn get`/`shell list` while nothing
+changes (behaviour counted at the owner, not a time bound); a synthetic `resync_required` makes chat
+read again and finish with the tool line and end message; the existing chat suite (Ctrl+C,
+timeout 5, run-end, recovery_wait, held message, no owner) passes on the new loop. Not verified: a
+real owner restart during a follow (the resync is injected; the real `resync_required` after restart
+is covered by stage B's own test), Windows or Linux timings (not measured), a real terminal, a real
+provider, many concurrent chats, `--until reply` end to end.
+
 ## events.wait change hints (#243 stage B)
 
 Verified (macOS local, synthetic temp databases and a loopback fake provider; ubuntu/macOS/windows

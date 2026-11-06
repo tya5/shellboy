@@ -554,7 +554,7 @@ Use `shellboy startup [--last N]` (default 5, maximum 20) to inspect startup-sta
 An external agent or test can drive a running owner with `printf 'message\n' | shellboy chat --json`:
 piped lines in, one JSON object per progress event and end message out (schema in the
 [CLI reference](cli-reference.md#interactive-chat-client-242)), recorded as `external_cli`. It
-uses the same RPCs as `message send` and `wait`; a model needs no chat client inside its own shell.
+uses the same RPCs as `message send`, `wait` and `events wait` (it follows change hints instead of polling); a model needs no chat client inside its own shell.
 
 ## Terminal-free startup (#5, v0.5.0)
 

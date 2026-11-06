@@ -416,7 +416,7 @@ unanswered. Stop/recovery leaves it pending; combine a reply wait with
 
 `shellboy chat [--thread THREAD] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]` is a thin
 line client over the owner RPCs a script could call itself: `thread create`,
-`message send`, `turn get` / `run get`, `wait`, `shell list` and `history get`. It adds no table,
+`message send`, `turn get` / `run get`, `events wait`, `shell list` and `history get`. It adds no table,
 event, worker or queue and keeps no state beyond its own loop. An owner must already be
 running (`shellboy serve --data-dir DIR` or the TUI); otherwise chat exits 6 with a message
 that suggests `shellboy serve`. Without `--thread` it creates a Thread on the first input
@@ -449,6 +449,17 @@ and prints the reply). `--timeout-ms` is a per-message deadline (default none); 
 notice and returns to the prompt without stopping the work. An abnormal end (Turn or Run stopped
 or failed, `recovery_wait` including a wait reporting it, a wait target becoming unavailable, a message the finished Turn did not apply (held), a missing or deleted end message, a message with no assigned Turn) prints one notice line and returns to
 the prompt; chat never retries.
+
+Following uses change hints, not a timer (#243): before sending, chat takes an `events wait`
+baseline cursor for its Thread, then reads the Turn (and Run), the Turn's `shell list` rows and,
+at the end, the saved end message; between reads it holds one `events wait --thread THREAD`
+(at most 30 s per call, shortened to the `--timeout-ms` deadline). A `changed` or
+`resync_required` result makes it read again, `timeout` does not (nothing changed), and `more`
+is drained at once. While nothing changes it sends no other request. Hints are not data: every
+printed line comes from saved facts read after the hint, so intermediate states can be skipped.
+Chat needs an owner that has `events.wait` (the same release); there is no polling fallback.
+If the owner stops while chat waits, the pending call fails and chat exits 6 like any other lost owner
+call; it does not reconnect (start chat again; with `--thread` it continues the same conversation).
 
 Interruption: the first Ctrl+C while a message is being followed requests `run stop` for that
 message's Run, exactly like Ctrl+C in the TUI (Esc, the Turn-only interrupt, has no chat

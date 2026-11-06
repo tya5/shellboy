@@ -1,5 +1,18 @@
 # Development status
 
+## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
+
+`src/chat_client.rs` no longer polls once a second: it takes an `events.wait` baseline cursor before
+each send, reads Turn/Run/`shell list` facts, then holds one `events.wait --thread` (30 s max, cut to
+the `--timeout-ms` deadline) and reads again only on `changed`/`resync_required`; `timeout` reads nothing,
+`more` is drained. No core change, no new operation, no fallback for an owner without `events.wait`
+(same-release rule; pre-1.0 policy), no reconnect after owner loss (exit 6 as before). A closed
+Ctrl+C channel no longer spins the loop. Tests: `chat_idle_follow_holds_one_events_wait_and_reads_nothing`,
+`chat_resync_required_rereads_and_follows_to_the_end` and the existing `chat_*` suite. Measured numbers
+are in docs/validation/acceptance.md. Agent Guide: only the chat sentence changed (models do not
+use chat). Resume: exact-tip default and all-OS CI.
+
+
 ## Unit-length embeddings (#250; on branch issue-250/normalize-embeddings, CI pending)
 
 All provider embeddings are normalized to unit L2 length in the model HTTP client before storage or comparison. Synthetic-vector tests only; no real API. Docs: search design, history guide, agent guide, decisions. Resume: check CI on the branch tip.
@@ -30,7 +43,7 @@ other instance or a cursor below the eviction floor returns `resync_required`. T
 `src/control/change_clock.rs` units and `tests/events_wait.rs` (ordering, merging, paging,
 resume, resync after restart, timeout, disconnect/shutdown, one test per mutation family).
 Missing `changed()` found and fixed: queued/held `message.send`, `thread.prune`, `attachment.add` (not live), the post-`next()` commit in the driver (review F1), `run.stop` stopping.
-Not done: chat still polls (stage C); protocol 3/capabilities (A2), schema (D), live text
+Not done: protocol 3/capabilities (A2), schema (D), live text
 deltas (E3, user wants them in Web M1, plan A first). See D-243-1.
 
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
