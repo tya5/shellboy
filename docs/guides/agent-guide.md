@@ -115,6 +115,36 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. A completed parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check `message get` for the reply state and retrieve `reply.node_id` when replied.
 
 
+### Waiting for a shell, and leaving shells behind
+
+A background shell has no time limit. A shell that never ends keeps your Run
+live after your Turn ends, and a parent waiting on `thread_settled` for your
+Thread keeps waiting. Shellboy does not stop it automatically, because that
+would also stop correct long commands.
+
+- Wait for a shell with `shellboy wait` and `shell_ended` for its
+  `execution_id` (or `shell_output` to resume reading), not with a loop you
+  write such as `until grep ...; do sleep 1; done`. The wait is saved, has a
+  timeout, and a timeout leaves the shell running.
+- Do not wait for other work (another process, a build, a child) by polling
+  `pgrep`, `ps`, or similar. Wait on the Shellboy target: the shell's
+  `execution_id`, a child's `thread_settled`, or a reply.
+- Before you end a Turn, stop owned shells you no longer need with
+  `shellboy shell stop --execution EXECUTION_ID`, and confirm with `shell get`
+  that the state is terminal. Leave one running only on purpose, and say so in
+  your answer with its `execution_id`.
+- If you wait for a child with `thread_settled` and the wait times out, read
+  `result.snapshot.conditions[].owned_shells` (execution ID, Run, elapsed
+  milliseconds) and run `shellboy shell list --thread CHILD_THREAD_ID --state running`.
+  A child's finished Turn with a live shell is not a settled Thread. Inspect it
+  with `shell get`; to end it, ask the child to stop it, or a person or leader
+  can use `shell stop` or `run stop`.
+
+```sh
+shellboy wait --conditions-json '[{"type":"shell_ended","execution_id":"WORK_EXECUTION_ID"}]' --timeout-ms 30000
+shellboy shell stop --execution WORK_EXECUTION_ID
+```
+
 ### Noninteractive Git and stalled shells
 
 A model shell is not an interactive terminal. When Git would open an editor or

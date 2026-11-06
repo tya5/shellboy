@@ -1,5 +1,18 @@
 # Development status
 
+## Never-ending background shell (#255; on branch issue-255/stuck-shell, CI pending)
+
+Reproduced on a temporary data dir with a loopback mock provider (test
+`never_ending_background_shell_keeps_run_live_is_named_everywhere_and_is_reclaimed_by_run_stop`):
+a Turn starts `until false; do sleep 1; done` with `background:true` and ends. The Run stays `live`
+as documented, and `run get`, `thread get`, `status`, `shell list` and Run stop already name or
+reclaim the shell. The one gap: a parent's `wait thread_settled` that timed out said only "targets
+continue". It now adds `snapshot.conditions[].owned_shells` (execution ID, Run, elapsed ms; at most 16;
+omitted when empty) from saved state. No new mechanism, glyph or automatic stop. The TUI owned-work
+panel already showed the row, state and elapsed time; a paint test now pins that. Agent Guide, shell,
+CLI reference and delegation guides updated. Details and the by-surface table: acceptance.md. Resume:
+CI on the exact tip, all OSes.
+
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 
 `src/chat_client.rs` no longer polls once a second: it takes an `events.wait` baseline cursor before

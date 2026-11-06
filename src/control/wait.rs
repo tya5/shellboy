@@ -447,7 +447,12 @@ fn inspect(
                 if !changes.is_empty() {
                     observation.matched.push(condition.clone());
                 }
-                snapshots.push(json!({"type":"thread_settled","thread_ids":thread_ids,"states":states,"changes":changes}));
+                let mut snapshot = json!({"type":"thread_settled","thread_ids":thread_ids,"states":states,"changes":changes});
+                let shells = owned_live_shells(db, thread_ids)?;
+                if !shells.is_empty() {
+                    snapshot["owned_shells"] = json!(shells);
+                }
+                snapshots.push(snapshot);
             }
             WaitCondition::TurnCompleted { turn_id } => {
                 let row=db.query_row("SELECT u.state,u.run_id,u.answer_node_id,t.deleted_at FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[turn_id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?))).optional().map_err(sql_error)?;
@@ -518,6 +523,37 @@ fn inspect(
         observation.targets.extend(report.targets);
     }
     Ok(observation)
+}
+/// Live shells that keep a watched Thread's Run from completing: saved
+/// execution ID and elapsed time only, bounded, so a parent that is still
+/// waiting can see why without a separate query.
+fn owned_live_shells(db: &Connection, thread_ids: &[String]) -> Result<Vec<Value>> {
+    const LIMIT: usize = 16;
+    let observed = chrono::Utc::now();
+    let mut shells = Vec::new();
+    let mut statement = db
+        .prepare("SELECT s.id,r.id FROM run r JOIN shell_execution s ON s.owner_run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND s.state IN ('starting','running','stopping') ORDER BY s.started_at,s.id LIMIT ?2")
+        .map_err(sql_error)?;
+    for thread in thread_ids {
+        let rows = statement
+            .query_map(
+                rusqlite::params![thread, (LIMIT - shells.len()) as i64],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .map_err(sql_error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_error)?;
+        for (execution, run) in rows {
+            let elapsed = crate::shell::timing::read(db, &execution, observed)
+                .map_err(sql_error)?
+                .elapsed_ms;
+            shells.push(json!({"thread_id":thread,"run_id":run,"execution_id":execution,"elapsed_ms":elapsed}));
+        }
+        if shells.len() >= LIMIT {
+            break;
+        }
+    }
+    Ok(shells)
 }
 fn missing(observation: &mut Observation, initial: bool, kind: &str, id: &str) -> Result<()> {
     if initial {

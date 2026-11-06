@@ -146,7 +146,9 @@ each reply contains at most64 changes and each request names at most64 Threads.
 No-after is a current-state observation plus a new baseline, not a replay of all
 past completions. An empty Thread has no settled Run. `satisfied` is not success:
 inspect failed/stopped/recovery records before deciding what to do. The wait does
-not stop or resume work. Changing conditions or losing a source anchor rejects
+not stop or resume work. When a wait times out on a Thread whose Turn ended but whose
+Run still owns a shell, `snapshot.conditions[].owned_shells` gives the `execution_id` and
+`elapsed_ms`; inspect it with `shell get`. Changing conditions or losing a source anchor rejects
 the cursor rather than silently skipping records. No background poller is needed.
 
 ThreadList/Get also separate `last_end_message` (latest own Turn end message, with

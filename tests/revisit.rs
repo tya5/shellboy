@@ -742,3 +742,109 @@ async fn model_shell_cli_defers_a_message_to_its_own_run_completion() {
     f.owner.shutdown().await.unwrap();
     f.server.abort();
 }
+
+fn cmd(name: &str, args: Value) -> Command {
+    serde_json::from_value(json!({"command":name,"args":args})).unwrap()
+}
+
+/// #255: a never-ending background shell keeps the Run live after the Turn
+/// ends. Every surface a parent or person reads names the shell, and a
+/// waiting parent sees its execution ID and elapsed time. No timing bound is
+/// asserted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn never_ending_background_shell_keeps_run_live_is_named_everywhere_and_is_reclaimed_by_run_stop()
+ {
+    let mut f = fixture().await;
+    let run = send(&f.control, &f.thread, "BASE", Deliver::Next)
+        .await
+        .run_id
+        .unwrap();
+    let first = incoming(&mut f.receive).await;
+    let command = if cfg!(windows) {
+        "while ($true) { Start-Sleep 1 }"
+    } else {
+        "until false; do sleep 1; done"
+    };
+    first.reply.send((200,json!({"id":"r1","status":"completed","output":[{"type":"function_call","call_id":"bg","name":"shell","arguments":json!({"command":command,"background":true}).to_string()}]}))).unwrap();
+    let after_tool = incoming(&mut f.receive).await;
+    after_tool
+        .reply
+        .send((200, answer("Done, shell left running")))
+        .unwrap();
+    let id = run.clone();
+    let control = f.control.clone();
+    crate::test_watchdog::watchdog("tests/revisit.rs: stuck shell turn end", async move {
+        loop {
+            let target = id.clone();
+            let ended = control.store.database.call(move |db| Ok(db.query_row("SELECT NOT EXISTS(SELECT 1 FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting'))",[target],|r|r.get::<_,bool>(0))?)).await.unwrap();
+            if ended {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let thread = f.thread.clone();
+    let execution: String = {
+        let run = run.clone();
+        f.control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT id FROM shell_execution WHERE owner_run_id=?1 AND state='running'",
+                    [run],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    };
+    // Run get and Thread get: the Run is live and names the shell.
+    let details = request(&f.control, cmd("run.get", json!({"run_id":run}))).await;
+    assert_eq!(details["state"], "live");
+    assert_eq!(details["owned_execution_ids"], json!([execution]));
+    let thread_details = request(&f.control, cmd("thread.get", json!({"thread_id":thread}))).await;
+    assert_eq!(thread_details["shells_count"], 1);
+    assert_eq!(thread_details["run_id"], json!(run));
+    // Status: the live Run and the shell item with its elapsed time.
+    let status = request(&f.control, cmd("status", json!({"thread_id":thread}))).await;
+    let items = status["items"].as_array().unwrap();
+    assert!(
+        items
+            .iter()
+            .any(|i| i["kind"] == "run" && i["state"] == "live")
+    );
+    let shell = items.iter().find(|i| i["kind"] == "shell").unwrap();
+    assert_eq!(shell["execution_id"], json!(execution));
+    assert!(shell["elapsed_ms"].is_u64());
+    // Shell list names the execution and its command.
+    let listed = request(&f.control, cmd("shell.list", json!({"thread_id":thread}))).await;
+    assert_eq!(listed["items"][0]["execution_id"], json!(execution));
+    assert_eq!(listed["items"][0]["state"], "running");
+    // A parent waiting on thread_settled times out and the result says why.
+    let waited = request(
+        &f.control,
+        cmd("wait", json!({"conditions":[{"type":"thread_settled","thread_ids":[thread],"states":["completed","recovery_wait","failed","stopped"]}],"timeout_ms":200})),
+    )
+    .await;
+    assert_eq!(waited["status"], "timeout");
+    let owned = &waited["snapshot"]["conditions"][0]["owned_shells"];
+    assert_eq!(owned[0]["execution_id"], json!(execution));
+    assert_eq!(owned[0]["run_id"], json!(run));
+    assert!(owned[0]["elapsed_ms"].is_u64());
+    // Run stop reclaims the shell.
+    request(&f.control, cmd("run.stop", json!({"run_id":run}))).await;
+    run_state(&f.control, &run, "stopped").await;
+    let stopped = request(
+        &f.control,
+        cmd("shell.get", json!({"execution_id":execution})),
+    )
+    .await;
+    assert_eq!(stopped["state"], "stopped");
+    assert_eq!(stopped["group_cleanup_confirmed"], true);
+    let after = request(&f.control, cmd("run.get", json!({"run_id":run}))).await;
+    assert_eq!(after["owned_execution_ids"], json!([]));
+    f.finish().await;
+}

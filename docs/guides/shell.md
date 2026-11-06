@@ -79,6 +79,16 @@ result was returned; they do not assert its current liveness.
   `owner_shutdown_before_call`: fix invalid arguments or respect the stop/shutdown;
   the cancelled call itself has not executed.
 
+A background shell has no time limit and Shellboy does not stop one
+automatically. One that never ends keeps its Run live after the Turn ends, and a
+parent waiting on `thread_settled` keeps waiting. Run get lists it in
+`owned_execution_ids`, thread get shows `shells_count`, `status` and `shell list`
+show the execution, and a `thread_settled` wait that times out lists it under
+`snapshot.conditions[].owned_shells` with the elapsed time. Wait for a shell with
+`shell_ended`, not a hand-written polling loop, and stop shells that are no
+longer needed (`shell stop`) before the Turn ends. Stopping the Run reclaims
+them.
+
 There is no time-based automatic foreground backgrounding. Use `background: true`
 for intentionally long work, retain its execution ID, and stop owned servers or
 other persistent commands when finished. A sequence whose later commands depend

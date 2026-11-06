@@ -1,5 +1,29 @@
 # Validation record
 
+## Never-ending background shell (#255)
+
+Reproduced on macOS (Darwin 25.3, arm64) with a temporary data dir and a loopback mock provider; no
+paid API, real data dir untouched. A Turn started `until false; do sleep 1; done` with `background:true`
+and then answered. State after the Turn ended:
+
+| Surface | Observed |
+|---|---|
+| Run | `live` (not completed), as the docs say; Turn completed |
+| `run get` | `state: live`, `owned_execution_ids: [id]` (no elapsed) |
+| `thread get` | `shells_count: 1`, current `run_id` |
+| `status --thread` | `run` item `live` and `shell` item `running` with `execution_id`, `elapsed_ms` |
+| `shell list` | the execution, command excerpt, `started_at`, `running` |
+| `wait thread_settled` (timeout) | before: `timeout`, "targets continue", no mention of the shell; after: `owned_shells` with execution ID, Run, elapsed ms |
+| Run stop | Run `stopping` then `stopped`; shell `stopped`, `group_cleanup_confirmed: true`; `owned_execution_ids` empty |
+| Watch | phase Background (existing unit tests in `src/ui/watch.rs`); not exercised against this live fixture |
+| TUI | owned-work panel row with command, state, elapsed (new paint test `answered_run_kept_live_by_one_shell_paints_the_shell_state_and_elapsed_time`, En and Ja) |
+
+Verified on macOS only (local test runs): the integration test above, the paint test, the
+`language-audit.py` CI invocation (no refresh of the classifications needed). Not verified: Linux and
+Windows runs (the test uses a PowerShell loop on Windows; CI results are in the branch report), a real
+terminal, a real provider, an owner restart with the shell live, Watch painted from this fixture. No
+wall-clock bound is asserted; the wait timeout is only an input.
+
 ## Chat on events.wait (#243 stage C)
 
 Measured on macOS (Darwin 25.3, arm64, release builds, temporary data dir, local Python mock

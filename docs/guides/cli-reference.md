@@ -733,6 +733,10 @@ IDs total (each at most128 bytes) and four distinct states are accepted; repeate
 IDs within a condition are errors. Other existing wait conditions can coexist.
 The result's `snapshot.changes` contains bounded Thread/Run/state/at and optional
 Turn identities; `at=null` means not recorded, never a guessed observation time.
+`snapshot.conditions[].owned_shells` (present only when nonempty, at most 16) lists the
+live shells (`starting`/`running`/`stopping`) of the watched Threads' live Runs with
+`thread_id`, `run_id`, `execution_id` and `elapsed_ms`: a finished Turn does not settle
+a Thread whose Run still owns one. It is saved-state information, not a stop or a timeout.
 `cursor` is the Thread continuation cursor when these conditions are present,
 otherwise the existing shell-output cursor. `snapshot.more` announces another
 saved matching change. Keep the cursor on timeout too and pass it to the next
