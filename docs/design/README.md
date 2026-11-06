@@ -54,6 +54,10 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
   Run-end reminder, end-message rename, `exec --result reply|turn-end|run-end`
   and delegation unification, with a six-step implementation plan.
 
+- [Secretary stack](secretary-stack.md) (decision memo, 2026-11-07): which generic
+  lower layers an AI secretary needs and where each lives (external app, CLI, core,
+  bridge, docs), with per-issue status, risks and an on-site recipe outline.
+
 ## Proposed Drafts (Not Adopted)
 
 - [Connection-wide rate feedback](connection-rate-limit.md) (#224, Phase 1):

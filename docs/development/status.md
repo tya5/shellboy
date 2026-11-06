@@ -1,5 +1,12 @@
 # Development status
 
+## Secretary stack memo (docs only; on branch doc/secretary-stack)
+
+[Secretary stack](../design/secretary-stack.md) records the user's 2026-11-07 decisions, where
+each generic layer lives, per-issue status at `5e140d3011`, risks, real-machine Windows checks and
+the on-site recipe outline. Nothing was run. No guide changed. Resume: section 7 of the memo lists
+guide text to add as #259, #261, #262, #253, #254 land, and section 8 lists stale text to fix.
+
 ## No stop/retry authority check (#256; on branch issue-256/retry-authority, CI pending)
 
 `authorize_owned_run` and all its uses are removed: any caller may stop or retry any
