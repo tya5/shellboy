@@ -20,7 +20,7 @@ JSON decode are each at most about 5%, skipped by perf-by-contribution):
   old loop; checked by a unit test against the old loop and by comparing result
   digests on the owner-DB copy before and after. After the change, on the same
   copy (warm, load about 7, 2 passes x 3 runs interleaved with the old build):
-  all-history ranked_hits 2.6-3.1 s to 0.66-0.86 s, largest Thread 1.2-1.8 s to
+  all-history ranked_hits 2.6-3.1 s to 0.66-0.86 s, largest Thread 1.17-1.71 s to
   0.41-0.52 s; result digests (node, distance bits, span count) identical.
   Recheck if vec0 per-k cost grows with k on other DBs (not measured).
 - Not changed, recorded as a latent risk: the `DELETED_OWNER` branch when roots

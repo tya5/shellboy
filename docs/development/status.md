@@ -1,6 +1,6 @@
 # Development status
 
-## Storage vacuum (#238; implemented, CI pending)
+## Storage vacuum (#238; landed on main 16f39d38, default and all-OS CI passed)
 
 `shellboy storage vacuum [--dry-run]` (standalone, `src/storage/vacuum.rs`): owner.lock
 required (refused with `invalid_state` while an owner runs), conversation DB only
@@ -11,7 +11,7 @@ before/after sizes. No schema, setting or table change. In-place VACUUM keeps th
 file inode, a reader holding the WAL is detected (refused before, error after), so docs-and-rag history references stay valid (unix test). Tests: five unit
 tests in `vacuum.rs` and `cli_process::storage_vacuum_cli_*`. Resume point:
 exact-tip default and all-OS CI.
-## Search speed (#240; branch `issue-240/search-speed`, CI pending)
+## Search speed (#240; landed on main 8b5fc238, default and all-OS CI passed)
 
 Two measured fixes: `searchable` checks the live root first and falls back to the
 full rule only when false; `ranked_hits` does one vec0 scan of `min(count, 4096)`
@@ -21,7 +21,7 @@ and `single_scan_equals_doubling_rescans`. Before/after on the owner-DB copy is
 in the #240 comment. Not done: `DELETED_OWNER` cost when roots are false
 (follow-up issue); eligibility/witness steps (low share).
 
-## Thread prune (#235; implemented, CI pending)
+## Thread prune (#235; landed on main 90c388ad, default and all-OS CI passed)
 
 `shellboy thread prune [--thread T] --before NODE [--dry-run]` (wire `thread.prune`,
 OperationId `ThreadPrune`) releases a Thread's hold on the originals of adopted
@@ -36,7 +36,7 @@ released original and `compact --restore` of its summary fail with a pruned /
 not-retained error. Tests: `tests/thread_prune.rs` plus a restore-guard unit test.
 Resume point: exact-tip default and all-OS CI, then integration.
 
-## macOS-only local test failures (#234; fixed, CI pending)
+## macOS-only local test failures (#234; landed on main b278088a, default and all-OS CI passed)
 
 Root cause for both tests: the native-shell guardian (`src/shell/unix_lifeline.rs`)
 closed inherited descriptors by walking `0..sysconf(_SC_OPEN_MAX)` on macOS (no
@@ -49,7 +49,7 @@ with `proc_pidinfo(PROC_PIDLISTFDS)`; the walk remains the fallback. Unit test
 `close_from_closes_open_descriptors_without_walking_the_limit`. Resume point: CI on
 the final SHA, then owner review.
 
-## Compaction marker and post-compaction input (#230; implemented, CI pending)
+## Compaction marker and post-compaction input (#230; landed on main 57421d61, default and all-OS CI passed)
 
 `compact list` adopted summaries carry `post_compaction_input_tokens` and
 `post_compaction_attempt_id`, derived at read time with no storage (D-230-1). The
