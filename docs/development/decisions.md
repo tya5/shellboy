@@ -3683,3 +3683,21 @@ within float tolerance, so existing 3,072-dimension spaces need no rebuild; redu
 dimension spaces built earlier stay unnormalized until rebuilt. The pre-normalization
 length is not recorded (optional in the issue; no consumer). Recheck when: a provider
 needs dot/cosine-specific semantics or a vector arrives from a path other than the HTTP client.
+## D-243-1: In-memory change clock and `events.wait` (2026-11-06)
+
+Decision: `Control` owns a `ChangeClock` advanced from `Control::changed`; `events.wait`
+long-polls it. User decisions (#243): the long-poll shares ordinary request slots (the
+Web bridge multiplexes one poll for all tabs); no change record is persisted (clients
+re-read saved facts); models may use it. State record (AGENTS.md): owner `Control`, dropped
+with it; bound 4096 Threads (one latest sequence per Thread, oldest evicted and `floor`
+raised; a cursor below the floor or from another owner instance gets `resync_required`,
+never a silent gap); at most 64 changes per reply and 64 filter IDs; one `std::sync::Mutex`
+held only for map updates, never across `.await`; no task, queue, table or per-client buffer.
+Termination: a pending call ends on match, timeout, disconnect (observation wrapper) or
+owner stop; nothing outlives the request. Memory is two small map nodes plus one Thread ID
+per entry; bytes were not measured. Hint completeness is checked by one test per mutation
+family in `tests/events_wait.rs`. Recheck when: measurement shows follow-up reads dominate
+(per-Thread digest, study E1), or long-polls crowd out the 24 ordinary permits (study Q6).
+Hint-completeness findings (fixed in the same change): `message.send` that is queued or held
+(no wake), `thread.prune` (non-dry-run) and `attachment.add` that is not delivered live
+committed without `changed()`; each now reports its Thread in `changed_threads`.

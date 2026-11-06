@@ -341,6 +341,23 @@ impl WaitArgs {
     }
 }
 
+impl EventsWaitArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        if let Some(after) = &self.after {
+            EventCursor::decode(after)?;
+        }
+        if self.thread_ids.len() > MAX_EVENT_THREAD_FILTER {
+            return Err(invalid(format!(
+                "events.wait accepts at most {MAX_EVENT_THREAD_FILTER} thread filters"
+            )));
+        }
+        for id in &self.thread_ids {
+            nonempty(id, "thread_id")?;
+        }
+        Ok(())
+    }
+}
+
 impl HistoryListArgs {
     pub(crate) fn validate_excerpt(&self) -> Result<(), ApiError> {
         if self.excerpt_chars > MAX_HISTORY_EXCERPT_CHARS {
@@ -621,6 +638,7 @@ impl Command {
                 Ok(())
             }
             Self::StorageStatus(_) | Self::StorageCollect(_) => Ok(()),
+            Self::EventsWait(a) => a.validate(),
         }
     }
 }

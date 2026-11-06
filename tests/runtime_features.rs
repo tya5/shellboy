@@ -46,12 +46,12 @@ fn assert_working_instructions(body: &Value, path: &std::path::Path, original: &
     );
 }
 
-struct Incoming {
-    body: Value,
-    session: Option<String>,
-    reply: oneshot::Sender<(u16, Value)>,
+pub(crate) struct Incoming {
+    pub(crate) body: Value,
+    pub(crate) session: Option<String>,
+    pub(crate) reply: oneshot::Sender<(u16, Value)>,
 }
-async fn proxy() -> (
+pub(crate) async fn proxy() -> (
     String,
     mpsc::Receiver<Incoming>,
     tokio::task::JoinHandle<()>,
@@ -145,7 +145,7 @@ async fn proxy_with_sse(
     });
     (format!("http://{address}/v1"), receive, task)
 }
-async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
+pub(crate) async fn owner(root: &std::path::Path, url: &str) -> DataOwner {
     owner_with_retries(root, url, 0).await
 }
 async fn owner_with_retries(root: &std::path::Path, url: &str, retries: u32) -> DataOwner {
@@ -155,7 +155,7 @@ async fn owner_with_retries(root: &std::path::Path, url: &str, retries: u32) -> 
         .await
         .unwrap()
 }
-async fn request(control: &Arc<Control>, command: Command) -> Value {
+pub(crate) async fn request(control: &Arc<Control>, command: Command) -> Value {
     let response = control
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
@@ -165,7 +165,7 @@ async fn request(control: &Arc<Control>, command: Command) -> Value {
     assert!(response.ok, "{:?}", response.error);
     response.result.unwrap()
 }
-fn answer(text: &str) -> Value {
+pub(crate) fn answer(text: &str) -> Value {
     json!({"id":uuid::Uuid::new_v4().to_string(),"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":text}]}]})
 }
 // Fixture guards detect deadlocks, not product latency. Capture only bounded
@@ -185,7 +185,7 @@ async fn progress(control: &Control) -> Result<Value, shellboy::storage::Storage
     }).await
 }
 #[track_caller]
-fn incoming<'a>(
+pub(crate) fn incoming<'a>(
     control: &'a Control,
     receive: &'a mut mpsc::Receiver<Incoming>,
 ) -> impl std::future::Future<Output = Incoming> + 'a {
@@ -216,7 +216,7 @@ fn incoming<'a>(
     }
 }
 #[track_caller]
-fn settled<'a>(
+pub(crate) fn settled<'a>(
     control: &'a Control,
     thread: &'a str,
 ) -> impl std::future::Future<Output = ()> + 'a {
@@ -259,7 +259,7 @@ fn settled<'a>(
         }
     }
 }
-async fn thread(control: &Arc<Control>) -> String {
+pub(crate) async fn thread(control: &Arc<Control>) -> String {
     request(
         control,
         Command::ThreadCreate(ThreadCreateArgs {
@@ -276,7 +276,7 @@ async fn thread(control: &Arc<Control>) -> String {
         .unwrap()
         .into()
 }
-async fn send(control: &Arc<Control>, thread: &str, text: &str) {
+pub(crate) async fn send(control: &Arc<Control>, thread: &str, text: &str) {
     request(
         control,
         Command::MessageSend(MessageSendArgs {

@@ -300,6 +300,7 @@ impl Control {
                 self.index.retry(args).await?;
                 Ok(json!({"accepted":true}))
             }
+            Command::EventsWait(args) => self.runtime_events_wait(args, disconnected).await,
             Command::Wait(args) => {
                 self.runtime_wait(request.operation_id, args, caller, disconnected)
                     .await
@@ -432,6 +433,90 @@ impl Control {
             ErrorCode::InvalidState,
             "Cannot encode model list",
         )
+    }
+
+    /// Receipt-free long-poll over the in-memory change clock; never reads the DB.
+    /// Lost-wakeup discipline as in `wait`: enable the notification, then read the clock.
+    async fn runtime_events_wait(
+        self: &Arc<Self>,
+        args: EventsWaitArgs,
+        disconnected: CancellationToken,
+    ) -> Result<Value, ApiError> {
+        use super::change_clock::Poll;
+        let result = |status, seq: u64, changes: Vec<(String, u64)>, more| {
+            let cursor = EventCursor {
+                v: 1,
+                instance_id: self.store.instance_id.clone(),
+                seq,
+            }
+            .encode();
+            encode_result(
+                EventsWaitResult {
+                    status,
+                    cursor,
+                    changes: changes
+                        .into_iter()
+                        .map(|(thread_id, seq)| EventChange { thread_id, seq })
+                        .collect(),
+                    more,
+                },
+                ErrorCode::InvalidState,
+                "Cannot encode events result",
+            )
+        };
+        let Some(token) = args.after.as_deref() else {
+            return result(
+                EventsWaitStatus::Baseline,
+                self.change_clock.head(),
+                vec![],
+                false,
+            );
+        };
+        let after = EventCursor::decode(token)?;
+        if after.instance_id != self.store.instance_id {
+            return result(
+                EventsWaitStatus::ResyncRequired,
+                self.change_clock.head(),
+                vec![],
+                false,
+            );
+        }
+        let deadline = tokio::time::Instant::now()
+            .checked_add(std::time::Duration::from_millis(args.timeout_ms));
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            match self.change_clock.poll(after.seq, &args.thread_ids) {
+                None => {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidArgument,
+                        "events cursor is ahead of this owner; restart without --after",
+                    ));
+                }
+                Some(Poll::Resync { head }) => {
+                    return result(EventsWaitStatus::ResyncRequired, head, vec![], false);
+                }
+                Some(Poll::Ready {
+                    changes,
+                    more,
+                    cursor,
+                }) => {
+                    if !changes.is_empty() {
+                        return result(EventsWaitStatus::Changed, cursor, changes, more);
+                    }
+                    if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
+                        return result(EventsWaitStatus::Timeout, cursor, vec![], false);
+                    }
+                }
+            }
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {}
+                _ = self.stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Owner is shutting down")),
+                _ = disconnected.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Observation caller disconnected")),
+            }
+        }
     }
 
     async fn runtime_wait(

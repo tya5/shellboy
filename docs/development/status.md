@@ -3,6 +3,17 @@
 ## Unit-length embeddings (#250; on branch issue-250/normalize-embeddings, CI pending)
 
 All provider embeddings are normalized to unit L2 length in the model HTTP client before storage or comparison. Synthetic-vector tests only; no real API. Docs: search design, history guide, agent guide, decisions. Resume: check CI on the branch tip.
+## Change hints `events.wait` (#243 stage B; on branch issue-243/events-wait, CI pending)
+
+`Control` keeps an in-memory, bounded (4096 Threads) change clock advanced from
+`Control::changed`; `events.wait` / `shellboy events wait` long-polls it (receipt-free, no
+DB access, ordinary request slot, models allowed). Cursor = owner instance id + sequence;
+other instance or a cursor below the eviction floor returns `resync_required`. Tests:
+`src/control/change_clock.rs` units and `tests/events_wait.rs` (ordering, merging, paging,
+resume, resync after restart, timeout, disconnect/shutdown, one test per mutation family).
+Missing `changed()` found and fixed: queued/held `message.send`, `thread.prune`, `attachment.add` (not live).
+Not done: chat still polls (stage C); protocol 3/capabilities (A2), schema (D), live text
+deltas (E3, user wants them in Web M1, plan A first). See D-243-1.
 
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
 
