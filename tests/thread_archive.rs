@@ -423,6 +423,10 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
     .await
     .unwrap();
     assert_eq!(found["items"].as_array().unwrap().len(), 1);
+    // And it can still receive a message (which starts a Run, so it returns to the list).
+    let sent = run(&store, send(&child, "still reachable")).await.unwrap();
+    assert!(sent["message_id"].is_string(), "{sent}");
+    assert_eq!(sent["assignment"], "new_run");
     store.database.shutdown().await.unwrap();
 }
 
@@ -498,6 +502,176 @@ async fn only_a_new_run_unarchives_and_a_live_run_does_not_block_archiving() {
         )
         .await
         .is_some()
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+async fn full(store: &Store, command: Command) -> shellboy::control::db::MutationResult {
+    store.execute(request(command), None).await.unwrap()
+}
+
+#[tokio::test]
+async fn archive_publishes_changed_threads_once_and_replays_without_effects() {
+    let (_dir, store) = store().await;
+    let a = create(&store, None).await;
+    let b = create(&store, None).await;
+    let archive_both = request(Command::ThreadArchive(ThreadArchiveArgs {
+        thread_ids: vec![a.clone(), b.clone()],
+        descendants: false,
+    }));
+    let first = store.execute(archive_both.clone(), None).await.unwrap();
+    assert_eq!(first.changed_threads, [a.clone(), b.clone()]);
+    assert!(first.wake_threads.is_empty() && first.quiet_wake_threads.is_empty());
+    // The same operation ID returns the saved result and repeats no effect.
+    let replay = store.execute(archive_both, None).await.unwrap();
+    assert_eq!(replay.result, first.result);
+    assert!(replay.changed_threads.is_empty() && replay.wake_threads.is_empty());
+    // A no-op archive under a new operation changes nothing to publish.
+    let again = full(
+        &store,
+        Command::ThreadArchive(ThreadArchiveArgs {
+            thread_ids: vec![a.clone()],
+            descendants: false,
+        }),
+    )
+    .await;
+    assert!(again.changed_threads.is_empty());
+    let undone = full(
+        &store,
+        Command::ThreadUnarchive(ThreadArchiveArgs {
+            thread_ids: vec![a.clone()],
+            descendants: false,
+        }),
+    )
+    .await;
+    assert_eq!(undone.changed_threads, [a]);
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
+    let (_dir, store) = store().await;
+    for deliver in [Deliver::Next, Deliver::Complete] {
+        let thread = create(&store, None).await;
+        archive(&store, &[&thread], false).await.unwrap();
+        let result = full(
+            &store,
+            Command::MessageSend(MessageSendArgs {
+                human: false,
+                expect_reply: false,
+                sender_label: None,
+                deliver,
+                thread_id: Some(thread.clone()),
+                text: "start".into(),
+            }),
+        )
+        .await;
+        assert_eq!(result.result["assignment"], "new_run", "{deliver:?}");
+        assert!(
+            column(
+                &store,
+                &thread,
+                "SELECT archived_at FROM thread WHERE id=?1"
+            )
+            .await
+            .is_none(),
+            "{deliver:?} on an idle Thread starts a Run and unarchives"
+        );
+    }
+    // Against a live Run, --deliver complete is only held: still archived.
+    let busy = create(&store, None).await;
+    run(&store, send(&busy, "first")).await.unwrap();
+    archive(&store, &[&busy], false).await.unwrap();
+    let held = full(
+        &store,
+        Command::MessageSend(MessageSendArgs {
+            human: false,
+            expect_reply: false,
+            sender_label: None,
+            deliver: Deliver::Complete,
+            thread_id: Some(busy.clone()),
+            text: "after the run".into(),
+        }),
+    )
+    .await;
+    assert_ne!(held.result["assignment"], "new_run");
+    assert!(
+        column(&store, &busy, "SELECT archived_at FROM thread WHERE id=?1")
+            .await
+            .is_some()
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+fn origin(thread: &str, run: &str, turn: &str) -> Origin {
+    Origin {
+        instance_id: "instance".into(),
+        thread_id: thread.into(),
+        run_id: run.into(),
+        turn_id: turn.into(),
+        execution_id: "execution-fixture".into(),
+        token: "fixture-token".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_reply_that_starts_a_run_on_an_archived_sender_unarchives_it() {
+    let (_dir, store) = store().await;
+    let sender = create(&store, None).await;
+    let recipient = create(&store, None).await;
+    // The sender has a live Run so it can send as a model.
+    let started = run(&store, send(&sender, "work")).await.unwrap();
+    let run_id = started["run_id"].as_str().unwrap().to_owned();
+    let turn_id = started["turn_id"].as_str().unwrap().to_owned();
+    let asked = store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                human: false,
+                expect_reply: true,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(recipient.clone()),
+                text: "please answer".into(),
+            })),
+            Some(origin(&sender, &run_id, &turn_id)),
+        )
+        .await
+        .unwrap()
+        .result;
+    let message = asked["message_id"].as_str().unwrap().to_owned();
+    store
+        .database
+        .call({
+            let (message, run_id) = (message.clone(), run_id.clone());
+            move |db| {
+                db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&message])?;
+                // The sender's Run has ended: the reply has to start a new one.
+                db.execute("UPDATE run SET state='completed',ended_at='now' WHERE id=?1", [&run_id])?;
+                db.execute("UPDATE turn SET state='completed',ended_at='now' WHERE run_id=?1", [&run_id])?;
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+    archive(&store, &[&sender], false).await.unwrap();
+    let _reply = full(
+        &store,
+        Command::MessageReply(MessageReplyArgs {
+            message_id: message,
+            text: "answer".into(),
+            sender_label: None,
+        }),
+    )
+    .await;
+    assert!(
+        column(
+            &store,
+            &sender,
+            "SELECT archived_at FROM thread WHERE id=?1"
+        )
+        .await
+        .is_none(),
+        "the reply started a Run on the archived sender"
     );
     store.database.shutdown().await.unwrap();
 }

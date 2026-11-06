@@ -3007,7 +3007,7 @@ mod thread_list_plan_tests {
     }
 
     #[test]
-    fn each_archived_mode_seeks_its_partial_index_without_sorting_or_scanning_threads() {
+    fn each_archived_mode_walks_its_partial_index_in_order_without_a_sort() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         for (mode, index) in [

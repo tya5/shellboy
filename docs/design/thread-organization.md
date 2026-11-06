@@ -212,7 +212,7 @@ Semantics:
 | `thread list` (CLI, TUI, Web) | hidden by default; `--archived only` lists them, `--archived include` lists both |
 | `thread get`, `history get/search`, `status`, `wait`, `usage`, `thread branches`, `message get` | unchanged: readable, searchable, counted. Items gain `archived_at` (branches: `archived: bool`) so viewers can mark them |
 | Receiving messages | allowed; a model or human can still send |
-| **New Run starts on it** | **clears `archived_at`** (auto-unarchive) and records a context entry `thread_unarchived {reason:"run_started"}`. Held messages, reply notices and `--deliver complete` reservations do not unarchive; only the moment new work actually starts |
+| **New Run starts on it** | **clears `archived_at`** (auto-unarchive) and records a context entry `thread_unarchived {reason:"run_started"}`. Messages into a live Run and held `--deliver complete` reservations do not unarchive (a `--deliver complete` or reply on an idle Thread starts a Run and does); only the moment new work actually starts |
 | Archiving a Thread with a live Run | allowed for an explicit single target (user's choice); list hides it, `status`/`watch` still show live work. Bulk calls skip Threads with live/stopping Runs and report them as `skipped` |
 | Descendants | not implied. `--descendants` selects the current subtree with the existing bounded walk (≤256, reports `scope_complete`); in the TUI tree an archived parent with visible children shows the existing "parent not fetched" marker |
 
@@ -387,7 +387,7 @@ adopted design for stage 1; the sections above remain the study.
   Threads.
 - Auto-unarchive: the single new-Run branch of `assign_message` clears
   `archived_at` and records a `thread_unarchived` context entry
-  (`{reason:"run_started"}`). Queued, held and `--deliver complete` messages do not.
+  (`{reason:"run_started"}`). Only a message that actually starts a Run does: a message into an existing live Run, a held one, or a reply that is only queued does not. `--deliver complete` on an idle Thread is assigned `new_run` immediately, so it does unarchive; against a live Run it is held until the Run ends and does not.
 - List cursors are bound to the archived mode through the scope string; a cursor
   from another mode is `cursor_expired`.
 - TUI: Ctrl+A archives (with descendants, no confirmation: reversible) or, in the

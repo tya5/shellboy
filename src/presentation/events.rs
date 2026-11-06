@@ -18,6 +18,7 @@ pub(super) fn event_title(kind: &str) -> &str {
             "指示ファイル更新"
         }
         "recovery_resumed" => "復旧再開",
+        "thread_unarchived" => "アーカイブ解除",
         "context_changed" => "状態変更",
         "child_recovery_wait" => "子の作業が復旧待ち",
         "recovery_wait" => "復旧待ち",

@@ -387,7 +387,7 @@ In F8 `会話 | 設定` (conversation settings), set `タイトル操作` (title
 
 Fixed bottom details show the selection's cwd, ID, parent, state, and a one-line excerpt of roughly at most 80 characters with Markdown/newlines normalized. Narrow screens omit columns; details or F1 show complete values. Enter opens the conversation; F6 reads source.
 
-`[親未取得]` means the parent is outside the fetched page/filter scope. Adding pages with PgDn groups children under newly fetched parents. Fetched rows group ancestry based on update order; this is not a guaranteed complete tree. At 2000 entries, narrow the filter. Ctrl+R retries failed fetches. Searching/browsing does not stop Thread work.
+`[親は一覧外]` (English `[Parent not in this list]`) means the parent is not among the rows of this list: outside the fetched page or filter, or archived while the child is not (or the reverse in the archived list). Adding pages with PgDn groups children under newly fetched parents. Fetched rows group ancestry based on update order; this is not a guaranteed complete tree. At 2000 entries, narrow the filter. Ctrl+R retries failed fetches. Searching/browsing does not stop Thread work.
 
 ### Watch work and descendants
 
@@ -454,7 +454,7 @@ history. Normal source availability/GC rules still apply.
 
 In `/threads` List mode, select a saved conversation and press Delete or Ctrl+D for impact and confirmation. On macOS, fn+delete means Delete; ordinary delete/Backspace still removes filter characters.
 
-Ctrl+A in List mode archives the selected conversation together with its descendants: they leave the list but nothing is deleted, history, search and usage are unchanged, and a Run in progress keeps running. A notice reports how many conversations were archived. Ctrl+G opens the archived list (titled `Archived conversations`), where Ctrl+A unarchives the selection and its descendants; Ctrl+G returns. A new Run on an archived conversation returns it to the list. The archived list is not shown in Watch, and unsent drafts cannot be archived. Selections over 256 conversations are refused. The `shellboy thread archive` commands do the same from a shell with explicit IDs.
+Ctrl+A in List mode archives the selected conversation together with its descendants: they leave the list but nothing is deleted, history, search and usage are unchanged, and a Run in progress keeps running. A notice reports how many conversations were archived. Ctrl+G opens the archived list (titled `Archived conversations`), where Ctrl+A unarchives the selection and its descendants; Ctrl+G returns. A new Run on an archived conversation returns it to the list. Watch is not filtered by archive state: an archived conversation with live work still appears there. Unsent drafts cannot be archived. Selections over 256 conversations are refused. The `shellboy thread archive` commands do the same from a shell with explicit IDs.
 
 Deleting child conversations is off by default. Toggling D/Space requeries impact. Only Y with the latest impact permitting deletion executes; N/Esc cancel. Reasons explain live/stopping Run blockers and similar restrictions. State is checked again during execution even after confirmation, and failures remain in the list.
 

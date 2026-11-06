@@ -984,6 +984,7 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
         "previous_instance_interrupted"
         | "app_shutdown"
         | "recovery_resumed"
+        | "thread_unarchived"
         | "interrupted_messages_recovered" => glyphs::LIFECYCLE,
         "index_state" => glyphs::INDEX,
         "turn_started" | "run_started" => glyphs::START,

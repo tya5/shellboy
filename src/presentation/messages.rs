@@ -901,6 +901,7 @@ pub fn event_title(kind: &str, language: UiLanguage) -> &str {
             "Instruction files updated"
         }
         "recovery_resumed" => "Recovery resumed",
+        "thread_unarchived" => "Unarchived",
         "context_changed" => "State change",
         "child_recovery_wait" => "Child awaiting recovery",
         "recovery_wait" => "Awaiting recovery",

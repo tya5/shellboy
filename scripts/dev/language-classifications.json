@@ -157,82 +157,82 @@
   "src/presentation/events.rs:ada8b376f754ec68:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:112f436c64513522:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:8616fa9256185981:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:44b22b26e9b2c135:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:e9dcbe03b96ad9eb:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:f8a1a79c0f9cd0ed:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:13f5916b1a55a6ae:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:2057a96bed26f392:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:c3e7115095a225cc:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:64891fe89e96183e:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:b0e5347b4b659922:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:72d7a2429570c6ba:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:70080e45f7282d03:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:f27ff0993479551f:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:de3da5375eedcba4:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:fbdc72ace73d5480:1": {
     "category": "a",
     "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:62a142b415a31d33:1": {
     "category": "a",
@@ -842,7 +842,7 @@
   "src/ui/threads.rs:0021934db889491e:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:03e76b90ffcad3a0:1": {
     "category": "a",
@@ -852,7 +852,7 @@
   "src/ui/threads.rs:05bcfbb952d25bf6:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:17d1fbe0d5842062:1": {
     "category": "a",
@@ -867,22 +867,22 @@
   "src/ui/threads.rs:1b0a8eb466c03340:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:1e9e4e1395f9e40a:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:23f004081e78a3f8:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:2407ea624905a8fe:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:27ab8252051f3bf8:1": {
     "category": "a",
@@ -892,7 +892,7 @@
   "src/ui/threads.rs:28d01c30883506ac:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:296fea21d036ad80:1": {
     "category": "a",
@@ -902,7 +902,7 @@
   "src/ui/threads.rs:2a3d305091ce105f:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:2b02db01fef3e847:1": {
     "category": "a",
@@ -917,22 +917,22 @@
   "src/ui/threads.rs:352a772363007f3c:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:35c963d900df98e4:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:3b051502ad184882:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:3d12dc7153ca857e:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:439c41c44b4f1a7d:1": {
     "category": "a",
@@ -947,27 +947,27 @@
   "src/ui/threads.rs:4d0ff1fa13abebf0:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:4efdcd8b601b5ca2:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:538119a8e8aea24c:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:53ef7ff6d66d861c:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:5c9f8bc9649fc9fe:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:5cf688b1161b693f:1": {
     "category": "a",
@@ -987,7 +987,7 @@
   "src/ui/threads.rs:69f649d0bf711005:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:1": {
     "category": "a",
@@ -1007,7 +1007,7 @@
   "src/ui/threads.rs:6d429bf572bea1fc:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:7179959f576d8823:1": {
     "category": "a",
@@ -1022,7 +1022,7 @@
   "src/ui/threads.rs:7aaf65c3b1b3f3f6:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:7bda6297def68be8:1": {
     "category": "a",
@@ -1047,12 +1047,12 @@
   "src/ui/threads.rs:8087ef176b4c0d1d:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:8fc09b991d5f62f4:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:9676341e507f1036:1": {
     "category": "a",
@@ -1067,7 +1067,7 @@
   "src/ui/threads.rs:9abc66d964ad2f60:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:9ca7d8cf8c013360:1": {
     "category": "a",
@@ -1077,7 +1077,7 @@
   "src/ui/threads.rs:a325ebf1700f8a3e:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:a61360828f648330:1": {
     "category": "a",
@@ -1087,22 +1087,17 @@
   "src/ui/threads.rs:a6c3ef78d56a7a5b:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:b367fd0814062db0:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:bb37953c3e148b0b:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
     "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
-  },
-  "src/ui/threads.rs:bbbf6c93d9c9b271:1": {
-    "category": "a",
-    "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
   },
   "src/ui/threads.rs:bbc7c0413b562151:1": {
     "category": "a",
@@ -1112,12 +1107,12 @@
   "src/ui/threads.rs:c5661a5eb0cfca5e:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:c70652bc146c1f3a:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:c7518c08bc44cbf4:1": {
     "category": "a",
@@ -1147,22 +1142,22 @@
   "src/ui/threads.rs:cd5737cf4caf2d35:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:cdd57fe1031ca261:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:d71b9ec4812fdbda:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:d71c4bafc5bb91e9:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:da88d03c0cd7c307:1": {
     "category": "a",
@@ -1177,7 +1172,7 @@
   "src/ui/threads.rs:e52a5a0b453130a7:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/ui/threads.rs:eef937651c7611c9:1": {
     "category": "a",
@@ -1192,7 +1187,7 @@
   "src/ui/threads.rs:ff8e747ed6480f71:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "fe8546821b26256dcecd76f1cb1a22ea869d82f005d30411809db851bd9f1b56"
+    "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
   "src/presentation/rows.rs:84848997ab9fdca5:1": {
     "category": "a",
@@ -6242,12 +6237,12 @@
   "src/presentation/events.rs:7346b96eb637e521:1": {
     "category": "a",
     "reason": "Japanese event_title source copy; presentation::messages::event_title has an explicit English arm for reply_reminder. Event kind/wire value is unchanged.",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/events.rs:18ad5b1c390631ed:1": {
     "category": "a",
     "reason": "Japanese event_title source copy; presentation::messages::event_title has an explicit English arm for reply_outcome. Event kind/wire value is unchanged.",
-    "source_tokens_sha256": "cbeb4b8a973f429118336524f37d85fa9c47ae0e87bf806b1d83ff580743cd2f"
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   },
   "src/presentation/messages.rs:63826ef0a65930b5:1": {
     "category": "a",
@@ -7056,5 +7051,10 @@
     "category": "a",
     "reason": "Reviewed ThreadBrowser::archive_result: each match arm builds an explicit (Japanese, English) pair; both are stored and notice_for_language selects the English text for En and the Japanese text for Ja. The count and error values are interpolated unchanged.",
     "source_tokens_sha256": "892486be610733ea992515df5466d8d2da5ea36c4db1228a3c95baed4f01be3d"
+  },
+  "src/presentation/events.rs:a34d8382cdc112cb:1": {
+    "category": "a",
+    "reason": "event_title: Japanese branch consumed by messages::event_title when locale is Ja; English titles are separately keyed there",
+    "source_tokens_sha256": "05fd360a4afb19d2345a94a447d8628bb0d48c6c65a8a7599de9fd3367bb2f3b"
   }
 }

@@ -81,6 +81,7 @@ fn event(
             }
             "child_recovery_wait" | "recovery_wait" => EventClass::Attention,
             "recovery_resumed"
+            | "thread_unarchived"
             | "child_turn_completed"
             | "child_run_ended"
             | "shell_ended"

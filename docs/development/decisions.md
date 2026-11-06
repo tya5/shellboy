@@ -3699,3 +3699,11 @@ dispatcher and the global keys Ctrl+Q/Ctrl+C/F1/F2). Impact: Watch keeps showing
 archived Threads with live work. Recheck when: real users archive subtrees over 256
 Threads (a continuation cursor would be needed) or Watch should hide archived work.
 
+Review follow-up to D-222-1 (key choice, not tested): Ctrl+A is the default prefix of GNU
+screen and a common tmux remap, and Ctrl+G is the default lock toggle in Zellij (reviewer's
+knowledge, not verified here), so either may be swallowed by a multiplexer. The keys are kept
+for now and the key choice goes back to the user. The thread list footer now picks the richest
+line whose text, measured after the view's labels are substituted, fits (full, two-line, compact,
+small); the two-line tier trades Ctrl+R/Fold hints for the archive keys (F1 and the failure
+footer still name Ctrl+R).
+

@@ -125,12 +125,12 @@ impl BrowserText {
                 "Esc戻る ^v選択 Enter切替 Delete/Ctrl+D削除 Ctrl+A{A} Ctrl+G{G} Tab監視 F1会話情報",
             ),
             (En, Self::ListKeys) => crate::ui::text_width::glyphs::select(
-                "Esc Back · Enter Open · Ctrl+D Delete · Ctrl+A {A}\nUp/Down Select · F1 Info · Ctrl+R Refresh · Ctrl+G {G}",
-                "Esc Back | Enter Open | Ctrl+D Delete | Ctrl+A {A}\nUp/Down Select | F1 Info | Ctrl+R Refresh | Ctrl+G {G}",
+                "Esc Back · Enter Open · Ctrl+A {A} · F1 Info\nUp/Down Select · Ctrl+D Delete · Ctrl+G {G}",
+                "Esc Back | Enter Open | Ctrl+A {A} | F1 Info\nUp/Down Select | Ctrl+D Delete | Ctrl+G {G}",
             ),
             (Ja, Self::ListKeys) => crate::ui::text_width::glyphs::select(
-                "Esc戻る Enter切替 Delete/Ctrl+D削除 Ctrl+A{A}\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得 Ctrl+G{G}",
-                "Esc戻る Enter切替 Delete/Ctrl+D削除 Ctrl+A{A}\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得 Ctrl+G{G}",
+                "Esc戻る Enter切替 Ctrl+A{A} F1情報\n↑↓選択 Delete/Ctrl+D削除 Ctrl+G{G}",
+                "Esc戻る Enter切替 Ctrl+A{A} F1情報\n^v選択 Delete/Ctrl+D削除 Ctrl+G{G}",
             ),
             (En, Self::ListCompactKeys) => crate::ui::text_width::glyphs::select(
                 "Esc Back · Enter Open · Ctrl+D Delete\nUp/Down Select · F1 Info",
@@ -174,8 +174,8 @@ impl BrowserText {
             (Ja, Self::State) => "状態",
             (En, Self::Updated) => "Updated",
             (Ja, Self::Updated) => "更新",
-            (En, Self::MissingParent) => "[Parent unavailable] ",
-            (Ja, Self::MissingParent) => "[親未取得] ",
+            (En, Self::MissingParent) => "[Parent not in this list] ",
+            (Ja, Self::MissingParent) => "[親は一覧外] ",
             (En, Self::Cycle) => "[Cycle] ",
             (Ja, Self::Cycle) => "[循環] ",
             (En, Self::Reconfirm) => "[Reconfirming] ",
@@ -849,6 +849,22 @@ impl ThreadBrowser {
     }
     pub fn mode(&self) -> BrowserMode {
         self.mode
+    }
+    /// The richest key line whose archive-aware text really fits `footer_width`;
+    /// templates are measured after the view's labels are substituted.
+    fn list_footer_keys(&self, footer_width: usize) -> String {
+        let fits =
+            |text: &str| text.lines().map(|line| line.width()).max().unwrap_or(0) <= footer_width;
+        [
+            BrowserText::ListFullKeys,
+            BrowserText::ListKeys,
+            BrowserText::ListCompactKeys,
+            BrowserText::ListSmallKeys,
+        ]
+        .into_iter()
+        .map(|text| self.archive_key_labels(text.render(self.language)))
+        .find(|text| fits(text))
+        .unwrap_or_else(|| BrowserText::Back.render(self.language).to_owned())
     }
     /// Name the keys for the current view: archive/unarchive and where Ctrl+G goes.
     fn archive_key_labels(&self, keys: &str) -> String {
@@ -2383,20 +2399,7 @@ impl ThreadBrowser {
         } else if let Some(error) = error {
             BrowserMessage::FailedFooter(&one_line(error)).render(self.language)
         } else {
-            let mut keys = if footer_width >= 90 {
-                BrowserText::ListFullKeys.render(self.language).to_owned()
-            } else if footer_width >= 45 {
-                BrowserText::ListKeys.render(self.language).to_owned()
-            } else if footer_width >= 30 {
-                BrowserText::ListCompactKeys
-                    .render(self.language)
-                    .to_owned()
-            } else if footer_width >= 17 {
-                BrowserText::ListSmallKeys.render(self.language).to_owned()
-            } else {
-                BrowserText::Back.render(self.language).to_owned()
-            };
-            keys = self.archive_key_labels(&keys);
+            let mut keys = self.list_footer_keys(footer_width);
             if next_cursor {
                 let last_width = keys.lines().next_back().unwrap_or_default().width();
                 if last_width + BrowserText::MoreKey.render(self.language).width() <= footer_width {
@@ -3207,7 +3210,7 @@ mod tests {
             let meanings: &[&str] = if width >= 100 {
                 &["Esc戻る", "Enter切替", "F1会話情報", "Ctrl+Aアーカイブ"]
             } else {
-                &["Esc戻る", "Enter切替", "F1会話情報", "Ctrl+R再取得"]
+                &["Esc戻る", "Enter切替", "F1情報", "Ctrl+Aアーカイブ"]
             };
             for meaning in meanings {
                 assert!(
@@ -5446,12 +5449,19 @@ mod archive_tests {
                 screen.contains(archive_key) && screen.contains(switch_to),
                 "{language:?}\n{screen}"
             );
-            // The narrower two-line footer keeps both keys too.
-            let medium = paint(&browser, 80, 14);
-            assert!(
-                medium.contains(archive_key) && medium.contains(switch_to),
-                "{language:?}\n{medium}"
-            );
+            // Every width from 60 columns up shows both whole labels and F1.
+            let f1 = if language == UiLanguage::En {
+                "F1 Info"
+            } else {
+                "情報"
+            };
+            for width in [60, 80, 100, 110, 120] {
+                let shown = paint(&browser, width, 14);
+                assert!(
+                    shown.contains(archive_key) && shown.contains(switch_to) && shown.contains(f1),
+                    "{language:?} {width}\n{shown}"
+                );
+            }
             browser.key(ctrl('g'));
             browser.apply(
                 browser.generation,
@@ -5463,13 +5473,21 @@ mod archive_tests {
                 vec![],
                 None,
             );
-            let screen = paint(&browser, 120, 14);
-            assert!(screen.contains(archived), "{language:?}\n{screen}");
-            assert!(
-                screen.contains(unarchive_key) && screen.contains(switch_back),
-                "{language:?}\n{screen}"
-            );
-            assert!(!screen.contains("{A}") && !screen.contains("{G}"));
+            for width in [60, 80, 100, 110, 120] {
+                let screen = paint(&browser, width, 14);
+                assert!(screen.contains(archived), "{language:?} {width}\n{screen}");
+                assert!(
+                    screen.contains(unarchive_key)
+                        && screen.contains(switch_back)
+                        && screen.contains(if language == UiLanguage::En {
+                            "F1 Info"
+                        } else {
+                            "情報"
+                        }),
+                    "{language:?} {width}\n{screen}"
+                );
+                assert!(!screen.contains("{A}") && !screen.contains("{G}"));
+            }
         }
     }
 
@@ -6467,18 +6485,53 @@ mod language_tests {
         }
     }
     #[test]
-    fn footer_line_budget_preserves_dense_rows_in_both_languages() {
-        for language in [UiLanguage::En, UiLanguage::Ja] {
-            let wide = BrowserText::ListFullKeys.render(language);
-            assert_eq!(wide.lines().count(), 1, "{language:?}: {wide}");
-            assert!(wide.width() <= 108, "{language:?}: {wide}");
-            for key in ["Esc", "Enter", "Ctrl+D", "Ctrl+A", "Ctrl+G", "Tab", "F1"] {
-                assert!(wide.contains(key), "{language:?}: {wide}");
+    fn footer_line_budget_preserves_dense_rows_and_never_clips_in_both_languages() {
+        for policy in [Some(1), Some(2), None] {
+            super::super::text_width::set_terminal_width(policy);
+            for language in [UiLanguage::En, UiLanguage::Ja] {
+                for archived in [ArchivedFilter::Exclude, ArchivedFilter::Only] {
+                    let browser = ThreadBrowser {
+                        language,
+                        archived,
+                        ..ThreadBrowser::default()
+                    };
+                    let unarchive = archived == ArchivedFilter::Only;
+                    // Every footer threshold the draw code can reach.
+                    for width in 8..=108usize {
+                        let keys = browser.list_footer_keys(width);
+                        assert!(!keys.contains('{'), "unsubstituted label: {keys}");
+                        if width >= 17 {
+                            assert!(
+                                keys.lines().all(|line| line.width() <= width),
+                                "{language:?} {archived:?} width {width}: {keys}"
+                            );
+                        }
+                        // A tier that names an archive key names the whole label of
+                        // the action it performs (never the opposite one).
+                        if keys.contains("Ctrl+A") {
+                            let label = match (language, unarchive) {
+                                (UiLanguage::En, false) => "Ctrl+A Archive",
+                                (UiLanguage::En, true) => "Ctrl+A Unarchive",
+                                (UiLanguage::Ja, false) => "Ctrl+Aアーカイブ",
+                                (UiLanguage::Ja, true) => "Ctrl+Aアーカイブ解除",
+                            };
+                            assert!(
+                                keys.contains(label),
+                                "{language:?} {archived:?} {width}: {keys}"
+                            );
+                            assert!(keys.contains("Ctrl+G"), "{keys}");
+                            assert!(keys.contains("F1"), "F1 must survive: {keys}");
+                        }
+                    }
+                    // Wide terminals get the single dense line; 60 columns the two-line one.
+                    assert_eq!(browser.list_footer_keys(108).lines().count(), 1);
+                    let medium = browser.list_footer_keys(60 - 8);
+                    assert_eq!(medium.lines().count(), 2, "{language:?} {medium}");
+                    assert!(medium.contains("Ctrl+A"), "{medium}");
+                }
             }
-            let medium = BrowserText::ListKeys.render(language);
-            assert_eq!(medium.lines().count(), 2);
-            assert!(medium.lines().all(|line| line.width() <= 68));
         }
+        super::super::text_width::clear_terminal_width();
     }
     #[test]
     fn actual_browser_borders_remain_aligned_in_both_modes_and_languages() {

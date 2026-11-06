@@ -518,6 +518,37 @@ mod tests {
     }
 
     #[test]
+    fn watch_lists_archived_threads_with_live_work() {
+        let db = fixture();
+        add(&db, "live-archived", "live", "running", false);
+        add(&db, "live-visible", "live", "running", false);
+        db.execute(
+            "UPDATE thread SET archived_at='2026-11-06T00:00:00Z' WHERE id='live-archived'",
+            [],
+        )
+        .unwrap();
+        let page = collect_observed(&db, &request(), 70, None, UiLanguage::En).unwrap();
+        let ids: Vec<_> = page
+            .page
+            .items
+            .iter()
+            .map(|row| row.thread_id.as_str())
+            .collect();
+        assert!(ids.contains(&"live-archived"), "{ids:?}");
+        assert!(ids.contains(&"live-visible"), "{ids:?}");
+        let archived = page
+            .page
+            .items
+            .iter()
+            .find(|row| row.thread_id == "live-archived")
+            .unwrap();
+        assert!(
+            archived.archived_at.is_some(),
+            "Watch rows keep the archive mark"
+        );
+    }
+
+    #[test]
     fn localized_continuation_preserves_cursor_and_saved_titles_at_all_counts() {
         for count in [0, 1, 2, 10] {
             let db = fixture();

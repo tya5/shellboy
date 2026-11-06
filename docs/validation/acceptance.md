@@ -10134,7 +10134,7 @@ refused across modes in both directions, restored order after unarchive, archive
 (`thread get`, `history list`), counted (`usage --include-children`) and found by `thread list --query`
 with `--archived include`, a message to an idle archived Thread starting a Run and unarchiving it with one
 `thread_unarchived` context entry, archiving a Thread with a live Run, and a message into that live Run
-leaving it archived. Unit tests check that the default and archived pages walk their partial index with no
+leaving it archived. Unit tests check that the default and archived pages walk their partial index in order with no
 sort and that the default page costs the same VM steps with 20 or 3,000 archived Threads
 (`INDEXED BY` pins the index; without it the planner chose `threads_updated` plus a sort). TUI tests cover
 key dispatch (Ctrl+A archive and unarchive, Ctrl+G list switch with a new generation and no carried rows,

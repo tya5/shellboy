@@ -1322,6 +1322,22 @@ fn terminal_tools_plain_code_and_index_readiness_avoid_internal_noise() {
 }
 
 #[test]
+fn auto_unarchive_event_has_a_title_and_is_a_visible_change_not_unknown() {
+    let event = json!({"kind":"thread_unarchived","change":{"reason":"run_started"}});
+    let payload = json!({"text":format!("Shellboy event v1: {event}")});
+    let p = project("event", &payload, &text_of_payload(&payload), 0);
+    assert_eq!(p.event_class, EventClass::Change);
+    assert_eq!(p.title, "アーカイブ解除");
+    assert_eq!(
+        shellboy::presentation::messages::event_title(
+            "thread_unarchived",
+            shellboy::config::UiLanguage::En
+        ),
+        "Unarchived"
+    );
+}
+
+#[test]
 fn interrupted_tool_results_show_uncertainty_without_fabricated_success() {
     for (status, label, text) in [
         ("interrupted", "中断・結果不確か", "再実行前"),

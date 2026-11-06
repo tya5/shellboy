@@ -401,6 +401,18 @@ impl Page {
                 "Review deletion effects for the selected conversation; this does not delete yet"
             ),
         );
+        page.entry(
+            local!(
+                config.ui.language,
+                "一覧内 Ctrl+A / Ctrl+G",
+                "List Ctrl+A / Ctrl+G"
+            ),
+            local!(
+                config.ui.language,
+                "Ctrl+A: 選んだ会話と子孫をアーカイブ（一覧から隠すだけ。削除しない）。アーカイブ一覧では解除。Ctrl+G: 通常の一覧とアーカイブ一覧を切替え",
+                "Ctrl+A: archive the selected conversation and its descendants (hidden, not deleted); in the archived list, unarchive. Ctrl+G: switch between the list and the archived list"
+            ),
+        );
         page.note(local!(config.ui.language, "削除確認ではD/Spaceで子孫も含めるか変更。影響の取得中や実行中の作業がある場合はYで実行できません。Yで削除、N/Escで一覧へ戻ります。文字入力とBackspaceは一覧の絞り込みです。", "In deletion confirmation, D/Space toggles descendants. Y cannot execute while effects are loading or work is running. Y deletes; N/Esc returns to the list. Typing and Backspace filter the list."));
         page.note(local!(
             config.ui.language,
