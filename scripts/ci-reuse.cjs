@@ -10,6 +10,11 @@ const requiredJobs = [
 // include_str! the files under docs/guides/ (bundled `shellboy docs` guides and
 // user-guide embeds), so editing them changes compiled output and Rust tests.
 const embeddedDocPrefixes = ['docs/guides/'];
+// Python tests that reference docs/ paths; the docs-checks job runs exactly these
+// (workflow reads this list via node). Add a test here when it starts referencing docs/.
+const docTestFiles = [
+  'test_validation_documents.py', 'test_readme_overview.py', 'test_record_delta.py',
+];
 const maxComparedFiles = 3000; // compare API listing limit; beyond it the diff is incomplete
 
 function isLightDoc(path) {
@@ -95,3 +100,4 @@ module.exports.requiredJobs = requiredJobs;
 module.exports.decideDocsOnly = decideDocsOnly;
 module.exports.classifyFiles = classifyFiles;
 module.exports.embeddedDocPrefixes = embeddedDocPrefixes;
+module.exports.docTestFiles = docTestFiles;

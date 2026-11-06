@@ -186,8 +186,8 @@ The `reuse` job (`scripts/ci-reuse.cjs`) also emits `docs_only`. For a push to
 main it compares `before...after` from the push payload; when every changed
 path (including a rename's previous path) is under `docs/` or is a top-level
 `*.md`, the three-OS `check` job is skipped and the Linux `docs-checks` job runs
-the language-classification audit plus `test_validation_documents.py` and
-`test_readme_overview.py`. Everything else runs the full checks: any other path,
+the language-classification audit plus the Python tests listed in `docTestFiles`
+(`ci-reuse.cjs`; those referencing `docs/` or `README.md`). Everything else runs the full checks: any other path,
 an empty or 3000-file diff, a missing/all-zero `before`, a compare API failure,
 and `workflow_dispatch` or any non-main ref. Exact-SHA reuse is evaluated first;
 when it reuses, `docs_only` is false.

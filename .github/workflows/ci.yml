@@ -85,7 +85,8 @@ jobs:
       - name: Check documents read by Python tests
         run: |
           set -e
-          for t in test_validation_documents.py test_readme_overview.py; do
+          # The test list lives next to embeddedDocPrefixes in scripts/ci-reuse.cjs.
+          for t in $(node -p "require('./scripts/ci-reuse.cjs').docTestFiles.join(' ')"); do
             python3 -m unittest discover -s scripts/tests -p "$t"
           done
   check:

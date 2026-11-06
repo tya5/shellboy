@@ -98,3 +98,11 @@ test('entrypoint sets docs_only; API failure and reuse fall back to false', asyn
     paginate: async m => { if (m === 'compare') throw Error('boom'); return []; }};
   assert.equal((await run(failing, docsContext)).docs_only, 'false');
 });
+test('every Python test referencing docs/ is in the docs-checks list', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const dir = __dirname;
+  const referencing = fs.readdirSync(dir).filter(f => f.startsWith('test_') && f.endsWith('.py') &&
+    /docs\/(development|validation|assets)|README\.md/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  for (const f of referencing) assert.ok(gate.docTestFiles.includes(f), f);
+  for (const f of gate.docTestFiles) assert.ok(fs.existsSync(path.join(dir, f)), f);
+});
