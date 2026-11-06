@@ -302,6 +302,7 @@ pub(super) async fn stream_response(
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
     let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
+    let _live_text = control.change_clock.live_text_guard(thread, attempt);
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
     let response = client.response_observed(
@@ -333,7 +334,7 @@ pub(super) async fn stream_response(
                 let Some(event) = event else { continue; };
                 let kind=model::classify_stream_event(&event);
                 let reasoning=kind==model::StreamEventKind::ReasoningDelta;
-                if matches!(kind,model::StreamEventKind::TextDelta|model::StreamEventKind::ReasoningDelta) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();control.publish_event(EngineEvent::Stream{thread_id:thread.into(),node_id:attempt.into(),text:delta.into(),reasoning,stream_char_offset});}
+                if matches!(kind,model::StreamEventKind::TextDelta|model::StreamEventKind::ReasoningDelta) && let Some(delta)=event.get("delta").and_then(Value::as_str){let stream_char_offset=stream_chars;stream_chars+=delta.chars().count();control.stream_delta(thread,attempt,delta,reasoning,stream_char_offset);}
             }
         }
     }

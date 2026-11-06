@@ -22,6 +22,18 @@ async fn convert(args: &[&str]) -> Command {
         .unwrap()
 }
 #[tokio::test]
+async fn events_wait_asks_for_text_only_with_the_flag() {
+    for (args, wanted) in [
+        (&["events", "wait"][..], false),
+        (&["events", "wait", "--text"][..], true),
+    ] {
+        let Command::EventsWait(parsed) = convert(args).await else {
+            panic!("expected events.wait");
+        };
+        assert_eq!(parsed.include_text, wanted);
+    }
+}
+#[tokio::test]
 async fn all_public_cli_operations_map_to_shared_typed_contracts() {
     let cases: &[(&[&str], &str)] = &[
         (&["status"], "status"),
