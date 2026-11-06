@@ -352,7 +352,7 @@ or breaking stays a review decision.
 
 | Stage | Content | New mechanism |
 |---|---|---|
-| A1 | Reply typed `invalid_argument` for decodable unknown command/field instead of closing; regression test | none |
+| A1 | Reply typed `invalid_argument` for decodable unknown command/field instead of closing; regression test (done, D-244-1) | none |
 | B | `ChangeClock` + `events.wait` + `shellboy events`; tests: ordering, coalescing, `more`, filter, baseline, resume, floor → resync, instance change → resync, forged cursor, timeout 0, disconnect, shutdown, hint completeness per mutation family; protocol/CLI docs | one bounded in-memory map in `Control`, one operation |
 | C | chat uses `events.wait`; before/after measurements (§3) recorded in validation | none |
 | A2 | Protocol 3: `record!` split (tolerant results), tolerant `Welcome`/`Endpoint` decode, `Welcome.capabilities`, version policy section in protocol.md; supersede PR1-10 | handshake field |
