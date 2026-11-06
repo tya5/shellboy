@@ -278,7 +278,7 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 
 | Code | Meaning / next action |
 |---|---|
-| `invalid_argument` | Correct flags/JSON/values/explicit scope against help |
+| `invalid_argument` | Correct flags/JSON/values/explicit scope against help. An owner that does not know a command or field (`details.reason` `unknown_command`/`unknown_field`/`unknown_request_field`, with `details.name`) rejects it before running anything (`request_may_have_been_applied=false`); run the CLI and owner from the same release |
 | `config_invalid` | Check connection/model/credential environment/settings; restart owner as needed |
 | `app_not_running` | Check owner for the same data directory; CLI never autostarts it |
 | `protocol_mismatch` | Align owner and CLI versions |

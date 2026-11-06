@@ -93,10 +93,24 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             },
         )
         .await?;
-        let request: Request = tokio::time::timeout(FRAME_READ_TIMEOUT, read_frame(&mut stream))
+        let frame: Value = tokio::time::timeout(FRAME_READ_TIMEOUT, read_frame(&mut stream))
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Request frame read timed out"))??
             .ok_or_else(endpoint_mismatch)?;
+        // Parsing happens before any effect. A decodable frame with an unknown
+        // command/field is answered with its own ID instead of being closed.
+        let request = match Request::decode_frame(frame) {
+            Ok(request) => request,
+            Err((Some(operation_id), error)) => {
+                write_frame(
+                    &mut stream,
+                    &Response::<Value>::failure(operation_id, error),
+                )
+                .await?;
+                return Ok(());
+            }
+            Err((None, _)) => return Err(endpoint_mismatch()),
+        };
         if let Err(error) = request.validate() {
             write_frame(
                 &mut stream,
@@ -825,6 +839,126 @@ mod frame_delivery_tests {
         task.await.unwrap().unwrap();
         assert!(incoming.recv().await.is_none());
         assert!(read_frame::<_, Value>(&mut client).await.unwrap().is_none());
+    }
+    async fn rejected_reply(frame: Value) -> (Response<Value>, bool) {
+        let (mut client, server) = tokio::io::duplex(4096);
+        let (requests, mut incoming) = mpsc::channel(1);
+        let task = tokio::spawn(serve_connection(
+            server,
+            "instance".into(),
+            requests,
+            CancellationToken::new(),
+            server::WorkAdmission::new(),
+        ));
+        write_frame(
+            &mut client,
+            &Hello {
+                protocol_version: PROTOCOL_VERSION,
+            },
+        )
+        .await
+        .unwrap();
+        read_frame::<_, Welcome>(&mut client)
+            .await
+            .unwrap()
+            .unwrap();
+        write_frame(&mut client, &frame).await.unwrap();
+        let response: Response<Value> = read_frame(&mut client).await.unwrap().unwrap();
+        response.validate().unwrap();
+        task.await.unwrap().unwrap();
+        let dispatched = incoming.recv().await.is_some();
+        (response, dispatched)
+    }
+    #[tokio::test]
+    async fn unknown_command_field_or_type_gets_a_typed_reply_without_dispatch() {
+        let base = |extra: Value| {
+            let mut frame = serde_json::json!({
+                "protocol_version": PROTOCOL_VERSION,
+                "operation_id": "instance:typed"
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                frame[key] = value.clone();
+            }
+            frame
+        };
+        let cases = [
+            (
+                base(serde_json::json!({"command": "future.thing", "args": {}})),
+                "unknown_command",
+                "unknown command `future.thing`",
+            ),
+            (
+                base(serde_json::json!({"command": "message.send", "args": {
+                    "text": "hi", "thread_id": "t", "human": false, "from_the_future": 1}})),
+                "unknown_field",
+                "unknown field `from_the_future` in the arguments of `message.send`",
+            ),
+            (
+                base(serde_json::json!({"command": "status", "args": {}, "extra": 1})),
+                "unknown_request_field",
+                "unknown request field `extra`",
+            ),
+            (
+                base(serde_json::json!({"command": "message.send", "args": {
+                    "text": 5, "thread_id": "t"}})),
+                "invalid_shape",
+                "invalid arguments for `message.send`",
+            ),
+        ];
+        for (frame, reason, message) in cases {
+            let (response, dispatched) = rejected_reply(frame).await;
+            assert!(!dispatched, "{reason} must not reach the dispatcher");
+            assert_eq!(response.operation_id, "instance:typed");
+            let error = response.error.unwrap();
+            assert_eq!(error.code, ErrorCode::InvalidArgument, "{reason}");
+            assert!(error.message.starts_with(message), "{}", error.message);
+            let details = error.details.unwrap();
+            assert_eq!(details["reason"], reason);
+            assert_eq!(details["request_may_have_been_applied"], false);
+            assert!(!error.message.contains('5'), "values must not be echoed");
+        }
+    }
+    #[tokio::test]
+    async fn typed_rejection_of_a_mutation_is_not_reported_as_uncertain() {
+        let (client, mut peer) = tokio::io::duplex(4096);
+        let owner = tokio::spawn(async move {
+            read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    instance_id: "instance".into(),
+                },
+            )
+            .await
+            .unwrap();
+            let frame: Value = read_frame(&mut peer).await.unwrap().unwrap();
+            let id = frame["operation_id"].as_str().unwrap().to_owned();
+            let mut frame = frame;
+            frame["args"]["human"] = Value::Bool(true);
+            frame["args"]["unknown_to_owner"] = Value::Bool(true);
+            let (_, error) = Request::decode_frame(frame).unwrap_err();
+            write_frame(&mut peer, &Response::<Value>::failure(id, error))
+                .await
+                .unwrap();
+        });
+        let command = Command::MessageSend(MessageSendArgs {
+            human: true,
+            expect_reply: false,
+            sender_label: None,
+            deliver: crate::protocol::Deliver::Next,
+            thread_id: Some("t".into()),
+            text: "hello".into(),
+        });
+        let response = call_stream(client, endpoint(), command, None, None)
+            .await
+            .unwrap();
+        let error = response.error.unwrap();
+        assert_eq!(error.code, ErrorCode::InvalidArgument);
+        let details = error.details.unwrap();
+        assert_eq!(details["request_may_have_been_applied"], false);
+        assert!(details.get("next_operation").is_none());
+        owner.await.unwrap();
     }
     #[tokio::test]
     async fn partial_request_prefix_and_payload_time_out_without_dispatch() {

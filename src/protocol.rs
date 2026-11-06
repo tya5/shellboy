@@ -245,19 +245,29 @@ pub struct Request {
 }
 // Both entry points accept exactly the same top-level envelope fields. Keep
 // static diagnostics here: arbitrary keys/values can contain credentials.
+const REQUEST_FIELDS: &[&str] = &[
+    "protocol_version",
+    "operation_id",
+    "command",
+    "args",
+    "origin",
+];
 fn request_fields(value: &Value) -> Result<(), &'static str> {
     let object = value.as_object().ok_or("request must be an object")?;
-    const FIELDS: &[&str] = &[
-        "protocol_version",
-        "operation_id",
-        "command",
-        "args",
-        "origin",
-    ];
-    if object.keys().any(|key| !FIELDS.contains(&key.as_str())) {
+    if object
+        .keys()
+        .any(|key| !REQUEST_FIELDS.contains(&key.as_str()))
+    {
         return Err("unknown request field");
     }
     Ok(())
+}
+/// Bounded, printable form of a caller-supplied name for diagnostics.
+fn diagnostic_name(name: &str) -> String {
+    name.chars()
+        .take(64)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
 }
 impl<'de> Deserialize<'de> for Request {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -312,6 +322,90 @@ impl Request {
             }
         }
         self.command.validate()
+    }
+    /// Decode a request frame that was already parsed as JSON. On failure the
+    /// caller gets the request's own non-empty `operation_id` (when it has one)
+    /// and a typed `invalid_argument` naming the unknown command or field, so
+    /// the owner can reply instead of closing. Nothing is executed here.
+    /// Diagnostics never echo argument values, only bounded command/field names.
+    pub fn decode_frame(value: Value) -> Result<Self, (Option<String>, ApiError)> {
+        let operation_id = value
+            .get("operation_id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.trim().is_empty())
+            .map(str::to_owned);
+        let command = value
+            .get("command")
+            .and_then(Value::as_str)
+            .map(diagnostic_name);
+        let fail = |message: String, kind: &str, name: Option<String>| {
+            let mut details = serde_json::json!({
+                "reason": kind,
+                "request_may_have_been_applied": false
+            });
+            if let Some(name) = name {
+                details["name"] = Value::String(name);
+            }
+            if let Some(command) = &command {
+                details["command"] = Value::String(command.clone());
+            }
+            invalid(message)
+                .hint("The owner rejected the request before running anything. The client and owner may be from different releases; run them from the same release, then retry")
+                .details(details)
+        };
+        if request_fields(&value).is_err() {
+            let name = value
+                .as_object()
+                .into_iter()
+                .flat_map(|object| object.keys())
+                .find(|key| !REQUEST_FIELDS.contains(&key.as_str()))
+                .map(|key| diagnostic_name(key));
+            let message = match &name {
+                Some(name) => format!("unknown request field `{name}`"),
+                None => "request must be an object".into(),
+            };
+            let reason = if name.is_some() {
+                "unknown_request_field"
+            } else {
+                "invalid_shape"
+            };
+            return Err((operation_id, fail(message, reason, name)));
+        }
+        match serde_json::from_value::<Self>(value) {
+            Ok(request) => Ok(request),
+            Err(error) => {
+                let text = error.to_string();
+                let quoted = |prefix: &str| {
+                    text.split_once(prefix)
+                        .and_then(|(_, rest)| rest.split_once('`'))
+                        .map(|(name, _)| diagnostic_name(name))
+                };
+                let error = if let Some(name) = quoted("unknown variant `") {
+                    fail(
+                        format!("unknown command `{name}`"),
+                        "unknown_command",
+                        Some(name),
+                    )
+                } else if let Some(name) = quoted("unknown field `") {
+                    let message = match &command {
+                        Some(command) => {
+                            format!("unknown field `{name}` in the arguments of `{command}`")
+                        }
+                        None => format!("unknown field `{name}`"),
+                    };
+                    fail(message, "unknown_field", Some(name))
+                } else {
+                    let message = match &command {
+                        Some(command) => format!(
+                            "invalid arguments for `{command}`: wrong type or missing required field"
+                        ),
+                        None => "invalid request shape".into(),
+                    };
+                    fail(message, "invalid_shape", None)
+                };
+                Err((operation_id, error))
+            }
+        }
     }
     /// Strict top-level parsing is explicit because serde flatten cannot deny unknown fields.
     pub fn from_value(value: Value) -> Result<Self, ApiError> {

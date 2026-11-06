@@ -1,5 +1,15 @@
 # Development status
 
+## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
+
+The owner now answers a decodable request with an unknown command, unknown
+top-level/args field or wrong argument type with `invalid_argument` carrying the
+request's own operation ID (`details.reason`, `command`, `name`,
+`request_may_have_been_applied=false`) instead of closing; the client therefore
+no longer reports it as an uncertain mutation. Parsing precedes dispatch, so
+nothing runs. No protocol version change. Tests in `src/ipc.rs`. Remaining #244
+stages (A2, B, D) are not started.
+
 ## Documentation-only CI skip (#245; on branch issue-245/docs-only-ci, not yet landed)
 
 `reuse` emits `docs_only`; documentation-only main pushes skip the three-OS

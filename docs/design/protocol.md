@@ -85,6 +85,7 @@ requestの書込み開始後にI/O失敗、途中切断、または不正な応�
 否定せず、同じoperation IDの照会を案内する。対象を変えない観測はreceiptを持たないため、同じcommand/filterでfreshな再照会へ案内する。semantic検索は再びquery embedding費用が生じ得る。waitは待機状態を保存するためreceiptを維持する。
 サーバ側でoperation IDを確定できない不正frame/JSONは接続を閉じ、架空IDの応答を作らない。
 frame長が適正なJSON requestをdecode後に検証で拒否した場合は、元IDのerror応答を返して閉じる。
+未知のcommand、未知のtop-level/args項目、型違い・必須欠落（例: 新しいclientが古いownerへ送る追加項目 `human`）も、非空 `operation_id` を持つ適正なJSONなら同様に元IDの `invalid_argument` を返して閉じる（#244 A1）。`message` は未知のcommand/項目名（制御文字を `?` に置換し64文字まで）を示し、値は含めない。`details` は `reason`（`unknown_command` / `unknown_field` / `unknown_request_field` / `invalid_shape`）、該当する `command` と `name`、`request_may_have_been_applied=false` を持つ。decodeは副作用・dispatch・admission・receipt作成より前に完結し、拒否時は何も実行しない。応答を受けたclientは不確実な変更として扱わず、receiptの照会も案内しない。`operation_id` を取り出せないframeは従来どおり応答なしで閉じる。requestは厳格（`deny_unknown_fields`）のままで、変わるのは失敗の返し方だけであり、PROTOCOL_VERSIONは変えない。
 wire版・8MiB上限・既存error codeは変更しない。
 
 

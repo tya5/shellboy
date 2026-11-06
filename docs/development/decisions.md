@@ -3629,3 +3629,17 @@ range ('/' is '.'+1). EXPLAIN QUERY PLAN changes from `SCAN app_meta` to `SEARCH
 USING INDEX sqlite_autoindex_app_meta_1 (key>? AND key<?)` (MULTI-INDEX OR for the pair).
 Share: 660 of 1,207 ms measured on a real startup. No new index or schema. Recheck when a
 key with an upper-case or differently written prefix is introduced.
+## D-244-1: Reject unknown commands/fields with a typed reply (2026-11-06)
+
+Decision: `serve_connection` parses the request frame as JSON first and decodes it
+with `Request::decode_frame`; when the frame has a non-empty `operation_id` but an
+unknown command, unknown field or wrong argument type, the owner replies
+`invalid_argument` (existing code; no new one) under that ID and closes. Requests
+stay strict. Reason: closing without a reply made a client talking to an older owner
+(new `chat` sending `human`) report an uncertain mutation although nothing ran, and
+protocol.md P5 already requires an own-ID reply for decodable rejected requests.
+Names are bounded to 64 printable characters and values are never echoed (keys can
+still be caller-chosen; only the key, not its value, is shown). Frames without a
+usable ID still close silently. Impact: no version change, no new table/worker/queue.
+Recheck when: protocol 3 adds capabilities (study A2), which should let clients avoid
+sending unsupported fields at all.
