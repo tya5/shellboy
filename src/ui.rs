@@ -1880,6 +1880,8 @@ pub struct UiState {
     next_rewind_request: u64,
     rewind_pending: Option<u64>,
     rewind_undo: Option<rewind::RewindUndo>,
+    /// Selection revision at Y and the confirmed facts, until the result arrives.
+    rewind_base: Option<(u64, rewind::RewindFacts)>,
     queue_popup: message_queue::QueuePopup,
     send_now: bool,
     immediate_chord: bool,
@@ -2010,6 +2012,7 @@ impl UiState {
             next_rewind_request: 0,
             rewind_pending: None,
             rewind_undo: None,
+            rewind_base: None,
             queue_popup: message_queue::QueuePopup::default(),
             send_now: false,
             immediate_chord: false,
@@ -4817,6 +4820,8 @@ impl UiState {
         }]
     }
     fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
+        // The next submission ends the "right after the rewind" undo offer.
+        self.rewind_undo = None;
         if self.view().composer.reply.is_some() {
             return self.submit_reply();
         }
@@ -6009,7 +6014,7 @@ impl UiState {
             Some(Confirmation::ThreadDeletion(_)) => {
                 unreachable!("thread deletion owns its confirmation")
             }
-            Some(Confirmation::Rewind { args, .. }) => self.execute_rewind(args),
+            Some(Confirmation::Rewind { args, facts }) => self.execute_rewind(args, facts),
             Some(Confirmation::ForceQuit) => vec![UiAction::ForceQuit],
             None => vec![],
         }

@@ -15,6 +15,7 @@ pub(super) struct RewindFacts {
     shell_executions: i64,
     child_threads: i64,
     pending_replies: i64,
+    attachments_removed: i64,
 }
 
 impl RewindFacts {
@@ -27,6 +28,7 @@ impl RewindFacts {
             shell_executions: count("/shell_executions_after_node/count")?,
             child_threads: count("/child_threads_after_node/count")?,
             pending_replies: count("/pending_replies_to_sent_messages/count")?,
+            attachments_removed: count("/attachment_selections_removed")?,
         })
     }
 
@@ -48,13 +50,16 @@ impl RewindFacts {
                  この依頼より後のシェル実行: {}\n  \
                  ファイルの変更は戻りません\n  \
                  この依頼より後に始めた子の会話: {}\n  \
-                 返事待ちの送信: {}\n\
+                 返事待ちの送信: {}\n  \
+                 外れる依頼の添付の選択: {}（枝には残ります）\n  \
+                 背景のシェルや返事は、あとからこの会話に届くことがあります\n\
                  取り消し: 外れた部分は枝の会話として残ります。戻した直後に {} で開けます（/branches からも開けます）",
                 self.removed_turns,
                 self.removed_nodes,
                 none(self.shell_executions, "件", "なし"),
                 none(self.child_threads, "件", "なし"),
                 none(self.pending_replies, "件", "なし"),
+                none(self.attachments_removed, "件", "なし"),
                 UNDO_BINDING,
             ),
             UiLanguage::En => format!(
@@ -65,7 +70,9 @@ impl RewindFacts {
                  Shell executions after this request: {}\n  \
                  File changes are not undone\n  \
                  Child conversations started after it: {}\n  \
-                 Pending replies to sent messages: {}\n\
+                 Pending replies to sent messages: {}\n  \
+                 Attachment selections removed from this conversation: {} (the branch keeps them)\n  \
+                 Background shells and replies may still arrive here later\n\
                  Undo: the removed part stays as a branch conversation. Right after rewinding, {} opens it (so does /branches)",
                 self.removed_turns,
                 plural(self.removed_turns, "turn", "turns"),
@@ -74,6 +81,7 @@ impl RewindFacts {
                 none(self.shell_executions, "", "none"),
                 none(self.child_threads, "", "none"),
                 none(self.pending_replies, "", "none"),
+                none(self.attachments_removed, "", "none"),
                 UNDO_BINDING,
             ),
         }
@@ -93,6 +101,9 @@ pub(super) const UNDO_BINDING: &str = "Alt+U";
 pub(super) struct RewindUndo {
     pub thread_id: String,
     pub branch_id: String,
+    /// The Thread's selection revision when Y was pressed. The rewind itself
+    /// advances it by one; any further change means the path moved on.
+    pub base_revision: u64,
 }
 
 impl UiState {
@@ -136,11 +147,16 @@ impl UiState {
     }
 
     /// Confirmed with Y: the same request without `dry_run`.
-    pub(super) fn execute_rewind(&mut self, mut args: ThreadRewindArgs) -> Vec<UiAction> {
+    pub(super) fn execute_rewind(
+        &mut self,
+        mut args: ThreadRewindArgs,
+        facts: RewindFacts,
+    ) -> Vec<UiAction> {
         if self.rewind_pending.is_some() {
             return vec![];
         }
         args.dry_run = false;
+        self.rewind_base = Some((self.view().selection_revision, facts));
         self.next_rewind_request += 1;
         let request_id = self.next_rewind_request;
         self.rewind_pending = Some(request_id);
@@ -169,10 +185,26 @@ impl UiState {
             ui.dirty = true;
         };
         match (args.dry_run, result) {
-            (_, Err(message)) => fail(self, message),
+            (_, Err(message)) => {
+                self.rewind_base = None;
+                fail(self, message)
+            }
             (true, Ok(value)) => {
                 // The view moved on while the owner was reading: show nothing.
                 if !same_thread {
+                    return;
+                }
+                // A late preview never replaces a confirmation the user is reading.
+                if self.confirmation.is_some() {
+                    self.active_view_mut().status = i18n::local!(
+                        language,
+                        "別の確認を開いているため、巻き戻しの確認は表示しませんでした。やり直してください",
+                        "Another confirmation is open, so the rewind preview was dropped. Try again"
+                    )
+                    .into();
+                    self.active_view_mut()
+                        .promote_status_notice(history_interaction::NoticeKind::Info);
+                    self.dirty = true;
                     return;
                 }
                 match RewindFacts::from_result(&value) {
@@ -189,6 +221,7 @@ impl UiState {
                 }
             }
             (false, Ok(value)) => {
+                let base = self.rewind_base.take();
                 let Some(branch_id) = value["branch_thread_id"].as_str() else {
                     return fail(
                         self,
@@ -200,47 +233,88 @@ impl UiState {
                         .into(),
                     );
                 };
+                // The user already left the Thread: an offer there would be unexplained.
+                if !same_thread {
+                    self.rewind_undo = None;
+                    return;
+                }
                 let Some(thread_id) = args.thread_id.clone() else {
                     return;
+                };
+                let (base_revision, expected) = match base {
+                    Some((revision, facts)) => (revision, Some(facts)),
+                    None => (self.view().selection_revision, None),
                 };
                 self.rewind_undo = Some(RewindUndo {
                     thread_id,
                     branch_id: branch_id.to_owned(),
+                    base_revision,
                 });
-                if same_thread {
-                    self.active_view_mut().status = match language {
+                let mut status = match language {
+                    crate::config::UiLanguage::Ja => format!(
+                        "依頼の手前まで戻しました。{UNDO_BINDING} で元に戻す（切り取った枝を開く）"
+                    ),
+                    crate::config::UiLanguage::En => format!(
+                        "Rewound to before the request. {UNDO_BINDING} undoes it (opens the removed branch)"
+                    ),
+                };
+                // Say so when the real range is not the one that was confirmed.
+                if let (Some(expected), Some(real)) = (expected, RewindFacts::from_result(&value))
+                    && (expected.removed_nodes, expected.removed_turns)
+                        != (real.removed_nodes, real.removed_turns)
+                {
+                    status.push_str(&match language {
                         crate::config::UiLanguage::Ja => format!(
-                            "依頼の手前まで戻しました。{UNDO_BINDING} で元に戻す（切り取った枝を開く）"
+                            " · 確認時と範囲が異なります: {} Turn、{} ノード",
+                            real.removed_turns, real.removed_nodes
                         ),
                         crate::config::UiLanguage::En => format!(
-                            "Rewound to before the request. {UNDO_BINDING} undoes it (opens the removed branch)"
+                            " · The range differs from the preview: {} turns, {} nodes",
+                            real.removed_turns, real.removed_nodes
                         ),
-                    };
-                    self.active_view_mut()
-                        .promote_status_notice(history_interaction::NoticeKind::Info);
+                    });
                 }
+                self.active_view_mut().status = status;
+                self.active_view_mut()
+                    .promote_status_notice(history_interaction::NoticeKind::Info);
                 self.dirty = true;
             }
         }
     }
 
+    /// The undo offer lasts only while it is still the thing to do right after
+    /// the rewind: in that Thread, with its selected path unchanged.
+    fn rewind_undo_valid(&self) -> bool {
+        self.rewind_undo.as_ref().is_some_and(|undo| {
+            self.view().thread_id.as_deref() == Some(undo.thread_id.as_str())
+                && self.view().selection_revision <= undo.base_revision + 1
+        })
+    }
+
+    /// Drop an offer that is no longer valid (next submission, a changed path,
+    /// another Thread). Called before keys are handled.
+    pub(super) fn expire_rewind_undo(&mut self) {
+        if self.rewind_undo.is_some() && !self.rewind_undo_valid() {
+            self.rewind_undo = None;
+        }
+    }
+
     /// Alt+U: open the branch Thread holding the removed part (one use).
     pub(super) fn undo_rewind(&mut self) -> Vec<UiAction> {
+        if !self.rewind_undo_valid() {
+            self.rewind_undo = None;
+            return vec![];
+        }
         let Some(undo) = self.rewind_undo.as_ref() else {
             return vec![];
         };
-        if self.view().thread_id.as_deref() != Some(undo.thread_id.as_str()) {
-            return vec![];
-        }
         let branch = undo.branch_id.clone();
         self.rewind_undo = None;
         self.select_thread(branch)
     }
 
     pub(super) fn rewind_undo_available(&self) -> bool {
-        self.rewind_undo
-            .as_ref()
-            .is_some_and(|undo| self.view().thread_id.as_deref() == Some(undo.thread_id.as_str()))
+        self.rewind_undo_valid()
     }
 }
 
@@ -257,6 +331,7 @@ mod tests {
             "shell_executions_after_node": {"count": shells},
             "child_threads_after_node": {"count": children},
             "pending_replies_to_sent_messages": {"count": replies},
+            "attachment_selections_removed": 2,
         })
     }
     fn fixture(language: UiLanguage) -> UiState {
@@ -511,6 +586,8 @@ mod tests {
                     "File changes are not undone",
                     "Child conversations started after it: 1",
                     "Pending replies to sent messages: none",
+                    "Attachment selections removed from this conversation: 2 (the branch keeps them)",
+                    "Background shells and replies may still arrive here later",
                     "Undo: the removed part stays as a branch conversation",
                     "Alt+U",
                     "Y Execute",
@@ -525,6 +602,8 @@ mod tests {
                     "ファイルの変更は戻りません",
                     "この依頼より後に始めた子の会話: 1件",
                     "返事待ちの送信: なし",
+                    "外れる依頼の添付の選択: 2件（枝には残ります）",
+                    "背景のシェルや返事は、あとからこの会話に届くことがあります",
                     "取り消し: 外れた部分は枝の会話として残ります",
                     "Alt+U",
                     "Y 実行",
@@ -564,6 +643,122 @@ mod tests {
         crate::ui::text_width::clear_terminal_width();
     }
 
+    /// Run the key, preview and Y so the undo offer is set on "thread".
+    fn offer_undo(ui: &mut UiState, real: Value) {
+        select_request(ui);
+        let (id, args) = rewind_action(ui, 'r');
+        ui.apply(UiUpdate::RewindResult {
+            request_id: id,
+            args,
+            result: Ok(facts_json(3, 1, 0)),
+        });
+        let (id, args) = rewind_action(ui, 'y');
+        ui.apply(UiUpdate::RewindResult {
+            request_id: id,
+            args,
+            result: Ok(real),
+        });
+    }
+    fn real_result() -> Value {
+        let mut value = facts_json(3, 1, 0);
+        value["branch_thread_id"] = json!("branch-1");
+        value
+    }
+
+    #[test]
+    fn the_undo_offer_expires_on_submission_path_change_and_leaving() {
+        // Next submission in that Thread.
+        let mut ui = fixture(UiLanguage::En);
+        offer_undo(&mut ui, real_result());
+        assert!(ui.rewind_undo_available());
+        ui.send_current(None);
+        assert!(ui.rewind_undo.is_none() && !ui.rewind_undo_available());
+        // The selected path changes (a newer selection revision is read).
+        let mut ui = fixture(UiLanguage::En);
+        offer_undo(&mut ui, real_result());
+        // The rewind's own refresh (+1) keeps it.
+        ui.active_view_mut().selection_revision = 2;
+        assert!(ui.rewind_undo_available());
+        ui.active_view_mut().selection_revision = 3;
+        assert!(!ui.rewind_undo_available(), "path moved on");
+        assert!(alt_u(&mut ui).is_empty() && ui.rewind_undo.is_none());
+        // Leaving the Thread: the offer is gone for good, also when coming back.
+        let mut ui = fixture(UiLanguage::En);
+        offer_undo(&mut ui, real_result());
+        ui.select_thread("other".into());
+        assert!(!ui.rewind_undo_available());
+        key(&mut ui, KeyCode::Char('x'));
+        ui.select_thread("thread".into());
+        assert!(ui.rewind_undo.is_none());
+        assert!(alt_u(&mut ui).is_empty());
+    }
+
+    #[test]
+    fn alt_u_needs_an_empty_input_as_the_key_help_says() {
+        let mut ui = fixture(UiLanguage::En);
+        offer_undo(&mut ui, real_result());
+        ui.insert("draft", false);
+        let actions = alt_u(&mut ui);
+        assert!(actions.is_empty() && ui.view().thread_id.as_deref() == Some("thread"));
+        assert!(ui.rewind_undo.is_some(), "typing does not spend the offer");
+    }
+
+    #[test]
+    fn a_real_result_after_leaving_the_thread_leaves_no_offer() {
+        let mut ui = fixture(UiLanguage::En);
+        select_request(&mut ui);
+        let (id, args) = rewind_action(&mut ui, 'r');
+        ui.apply(UiUpdate::RewindResult {
+            request_id: id,
+            args,
+            result: Ok(facts_json(0, 0, 0)),
+        });
+        let (id, args) = rewind_action(&mut ui, 'y');
+        ui.select_thread("other".into());
+        ui.apply(UiUpdate::RewindResult {
+            request_id: id,
+            args,
+            result: Ok(real_result()),
+        });
+        assert!(ui.rewind_undo.is_none());
+        ui.select_thread("thread".into());
+        assert!(!ui.rewind_undo_available());
+    }
+
+    #[test]
+    fn a_late_preview_never_replaces_an_open_confirmation() {
+        let mut ui = fixture(UiLanguage::En);
+        select_request(&mut ui);
+        let (id, args) = rewind_action(&mut ui, 'r');
+        ui.confirmation = Some(Confirmation::ForceQuit);
+        ui.apply(UiUpdate::RewindResult {
+            request_id: id,
+            args,
+            result: Ok(facts_json(0, 0, 0)),
+        });
+        assert!(matches!(ui.confirmation, Some(Confirmation::ForceQuit)));
+        assert!(ui.rewind_pending.is_none());
+        assert!(ui.view().status.contains("preview was dropped"));
+    }
+
+    #[test]
+    fn a_real_range_that_differs_from_the_preview_is_said() {
+        let mut ui = fixture(UiLanguage::En);
+        let mut real = real_result();
+        real["removed"] = json!({"nodes": 20, "turns": 3});
+        offer_undo(&mut ui, real);
+        assert!(
+            ui.view()
+                .status
+                .contains("differs from the preview: 3 turns, 20 nodes"),
+            "{}",
+            ui.view().status
+        );
+        let mut ui = fixture(UiLanguage::En);
+        offer_undo(&mut ui, real_result());
+        assert!(!ui.view().status.contains("differs"));
+    }
+
     #[test]
     fn plural_and_zero_counts_read_naturally() {
         let one = RewindFacts {
@@ -572,6 +767,7 @@ mod tests {
             shell_executions: 0,
             child_threads: 0,
             pending_replies: 0,
+            attachments_removed: 0,
         };
         let text = one.text(UiLanguage::En);
         assert!(text.contains("1 turn, 1 node"), "{text}");

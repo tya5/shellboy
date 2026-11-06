@@ -546,24 +546,38 @@ async fn rewind_path_cost() {
     }
 }
 
-/// Every row of the tables a rewind could touch, as one comparable string.
+/// Every row of every table (app_meta, edges, thread revisions included), as
+/// one comparable string.
 fn dump(db: &Connection) -> String {
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
     let mut out = String::new();
-    for sql in [
-        "SELECT id||'|'||title||'|'||COALESCE(cursor_node_id,'')||'|'||selection_revision||'|'||COALESCE(parent_thread_id,'') FROM thread ORDER BY id",
-        "SELECT thread_id||'|'||ordinal||'|'||node_id FROM thread_path ORDER BY thread_id,ordinal",
-        "SELECT id||'|'||turn_id FROM node ORDER BY id",
-        "SELECT thread_id||'|'||attachment_id FROM attachment_selection ORDER BY 1",
-    ] {
-        let rows: Vec<String> = db
-            .prepare(sql)
-            .unwrap()
-            .query_map([], |r| r.get(0))
+    for table in tables {
+        // The executor's request journal (one receipt and its quota counters
+        // per request, dry run or not) is bookkeeping about the call, not state
+        // of the conversation.
+        if matches!(table.as_str(), "operation_receipt" | "quota_counter") {
+            continue;
+        }
+        let mut statement = db.prepare(&format!("SELECT * FROM \"{table}\"")).unwrap();
+        let columns = statement.column_count();
+        let mut rows: Vec<String> = statement
+            .query_map([], |r| {
+                Ok((0..columns)
+                    .map(|i| format!("{:?}", r.get_ref(i).unwrap()))
+                    .collect::<Vec<_>>()
+                    .join("|"))
+            })
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
-        out.push_str(&rows.join("\n"));
-        out.push('\n');
+        rows.sort();
+        out.push_str(&format!("== {table}\n{}\n", rows.join("\n")));
     }
     out
 }
@@ -601,4 +615,39 @@ async fn dry_run_reports_the_facts_of_the_real_rewind_and_writes_nothing() {
     }
     assert!(real["branch_thread_id"].is_string());
     assert!(real.get("dry_run").is_none());
+}
+
+#[tokio::test]
+async fn preview_equals_real_with_nonzero_shell_child_and_reply_counts() {
+    let script = [
+        plain(6),
+        n_path(6),
+        "INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('sh1','run','turn','op1','exited','/w','{\"command\":\"echo 1\"}','UTF-8','UTF-8','closed','2026-01-01T00:00:05'),('sh2','run','turn','op2','exited','/w','{\"command\":\"echo 2\"}','UTF-8','UTF-8','closed','2026-01-01T00:00:06');
+         INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,cursor_node_id,updated_at)VALUES('c-fork','T','fork','/w','/w','p','m','n5','now');
+         INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('other','','/w','/w','p','m','now');
+         INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,result_json,created_at)VALUES('rc1','op9','{\"kind\":\"model\",\"thread_id\":\"T\"}','other','n2','applied','{\"reply\":{\"state\":\"pending\"}}','2026-01-01');".into(),
+    ]
+    .concat();
+    let f = Fixture::new(script).await;
+    let before = f.query(dump).await;
+    let preview = f
+        .rewind_args(Some("T"), "n3", true, true, None)
+        .await
+        .unwrap();
+    assert_eq!(f.query(dump).await, before, "dry run wrote something");
+    assert_eq!(preview["shell_executions_after_node"]["count"], 2);
+    assert_eq!(preview["child_threads_after_node"]["count"], 1);
+    assert_eq!(preview["pending_replies_to_sent_messages"]["count"], 1);
+    let real = f.rewind_with(Some("T"), "n3", true, None).await.unwrap();
+    for key in [
+        "path_nodes",
+        "removed",
+        "attachment_selections_removed",
+        "rewound_into_summarized_range",
+        "shell_executions_after_node",
+        "child_threads_after_node",
+        "pending_replies_to_sent_messages",
+    ] {
+        assert_eq!(preview[key], real[key], "{key}");
+    }
 }

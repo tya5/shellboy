@@ -299,6 +299,7 @@ impl UiState {
         actions
     }
     pub(super) fn key(&mut self, key: KeyEvent) -> Vec<UiAction> {
+        self.expire_rewind_undo();
         if let Some(actions) = self.global_key(key) {
             return actions;
         }
@@ -342,6 +343,7 @@ impl UiState {
         if self.composer_active()
             && key.code == KeyCode::Char('u')
             && key.modifiers == KeyModifiers::ALT
+            && self.view().draft.text.is_empty()
             && self.rewind_undo_available()
             && !key_matches(&self.config.ui.send_key, key)
             && !self

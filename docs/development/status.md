@@ -5021,5 +5021,5 @@ undoable as a branch). Y rewinds, N/Esc writes nothing. Afterwards the footer no
 offers Alt+U, which opens the removed branch. Tests: dry run writes nothing and
 reports the real rewind's facts, key dispatch and conflicts, confirmation text in
 both languages across terminal width policies and 100/60/40/28 columns, cancel, undo.
-Decision D-246-1. Resume point: exact-tip default and all-OS CI, then integration.
+Decision D-246-1 (review fixes applied: undo offer expiry, empty-draft check, late-result handling, attachment and late-arrival lines in the confirmation, wider no-write dump). Resume point: exact-tip default and all-OS CI, then integration.
 Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).

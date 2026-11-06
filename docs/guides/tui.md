@@ -328,12 +328,14 @@ Not undone:
   File changes are not undone
   Child conversations started after it: 1
   Pending replies to sent messages: none
+  Attachment selections removed from this conversation: 0 (the branch keeps them)
+  Background shells and replies may still arrive here later
 Undo: the removed part stays as a branch conversation. Right after rewinding, Alt+U opens it (so does /branches)
 ```
 
 The Japanese screen shows the same facts (`外れる範囲`, `戻らないもの`, `取り消し`). Y rewinds; N or Esc cancels without writing anything. Counts come from the owner; the confirmation is not shown if the owner's answer lacks one of them. Shell executions and child conversations are counted from the time of the request; file changes made by shell commands are never undone.
 
-After Y, the footer notice reads `Rewound to before the request. Alt+U undoes it (opens the removed branch)`, and `Alt+U` appears in the key help while the input is empty. **Alt+U** opens the branch conversation that holds the removed part (the same conversation `/branches` lists); it works once, in the conversation that was rewound, and not when the configured send or newline key is Alt+U. Plain letters cannot be used there because they would be typed into the draft.
+After Y, the footer notice reads `Rewound to before the request. Alt+U undoes it (opens the removed branch)`, and `Alt+U` appears in the key help while the input is empty. **Alt+U** opens the branch conversation that holds the removed part (the same conversation `/branches` lists); it works once, only with an empty draft, and only "right after" the rewind: the offer ends at the next submission in that conversation, when its selected path changes, or when you leave it. It does not work when the configured send or newline key is Alt+U. If the rewind result arrives after you left the conversation, no offer is made; if the removed range differs from the one you confirmed, the notice says so. Plain letters cannot be used there because they would be typed into the draft.
 
 ## Overlays and selection mode
 

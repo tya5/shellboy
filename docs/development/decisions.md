@@ -3660,3 +3660,12 @@ configured send/newline bindings the same way. The undo only opens the branch Th
 `UiAction`/`UiUpdate` pair, no table, worker, queue or glyph. Recheck when: a terminal
 where Alt+U is unusable is reported (macOS Terminal without "Option as Meta"), or the
 user wants undo reachable without the keyboard enhancement of Alt.
+
+Addendum (review of #246): the preview occupies the DB writer exactly like a real
+rewind (about 20 us per path node, D-236-1), because it performs the same writes before
+rolling back; the 200,000-node bound applies to it too. The "writes nothing" test now
+dumps every table except the executor's own request journal (`operation_receipt`,
+`quota_counter`, written for every call, dry run or not), including app_meta
+(`root_revision`), edges and thread revisions. The undo offer ends at the next
+submission in the Thread, when its selection revision moves beyond the rewind's own
++1, or when the Thread is left; Alt+U also needs an empty draft.
