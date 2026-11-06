@@ -45,6 +45,8 @@ mod diagnostics;
 mod docs_cli;
 #[path = "../docs_proxy.rs"]
 mod docs_proxy;
+#[path = "../events_text.rs"]
+mod events_text;
 #[path = "../events_wait.rs"]
 mod events_wait;
 #[path = "../frontend.rs"]

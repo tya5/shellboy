@@ -113,7 +113,7 @@ states!(WaitStatus {
     Unavailable
 });
 states!(EventsWaitStatus {
-    Baseline => "baseline", Changed => "changed", Timeout => "timeout", ResyncRequired => "resync_required"
+    Baseline => "baseline", Changed => "changed", Text => "text", Timeout => "timeout", ResyncRequired => "resync_required"
 });
 states!(AttachmentKind { Image => "image", File => "file" });
 states!(StorageCategory {
@@ -738,12 +738,25 @@ impl Default for StatusArgs {
     }
 }
 // Receipt-free long-poll over the owner's in-memory change clock (#243).
-args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64 });
+args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool });
 args!(EventChange {
     thread_id: String,
     seq: u64
 });
-args!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool });
+// Unsaved model text (#243 E3). `offset` counts Unicode scalar values of this attempt's
+// stream, reasoning and refusal text included; it restarts with each attempt.
+args!(EventTextDelta {
+    offset: u64,
+    reasoning: bool,
+    text: String
+});
+args!(EventLiveText {
+    thread_id: String,
+    attempt_id: String,
+    gap: bool,
+    deltas: Vec<EventTextDelta>
+});
+args!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.

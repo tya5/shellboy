@@ -132,7 +132,7 @@ pub enum EventsCommand {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters."
+    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters. --text also returns unsaved model text in live_text (status=text when only text is new): a lossy preview for UI clients, never saved; on gap=true, a new attempt_id or an attempt no longer listed, discard what you showed. Saved output is what stays."
 )]
 pub struct EventsWaitOptions {
     /// Cursor from a previous events wait; omit for a baseline.
@@ -143,6 +143,9 @@ pub struct EventsWaitOptions {
     pub thread_ids: Vec<String>,
     #[arg(long, default_value_t = wire::DEFAULT_WAIT_TIMEOUT_MS)]
     pub timeout_ms: u64,
+    /// Also return unsaved model text being written now (a lossy preview for UI clients).
+    #[arg(long)]
+    pub text: bool,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum UsageCommand {
@@ -1063,6 +1066,7 @@ impl Cli {
                 after: a.after,
                 thread_ids: a.thread_ids,
                 timeout_ms: a.timeout_ms,
+                include_text: a.text,
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {
