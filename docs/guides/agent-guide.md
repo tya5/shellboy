@@ -132,6 +132,23 @@ waiting on an interactive prompt; it is not by itself proof. Stop it with
 `shellboy shell stop --execution ID`, then confirm the resulting state. See the
 [Shell guide](shell.md#finding-and-stopping-a-stalled-shell) for the procedure.
 
+### Wait for any change instead of polling
+
+When you supervise several Threads and want to know when to look again, one long-poll
+replaces repeated `thread list` / `run get` calls:
+
+```sh
+shellboy events wait                       # baseline: returns a cursor at once
+shellboy events wait --after 'CURSOR' --thread CHILD_A --thread CHILD_B --timeout-ms 30000
+```
+
+`status:"changed"` lists the Threads that changed (`changes[].thread_id`); then read
+their saved state (`thread get`, `turn get`, `history list`). Keep `result.cursor`, even
+after `timeout`. `more:true` means call again immediately. `resync_required` means
+re-read every Thread you track. Hints coalesce and are not data; for a conclusion that
+must not miss a transition, use `wait` with `thread_settled` (see below). Details:
+[CLI reference](cli-reference.md#change-hints-events-wait-243).
+
 ### Wait for any child Thread
 
 Use one wait for several child Threads, not a repeated ThreadList comparison:

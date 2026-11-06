@@ -268,6 +268,39 @@ Common flag: `[--category raw|managed-images|history|index|all]`. Omitted collec
 
 Logical usage, reclaimable bytes, DB/WAL physical size, and SQLite reusable pages differ. GC need not shrink files by the same amount; no automatic VACUUM (explicit `storage vacuum` below). History GC targets unreachable portions after explicit deletion, never surviving conversations by age alone. See [recovery and storage](recovery-and-storage.md).
 
+## Change hints: `events wait` (#243)
+
+`shellboy events wait [--after CURSOR] [--thread THREAD ...] [--timeout-ms N]` is a
+receipt-free long-poll. It answers "which Threads changed after this cursor?" without
+reading saved data, so a client can stop polling `run get` / `turn get` / `shell list`
+on a timer and read them only after a hint.
+
+| Result field | Meaning |
+|---|---|
+| `status` | `baseline` (no `--after`; returns the current cursor at once), `changed`, `timeout` (nothing before the timeout; default 30000 ms, 0 allowed), or `resync_required` |
+| `cursor` | Opaque; pass it as `--after` next time. Keep it even on `timeout`. Never parse it |
+| `changes` | Up to 64 `{thread_id, seq}`, ordered by `seq` ascending. One entry per Thread: repeated changes merge into the latest |
+| `more` | `true` means further matching changes exist already; call again at once with `cursor` |
+
+Example: `{"status":"changed","cursor":"eyJ2IjoxLC4uLn0","changes":[{"thread_id":"01J...","seq":41}],"more":false}`.
+
+Rules:
+
+- A change is a hint, not data. Read saved facts afterwards (`thread get`, `turn get`,
+  `run get`, `history list`, `shell list`, `message get`). Intermediate states can be
+  skipped; use durable reads (`history list`, `wait` with `thread_settled --after`)
+  when every transition matters.
+- `resync_required` means the owner restarted or the cursor is older than the bounded
+  window (the latest 4096 changed Threads are kept). Re-read everything you display,
+  then continue with the returned `cursor`. A client is never silently left with a gap.
+- `--thread` accepts up to 64 IDs (omit for all Threads). A cursor ahead of the owner or
+  malformed is `invalid_argument`; start again without `--after`.
+- No receipt is kept; after a lost reply simply ask again with the same cursor.
+  The owner keeps no per-client buffer. The call holds one ordinary request slot while it
+  waits; a bridge serving several clients should share one long-poll.
+- Shell output bytes and model text deltas are not Thread hints. Use `shell read` or
+  `wait` with `shell_output` for live output.
+
 ## Cursors
 
 List/get/read cursors are opaque continuation tokens. Pass the exact returned string to the same operation, target, filters, and encoding; never construct, edit, or reuse elsewhere. A list without next_cursor ends that enumeration. Shell read returns an observation cursor for subsequent reads until output_complete.

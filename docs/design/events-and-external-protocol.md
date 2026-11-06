@@ -1,7 +1,10 @@
 # Event subscription and the external RPC contract (#243, #244)
 
-Status: study, not adopted. Nothing here changes the current contract until the
-user adopts it. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
+Status: adopted in principle by the user (2026-11-06); stages A1 and B are implemented
+(see 5), the rest is not. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
+User decisions on stage B (#243): long-polls share the ordinary request slots (Q6), models
+may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
+Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved).
 
 Context (user decision 2026-11-06): the Web UI is a separate project
 (`shellboy-web`, a Rust bridge on the same machine that speaks the existing
@@ -353,7 +356,7 @@ or breaking stays a review decision.
 | Stage | Content | New mechanism |
 |---|---|---|
 | A1 | Reply typed `invalid_argument` for decodable unknown command/field instead of closing; regression test (done, D-244-1) | none |
-| B | `ChangeClock` + `events.wait` + `shellboy events`; tests: ordering, coalescing, `more`, filter, baseline, resume, floor → resync, instance change → resync, forged cursor, timeout 0, disconnect, shutdown, hint completeness per mutation family; protocol/CLI docs | one bounded in-memory map in `Control`, one operation |
+| B (done, #243: `src/control/change_clock.rs`, `tests/events_wait.rs`) | `ChangeClock` + `events.wait` + `shellboy events wait`; tests: ordering, coalescing, `more`, filter, baseline, resume, floor → resync, instance change → resync, forged cursor, timeout 0, disconnect, shutdown, hint completeness per mutation family; protocol/CLI docs | one bounded in-memory map in `Control`, one operation |
 | C | chat uses `events.wait`; before/after measurements (§3) recorded in validation | none |
 | A2 | Protocol 3: `record!` split (tolerant results), tolerant `Welcome`/`Endpoint` decode, `Welcome.capabilities`, version policy section in protocol.md; supersede PR1-10 | handshake field |
 | D | `schemars`, command→result match, `shellboy protocol schema`, committed schema + drift test, contract section | one dependency |

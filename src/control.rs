@@ -1,4 +1,5 @@
 //! Independent operation admission and per-Thread drivers on one async runtime.
+mod change_clock;
 mod compact;
 mod foreground;
 pub(crate) mod interruption;
@@ -139,6 +140,7 @@ pub struct Control {
     events: broadcast::Sender<EngineEvent>,
     ui_events: ui_events::UiEvents,
     changed: Notify,
+    change_clock: change_clock::ChangeClock,
     shell_output_changed: Notify,
     stop: CancellationToken,
     diagnostics: crate::diagnostics::Diagnostics,
@@ -307,6 +309,7 @@ impl Control {
             events,
             ui_events: ui_events::UiEvents::new(),
             changed: Notify::new(),
+            change_clock: change_clock::ChangeClock::new(),
             shell_output_changed: Notify::new(),
             stop: CancellationToken::new(),
             diagnostics: owner.diagnostics.clone(),
@@ -394,6 +397,8 @@ impl Control {
         self.changed_with_recovery(thread_id, false);
     }
     fn changed_with_recovery(&self, thread_id: &str, recovery: bool) {
+        // Record before waking so a woken long-poll always finds the entry.
+        self.change_clock.record(thread_id);
         self.publish_event(EngineEvent::Changed {
             thread_id: thread_id.into(),
             recovery,

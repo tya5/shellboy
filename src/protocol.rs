@@ -112,6 +112,9 @@ states!(WaitStatus {
     RecoveryWait,
     Unavailable
 });
+states!(EventsWaitStatus {
+    Baseline => "baseline", Changed => "changed", Timeout => "timeout", ResyncRequired => "resync_required"
+});
 states!(AttachmentKind { Image => "image", File => "file" });
 states!(StorageCategory {
     Raw => "raw", ManagedImages => "managed_images", History => "history", Index => "index", All => "all"
@@ -700,6 +703,40 @@ impl Default for StatusArgs {
         }
     }
 }
+// Receipt-free long-poll over the owner's in-memory change clock (#243).
+args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64 });
+args!(EventChange {
+    thread_id: String,
+    seq: u64
+});
+args!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool });
+pub const MAX_EVENT_THREAD_FILTER: usize = 64;
+pub const MAX_EVENT_CHANGES: usize = 64;
+/// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EventCursor {
+    pub v: u32,
+    pub instance_id: String,
+    pub seq: u64,
+}
+impl EventCursor {
+    pub fn encode(&self) -> String {
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(self).expect("event cursor serializes"))
+    }
+    pub fn decode(token: &str) -> Result<Self, ApiError> {
+        let bad = || invalid("events cursor is malformed; restart without --after");
+        if token.len() > 1024 {
+            return Err(bad());
+        }
+        let bytes = URL_SAFE_NO_PAD.decode(token).map_err(|_| bad())?;
+        let value: Self = serde_json::from_slice(&bytes).map_err(|_| bad())?;
+        if value.v != 1 || value.instance_id.is_empty() {
+            return Err(bad());
+        }
+        Ok(value)
+    }
+}
 args!(WaitArgs { conditions: Vec<WaitCondition>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String> });
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -786,6 +823,8 @@ pub enum Command {
     TurnGet(TurnTarget),
     #[serde(rename = "wait")]
     Wait(WaitArgs),
+    #[serde(rename = "events.wait")]
+    EventsWait(EventsWaitArgs),
     #[serde(rename = "history.list")]
     HistoryList(HistoryListArgs),
     #[serde(rename = "history.get")]

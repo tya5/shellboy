@@ -522,3 +522,25 @@ The adopted [reply design](reply-expected-messages.md) adds `expect_reply` to
 Reply eligibility, authority, body creation, delivery, and terminal-state CAS
 commit atomically. Operation replay returns the saved result, not a second
 reply. Only the recipient model or a human may reply after application.
+
+## Change hints `events.wait` (#243 stage B)
+
+Adopted from [events-and-external-protocol](events-and-external-protocol.md). `events.wait`
+is a read-only runtime-route long-poll: no receipt, no `app_meta` row, no DB access, no
+wait graph or Turn `waiting` state. Args: `after` (optional opaque cursor), `thread_ids`
+(0..64 non-empty IDs, 0 = all), `timeout_ms` (default 30000, 0 allowed). Result:
+`status` (`baseline | changed | timeout | resync_required`), `cursor`, `changes`
+(`{thread_id, seq}`, ascending by seq, at most 64) and `more`.
+
+The cursor is base64url JSON `{v:1, instance_id, seq}`. A cursor from another owner instance
+or with `seq` below the clock's eviction floor returns `resync_required` with a current
+cursor; a malformed cursor, or one ahead of the clock for this instance, is
+`invalid_argument`. Without `after` the call returns `baseline` immediately. When `more` is
+true `cursor` is the last returned seq; otherwise it is the clock head read in the same lock.
+
+The clock lives in `Control` (`src/control/change_clock.rs`): one sequence number per
+`Control::changed` call, latest sequence kept per Thread, at most 4096 Threads (oldest
+evicted, raising the floor). Memory only; it dies with `Control`, has no task or queue, and
+the owner keeps nothing per client. The call is admitted in an ordinary request slot,
+returns on a matching change, timeout, caller disconnect or owner shutdown, and is
+cancellable by the shared runtime-observation wrapper. Models may call it.
