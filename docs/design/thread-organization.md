@@ -64,10 +64,10 @@ Completed); no surveyed product offers arbitrary re-parenting.
 
 Uses of **`owner_run_id`** (not `parent_id`), unchanged by re-parenting:
 
-- stop: `authorize_owned_run` allows a human or any Run up the owner chain; stop
-  cascades over owned live Runs (`src/control/db.rs:2503-2546`);
-- retry: only a human or the **live direct owner** (`retry_run`,
-  `src/control/db.rs:2548-2575`);
+- stop: no authority check (#256); stop cascades over owned live Runs
+  (`stop_run`, `src/control/db.rs`);
+- retry: no authority check (#256); the generation CAS makes a race safe
+  (`retry_run`, `src/control/db.rs`);
 - recovery and completion notices go to the owner Run (`owner_event`,
   `src/control/state.rs:333-355`; `nudge_owner`, `src/control.rs:1086-1100`);
 - the parent Run stays live while owning Runs/shells (`src/control/driver.rs:559`);
@@ -76,8 +76,8 @@ Uses of **`owner_run_id`** (not `parent_id`), unchanged by re-parenting:
 - ownership cycles are rejected by triggers (`migrations/0001_initial.sql:57-70`).
 
 **Answer to issue point 2.** Re-parenting can and should leave live Run ownership
-untouched. Authority follows ownership: the Run that owns a live child Run keeps
-stop, retry and recovery notices until that Run ends; the new parent gains
+untouched. Ownership decides notices and cascade, not permission: the Run that owns a live child Run keeps
+recovery and child-end notices (and its stop cascade) until that Run ends; the new parent gains
 ownership only of Runs it starts afterwards. "Moving a delegation mid-flight" is
 then: re-parent, let the current Run finish (or stop it as its owner/human), and
 the new parent's next send owns the next Run. Transferring `owner_run_id` of a
@@ -85,9 +85,8 @@ live Run is not recommended: it would have to move owned shells' supervision,
 re-evaluate the old owner's completion and pending waits, and re-check the
 owner-cycle triggers, for a case the sequence above already covers.
 
-Documentation follow-up (any stage 2): the delegation guide says "recovery retry
-decisions belong to the live immediate parent". The code checks the direct
-*owning Run*, not `parent_id`; the guide should say so once parents can move.
+Documentation follow-up (any stage 2): the delegation guide no longer restricts retry or stop (#256); it says that
+notices follow the *owning Run*, not `parent_id`.
 
 ## 2. Restrictions: needed for safety vs removable (issue point 6)
 
@@ -97,7 +96,7 @@ decisions belong to the live immediate parent". The code checks the direct
 | Ownership granted only when caller Thread = target's parent at Run start | delegation authority is explicit; a model cannot take over a Thread it merely messages | keep; with mutable parents the grant is still an explicit act (someone set the parent) |
 | One owner per live Run ("owned by another live parent Run") | single owner, single cleanup path | keep |
 | Owner Run stays live while it owns work; stopping it stops owned descendants | no orphaned child Runs or shells ("no persistent daemons") | keep |
-| Retry only by the live **direct** owner or a human | avoids two Runs deciding recovery for the same child | removable: retry is a generation CAS (`resume_recovery_turn_tx` returns false when the Turn changed), so a race is already safe. Aligning retry with stop (any owner up the chain) gives one authority rule. Low value; offer as optional |
+| ~~Retry only by the live direct owner or a human~~ | was: avoid two Runs deciding recovery for one child | **removed (#256)**: retry is a generation CAS (`resume_recovery_turn_tx` returns false when the Turn changed), so a race is safe. The user then also removed the stop check: any caller may stop or retry any Run (personal use; the check was not a security boundary) |
 | Model message to a child in `recovery_wait` is held | an ordinary message must not silently act as a retry | keep |
 | Delete refused while any selected Thread has a live/stopping Run | no deletion under running work | keep |
 | Parent must be a live Thread | no dangling new edges | keep for `set --parent` too |
@@ -348,12 +347,12 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
 2. **Re-parent**: `thread set --parent P|''`; live-parent and cycle checks with the
    1024-step bound; context record; changed old/new parent; F8 form field;
    guide wording. Tests: cycle (self, descendant, deep chain at the bound),
-   re-parent with a live owned Run (old owner keeps stop/retry/notices, new parent
+   re-parent with a live owned Run (old owner keeps notices and the stop cascade, new parent
    refused until the Run ends, then owns the next Run), branch view divergence
    after a move, usage and delete following the current tree, preview_stale.
 3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above):
    many tags per Thread, automatic grouping by cwd, TUI filter.
-4. Optional: retry authority aligned with stop (any owning ancestor Run).
+4. Done (#256): no stop/retry authority check at all.
 
 Not recommended: ownership transfer of live Runs; folder Threads;
 filter-driven bulk writes; automatic archiving. Dropped by the user: pin (2026-11-07).
@@ -427,8 +426,7 @@ adopted design for stage 1; the sections above remain the study.
    nesting or multiple tags?
 6. Pin: needed at all, given Claude Code's "Pinned" group, or is archive plus
    folders enough? Should archive unpin?
-7. Retry authority: align with stop (any owning ancestor Run) to have one rule,
-   or keep "direct owner only"?
+7. Retry authority: decided (#256), no check for stop or retry.
 8. Should organization changes leave `updated_at` untouched (recommended, list
    order stays stable on drag), unlike the current title change?
 9. TUI keys for archive, archived view and folder filter.

@@ -220,34 +220,32 @@ impl Control {
             self.store.instance_id.clone(),
         );
         let is_eof = matches!(&request.command, Command::ShellEof(_));
+        // No authority check (#256): any caller may write to, EOF or stop any shell,
+        // but an unknown execution is still an operation error.
         let mutation_execution = match &request.command {
             Command::ShellWrite(args) => Some(args.execution_id.clone()),
             Command::ShellEof(args) | Command::ShellStop(args) => Some(args.execution_id.clone()),
             _ => None,
         };
         if let Some(execution) = mutation_execution {
-            let origin = caller.clone();
-            self.store
+            let exists = self
+                .store
                 .database
                 .call(move |db| {
-                    use rusqlite::OptionalExtension;
-                    let owner: Option<String> = db
-                        .query_row(
-                            "SELECT owner_run_id FROM shell_execution WHERE id=?1",
-                            [execution],
-                            |row| row.get(0),
-                        )
-                        .optional()?;
-                    Ok(match owner {
-                        Some(owner) => db::authorize_owned_run(db, &owner, origin.as_ref()),
-                        None => Err(ApiError::new(
-                            ErrorCode::TargetUnavailable,
-                            "Shell execution does not exist",
-                        )),
-                    })
+                    Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM shell_execution WHERE id=?1)",
+                        [execution],
+                        |row| row.get::<_, bool>(0),
+                    )?)
                 })
                 .await
-                .map_err(storage_error)??;
+                .map_err(storage_error)?;
+            if !exists {
+                return Err(ApiError::new(
+                    ErrorCode::TargetUnavailable,
+                    "Shell execution does not exist",
+                ));
+            }
         }
         match request.command {
             Command::ModelList(args) => self.runtime_models(args, caller, disconnected).await,

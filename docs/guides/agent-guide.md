@@ -425,8 +425,9 @@ own Thread if it appears among the targets. Each destination starts an independe
 Run, so send a few at a time when many targets could exceed provider rate limits.
 
 A destination whose `parent_id` is your Thread becomes owned by your current
-Run: you can stop it or retry it. An unrelated destination has
-an independent Run that you cannot stop; the human user can. The saved
+Run, which stops with your Run. An unrelated destination has an independent Run. You may stop or retry any Run, but only act on ones you started or were asked to handle, and check the ID first: stopping or retrying another Run can interrupt the user's conversation.
+
+The saved
 `result_uncertain: true` describes uncertain effects of the interrupted work.
 Use the saved evidence to decide how to continue rather than assuming the work
 completed or repeating side effects automatically.

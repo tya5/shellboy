@@ -196,7 +196,7 @@ external CLI.
 `--sender-label TEXT` adds an optional self-asserted name: at most 64 Unicode
 characters, without newlines, control characters or line/paragraph separators.
 It is returned as `sender.label`, separate from verified identity. The label
-never grants ownership, stop, retry or cancellation authority. Explicitly
+never grants ownership. Explicitly
 connecting to another data directory still strips model Origin; only the name
 survives, as `external_cli`. TUI F6 message details display it as `名乗り：…`,
 not as verified identity. F6 also explains `unknown` as missing sender evidence,
@@ -253,8 +253,8 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | Operation and all specific flags | Main result and conditions |
 |---|---|
 | `run get --run RUN` | run_id/thread_id/state/owner_run_id/turn_id/end_message_node_id, owned_run_ids/owned_execution_ids, recovery_hint; optional waiting_reason identifies a saved in-flight context edit at the safe request boundary. Owned IDs reference current live resources, not a ledger of all historical children |
-| `run retry --run RUN` | Recovery Run/Turn references; release the oldest at most 128 recoverable held receipts per operation, retaining recovery_wait while more remain. Existing recovery_hint includes remaining_held; repeat with a new operation ID for the next unit. Once drained, reprepare the same Turn without blindly rerunning executed shells. Human or direct parent decides |
-| `run stop --run RUN` | Confirmed stopping/Run state; stops own Run and owned descendants without affecting independent Runs. Models limited to ownership, humans may explicitly target. Check get/wait for completed resource cleanup |
+| `run retry --run RUN` | Recovery Run/Turn references; release the oldest at most 128 recoverable held receipts per operation, retaining recovery_wait while more remain. Existing recovery_hint includes remaining_held; repeat with a new operation ID for the next unit. Once drained, reprepare the same Turn without blindly rerunning executed shells. Any caller may retry (no authority check); the owner Run still receives the recovery notice. Concurrent retries are safe: one resumes the Turn, the others fail with `invalid_state` |
+| `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned descendants without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
 
 ### Storage (2 operations, plus standalone `check` and `vacuum`)

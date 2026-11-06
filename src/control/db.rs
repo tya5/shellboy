@@ -925,7 +925,7 @@ impl Store {
                 let Some(run) = run else {
                     return Ok(Err(error(ErrorCode::InvalidState, "No live Run to stop")));
                 };
-                let effects = stop_run(&tx, &run, None, &chrono::Utc::now().to_rfc3339());
+                let effects = stop_run(&tx, &run, &chrono::Utc::now().to_rfc3339());
                 if effects.is_ok() {
                     tx.commit()?;
                 }
@@ -958,7 +958,7 @@ impl Store {
                         )
                         .details(json!({"confirmation_required":true,"run_id":run}))));
                     }
-                    let effects = stop_run(&tx, &run, None, &chrono::Utc::now().to_rfc3339());
+                    let effects = stop_run(&tx, &run, &chrono::Utc::now().to_rfc3339());
                     if effects.is_ok() {
                         tx.commit()?;
                     }
@@ -1460,7 +1460,7 @@ impl Store {
                 )?);
                 MutationResult::value(details)
             }
-            Command::RunStop(args) => stop_run(tx, &args.run_id, caller, now),
+            Command::RunStop(args) => stop_run(tx, &args.run_id, now),
             Command::RunRetry(args) => retry_run(tx, &args.run_id, caller, now),
             Command::CompactPreview(_) => Err(error(
                 ErrorCode::InvalidState,
@@ -2527,32 +2527,8 @@ pub fn turn_details(connection: &Connection, id: &str) -> Result<TurnDetails> {
     connection.query_row("SELECT run_id,thread_id,state,answer_node_id,recovery_reason_json FROM turn WHERE id=?1",[id],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,Option<String>>(3)?,row.get::<_,Option<String>>(4)?))).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::TargetUnavailable,"Turn not found")).and_then(|row|Ok(TurnDetails{usage_totals:None,context:crate::context::for_turn(connection,id)?,turn_id:id.into(),run_id:row.0,thread_id:row.1,state:serde_json::from_value(json!(row.2)).map_err(|_|error(ErrorCode::InvalidState,"unknown saved Turn state"))?,end_message_node_id:row.3,recovery_hint:row.4}))
 }
 
-pub(super) fn authorize_owned_run(
-    db: &Connection,
-    run: &str,
-    caller: Option<&Origin>,
-) -> Result<()> {
-    let Some(caller) = caller else {
-        return Ok(());
-    };
-    let allowed: bool = db.query_row("WITH RECURSIVE owned(id) AS (SELECT id FROM run WHERE id=?1 AND thread_id=?2 AND state IN ('live','stopping') UNION ALL SELECT r.id FROM run r JOIN owned o ON r.owner_run_id=o.id) SELECT EXISTS(SELECT 1 FROM owned WHERE id=?3)",params![caller.run_id,caller.thread_id,run],|row|row.get(0)).map_err(sql_error)?;
-    if !allowed {
-        return Err(error(
-            ErrorCode::InvalidState,
-            "Only a human or an owning Run may change this execution",
-        ));
-    }
-    Ok(())
-}
-
-fn stop_run(
-    tx: &Transaction<'_>,
-    id: &str,
-    caller: Option<&Origin>,
-    now: &str,
-) -> Result<MutationResult> {
+fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult> {
     let details = run_details(tx, id)?;
-    authorize_owned_run(tx, id, caller)?;
     let mut result = MutationResult::default();
     if matches!(details.state, RunState::Live | RunState::Stopping) {
         let mut statement=tx.prepare("WITH RECURSIVE owned(id,depth) AS(SELECT ?1,0 UNION ALL SELECT r.id,o.depth+1 FROM run r JOIN owned o ON r.owner_run_id=o.id WHERE r.state IN ('live','stopping')) SELECT id FROM owned ORDER BY depth DESC,id").map_err(sql_error)?;
@@ -2591,21 +2567,6 @@ fn retry_run(
             ErrorCode::InvalidState,
             "only a live Run in recovery_wait can retry",
         ));
-    }
-    if let Some(caller) = caller {
-        let owner_live: bool = tx
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND thread_id=?2 AND state='live')",
-                params![caller.run_id, caller.thread_id],
-                |row| row.get(0),
-            )
-            .map_err(sql_error)?;
-        if details.owner_run_id.as_deref() != Some(caller.run_id.as_str()) || !owner_live {
-            return Err(error(
-                ErrorCode::InvalidState,
-                "only a live direct owning parent or a human may retry this Run",
-            ));
-        }
     }
     let recovery: Option<(String, i64)> = tx
         .query_row(

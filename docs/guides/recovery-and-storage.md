@@ -205,7 +205,7 @@ Explicit context-capacity overflow triggers automatic compaction and up to two r
 | Ctrl+C during external CLI wait | Disconnect observation; target Run/shell continues |
 | TUI Ctrl+Q | Stop work, save, close DB, and shut down normally |
 
-Successful stop acceptance does not prove all PIDs were reaped. Wait for Run termination and inspect state when needed. A model can stop its own Run, currently owned descendants, and their shells. Ability to send requests to independent Threads does not imply authority to stop their execution.
+Successful stop acceptance does not prove all PIDs were reaped. Wait for Run termination and inspect state when needed. Any caller may stop any Run; stopping a Run also stops its currently owned descendants and their shells. Check the Run ID first, because stopping another conversation's Run interrupts it. The operation receipt records the calling Origin.
 
 After normal-shutdown grace expires, the TUI offers continued waiting or force quit. W/Enter waits for the same shutdown. F then Y explicitly forces exit; N/Esc cancels force confirmation. Force quit can leave unsaved data/unreaped descendants and differs from normal shutdown.
 

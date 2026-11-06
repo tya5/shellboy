@@ -263,7 +263,7 @@ pub enum RunCommand {
     Get(RunOptions),
     /// Explicitly retry a recovery-wait Turn after inspecting and fixing its cause.
     #[command(
-        after_help = "Inspect first: shellboy run get --run RUN_ID\nGuide: shellboy docs get --id shellboy/recovery-and-storage\nOnly an authorized direct owner or human chooses retry. Terminal Runs are not revived; do not repeat an unconfirmed side effect under a new ID."
+        after_help = "Inspect first: shellboy run get --run RUN_ID\nGuide: shellboy docs get --id shellboy/recovery-and-storage\nAny caller may retry; act only on Runs you started or were asked to handle. Terminal Runs are not revived; do not repeat an unconfirmed side effect under a new ID."
     )]
     Retry(RunOptions),
     /// Request stopping this Run and its owned work; inspect state to confirm termination.

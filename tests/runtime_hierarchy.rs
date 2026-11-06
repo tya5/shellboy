@@ -608,7 +608,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn model_cli_cannot_stop_or_write_to_an_independent_live_run() {
+async fn model_cli_may_write_to_and_stop_an_independent_live_run() {
     let _fixture = FIXTURE.lock().await;
     let (url, mut requests, server) = proxy().await;
     let (directory, owner, control) = runtime(&url).await;
@@ -649,7 +649,7 @@ async fn model_cli_cannot_stop_or_write_to_an_independent_live_run() {
     let executable = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
     let output = directory.path().join("ownership-errors.jsonl");
     let script = format!(
-        "set +e; '{executable}' run stop --run '{target_run}' > '{output}'; '{executable}' shell stop --execution '{execution}' >> '{output}'; '{executable}' shell eof --execution '{execution}' >> '{output}'; '{executable}' shell write --execution '{execution}' --text 'forbidden' >> '{output}'; true",
+        "set +e; '{executable}' shell write --execution '{execution}' --text 'allowed' > '{output}'; '{executable}' run stop --run '{target_run}' >> '{output}'; true",
         output = output.display()
     );
     request.reply.send(tool(&script, false)).ok().unwrap();
@@ -659,16 +659,14 @@ async fn model_cli_cannot_stop_or_write_to_an_independent_live_run() {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(responses.len(), 4, "{errors}");
+    assert_eq!(responses.len(), 2, "{errors}");
     for response in responses {
-        assert_eq!(response["ok"], false);
-        assert_eq!(response["error"]["code"], "invalid_state");
+        assert_eq!(response["ok"], true, "no stop authority check (#256)");
     }
-    assert!(alive(pid));
-    state(&control, "run", &target_run, "live").await;
+    state(&control, "run", &target_run, "stopped").await;
     continuation
         .reply
-        .send(final_answer("independent ownership preserved"))
+        .send(final_answer("non-owner stop allowed"))
         .ok()
         .unwrap();
     state(
@@ -680,7 +678,7 @@ async fn model_cli_cannot_stop_or_write_to_an_independent_live_run() {
     .await;
     command(&control, Command::RunStop(RunTarget { run_id: target_run })).await;
     crate::test_watchdog::watchdog(
-        "tests/runtime_hierarchy.rs: model_cli_cannot_stop_or_write_to_an_independent_live_run",
+        "tests/runtime_hierarchy.rs: model_cli_may_write_to_and_stop_an_independent_live_run",
         async {
             while alive(pid) {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -696,7 +694,7 @@ async fn model_cli_cannot_stop_or_write_to_an_independent_live_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_only_direct_child() {
+async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_grandchild() {
     let _fixture = FIXTURE.lock().await;
     let (url, mut requests, server) = proxy().await;
     let (directory, owner, control) = runtime(&url).await;
@@ -711,9 +709,10 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_only_direct
     let grandchild = child_thread(&control, &child).await;
     let parent_run = parent.run_id.clone().unwrap();
     let child_query = child.clone();
+    let grandchild_query = grandchild.clone();
     owner.db.call(move|db|{
         let tx=db.transaction()?;
-        for (thread,run,turn,owner) in [(&child_query,"recovery-child","recovery-child-turn",parent_run.as_str()),(&grandchild,"recovery-grandchild","recovery-grandchild-turn","recovery-child")] {
+        for (thread,run,turn,owner) in [(&child_query,"recovery-child","recovery-child-turn",parent_run.as_str()),(&grandchild_query,"recovery-grandchild","recovery-grandchild-turn","recovery-child")] {
             tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,owner])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,?2,?3,'recovery_wait','now','{\"reason\":\"fixture_proxy_failure\"}')",rusqlite::params![turn,thread,run])?;
         }
@@ -724,10 +723,13 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_only_direct
     first.reply.send(tool(&format!("set +e; '{executable}' message send --thread '{child}' --text 'ordinary machine note' > '{output}'; '{executable}' run retry --run recovery-grandchild >> '{output}'; '{executable}' run retry --run recovery-child >> '{output}'; true",output=output.display()),false)).ok().unwrap();
     let mut parent_continuation = None;
     let mut child_retry = None;
-    for _ in 0..2 {
+    let mut grandchild_retry = None;
+    for _ in 0..3 {
         let request = incoming(&mut requests).await;
         if request_thread(&request.body) == child {
             child_retry = Some(request);
+        } else if request_thread(&request.body) == grandchild {
+            grandchild_retry = Some(request);
         } else {
             parent_continuation = Some(request);
         }
@@ -739,7 +741,8 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_only_direct
         .collect::<Vec<_>>();
     assert_eq!(responses.len(), 3, "{body}");
     assert_eq!(responses[0]["result"]["delivery_status"], "held");
-    assert_eq!(responses[1]["error"]["code"], "invalid_state");
+    // An ancestor that is not the direct owner may retry too (#256).
+    assert_eq!(responses[1]["ok"], true);
     assert_eq!(responses[2]["ok"], true);
     assert!(
         child_retry
@@ -762,11 +765,11 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_only_direct
             );
             assert_eq!(
                 db.query_row(
-                    "SELECT state FROM turn WHERE id='recovery-grandchild-turn'",
+                    "SELECT generation FROM turn WHERE id='recovery-grandchild-turn'",
                     [],
-                    |r| r.get::<_, String>(0)
+                    |r| r.get::<_, i64>(0)
                 )?,
-                "recovery_wait"
+                1
             );
             Ok(())
         })
@@ -787,6 +790,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_only_direct
     )
     .await;
     state(&control, "run", "recovery-grandchild", "stopped").await;
+    drop(grandchild_retry);
     drop(parent_continuation);
     local.shutdown().await.unwrap();
     serving.abort();
