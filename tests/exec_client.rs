@@ -1692,6 +1692,17 @@ async fn chat_resync_required_rereads_and_follows_to_the_end() {
         .await
         .unwrap()
         .unwrap();
+    // The Turn cannot end while this reply is held, so chat must wait again and be served.
+    crate::test_watchdog::watchdog("chat to receive the resync", async {
+        while fixture
+            .resync_next
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
     second.reply.send(answer("after resync")).unwrap();
     let (result, out) = crate::test_watchdog::watchdog("chat resync end", task)
         .await
