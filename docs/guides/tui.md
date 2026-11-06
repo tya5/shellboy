@@ -281,6 +281,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/cwd`, `/cwd PATH` | Show/change working directory |
 | `/fork [NODE_ID]` | New Thread sharing history through the specified node |
 | `/edit [USER_NODE_ID]` | Load the original request into a separate editing draft; branch on send |
+| `/rewind [USER_NODE_ID]` | Move this conversation back to just before an earlier request (same Thread, ID and title); the removed part stays as a child conversation, so opening that child undoes it. Conversation only: shell side effects are not undone and the result lists later shell executions and child conversations. Refused while work is running or messages are queued. The request and the history before it must be loaded; otherwise use `shellboy thread rewind` |
 | `/compact` | Request spill/summary at a safe boundary |
 | `/search QUERY` | Conversation search in the active embedding space |
 | `/index [status\|all\|thread\|threads ID...]` | Index management; `thread` means current Thread |
@@ -301,7 +302,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/background` | Background the foreground shell |
 | `/quit` | Normal shutdown |
 
-Omitting the node in `/fork` suggests the anchor or tail; `/edit` suggests the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active, confirm stopping it with Y before proceeding.
+Omitting the node in `/fork` suggests the anchor or tail; `/edit` and `/rewind` suggest the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active, confirm stopping it with Y before proceeding.
 
 ## Overlays and selection mode
 

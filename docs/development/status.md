@@ -37,6 +37,19 @@ and `single_scan_equals_doubling_rescans`. Before/after on the owner-DB copy is
 in the #240 comment. Not done: `DELETED_OWNER` cost when roots are false
 (follow-up issue); eligibility/witness steps (low share).
 
+## Thread rewind (#236; in progress on branch issue-236/thread-rewind)
+
+`shellboy thread rewind [--thread T] --node NODE` (wire `thread.rewind`, OperationId
+`ThreadRewind`, TUI `/rewind [USER_NODE_ID]` = just before that request). Branches
+are Threads: the old full path becomes a child via `fork_thread`, T keeps ID and
+title and gets `select_path` of the prefix; no table or migration. Refused while T
+has a live Run or queued messages (so a model cannot rewind the Thread it runs in),
+at an unfinished tool group, or above 200,000 path nodes. Into a summarized range
+while originals exist; pruned/reclaimed ranges fail as target_unavailable.
+Attachment selections of removed messages are deleted. Result lists shell executions
+and child Threads after NODE (count + 20). Cost measured in decisions D-236-1.
+Tests: `tests/thread_rewind.rs`. Resume point: exact-tip default and all-OS CI.
+
 ## Thread prune (#235; landed on main 90c388ad, default and all-OS CI passed)
 
 `shellboy thread prune [--thread T] --before NODE [--dry-run]` (wire `thread.prune`,

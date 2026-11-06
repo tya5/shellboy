@@ -5,8 +5,11 @@ spills are included (one rule for summaries and spills, nested included), and th
 is no `--older-than` and no byte estimate (`reclaimable_bytes: null`). Implemented as
 #235; see [GC](gc.md#explicit-prune-of-replacement-originals-235). The prune section
 below is the study; where it excludes spills or reports `candidate_payload_bytes`
-only as a fact, the adopted behavior above wins. R1/R2/B1 (rewind, branches) remain
-a study, not adopted.** Original status line: It covers three user directions from 2026-11-06:
+only as a fact, the adopted behavior above wins. R1 (rewind) is adopted by the user (2026-11-06) in a simpler form: branches are
+Threads. No `thread_branch` tables and no migration; the cut-off part becomes an
+ordinary fork child and there is no in-place forward (#236; see
+[History](history.md#rewind-236)). The R1 storage design below is superseded; R2/B1
+(switch/forward, branch panel) remain a study, not adopted.** Original status line: It covers three user directions from 2026-11-06:
 explicit prune of compacted originals, rewind in place, and a branch view in
 the TUI. For the branch view the user chose option (d): an inline marker plus a
 branch panel. Evidence comes from reading the code at `origin/main` `7cb82d3923`.

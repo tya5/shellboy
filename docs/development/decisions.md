@@ -3569,3 +3569,32 @@ Decision: `segment_chars` accepts 2,000..=1,000,000 and `reduce_rounds` 1..=16, 
 ## D-229-1: Migration 30 is IndexOnly (2026-11-06)
 
 Decision: the nullable `thread.auto_compact_at` column is registered as `IndexOnly`. Reason: it has no foreign key and every existing row is NULL, so the integrity scan has nothing to check. Impact: upgrade skips the full check, as for migrations 25-27. Revisit if a later column gets a foreign key or a non-NULL backfill.
+
+## D-236-1: Rewind keeps branches as Threads and copies the whole path (2026-11-06)
+
+Decision: `thread rewind` (#236) adds no branch tables and no migration. The cut-off
+part is a child Thread made by `fork_thread` at the old end of the path; the Thread's
+path is rewritten by `select_path` (whole path, the study's R1 `thread_branch` tables
+are not used); the boundary is checked by `validate_group_boundary` on the new end.
+Reason: the user chose "branches are Threads" (undo = open the child) and reuse of
+existing parts. Impact: each rewind inserts one Thread row and about
+2 x path-length `thread_path` rows (child copy plus rewrite); no node is copied.
+Measured cost (release build, Apple silicon, temp file DB, synthetic message nodes,
+one operation = child fork + attachment delete + `select_path` + boundary check),
+`cargo test --release --test integration rewind_path_cost -- --ignored --nocapture` (the 1,000,000 row was measured with the limit temporarily raised):
+
+| path nodes | rewind to the middle | second rewind of the new (half) path |
+|---|---|---|
+| 10,000 | 0.21 s | 0.09 s |
+| 100,000 | 1.93 s | 1.01 s |
+| 1,000,000 | 22.6 s | 13.2 s |
+
+Cost is linear (about 20 us per path node). It runs in one writer transaction, so
+the number is also how long the DB writer is occupied. These are observations, not
+promises. Limit: rewind refuses a path above `PATH_LIMIT` = 200,000 nodes
+(`storage_limit`), declared as the writer bound (about 4 s by the table). Revisit if
+real Threads approach it or a cheaper truncate (delete only `ordinal>k`, share the
+prefix) is wanted; the fork copy is the other half of the cost. Child "started
+after NODE" is by time (first own node, or fork node), so a fork extended later is
+listed by its first own activity; shell "after NODE" compares `started_at` with the
+node's `created_at`.

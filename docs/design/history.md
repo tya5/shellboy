@@ -61,6 +61,27 @@ actor. Their returned agents_path is the actual inherited path. Product
 Control/CLI/TUI fork supports explicit references through validation, CAS and
 audit before invoking the primitive with an inherited/default argument.
 
+## Rewind (#236)
+
+`thread rewind --thread T --node NODE` cuts T's selected path back to end at NODE.
+**Branches are Threads**: the cut-off part is preserved as a child Thread made by
+`fork_thread` at the old end of the path, so undoing is opening that child; there
+is no branch table and no in-place forward. T keeps its ID, title and settings.
+The path is rewritten by `select_path` (CAS on the selection revision, whole
+path), the unfinished-tool-call boundary is checked by `validate_group_boundary`
+on the new end (an error rolls back the child and every other write), attachment
+selections whose source message leaves the path are deleted (the child keeps
+them), and the operation is refused while T has a live/stopping Run or queued
+(accepted/held) messages. NODE may also be an original inside a summary or spill T
+holds: the summary is expanded back to its originals (nested summaries followed,
+a context marker's `original_order` honoured) and the path is cut at NODE; a
+`pruned` replacement or a reclaimed original is refused as target_unavailable.
+Shell side effects are not undone; the result lists shell executions of T's Runs
+started after NODE's creation time and child Threads whose first own activity (or
+fork node) is after it, each as count plus up to 20 items. See
+[the study](thread-prune-rewind-branches.md) R1 and the cost record in
+[decisions](../development/decisions.md).
+
 ## Pruned originals (#235)
 
 `thread prune` releases a Thread's hold on originals of adopted summaries and
