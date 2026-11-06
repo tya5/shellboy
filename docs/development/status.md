@@ -4,11 +4,11 @@
 
 `src/chat_client.rs` no longer polls once a second: it takes an `events.wait` baseline cursor before
 each send, reads Turn/Run/`shell list` facts, then holds one `events.wait --thread` (30 s max, cut to
-the `--timeout-ms` deadline) and reads again only on `changed`/`resync_required`; `timeout` reads nothing,
-`more` is drained. No core change, no new operation, no fallback for an owner without `events.wait`
+the `--timeout-ms` deadline) and reads again after every result including `timeout` (safety net: a missing hint costs at most one
+30 s window); `more` is drained. No core change, no new operation, no fallback for an owner without `events.wait`
 (same-release rule; pre-1.0 policy), no reconnect after owner loss (exit 6 as before). A closed
 Ctrl+C channel no longer spins the loop. Tests: `chat_idle_follow_holds_one_events_wait_and_reads_nothing`,
-`chat_resync_required_rereads_and_follows_to_the_end` and the existing `chat_*` suite. Measured numbers
+`chat_resync_required_rereads_and_follows_to_the_end`, `chat_state_change_without_a_hint_is_found_after_a_timeout` and the existing `chat_*` suite. Measured numbers
 are in docs/validation/acceptance.md. Agent Guide: only the chat sentence changed (models do not
 use chat). Resume: exact-tip default and all-OS CI.
 

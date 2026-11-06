@@ -453,9 +453,10 @@ the prompt; chat never retries.
 Following uses change hints, not a timer (#243): before sending, chat takes an `events wait`
 baseline cursor for its Thread, then reads the Turn (and Run), the Turn's `shell list` rows and,
 at the end, the saved end message; between reads it holds one `events wait --thread THREAD`
-(at most 30 s per call, shortened to the `--timeout-ms` deadline). A `changed` or
-`resync_required` result makes it read again, `timeout` does not (nothing changed), and `more`
-is drained at once. While nothing changes it sends no other request. Hints are not data: every
+(at most 30 s per call, shortened to the `--timeout-ms` deadline). Every result
+(`changed`, `timeout`, `resync_required`) makes it read again, so a change whose hint was never
+sent is still found within one 30 s window; `more` is drained at once. While nothing changes it
+reads once per window and sends no other request. Hints are not data: every
 printed line comes from saved facts read after the hint, so intermediate states can be skipped.
 Chat needs an owner that has `events.wait` (the same release); there is no polling fallback.
 If the owner stops while chat waits, the pending call fails and chat exits 6 like any other lost owner

@@ -279,11 +279,11 @@ impl<W: Write> Chat<'_, W> {
         Ok(())
     }
 
-    /// Wait for a hint about the shown Thread. Returns the cursor to continue with and
-    /// whether the client must read again (`changed` or `resync_required`; `timeout` says
-    /// nothing happened). `more` is drained at once; each call advances the cursor.
-    async fn hint(&self, mut after: String, timeout_ms: u64) -> Result<(String, bool), ChatError> {
-        let mut read_again = false;
+    /// Wait for a hint about the shown Thread and return the cursor to continue with.
+    /// Every outcome (`changed`, `timeout`, `resync_required`) means "read again": a
+    /// timeout is the safety net that bounds the damage of a producer that sent no hint.
+    /// `more` is drained at once; each call advances the cursor.
+    async fn hint(&self, mut after: String, timeout_ms: u64) -> Result<String, ChatError> {
         let mut timeout_ms = timeout_ms;
         loop {
             let result: EventsWaitResult = self
@@ -293,10 +293,9 @@ impl<W: Write> Chat<'_, W> {
                     timeout_ms,
                 }))
                 .await?;
-            read_again |= result.status != EventsWaitStatus::Timeout;
             after = result.cursor;
             if !result.more {
-                return Ok((after, read_again));
+                return Ok(after);
             }
             timeout_ms = 0;
         }
@@ -313,73 +312,69 @@ impl<W: Write> Chat<'_, W> {
         let mut tools: HashMap<String, bool> = HashMap::new();
         let mut turn = turn.to_owned();
         let mut interrupts_open = true;
-        // After a `timeout` hint nothing changed, so the next pass skips the reads.
-        let mut changed = true;
         loop {
-            if changed {
-                // Run-scoped waits follow the Run's current Turn, which can change.
-                let run_facts: Option<RunDetails> = if self.until == ResultMode::TurnEnd {
-                    None
-                } else {
-                    let run = self
-                        .run
-                        .clone()
-                        .ok_or_else(|| ChatError::new(6, "no Run"))?;
-                    Some(
-                        self.call(Command::RunGet(RunTarget { run_id: run }))
-                            .await?,
-                    )
-                };
-                if let Some(current) = run_facts.as_ref().and_then(|r| r.turn_id.clone()) {
-                    turn = current;
-                }
-                let facts: TurnDetails = self
-                    .call(Command::TurnGet(TurnTarget {
-                        turn_id: turn.clone(),
-                    }))
-                    .await?;
-                self.turn = Some(turn.clone());
-                self.tool_progress(&turn, &mut tools).await?;
-                if last_state != Some(facts.state) {
-                    last_state = Some(facts.state);
-                    self.emit(
-                        Event {
-                            kind: "turn_state",
-                            state: Some(name(&facts.state)),
-                            ..Default::default()
-                        },
-                        format!("[turn] {}", name(&facts.state)),
-                    );
-                }
-                if facts.state == TurnState::RecoveryWait {
-                    return Ok(self.recovery_wait(&facts.recovery_hint.clone().unwrap_or_default()));
-                }
-                if self.until == ResultMode::TurnEnd {
-                    match facts.state {
-                        TurnState::Completed => {
-                            return self.completed(facts.end_message_node_id).await;
-                        }
-                        TurnState::Stopped | TurnState::Failed => {
-                            return Ok(self.abnormal(&name(&facts.state)));
-                        }
-                        _ => {}
+            // Run-scoped waits follow the Run's current Turn, which can change.
+            let run_facts: Option<RunDetails> = if self.until == ResultMode::TurnEnd {
+                None
+            } else {
+                let run = self
+                    .run
+                    .clone()
+                    .ok_or_else(|| ChatError::new(6, "no Run"))?;
+                Some(
+                    self.call(Command::RunGet(RunTarget { run_id: run }))
+                        .await?,
+                )
+            };
+            if let Some(current) = run_facts.as_ref().and_then(|r| r.turn_id.clone()) {
+                turn = current;
+            }
+            let facts: TurnDetails = self
+                .call(Command::TurnGet(TurnTarget {
+                    turn_id: turn.clone(),
+                }))
+                .await?;
+            self.turn = Some(turn.clone());
+            self.tool_progress(&turn, &mut tools).await?;
+            if last_state != Some(facts.state) {
+                last_state = Some(facts.state);
+                self.emit(
+                    Event {
+                        kind: "turn_state",
+                        state: Some(name(&facts.state)),
+                        ..Default::default()
+                    },
+                    format!("[turn] {}", name(&facts.state)),
+                );
+            }
+            if facts.state == TurnState::RecoveryWait {
+                return Ok(self.recovery_wait(&facts.recovery_hint.clone().unwrap_or_default()));
+            }
+            if self.until == ResultMode::TurnEnd {
+                match facts.state {
+                    TurnState::Completed => {
+                        return self.completed(facts.end_message_node_id).await;
                     }
-                } else if let Some(run_facts) = run_facts {
-                    match run_facts.state {
-                        RunState::Completed if self.until == ResultMode::RunEnd => {
-                            return self.completed(run_facts.end_message_node_id).await;
-                        }
-                        RunState::Completed => return self.reply_message().await,
-                        RunState::Stopped | RunState::Failed => {
-                            let state = if run_facts.state == RunState::Stopped {
-                                "stopped"
-                            } else {
-                                "failed"
-                            };
-                            return Ok(self.abnormal(state));
-                        }
-                        _ => {}
+                    TurnState::Stopped | TurnState::Failed => {
+                        return Ok(self.abnormal(&name(&facts.state)));
                     }
+                    _ => {}
+                }
+            } else if let Some(run_facts) = run_facts {
+                match run_facts.state {
+                    RunState::Completed if self.until == ResultMode::RunEnd => {
+                        return self.completed(run_facts.end_message_node_id).await;
+                    }
+                    RunState::Completed => return self.reply_message().await,
+                    RunState::Stopped | RunState::Failed => {
+                        let state = if run_facts.state == RunState::Stopped {
+                            "stopped"
+                        } else {
+                            "failed"
+                        };
+                        return Ok(self.abnormal(state));
+                    }
+                    _ => {}
                 }
             }
             let remaining = match deadline {
@@ -407,7 +402,6 @@ impl<W: Write> Chat<'_, W> {
                 .clone()
                 .ok_or_else(|| ChatError::new(6, "no events cursor"))?;
             let wait = self.hint(after, remaining);
-            changed = true;
             tokio::select! {
                 biased;
                 signal = interrupts.recv(), if interrupts_open => {
@@ -428,11 +422,8 @@ impl<W: Write> Chat<'_, W> {
                     }
                 }
                 result = wait => {
-                    // Every outcome is an observation: read again after a change or a
-                    // resync, keep the state after a timeout, then continue from the new cursor.
-                    let (cursor, read_again) = result?;
-                    self.cursor = Some(cursor);
-                    changed = read_again;
+                    // Every outcome is an observation; the next pass reads saved facts.
+                    self.cursor = Some(result?);
                 }
             }
         }

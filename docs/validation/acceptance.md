@@ -9,21 +9,26 @@ processes over a 60 s window while a `sleep 70` tool ran (idle) and tool-line la
 (`sleep 0.37..1.45 s`; latency = chat line arrival minus the saved `started_at`/`ended_at` in the
 `--json` line, so it excludes the time before the owner saved the fact):
 
-| | before (poll) | after (events.wait) |
+| | before (poll) | after (events.wait, reads on every result incl. timeout) |
 |---|---|---|
-| chat requests in 60 s idle | 180 (60 `turn get`, 60 `shell list`, 60 `wait`) | 2 (`events wait`, the 30 s timeouts) |
+| chat requests in 60 s idle | 180 (60 `turn get`, 60 `shell list`, 60 `wait`) | 6 (2 each of `events wait`, `turn get`, `shell list`: one read set per 30 s window) |
 | chat CPU in 60 s | 0.06 s | 0.00 s |
-| owner CPU in 60 s | 0.71 s | 0.01 s |
-| tool start line latency p50 / p95 / max | 617 / 831 / 1020 ms | 8 / 11 / 13 ms |
-| tool finish line latency p50 / p95 / max | 617 / 818 / 837 ms | 16 / 19 / 19 ms |
+| owner CPU in 60 s | 0.71 s | 0.04 s |
+| tool start line latency p50 / p95 / max | 617 / 831 / 1020 ms | 12 / 13 / 13 ms |
+| tool finish line latency p50 / p95 / max | 617 / 818 / 837 ms | 29 / 30 / 31 ms |
 | requests for the 20-tool session | 20 `turn get`, 20 `shell list`, 19 `wait` | 42 `events wait`, 42 `turn get`, 42 `shell list` |
+
+The first "after" run (reads skipped on `timeout`) gave 2 requests, 0.01 s owner CPU, 8 ms and 16 ms
+p50; it was replaced because chat now reads after `timeout` too, as the design says, so a missing hint
+cannot hang it. The "after" column is the second run; "before" is the earlier run.
 
 One run each, one machine; CPU has `ps` resolution of 10 ms; no bounds are asserted. The 20-tool
 session shows the cost of hints: about two reads per tool (start and finish) instead of one per second.
 
 Verified by tests (macOS local; CI for ubuntu/macOS/windows is recorded in the branch report):
 idle follow sends one held `events.wait` and no `run get`/`turn get`/`shell list` while nothing
-changes (behaviour counted at the owner, not a time bound); a synthetic `resync_required` makes chat
+changes (behaviour counted at the owner, not a time bound); with every hint swallowed (answered
+`timeout`), a finished Turn is still found by the read after each timeout; a synthetic `resync_required` makes chat
 read again and finish with the tool line and end message; the existing chat suite (Ctrl+C,
 timeout 5, run-end, recovery_wait, held message, no owner) passes on the new loop. Not verified: a
 real owner restart during a follow (the resync is injected; the real `resync_required` after restart

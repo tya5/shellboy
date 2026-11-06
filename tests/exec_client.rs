@@ -36,6 +36,9 @@ struct Fixture {
     /// While true, the next `events.wait` that carries a cursor is answered with a
     /// synthetic `resync_required` instead of reaching the owner.
     resync_next: Arc<std::sync::atomic::AtomicBool>,
+    /// While true, every `events.wait` that carries a cursor is answered (after a short
+    /// pause) with `timeout` and the same cursor, as if the owner had sent no hint.
+    swallow_hints: Arc<std::sync::atomic::AtomicBool>,
 }
 async fn read_request(stream: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
@@ -118,7 +121,8 @@ impl Fixture {
         tokio::spawn(control.clone().serve(requests));
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let resync_next = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (log, resync) = (seen.clone(), resync_next.clone());
+        let swallow_hints = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (log, resync, swallow) = (seen.clone(), resync_next.clone(), swallow_hints.clone());
         tokio::spawn(async move {
             let mut sent = false;
             while let Some(invocation) = receive.recv().await {
@@ -126,6 +130,25 @@ impl Fixture {
                 log.lock()
                     .unwrap()
                     .push(debug.split('(').next().unwrap_or_default().to_owned());
+                if let Command::EventsWait(a) = &invocation.request.command
+                    && let Some(cursor) = a.after.clone()
+                    && swallow.load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    let result = EventsWaitResult {
+                        status: EventsWaitStatus::Timeout,
+                        cursor,
+                        changes: vec![],
+                        more: false,
+                    };
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                        let _ = invocation.reply.send(Response::success(
+                            invocation.request.operation_id.clone(),
+                            serde_json::to_value(result).unwrap(),
+                        ));
+                    });
+                    continue;
+                }
                 if matches!(&invocation.request.command, Command::EventsWait(a) if a.after.is_some())
                     && resync.swap(false, std::sync::atomic::Ordering::SeqCst)
                 {
@@ -174,6 +197,7 @@ impl Fixture {
             mock,
             seen,
             resync_next,
+            swallow_hints,
         }
     }
     fn count(&self, name: &str) -> usize {
@@ -1599,8 +1623,9 @@ async fn run_chat_in_process(
     (signal, task)
 }
 
-// Behaviour, not speed: while nothing changes, chat holds one `events.wait` and issues no
-// state reads. A timer-polling client would repeat the reads within this window.
+// Behaviour, not speed: while nothing changes, chat holds one `events.wait` (its 30 s window
+// is far longer than this check) and issues no state reads. A timer-polling client would
+// repeat the reads within this window. A `timeout` is the only other reason to read.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn chat_idle_follow_holds_one_events_wait_and_reads_nothing() {
     let mut fixture = Fixture::new().await;
@@ -1682,5 +1707,30 @@ async fn chat_resync_required_rereads_and_follows_to_the_end() {
     );
     assert!(out.contains("echo resync-tool"), "{out}");
     assert!(out.contains("after resync"), "{out}");
+    fixture.close().await;
+}
+
+// A saved change whose hint never arrives is still picked up: a `timeout` makes chat read
+// again. Every hint is swallowed (answered as `timeout`), so the Turn's end is found only
+// by the reads that follow each timeout.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_state_change_without_a_hint_is_found_after_a_timeout() {
+    let mut fixture = Fixture::new().await;
+    fixture
+        .swallow_hints
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (_signal, task) = run_chat_in_process(&fixture, b"unhinted work\n").await;
+    let pending = crate::test_watchdog::watchdog("chat unhinted request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    pending.reply.send(answer("found without a hint")).unwrap();
+    let (result, out) = crate::test_watchdog::watchdog("chat unhinted end", task)
+        .await
+        .unwrap()
+        .unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(result.unwrap(), 0, "{out}");
+    assert!(out.contains("found without a hint"), "{out}");
     fixture.close().await;
 }
