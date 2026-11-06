@@ -1,5 +1,14 @@
 # Validation record
 
+## No stop/retry authority check (#256)
+
+Local, synthetic DB and mock-proxy tests only (no real API): a non-owner Run stops an
+unowned Run and the operation receipt records its Origin; a stranger and the owner
+retry one recovery Turn concurrently (one wins, the other `invalid_state`, owner
+unchanged); same operation ID replay returns the saved result; a real shell CLI from
+an independent Run writes to and stops another Run's shell and Run. Results: see the
+final report for the commit. Not verified: behavior on Windows/Linux outside CI.
+
 ## Chat on events.wait (#243 stage C)
 
 Measured on macOS (Darwin 25.3, arm64, release builds, temporary data dir, local Python mock

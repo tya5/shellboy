@@ -1,5 +1,13 @@
 # Development status
 
+## No stop/retry authority check (#256; on branch issue-256/retry-authority, CI pending)
+
+`authorize_owned_run` and all its uses are removed: any caller may stop or retry any
+Run and write/EOF/stop any shell. Ownership still drives notices and the stop cascade.
+Tests: `tests/control_db.rs` (non-owner stop with receipt origin, retry race, replay),
+`tests/runtime.rs` (real shell CLI stops another Run). Docs: thread-organization,
+guides, decisions. Resume: CI on the branch tip, then owner review.
+
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 
 `src/chat_client.rs` no longer polls once a second: it takes an `events.wait` baseline cursor before

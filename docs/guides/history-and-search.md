@@ -138,7 +138,7 @@ Spill replaces long tool-result input bodies with placeholders referencing origi
 
 Failure-driven overflow recovery starts only on provider-explicit context overflow. Its bounded recovery sequence is: spill older results → normal request retry 1 → if still explicit overflow, spill including the latest group and summarize → normal request retry 2 → if still failing, recovery wait. While the model's latest response asked for a tool, spills and omission wait; an overflow then summarizes the active Turn instead (see [recovery](recovery-and-storage.md#failure-driven-reduction-50)). If no eligible targets exist, the intermediate retry is skipped. Unknown errors or mere HTTP/byte limits are not assumed to be context overflow. Already executed shells are not rerun for compaction.
 
-Manual compaction during recovery wait does not automatically resume the normal request. Inspect results; a human or the owning immediate parent must explicitly resume with `shellboy run retry --run RUN_ID`. See [Recovery and storage](recovery-and-storage.md).
+Manual compaction during recovery wait does not automatically resume the normal request. Inspect results; a human or a model must explicitly resume with `shellboy run retry --run RUN_ID`. See [Recovery and storage](recovery-and-storage.md).
 
 ## Reasoning display and model changes
 

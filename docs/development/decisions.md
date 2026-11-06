@@ -1,5 +1,25 @@
 # 開発判断
 
+## No stop/retry authority check (#256, user decision 2026-11-07)
+
+User's reason: Shellboy assumes personal use, and pointless restrictions make for
+bad UX. The check was not a security boundary: a no-Origin caller (human CLI) always
+passed and a model has a shell. Decision: delete `authorize_owned_run` and its uses
+(`run stop`, `run retry`, `shell write/eof/stop`). Any caller may stop or retry any
+Run. Kept: single owner per live Run, stopping an owner stops its descendants,
+model messages to a `recovery_wait` child are held, no synchronous wait on self or
+owning ancestors; message-cancel authorization is untouched.
+
+What the old direct-owner retry rule protected (code trace): nothing that is not
+already guarded. Retry runs in one DB transaction and resumes through the
+generation CAS (`resume_recovery_turn_tx`); two concurrent retries resume the Turn
+once and the other fails with `invalid_state` ("no recoverable Turn"). Notices
+(`owner_event`, `nudge_owner`) route by saved `owner_run_id`, which a caller never
+changes, so the owner still gets cleanup and child-end notices. Who acted: the
+operation receipt keeps the caller Origin for stop and retry, and retry also
+writes a `recovery_resumed` context entry with the actor. Recheck when: Shellboy
+gains a multi-user or remote mode.
+
 ## Search speed: single KNN scan and two-stage visibility (#240, 2026-11-06)
 
 Basis: the measurement at

@@ -32,7 +32,7 @@ The `command` examples use Bash. The shell type and executable follow startup co
 
 ## Foreground and background
 
-For foreground work, the model waits for the tool to complete. This does not stop the entire UI/Control: humans can switch Threads or perform other operations. Background work has the same ownership rules; inspect the returned `execution_id` later. Even after the model's Turn returns its final answer, the Run remains live while it owns shells or child Runs. Normal Run completion requires that no owned work remains. Explicitly stopping the Run or exiting the application stops and reclaims owned work.
+For foreground work, the model waits for the tool to complete. This does not stop the entire UI/Control: humans can switch Threads or perform other operations. Background work has the same ownership (cleanup and notice) rules; inspect the returned `execution_id` later. Even after the model's Turn returns its final answer, the Run remains live while it owns shells or child Runs. Normal Run completion requires that no owned work remains. Explicitly stopping the Run or exiting the application stops and reclaims owned work.
 
 ```json
 {"command":"sleep 2; printf '%s\\n' 'ready'","background":true}
@@ -223,7 +223,7 @@ shellboy shell get --execution EXECUTION_ID
 
 Stop's `accepted:true` means the request was accepted. Confirm terminal state before reporting that stopping has completed. Shell `state` is `starting` / `running` / `stopping` / `exited` / `failed` / `stopped`. `exit_code` has a value only when available. `output_complete` and end reason are separate facts. Even a terminal shell cannot guarantee complete output storage if draining or similar work is incomplete.
 
-Reaching the raw output limit stops the target and records the reason and incompleteness. Shellboy does not hide stored bytes and let a process run indefinitely. A model Origin can operate on shells in its own Run or owned descendants; it cannot write/EOF/stop shells in independent Runs. After an application restart, old PIDs are not used to stop processes.
+Reaching the raw output limit stops the target and records the reason and incompleteness. Shellboy does not hide stored bytes and let a process run indefinitely. Any caller, including a model, may write/EOF/stop any shell (no authority check; an unknown execution ID is still an error). Check the execution ID first so you do not disturb another Run's work. After an application restart, old PIDs are not used to stop processes.
 
 ## PowerShell arguments
 

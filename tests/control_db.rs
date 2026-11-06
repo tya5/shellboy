@@ -916,7 +916,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
 }
 
 #[tokio::test]
-async fn model_stop_authority_follows_run_ownership_instead_of_thread_genealogy() {
+async fn any_caller_may_stop_any_run_and_ownership_only_drives_cascade_and_notices() {
     let (_directory, store) = store().await;
     let parent = create(&store, None).await;
     let (parent_message, _) = send(&store, &parent.thread_id, "parent").await;
@@ -934,34 +934,34 @@ async fn model_stop_authority_follows_run_ownership_instead_of_thread_genealogy(
         "human-started child is independent",
     )
     .await;
-    for run in [
-        independent_message.run_id.as_ref().unwrap(),
-        unowned_message.run_id.as_ref().unwrap(),
-    ] {
-        let denied = store
-            .execute(
-                request(Command::RunStop(RunTarget {
-                    run_id: run.clone(),
-                })),
-                Some(origin.clone()),
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(denied.code, ErrorCode::InvalidState);
-        let id = run.clone();
-        store
-            .database
-            .call(move |db| {
-                assert_eq!(
-                    db.query_row("SELECT state FROM run WHERE id=?1", [id], |r| r
-                        .get::<_, String>(0))?,
-                    "live"
-                );
-                Ok(())
-            })
-            .await
-            .unwrap();
-    }
+    // No authority check (#256): a non-owner Run may stop an unowned Run.
+    let non_owner_stop = request(Command::RunStop(RunTarget {
+        run_id: unowned_message.run_id.clone().unwrap(),
+    }));
+    let operation_id = non_owner_stop.operation_id.clone();
+    let stopped_unowned = store
+        .execute(non_owner_stop, Some(origin.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        stopped_unowned.stop_runs,
+        vec![unowned_message.run_id.clone().unwrap()]
+    );
+    // The operation receipt records who stopped it.
+    let recorded_run = parent_message.run_id.clone().unwrap();
+    store
+        .database
+        .call(move |db| {
+            let origin: String = db.query_row(
+                "SELECT origin_json FROM operation_receipt WHERE operation_id=?1",
+                [operation_id],
+                |r| r.get(0),
+            )?;
+            assert!(origin.contains(&recorded_run), "{origin}");
+            Ok(())
+        })
+        .await
+        .unwrap();
     let owned = create(&store, Some(parent.thread_id.clone())).await;
     let accepted = store
         .execute(
@@ -2357,5 +2357,123 @@ async fn thread_summary_parameters_reject_out_of_range_values_and_are_inherited(
         (got["segment_chars"].clone(), got["reduce_rounds"].clone()),
         (2_000.into(), 16.into())
     );
+    store.database.shutdown().await.unwrap();
+}
+
+async fn owned_send(store: &Store, origin: &Origin, thread: &str) -> MessageAccepted {
+    let accepted = store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                human: false,
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.into()),
+                text: "delegated".into(),
+            })),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap();
+    serde_json::from_value(accepted.result).unwrap()
+}
+
+#[tokio::test]
+async fn retry_has_no_authority_check_and_is_safe_when_raced() {
+    let (_directory, store) = store().await;
+    let grand = create(&store, None).await;
+    let middle = create(&store, Some(grand.thread_id.clone())).await;
+    let leaf = create(&store, Some(middle.thread_id.clone())).await;
+    let (grand_run, _) = send(&store, &grand.thread_id, "grand").await;
+    let grand_origin = caller(
+        &grand.thread_id,
+        grand_run.run_id.as_deref().unwrap(),
+        grand_run.turn_id.as_deref().unwrap(),
+    );
+    let middle_run = owned_send(&store, &grand_origin, &middle.thread_id).await;
+    let middle_origin = caller(
+        &middle.thread_id,
+        middle_run.run_id.as_deref().unwrap(),
+        middle_run.turn_id.as_deref().unwrap(),
+    );
+    let leaf_run = owned_send(&store, &middle_origin, &leaf.thread_id)
+        .await
+        .run_id
+        .unwrap();
+    let stranger = create(&store, None).await;
+    let (stranger_run, _) = send(&store, &stranger.thread_id, "stranger").await;
+    let stranger_origin = caller(
+        &stranger.thread_id,
+        stranger_run.run_id.as_deref().unwrap(),
+        stranger_run.turn_id.as_deref().unwrap(),
+    );
+    let to_recovery = |run: String| {
+        store.database.call(move |db| {
+            db.execute(
+                "UPDATE turn SET state='recovery_wait' WHERE run_id=?1",
+                [run],
+            )?;
+            Ok(())
+        })
+    };
+    to_recovery(leaf_run.clone()).await.unwrap();
+    let retry = || {
+        request(Command::RunRetry(RunTarget {
+            run_id: leaf_run.clone(),
+        }))
+    };
+    // A non-owner Run retries through the same path as a human: no authority check.
+    // Two callers (owner and a stranger) race one retry: exactly one resumes the Turn.
+    let (direct, ancestor) = tokio::join!(
+        store.execute(retry(), Some(stranger_origin)),
+        store.execute(retry(), Some(middle_origin.clone()))
+    );
+    assert_eq!(
+        direct.is_ok() as u8 + ancestor.is_ok() as u8,
+        1,
+        "one retry wins, the other sees the changed Turn"
+    );
+    let loser = direct.as_ref().err().or(ancestor.as_ref().err()).unwrap();
+    assert_eq!(loser.code, ErrorCode::InvalidState);
+    let winner = direct.or(ancestor).unwrap();
+    let ownership_run = leaf_run.clone();
+    let expected_owner = middle_run.run_id.clone().unwrap();
+    store
+        .database
+        .call(move |db| {
+            // The caller identity never changes ownership, so owner cleanup and notices still target the owner.
+            let owner: String = db.query_row(
+                "SELECT owner_run_id FROM run WHERE id=?1",
+                [ownership_run],
+                |r| r.get(0),
+            )?;
+            assert_eq!(owner, expected_owner);
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(winner.quiet_wake_threads, vec![leaf.thread_id.clone()]);
+    // Replaying the winning operation ID returns the saved result without resuming again.
+    let again = retry();
+    to_recovery(leaf_run.clone()).await.unwrap();
+    let first = store
+        .execute(again.clone(), Some(grand_origin.clone()))
+        .await
+        .unwrap();
+    let replay = store
+        .execute(again, Some(grand_origin.clone()))
+        .await
+        .unwrap();
+    assert_eq!(replay.result, first.result);
+    assert!(replay.quiet_wake_threads.is_empty());
+    // A human retry still works.
+    to_recovery(leaf_run.clone()).await.unwrap();
+    execute(
+        &store,
+        Command::RunRetry(RunTarget {
+            run_id: leaf_run.clone(),
+        }),
+    )
+    .await;
     store.database.shutdown().await.unwrap();
 }

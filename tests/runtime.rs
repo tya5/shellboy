@@ -1630,7 +1630,7 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn real_shell_cli_cannot_mutate_an_independent_runs_live_shell() {
+async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
     async fn snapshot(
         control: &Control,
         execution: &str,
@@ -1729,11 +1729,9 @@ async fn real_shell_cli_cannot_mutate_an_independent_runs_live_shell() {
         .unwrap();
     let executable = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
     // Each command gets the genuine shell-issued Origin through inherited environment + IPC.
-    // Deliberately omit `set -e`: every denied command must execute independently.
+    // There is no ownership boundary (#256): a non-owner may write to and stop another Run.
     let script = format!(
-        "'{executable}' shell write --execution '{execution}' --text 'unauthorized-write'\n\
-         '{executable}' shell eof --execution '{execution}'\n\
-         '{executable}' shell stop --execution '{execution}'\n\
+        "'{executable}' shell write --execution '{execution}' --text 'from-other-run\n'\n\
          '{executable}' run stop --run '{victim_run}'"
     );
     attacker_request
@@ -1749,45 +1747,17 @@ async fn real_shell_cli_cannot_mutate_an_independent_runs_live_shell() {
         .find(|item| item["type"] == "function_call_output")
         .unwrap();
     let output: Value = serde_json::from_str(output["output"].as_str().unwrap()).unwrap();
-    let errors: Vec<Value> = output["output"]
+    let results: Vec<Value> = output["output"]
         .as_str()
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(errors.len(), 4);
-    for error in errors {
-        assert_eq!(error["ok"], false);
-        assert_eq!(error["error"]["code"], "invalid_state");
-        assert_eq!(
-            error["error"]["message"],
-            "Only a human or an owning Run may change this execution"
-        );
+    assert_eq!(results.len(), 2);
+    for result in results {
+        assert_eq!(result["ok"], true, "{result}");
     }
-    assert_eq!(snapshot(&control, &execution).await, before);
-    // A permitted human write after all four denials proves the original cat and stdin remain live.
-    command(
-        &control,
-        Command::ShellWrite(ShellWriteArgs {
-            execution_id: execution.clone(),
-            text: "still-live\n".into(),
-            encoding: "UTF-8".into(),
-        }),
-    )
-    .await;
-    crate::test_watchdog::watchdog("tests/runtime.rs: snapshot", async {
-        loop {
-            let saved = snapshot(&control, &execution).await;
-            if saved.3 == b"baseline\nstill-live\n" {
-                assert_eq!(saved.0, "running");
-                assert_eq!(saved.4, "live");
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await
-    .unwrap();
+    state(&control, "run", &victim_run, "stopped").await;
     continuation
         .reply
         .send(final_answer("ownership boundary observed"))
