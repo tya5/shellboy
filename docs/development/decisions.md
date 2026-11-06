@@ -1,5 +1,31 @@
 # 開発判断
 
+## Search speed: single KNN scan and two-stage visibility (#240, 2026-11-06)
+
+Basis: the measurement at
+https://github.com/tya5/shellboy/issues/240#issuecomment-6674241038 on the
+owner's DB copy (44,038 eligible chunks, 6,723 nodes, 667 MB vec0 table). The
+KNN over-fetch loop (k 80, 160, 320, 640) rescanned the whole table 3-4 times
+(about 70% of slow-state time); `searchable` materialized the full `consumers`
+closure (about 20%). Chosen, no other part (eligibility step, witness checks,
+JSON decode are each at most about 5%, skipped by perf-by-contribution):
+
+- `searchable` runs a root-only statement first and the unchanged full rule
+  only when it is false. Equivalence test over random synthetic graphs.
+- One vec0 scan of `min(count, 4096)`. The measured k=4096 trial needed one
+  scan, and its extra 0.35-0.41 s was hit assembly for every distinct node;
+  that cost is removed by building provenance/thread_scope only for the
+  returned nodes. The old doubling schedule is replayed over the ordered rows
+  (spans per node come from the satisfying stage only), so results equal the
+  old loop; checked by a unit test against the old loop and by comparing result
+  digests on the owner-DB copy before and after. After the change, on the same
+  copy (warm, load about 7, 2 passes x 3 runs interleaved with the old build):
+  all-history ranked_hits 2.6-3.1 s to 0.66-0.86 s, largest Thread 1.2-1.8 s to
+  0.41-0.52 s; result digests (node, distance bits, span count) identical.
+  Recheck if vec0 per-k cost grows with k on other DBs (not measured).
+- Not changed, recorded as a latent risk: the `DELETED_OWNER` branch when roots
+  are false (about 25 ms/node, not triggered on this DB).
+
 ## Automatic compaction target window and spill evidence (#215)
 
 The owner approved proposals 1 and 2: bound automatic prefix selection by the

@@ -338,9 +338,10 @@ fn ranked_hits(
         FROM {} v JOIN embedding_chunk c ON c.vec_row_id=v.rowid AND c.space_id=?1 JOIN embedding_job j ON j.id=c.job_id
         LEFT JOIN app_meta m ON m.key=?5||c.id
         WHERE v.embedding MATCH ?2 AND k=?3 AND v.rowid IN (SELECT value FROM json_each(?4)) ORDER BY v.distance",space.table);
-    let mut k = (args.limit as usize * 8).min(count).min(4096);
-    let hits = loop {
-        ensure_running(cancel)?;
+    // One vec0 scan of the largest allowed k (#240): every scan reads the whole
+    // chunk table, so the old k*2 re-scans dominated. The former doubling
+    // schedule is replayed over the ordered rows by `pick_nodes`.
+    let outcome = pick_nodes(args.limit as usize, count, |k| {
         let mut statement = db.prepare(&sql).map_err(sql_error)?;
         let mut rows = statement
             .query(params![
@@ -351,46 +352,42 @@ fn ranked_hits(
                 IndexKeys::PREVIEW_PREFIX
             ])
             .map_err(sql_error)?;
-        let mut hits: Vec<IndexHit> = Vec::new();
+        let mut out = Vec::new();
         while let Some(row) = rows.next().map_err(sql_error)? {
             ensure_running(cancel)?;
-            let node: String = row.get(0).map_err(sql_error)?;
-            let span = SourceSpan {
-                source_revision: row.get(6).map_err(sql_error)?,
-                content_hash: row.get(7).map_err(sql_error)?,
-                body_kind: row.get(3).map_err(sql_error)?,
-                start: row.get::<_, i64>(1).map_err(sql_error)? as usize,
-                end: row.get::<_, i64>(2).map_err(sql_error)? as usize,
-            };
-            if let Some(hit) = hits.iter_mut().find(|hit| hit.node_id == node) {
-                hit.spans.push(span);
-            } else {
-                hits.push(IndexHit {
-                    thread_scope: search_thread_scope(db, args, &node)?,
-                    provenance: history::provenance(db, &node)?,
-                    node_id: node,
-                    excerpt: row
-                        .get::<_, Option<String>>(5)
-                        .map_err(sql_error)?
-                        .unwrap_or_default(),
-                    distance: row.get(4).map_err(sql_error)?,
-                    spans: vec![span],
-                });
-            }
+            out.push(KnnRow {
+                node: row.get(0).map_err(sql_error)?,
+                span: SourceSpan {
+                    source_revision: row.get(6).map_err(sql_error)?,
+                    content_hash: row.get(7).map_err(sql_error)?,
+                    body_kind: row.get(3).map_err(sql_error)?,
+                    start: row.get::<_, i64>(1).map_err(sql_error)? as usize,
+                    end: row.get::<_, i64>(2).map_err(sql_error)? as usize,
+                },
+                excerpt: row
+                    .get::<_, Option<String>>(5)
+                    .map_err(sql_error)?
+                    .unwrap_or_default(),
+                distance: row.get(4).map_err(sql_error)?,
+            });
         }
-        hits.sort_by(|a, b| {
-            a.distance
-                .total_cmp(&b.distance)
-                .then_with(|| a.node_id.cmp(&b.node_id))
-        });
-        if hits.len() >= args.limit as usize || k >= count {
-            hits.truncate(args.limit as usize);
-            break hits;
-        }
-        if k == 4096 {
-            break exact_filtered_hits(db, space, query, args, &candidates, cancel)?;
-        }
-        k = (k * 2).min(count).min(4096);
+        Ok(out)
+    })?;
+    let hits = match outcome {
+        KnnOutcome::Picked(picked) => picked
+            .into_iter()
+            .map(|p| {
+                Ok(IndexHit {
+                    thread_scope: search_thread_scope(db, args, &p.node)?,
+                    provenance: history::provenance(db, &p.node)?,
+                    node_id: p.node,
+                    excerpt: p.excerpt,
+                    distance: p.distance,
+                    spans: p.spans,
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?,
+        KnnOutcome::NeedExact => exact_filtered_hits(db, space, query, args, &candidates, cancel)?,
     };
     let selected: HashSet<_> = hits.iter().map(|hit| hit.node_id.as_str()).collect();
     let witnesses = witness_checks
@@ -506,6 +503,86 @@ fn search_thread_scope(
         })
         .transpose()
 }
+struct KnnRow {
+    node: String,
+    span: SourceSpan,
+    excerpt: String,
+    distance: f64,
+}
+struct Picked {
+    node: String,
+    excerpt: String,
+    distance: f64,
+    spans: Vec<SourceSpan>,
+}
+enum KnnOutcome {
+    Picked(Vec<Picked>),
+    NeedExact,
+}
+/// Nodes of the nearest chunks, best first. `scan(k)` returns the k nearest
+/// eligible chunks ordered by distance. The result equals the former loop that
+/// rescanned with k = limit*8, doubling up to count/4096 until `limit` distinct
+/// nodes appeared: each stage there saw exactly the first k rows, so the same
+/// stages are replayed over one ordered scan of min(count, 4096) rows. Spans of
+/// a node therefore never include rows beyond the stage that satisfied limit.
+fn pick_nodes(
+    limit: usize,
+    count: usize,
+    mut scan: impl FnMut(usize) -> Result<Vec<KnnRow>, ApiError>,
+) -> Result<KnnOutcome, ApiError> {
+    let mut stage = (limit * 8).min(count).min(4096);
+    let rows = scan(count.min(4096))?;
+    let mut picked: Vec<Picked> = Vec::new();
+    let mut index = HashMap::<String, usize>::new();
+    // Stage boundary after `stage` rows: done, exact fallback, or next stage.
+    let boundary = |picked: &Vec<Picked>, stage: &mut usize| {
+        if picked.len() >= limit || *stage >= count {
+            return Some(false);
+        }
+        if *stage == 4096 {
+            return Some(true);
+        }
+        *stage = (*stage * 2).min(count).min(4096);
+        None
+    };
+    let finish = |mut picked: Vec<Picked>, exact: bool| {
+        if exact {
+            return KnnOutcome::NeedExact;
+        }
+        picked.sort_by(|a, b| {
+            a.distance
+                .total_cmp(&b.distance)
+                .then_with(|| a.node.cmp(&b.node))
+        });
+        picked.truncate(limit);
+        KnnOutcome::Picked(picked)
+    };
+    for (n, row) in rows.into_iter().enumerate() {
+        while n == stage {
+            if let Some(exact) = boundary(&picked, &mut stage) {
+                return Ok(finish(picked, exact));
+            }
+        }
+        if let Some(&i) = index.get(&row.node) {
+            picked[i].spans.push(row.span);
+        } else {
+            index.insert(row.node.clone(), picked.len());
+            picked.push(Picked {
+                node: row.node,
+                excerpt: row.excerpt,
+                distance: row.distance,
+                spans: vec![row.span],
+            });
+        }
+    }
+    // Fewer rows than the stage asked for: the former loop would rescan with a
+    // larger k and receive the same rows, ending at count or the exact fallback.
+    loop {
+        if let Some(exact) = boundary(&picked, &mut stage) {
+            return Ok(finish(picked, exact));
+        }
+    }
+}
 /// More than 4096 nearest chunks can belong to fewer than limit nodes. Only
 /// that rare vec0 ceiling case uses exact L2 across the already eligible set.
 fn exact_filtered_hits(
@@ -611,3 +688,106 @@ mod visibility_cost_tests {
 
 #[cfg(test)]
 mod performance_tests;
+
+#[cfg(test)]
+mod pick_nodes_tests {
+    use super::*;
+
+    fn row(node: usize, i: usize) -> KnnRow {
+        KnnRow {
+            node: format!("n{node:04}"),
+            span: SourceSpan {
+                source_revision: 0,
+                content_hash: String::new(),
+                body_kind: String::new(),
+                start: i,
+                end: i + 1,
+            },
+            excerpt: String::new(),
+            distance: i as f64 / 100.0,
+        }
+    }
+
+    // (node, distance, span starts) per hit, or None for the exact fallback.
+    type Shape = Option<Vec<(String, u64, Vec<usize>)>>;
+
+    // The former loop, verbatim in structure: rescan with doubled k.
+    fn old_loop(rows: &[KnnRow], limit: usize, count: usize) -> Shape {
+        let mut k = (limit * 8).min(count).min(4096);
+        loop {
+            let mut hits: Vec<(String, f64, Vec<usize>)> = Vec::new();
+            for r in rows.iter().take(k) {
+                if let Some(h) = hits.iter_mut().find(|h| h.0 == r.node) {
+                    h.2.push(r.span.start);
+                } else {
+                    hits.push((r.node.clone(), r.distance, vec![r.span.start]));
+                }
+            }
+            hits.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+            if hits.len() >= limit || k >= count {
+                hits.truncate(limit);
+                return Some(
+                    hits.into_iter()
+                        .map(|h| (h.0, h.1.to_bits(), h.2))
+                        .collect(),
+                );
+            }
+            if k == 4096 {
+                return None;
+            }
+            k = (k * 2).min(count).min(4096);
+        }
+    }
+
+    #[test]
+    fn single_scan_equals_doubling_rescans() {
+        let mut state = 7u64;
+        let mut rand = move |n: u64| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 33) % n) as usize
+        };
+        let (mut one_scan, mut exact) = (0, 0);
+        for case in 0..300 {
+            // Few nodes with many chunks make distinct nodes arrive late.
+            let total = [5, 90, 700, 5000][case % 4];
+            let nodes = 1 + rand(if case % 3 == 0 { 6 } else { 400 } as u64);
+            let rows: Vec<KnnRow> = (0..total).map(|i| row(rand(nodes as u64), i)).collect();
+            let limit = [0, 1, 3, 10, 50][case % 5];
+            let mut scans = Vec::new();
+            let got = pick_nodes(limit, total, |k| {
+                scans.push(k);
+                Ok(rows
+                    .iter()
+                    .take(k)
+                    .map(|r| row(r.node[1..].parse().unwrap(), r.span.start))
+                    .collect())
+            })
+            .ok()
+            .unwrap();
+            let got: Shape = match got {
+                KnnOutcome::NeedExact => None,
+                KnnOutcome::Picked(p) => Some(
+                    p.into_iter()
+                        .map(|p| {
+                            (
+                                p.node,
+                                p.distance.to_bits(),
+                                p.spans.iter().map(|s| s.start).collect(),
+                            )
+                        })
+                        .collect(),
+                ),
+            };
+            assert_eq!(scans, vec![total.min(4096)], "exactly one scan");
+            assert_eq!(got, old_loop(&rows, limit, total), "case {case}");
+            if got.is_none() {
+                exact += 1
+            } else {
+                one_scan += 1
+            }
+        }
+        assert!(one_scan > 0 && exact > 0, "{one_scan}/{exact}");
+    }
+}
