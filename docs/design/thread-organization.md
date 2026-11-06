@@ -116,7 +116,7 @@ shellboy thread set --thread T --parent P     # attach / move under P
 shellboy thread set --thread T --parent ''    # detach: independent Thread
 ```
 
-`""` clears, as `--effort ''` already does (`set_thread`, `src/control/db.rs:1743`).
+`""` clears, as `--effort ''` already does (`set_thread`, `src/control/db.rs:1761`).
 The field is `skip_serializing_if = "Option::is_none"`, like `title`, so existing
 operation fingerprints stay unchanged. It takes the settings-free path (no
 `profile_revision`/`reasoning_epoch` change, no settings-change event). It
