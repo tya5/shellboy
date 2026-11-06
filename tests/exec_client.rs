@@ -31,6 +31,11 @@ struct Fixture {
     incoming: mpsc::Receiver<Incoming>,
     stop: CancellationToken,
     mock: JoinHandle<()>,
+    /// Every command the owner received, in order (name only), for client-behaviour tests.
+    seen: Arc<std::sync::Mutex<Vec<String>>>,
+    /// While true, the next `events.wait` that carries a cursor is answered with a
+    /// synthetic `resync_required` instead of reaching the owner.
+    resync_next: Arc<std::sync::atomic::AtomicBool>,
 }
 async fn read_request(stream: &mut TcpStream) -> Value {
     let mut bytes = Vec::new();
@@ -111,9 +116,36 @@ impl Fixture {
         let server = LocalServer::bind(&owner, rpc).await.unwrap();
         let (forward, requests) = mpsc::channel(16);
         tokio::spawn(control.clone().serve(requests));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let resync_next = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (log, resync) = (seen.clone(), resync_next.clone());
         tokio::spawn(async move {
             let mut sent = false;
             while let Some(invocation) = receive.recv().await {
+                let debug = format!("{:?}", invocation.request.command);
+                log.lock()
+                    .unwrap()
+                    .push(debug.split('(').next().unwrap_or_default().to_owned());
+                if matches!(&invocation.request.command, Command::EventsWait(a) if a.after.is_some())
+                    && resync.swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    let result = EventsWaitResult {
+                        status: EventsWaitStatus::ResyncRequired,
+                        cursor: EventCursor {
+                            v: 1,
+                            instance_id: "synthetic-other-instance".into(),
+                            seq: 0,
+                        }
+                        .encode(),
+                        changes: vec![],
+                        more: false,
+                    };
+                    let _ = invocation.reply.send(Response::success(
+                        invocation.request.operation_id.clone(),
+                        serde_json::to_value(result).unwrap(),
+                    ));
+                    continue;
+                }
                 if matches!(&invocation.request.command, Command::MessageSend(_)) {
                     sent = true;
                 }
@@ -140,7 +172,17 @@ impl Fixture {
             incoming,
             stop,
             mock,
+            seen,
+            resync_next,
         }
+    }
+    fn count(&self, name: &str) -> usize {
+        self.seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|n| *n == name)
+            .count()
     }
     fn schema(&self) -> std::path::PathBuf {
         let path = self.root.path().join("schema.json");
@@ -1524,5 +1566,121 @@ async fn chat_second_ctrl_c_during_follow_leaves_without_further_stops() {
     assert!(text.contains("[stop] stopping the Run"));
     assert!(code == 0 || code == 4, "{code}");
     drop(feed);
+    fixture.close().await;
+}
+
+async fn run_chat_in_process(
+    fixture: &Fixture,
+    input: &'static [u8],
+) -> (
+    mpsc::Sender<()>,
+    JoinHandle<(Result<u8, shellboy::chat_client::ChatError>, Vec<u8>)>,
+) {
+    let (signal, interrupts) = mpsc::channel(4);
+    let data = fixture.root.path().join("data");
+    let cwd = fixture.root.path().to_path_buf();
+    let task = tokio::spawn(async move {
+        let mut out: Vec<u8> = Vec::new();
+        let result = shellboy::chat_client::run(
+            chat_options(false),
+            &data,
+            &cwd,
+            None,
+            tokio::io::BufReader::new(input),
+            &mut out,
+            shellboy::chat_client::ChatEnv {
+                stdin_is_tty: false,
+                interrupts,
+            },
+        )
+        .await;
+        (result, out)
+    });
+    (signal, task)
+}
+
+// Behaviour, not speed: while nothing changes, chat holds one `events.wait` and issues no
+// state reads. A timer-polling client would repeat the reads within this window.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_idle_follow_holds_one_events_wait_and_reads_nothing() {
+    let mut fixture = Fixture::new().await;
+    let (_signal, task) = run_chat_in_process(&fixture, b"long work\n").await;
+    let pending = crate::test_watchdog::watchdog("chat idle request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let reads = |f: &Fixture| {
+        (
+            f.count("RunGet"),
+            f.count("TurnGet"),
+            f.count("ShellList"),
+            f.count("EventsWait"),
+        )
+    };
+    // Let the hints caused by the send settle: stable over two samples.
+    let mut last = reads(&fixture);
+    crate::test_watchdog::watchdog("chat idle settle", async {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let now = reads(&fixture);
+            if now == last && now.3 >= 2 {
+                break;
+            }
+            last = now;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    assert_eq!(reads(&fixture), last, "idle chat must not poll");
+    let before_turn_reads = fixture.count("TurnGet");
+    pending.reply.send(answer("done")).unwrap();
+    let (result, out) = crate::test_watchdog::watchdog("chat idle end", task)
+        .await
+        .unwrap()
+        .unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(result.unwrap(), 0, "{out}");
+    assert!(out.contains("done"), "{out}");
+    assert!(
+        fixture.count("TurnGet") > before_turn_reads,
+        "the held wait returned on the change and chat read the Turn"
+    );
+    fixture.close().await;
+}
+
+// A synthetic `resync_required` (as after an owner restart) makes chat read again and
+// continue with the new cursor; the session still shows the tool and the end message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_resync_required_rereads_and_follows_to_the_end() {
+    let mut fixture = Fixture::new().await;
+    let (_signal, task) = run_chat_in_process(&fixture, b"work with tool\n").await;
+    let first = crate::test_watchdog::watchdog("chat resync request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .resync_next
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    first.reply.send(tool_call("echo resync-tool")).unwrap();
+    let second = crate::test_watchdog::watchdog("chat resync second", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    second.reply.send(answer("after resync")).unwrap();
+    let (result, out) = crate::test_watchdog::watchdog("chat resync end", task)
+        .await
+        .unwrap()
+        .unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(result.unwrap(), 0, "{out}");
+    assert!(
+        !fixture
+            .resync_next
+            .load(std::sync::atomic::Ordering::SeqCst),
+        "the synthetic resync was served"
+    );
+    assert!(out.contains("echo resync-tool"), "{out}");
+    assert!(out.contains("after resync"), "{out}");
     fixture.close().await;
 }
