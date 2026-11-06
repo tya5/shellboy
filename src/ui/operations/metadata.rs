@@ -575,6 +575,9 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ModelList => local!(language, "モデル · 一覧", "Models · List"),
         OperationId::ThreadList => local!(language, "会話 · 一覧", "Conversations · List"),
         OperationId::ThreadGet => local!(language, "会話 · 詳細", "Conversation · Details"),
+        OperationId::ThreadBranches => {
+            local!(language, "会話 · 分岐の木", "Conversation · Branches")
+        }
         OperationId::ThreadCreate => local!(language, "会話 · 作成", "Conversation · Create"),
         OperationId::ThreadFork => local!(language, "会話 · 分岐", "Conversation · Fork"),
         OperationId::ThreadDelete => local!(language, "会話 · 削除", "Conversation · Delete"),
@@ -718,6 +721,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定したThreadの設定、現在のRun・Turn、所有作業と復旧理由を表示します。",
             "Show the specified Thread's settings, current Run and Turn, owned work, and recovery reasons."
+        ),
+        OperationId::ThreadBranches => local!(
+            language,
+            "Threadの分岐（fork・編集・巻き戻しで分かれた子Thread）を木として、分かれた位置・先端の最後の依頼・時刻・大きさ・状態とともに表示します。",
+            "Show a Thread's branches (child Threads made by fork, edit or rewind) as a tree with where they diverge, each tip's last request, time, size and state."
         ),
         OperationId::ThreadCreate => local!(
             language,

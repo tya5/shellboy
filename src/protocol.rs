@@ -439,6 +439,14 @@ args!(ThreadPruneArgs {
     #[serde(default, skip_serializing_if = "is_false")]
     dry_run: bool
 });
+args!(ThreadBranchesArgs {
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default = "list_limit")]
+    limit: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cursor: Option<String>
+});
 args!(ThreadRewindArgs {
     #[serde(default)]
     thread_id: Option<String>,
@@ -640,6 +648,8 @@ pub enum Command {
     ThreadList(ThreadListArgs),
     #[serde(rename = "thread.get")]
     ThreadGet(ThreadTarget),
+    #[serde(rename = "thread.branches")]
+    ThreadBranches(ThreadBranchesArgs),
     #[serde(rename = "usage.get")]
     UsageGet(UsageGetArgs),
     #[serde(rename = "compact.list")]

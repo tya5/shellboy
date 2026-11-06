@@ -58,7 +58,7 @@ macro_rules! named_jobs {
 // The exhaustive match ensures every future protocol variant gets a fixed label.
 named_jobs! {
     OwnerShutdown => owner_shutdown, Status => status, ModelList => model_list,
-    ThreadList => thread_list, ThreadGet => thread_get, UsageGet => usage_get,
+    ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadSet => thread_set,
@@ -107,6 +107,7 @@ impl Kind {
             Kind::Status
             | Kind::ThreadList
             | Kind::ThreadGet
+            | Kind::ThreadBranches
             | Kind::UsageGet
             | Kind::CompactList
             | Kind::CompactPreview
@@ -186,7 +187,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            48,
+            49,
             "classify new kinds and update this ratchet"
         );
     }

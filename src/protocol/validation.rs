@@ -193,6 +193,17 @@ impl ThreadPruneArgs {
     }
 }
 
+impl ThreadBranchesArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
+        optional_nonempty(self.cursor.as_deref(), "cursor")?;
+        if self.limit == 0 || self.limit > MAX_LIST_LIMIT {
+            return Err(invalid("branch limit must be in 1..=200"));
+        }
+        Ok(())
+    }
+}
+
 impl ThreadRewindArgs {
     fn validate(&self) -> Result<(), ApiError> {
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
@@ -526,6 +537,7 @@ impl Command {
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadPrune(a) => a.validate(),
             Self::ThreadRewind(a) => a.validate(),
+            Self::ThreadBranches(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
                 if let Some(marker) = &a.preview_marker

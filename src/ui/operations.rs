@@ -47,6 +47,7 @@ macro_rules! operation_kinds {
 operation_kinds! {
 ThreadList,
     ThreadGet,
+    ThreadBranches,
     UsageGet,
     ThreadCreate,
     ThreadFork,
@@ -181,6 +182,7 @@ impl OpKind {
     fn shortcut(self) -> Option<&'static str> {
         match self {
             Self::ThreadList => Some("/threads"),
+            Self::ThreadBranches => Some("/branches"),
             Self::ThreadFork => Some("/fork"),
             Self::ThreadRewind => Some("/rewind"),
             Self::ThreadSet => Some("/model | /effort"),
@@ -1157,6 +1159,20 @@ impl Form {
             OpKind::ThreadGet => (vec![thread()], |form, _cwd| {
                 Ok(Command::ThreadGet(form.thread_target()?))
             }),
+            OpKind::ThreadBranches => (
+                vec![
+                    thread(),
+                    f("limit", "件数", DEFAULT_LIST_LIMIT.to_string(), Number),
+                    f("cursor", "続きcursor（空=先頭）", String::new(), Text),
+                ],
+                |form, _cwd| {
+                    Ok(Command::ThreadBranches(ThreadBranchesArgs {
+                        thread_id: Some(form.owned("thread")?),
+                        limit: form.number("limit")?,
+                        cursor: form.optional("cursor")?,
+                    }))
+                },
+            ),
             OpKind::UsageGet => (
                 vec![
                     thread(),
@@ -2340,6 +2356,11 @@ mod tests {
             ),
             (OpKind::ThreadGet, "thread.get", json!({"thread_id":id(1)})),
             (
+                OpKind::ThreadBranches,
+                "thread.branches",
+                json!({"thread_id":id(1),"limit":50}),
+            ),
+            (
                 OpKind::UsageGet,
                 "usage.get",
                 json!({"thread_id":id(1),"run_id":null,"turn_id":null,"include_children":false}),
@@ -3223,10 +3244,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 61);
+        assert_eq!(rows.len(), 62);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            61
+            62
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3238,7 +3259,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 61);
+        assert_eq!(operations.rows().len(), 62);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

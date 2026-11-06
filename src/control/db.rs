@@ -1384,6 +1384,10 @@ impl Store {
                 }
                 MutationResult::value(value)
             }
+            Command::ThreadBranches(args) => {
+                let id = target(args.thread_id.as_deref(), caller)?;
+                MutationResult::value(history::branches::branches(tx, &id, args)?)
+            }
             Command::ThreadRewind(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
                 let branch = uuid::Uuid::new_v4().to_string();

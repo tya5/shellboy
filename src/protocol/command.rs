@@ -23,6 +23,7 @@ impl Command {
             Self::ModelList(_) => ("model.list", CommandRoute::Runtime),
             Self::ThreadList(_) => ("thread.list", CommandRoute::Database),
             Self::ThreadGet(_) => ("thread.get", CommandRoute::Database),
+            Self::ThreadBranches(_) => ("thread.branches", CommandRoute::Database),
             Self::UsageGet(_) => ("usage.get", CommandRoute::Database),
             Self::CompactList(_) => ("compact.list", CommandRoute::Database),
             Self::CompactPreview(_) => ("compact.preview", CommandRoute::Database),
@@ -98,6 +99,7 @@ impl Command {
             Self::OwnerShutdown(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::ThreadBranches(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -142,6 +144,7 @@ impl Command {
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::ThreadBranches(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -207,6 +210,7 @@ impl Command {
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::ThreadBranches(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -245,6 +249,7 @@ impl Command {
             | Self::ModelList(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
+            | Self::ThreadBranches(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)

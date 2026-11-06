@@ -188,6 +188,11 @@ pub enum ThreadCommand {
         after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or queued messages, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. Attachments whose message leaves the path are not sent."
     )]
     Rewind(ThreadRewindOptions),
+    /// Show the branch tree: Threads forked, edited or rewound from this one, and where they diverge.
+    #[command(
+        after_help = "A branch is a child Thread that shares a path prefix with its parent (fork, /edit, `thread rewind`). Read-only and bounded:\n  shellboy thread branches [--thread THREAD_ID] [--limit N] [--cursor TOKEN]\n\nItems are the Threads of the family of THREAD_ID (its topmost live ancestor and everything below), ancestors first then breadth first. Each item has: parent_thread_id, state (current, ancestor, branch), running, pruned_originals, divergence (the last node shared with the parent, its request, and whether the parent continues), tip (last request, time), size (path_nodes; bytes is null: not summed). Bounds: 256 Threads per family (family_truncated), 32 ancestors, 256 path rows searched for a last request, 160 excerpt characters, 1..=200 items per page. Open a branch with `shellboy thread get` or in the TUI (/switch ID); delete or prune it with `thread delete` / `thread prune`."
+    )]
+    Branches(ThreadBranchesOptions),
     /// Inspect deletion blockers and direct references without deleting anything.
     DeletePreview(ThreadDeleteOptions),
     Set(ThreadSetOptions),
@@ -465,6 +470,16 @@ pub struct ThreadPruneOptions {
     /// Report what would be pruned without changing anything.
     #[arg(long)]
     pub dry_run: bool,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ThreadBranchesOptions {
+    /// Target Thread; omitted means the calling Thread.
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    #[arg(long, default_value_t = wire::DEFAULT_LIST_LIMIT)]
+    pub limit: u32,
+    #[arg(long)]
+    pub cursor: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadRewindOptions {
@@ -910,6 +925,11 @@ impl Cli {
                     thread_id: a.thread_id,
                     before_node_id: a.before_node_id,
                     dry_run: a.dry_run,
+                }),
+                ThreadCommand::Branches(a) => C::ThreadBranches(wire::ThreadBranchesArgs {
+                    thread_id: a.thread_id,
+                    limit: a.limit,
+                    cursor: a.cursor,
                 }),
                 ThreadCommand::Rewind(a) => C::ThreadRewind(wire::ThreadRewindArgs {
                     thread_id: a.thread_id,

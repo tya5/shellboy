@@ -13,6 +13,7 @@ pub use list::list_nodes;
 pub(crate) mod payload;
 mod raw_witness;
 pub(crate) use node_row::NodeRow;
+pub mod branches;
 pub mod prune;
 pub(crate) mod reachability;
 pub mod rewind;

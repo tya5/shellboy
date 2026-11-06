@@ -145,6 +145,16 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::ThreadBranches,
+        &["thread", "branches"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("limit", FieldId::Limit),
+            ("cursor", FieldId::Cursor),
+        ],
+        None,
+    ),
+    (
         OperationId::ThreadRewind,
         &["thread", "rewind"],
         &[
