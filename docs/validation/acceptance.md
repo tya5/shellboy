@@ -10,6 +10,7 @@ collapsed row expands to the summary body; a page with no summary or automatic
 attempt performs no compaction read. Not verified: a real terminal, a live
 provider, live refresh of a marker when a compaction is adopted while the
 conversation is open (it appears on the next history read).
+
 ## Per-Thread auto-compaction threshold (#229)
 
 macOS ARM64 through `rust-slot`, disposable DBs and the loopback provider proxy. Store tests

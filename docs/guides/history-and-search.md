@@ -103,7 +103,7 @@ To replace a request, use `/edit USER_NODE_ID` in the TUI. It reads the full ori
 At a safe request boundary, Shellboy can compact from the latest
 provider-reported input-token count when it reaches `auto_at_tokens` (200,000
 by default; see [configuration](configuration.md), including the per-connection
-override and the `0` opt-out). Unknown or stale usage does not trigger it.
+override, the per-Thread override `thread set --auto-compact-at` and the `0` opt-out). Unknown or stale usage does not trigger it.
 Shellboy summarizes the oldest content first: it runs the ordinary summary of
 earlier Turns that are not yet summarized. Only when nothing but earlier
 summaries is left there, or when a fresh measurement after that summary is
@@ -124,7 +124,7 @@ tool results waits until the model's latest response requested no tool. If the
 context overflows before then, Shellboy summarizes the active Turn instead.
 Original history remains available subject to retention. This threshold policy
 is distinct from failure-driven overflow recovery; it adds no setting beyond
-`auto_at_tokens`.
+`auto_at_tokens` and its per-Thread override.
 
 ## Compaction and spill
 

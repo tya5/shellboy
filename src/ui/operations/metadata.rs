@@ -1283,7 +1283,7 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::AutoCompactAt => local!(
             language,
-            "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字で接続の値へ戻します。",
+            "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
             "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
         ),
         FieldId::Title => local!(

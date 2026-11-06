@@ -3535,3 +3535,7 @@ reuse existing presentation parts; the spilled count is shown only when known an
 above zero. Review follow-ups: the render stamp now covers the note and marker
 facts; a fork's inherited replacements omit the linkage keys (v3); a spill-only attempt
 shows a rejected summary and no later-input part.
+
+## D-229-1: Migration 30 is IndexOnly (2026-11-06)
+
+Decision: the nullable `thread.auto_compact_at` column is registered as `IndexOnly`. Reason: it has no foreign key and every existing row is NULL, so the integrity scan has nothing to check. Impact: upgrade skips the full check, as for migrations 25-27. Revisit if a later column gets a foreign key or a non-NULL backfill.

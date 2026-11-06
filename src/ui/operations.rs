@@ -1316,13 +1316,7 @@ impl Form {
                         connection: form.optional("connection")?,
                         model: form.optional("model")?,
                         effort: form.effort()?,
-                        auto_compact_at: form.optional("auto_compact_at")?.map(|value| {
-                            if value == "none" {
-                                String::new()
-                            } else {
-                                value
-                            }
-                        }),
+                        auto_compact_at: form.clearable("auto_compact_at")?,
                     }))
                 },
             ),
@@ -1931,14 +1925,18 @@ impl Form {
         self.optional(name)
     }
 
-    fn effort(&self) -> Result<Option<String>, String> {
-        Ok(self.optional("effort")?.map(|value| {
+    /// Optional text where `none` becomes the empty string that clears the saved value.
+    fn clearable(&self, name: &str) -> Result<Option<String>, String> {
+        Ok(self.optional(name)?.map(|value| {
             if value == "none" {
                 String::new()
             } else {
                 value
             }
         }))
+    }
+    fn effort(&self) -> Result<Option<String>, String> {
+        self.clearable("effort")
     }
     fn condition(&self) -> Result<WaitCondition, String> {
         let id = self.value("target")?.to_owned();

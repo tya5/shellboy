@@ -2112,6 +2112,7 @@ async fn thread_auto_compact_override_sets_disables_clears_and_reports_effective
     assert_eq!(initial["effective_auto_compact_at"], 200_000);
     let set = execute(&store, set_auto_compact(&thread, "50000")).await;
     assert_eq!(set.result["auto_compact_at"], 50_000);
+    assert_eq!(set.result["effective_auto_compact_at"], 50_000);
     let got = get_thread(&store, &thread).await;
     assert_eq!(
         (
@@ -2176,5 +2177,47 @@ async fn thread_auto_compact_rejects_invalid_values_like_other_thread_set_input(
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad}");
     }
     assert_eq!(get_thread(&store, &thread).await["auto_compact_at"], 7);
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_auto_compact_override_is_copied_by_fork() {
+    let (_root, store) = store().await;
+    let thread = create(&store, None).await.thread_id;
+    execute(&store, set_auto_compact(&thread, "4321")).await;
+    let source = thread.clone();
+    store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            shellboy::history::append_node(
+                &tx,
+                &source,
+                "base",
+                None,
+                "user",
+                &serde_json::json!({"role":"user","content":[{"type":"input_text","text":"base"}]}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let fork = execute(
+        &store,
+        Command::ThreadFork(ThreadForkArgs {
+            agents: None,
+            thread_id: thread.clone(),
+            node_id: "base".into(),
+            cwd: None,
+        }),
+    )
+    .await;
+    assert_eq!(fork.result["auto_compact_at"], 4321);
+    // Later changes to the source do not reach the fork.
+    execute(&store, set_auto_compact(&thread, "")).await;
+    let fork_id = fork.result["thread_id"].as_str().unwrap();
+    assert_eq!(get_thread(&store, fork_id).await["auto_compact_at"], 4321);
     store.database.shutdown().await.unwrap();
 }

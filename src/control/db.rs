@@ -1341,7 +1341,18 @@ impl Store {
                 )?)
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
-            Command::ThreadSet(args) => self.set_thread(tx, args, caller, now),
+            Command::ThreadSet(args) => {
+                let mut result = self.set_thread(tx, args, caller, now)?;
+                if let Some(thread) = result.changed_threads.first() {
+                    let details = thread_details(tx, thread)?;
+                    result.result["effective_auto_compact_at"] =
+                        serde_json::json!(self.config.compaction.auto_at_tokens_for(
+                            details.auto_compact_at,
+                            self.config.connections.get(&details.connection),
+                        ));
+                }
+                Ok(result)
+            }
             Command::ThreadDelete(args) => {
                 let result = delete_thread(tx, args, now);
                 if result.is_ok() {
