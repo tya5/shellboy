@@ -279,6 +279,11 @@ pub enum IndexCommand {
 pub enum StorageCommand {
     /// Check SQLite integrity and foreign keys while the owner is stopped.
     Check,
+    /// Shrink shellboy.db by rewriting it (owner stopped; explicit only). Reports sizes first.
+    #[command(
+        after_help = "Run with the owner stopped; refused while an owner holds the data directory.\n  shellboy storage vacuum --dry-run\n  shellboy storage vacuum\n\nReports reclaimable bytes (freelist pages x page size), file/WAL sizes and the free space VACUUM needs, and refuses if the filesystem lacks it. Never runs automatically. Run after `thread prune` and `storage collect --category history`."
+    )]
+    Vacuum(VacuumOptions),
     Status(StorageOptions),
     Collect(StorageOptions),
 }
@@ -759,6 +764,12 @@ impl ValueEnum for wire::StorageCategory {
     }
 }
 #[derive(Debug, Clone, Args)]
+pub struct VacuumOptions {
+    /// Report sizes and required space without changing anything.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+#[derive(Debug, Clone, Args)]
 pub struct StorageOptions {
     /// Category for collection; status always reports all categories.
     #[arg(long, value_enum)]
@@ -1090,6 +1101,9 @@ impl Cli {
             CliCommand::Storage { command } => match command {
                 StorageCommand::Check => {
                     return Err(invalid("storage check is a standalone command"));
+                }
+                StorageCommand::Vacuum(_) => {
+                    return Err(invalid("storage vacuum is a standalone command"));
                 }
                 StorageCommand::Status(a) => C::StorageStatus(a.into()),
                 StorageCommand::Collect(a) => C::StorageCollect(a.into()),

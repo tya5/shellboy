@@ -750,6 +750,38 @@ async fn storage_check_offline_checks_and_refuses_live_owner() {
     assert!(String::from_utf8_lossy(&output.stdout).contains("quick_check"));
 }
 
+#[tokio::test]
+async fn storage_vacuum_cli_previews_runs_and_refuses_live_owner() {
+    let root = tempfile::tempdir().unwrap();
+    let db = shellboy::storage::DbWorker::open(root.path().join("shellboy.db"))
+        .await
+        .unwrap();
+    db.shutdown().await.unwrap();
+    let run = |extra: &[&str]| {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+            .arg("--data-dir")
+            .arg(root.path())
+            .args(["storage", "vacuum"])
+            .args(extra)
+            .output()
+            .unwrap();
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        (output.status.success(), value)
+    };
+    let (ok, preview) = run(&["--dry-run"]);
+    assert!(ok, "{preview}");
+    assert_eq!(preview["result"]["dry_run"], true);
+    assert_eq!(preview["result"]["sufficient_space"], true);
+    let (ok, done) = run(&[]);
+    assert!(ok, "{done}");
+    assert_eq!(done["result"]["quick_check"], "ok");
+    let lock = shellboy::app::OwnerLock::acquire(root.path()).unwrap();
+    let (ok, refused) = run(&[]);
+    assert!(!ok);
+    assert_eq!(refused["error"]["code"], "invalid_state");
+    drop(lock);
+}
+
 #[cfg(unix)]
 #[test]
 fn width_cache_fake_terminal_benchmark() {

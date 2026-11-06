@@ -188,6 +188,7 @@ fn main() -> ExitCode {
                     | CliCommand::Startup(_)
                     | CliCommand::Storage {
                         command: shellboy::cli::StorageCommand::Check
+                            | shellboy::cli::StorageCommand::Vacuum(_)
                     }
                     | CliCommand::Rag(_)
                     | CliCommand::Config { .. }
@@ -292,6 +293,22 @@ fn main() -> ExitCode {
             match result {
                 Ok(()) => standalone_response(
                     serde_json::json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"ok":true,"result":{"quick_check":"ok","foreign_key_check":"ok"}}),
+                ),
+                Err(error) => print_error(error, None),
+            }
+        }
+        Some(CliCommand::Storage {
+            command: shellboy::cli::StorageCommand::Vacuum(options),
+        }) => {
+            let result = shellboy::storage::vacuum(
+                cli.config.as_deref(),
+                cli.data_dir.as_deref(),
+                &cwd,
+                options.dry_run,
+            );
+            match result {
+                Ok(result) => standalone_response(
+                    serde_json::json!({"protocol_version":shellboy::protocol::PROTOCOL_VERSION,"ok":true,"result":result}),
                 ),
                 Err(error) => print_error(error, None),
             }

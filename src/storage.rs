@@ -54,6 +54,8 @@ pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
 mod migrate;
 mod migration_integrity;
+mod vacuum;
+pub use vacuum::vacuum;
 #[cfg(test)]
 #[path = "storage/migration_startup_tests.rs"]
 mod migration_startup_tests;
