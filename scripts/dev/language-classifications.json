@@ -2277,497 +2277,497 @@
   "src/ui/operations.rs:f2d90a0be0cb1b6e:2": {
     "category": "a",
     "reason": "Re-reviewed after reply field addition: Ja conversation-ID label remains localized by the existing English field-label fallback; command values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b79385f22361b83b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3ff87e519d11d515:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:8672d3f7bb7ca9c9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:f60497f9a47573ac:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fe71c0645a08bdf:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:848a6e6c4a25eaf1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:c88455f47d5d3b39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:5bd32228272813a9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:92ecdf93e14a9de0:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:d71c4bafc5bb91e9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:62c47e8cf86515f2:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:5bd32228272813a9:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:9aa71ceffbf6fb2f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:5bd32228272813a9:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b836c49e526602f2:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:a62c2328334e53b1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:ca405fd0acebed63:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:420a6f8c410ffee5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:7623e1171cfbf221:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:31e0c346273bb2da:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b783e6e5958a219a:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:714c3a350162d715:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:52898e69a76a2a74:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:0e87088ce14c9e4c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:e71ad616b568f81d:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:69ba911ca69acf5b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:87e017068d1b26e3:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:c31df2c0f63b9037:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:6db0f20b809f67b5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:fa1a79578fac9214:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:90b3e9ee029cd19b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:6b8a86b275545086:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:8bcc510d40a805ff:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:9f1f211b4526f034:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:83a89ad6efba19d1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:bd9032bc125a2890:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:e5c29ad48e3b7b62:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:4ef15c8c112f06f6:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3b3d325079d81adf:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b3711c0f0ee0ac2a:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:069e23a42d290b1e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:94897a84832ffe3b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:94897a84832ffe3b:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:4862d75be34d3cf1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:4eee69fe31c36862:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:7e7f8e884af4fe39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b4c1b3d5062b568f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:42204d3800ce3b29:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:5ce83451d9727162:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b3461cc4ef1e99e7:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:6c6b672abcc787e4:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:0c34fd3e3f28f63e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:cc424470d0e69488:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b1accee036e69ade:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:256b55ca71e73beb:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:518a6ffa3c126190:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:5": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:8e4fe1bb32a3ac70:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:438f56e0f9f6230b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:2bd629b280ab1812:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:dbdc5bc7bc50568f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:77c1f34500462ca3:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:256b55ca71e73beb:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:f2872a7fcec2f195:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:e136c67b45b46c29:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:647167466551298e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:6201e742cf268a24:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:c15ec877e4d704a9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:f4ef0893dd833538:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:2e70e191b3c15d51:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:ad21d3da778e60e5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:de9ac2554289ad16:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:de9ac2554289ad16:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3e74041ef65012b5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3e74041ef65012b5:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:1364fa9713f89b10:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:467da2df0c93bc50:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:6": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3ff87e519d11d515:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:fa1a79578fac9214:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:a71af27fe55add77:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:90b559183763cb55:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:b41693c5e3b3d37f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:d0d847b052ac3b50:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:78bbaa0ec69fbc39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:7": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:5": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:80aab534242d8deb:1": {
     "category": "a",
@@ -2777,7 +2777,7 @@
   "src/ui/operations.rs:80aab534242d8deb:2": {
     "category": "a",
     "reason": "Re-reviewed after the #194 rebase onto 226c4f6d: this Japanese end-message-only form label remains UI-only; English uses the catalog translation or english_field_label fallback. Reply form additions do not change command field values.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/presentation/time_text.rs:2721e3380759d54f:1": {
     "category": "a",
@@ -2847,812 +2847,812 @@
   "src/operations.rs:2ca7b2b0e9072452:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:6268cb3c4a0e8c8a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:308f9d956e64cb0f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:39463bddd9452675:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:830a8bddf1045300:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:68ec90d8a318e2b5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:208064662ac7fde1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:26444df5c6acbc81:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:92ecdf93e14a9de0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a5e13f567865de52:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:62c47e8cf86515f2:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:2f8598717c2c5015:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f2d90a0be0cb1b6e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:ab3d0ad7d1b9fcb4:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:5236ccf7f04636f3:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:87c14930dfc9d23f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f09d90347f9ac33d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:8ed3f8ea85e3dbd1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:191c5d9c2c541079:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:dcc925877c6df3cb:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:5b6b07b43606eb80:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a4376bc3d5f336e0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:db41b2796c7654e5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:e2587d26c5b56f82:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:74a6e02c28e6a435:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c94a91c456072ce6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a868d91224b5f8c0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:ee121cfa8f68d3fe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3734ba767a637097:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:8ec78d7e19c5c515:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:9c9aa31a2b7b33b7:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:2bd4e6bcf82a65dc:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:df1c7214386546c9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:bacc1dc0f1f3d606:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:b8a13df1214a9cbe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:e8e2dc7fb750d09b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c83072149275189b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:43fe4393c0ebe7ab:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:cbf2bcffa67a1d45:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:005be91594c10a37:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3d842a69813afdbe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:b66574ec3998cd1e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a4cdf9ed33f1b835:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3da589190fad551d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:07f24ce083d81ee3:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:de38ee0726961ad4:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a475fecf7f41375d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a5b57841657361f8:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a2f9e6c6ccc3dabe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:7e464f8de645c71c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:2e0909285e917648:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:16bc001d7faa075c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:5c9c0f9ad0bd562e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:723cea93d32a8d5a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:95eab813e69c2469:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:da1cf1636b2c1d2e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:db014f6ac53ea5a3:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:02c15a8fec47f26d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:0eced3de1163323a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:038f30417243513d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f5d26076757d5a58:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:8041ac91e7ff5519:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:299832780ee089de:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a949c0dfd6a012ba:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:d257a777787de74c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:00cc7d7694e70a48:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:fa1a79578fac9214:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:5e280081bd39120e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:4b1bf6fd83b8a252:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:9293c0b91521e4ba:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c6c27a0c87dd8a20:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:ea7839e70a857e29:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f533da03afc76357:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:11178cb87a9ca820:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:2a6de0301866c453:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:279a1d187dd2a47e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:047f07bfe6c89146:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:08c09df8c004211e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:2095c074d1e61afe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:d9049136ba7fa459:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:017a042a833c1ca1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:d4c416b5db021214:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:256b55ca71e73beb:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:bed86f2f907388b4:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:80aab534242d8deb:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:ca8271e34e61455e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:48b83c001d465485:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c4632371b2701cb8:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c7c260f67f28c265:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:4b7734d57c8db044:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:eac2f241fafd53fb:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f6edc570b14b83bc:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a528de966b577e25:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:1e7c65280dc2df6d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:5bd32228272813a9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c7fab44478c84df7:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:7e00123570fc8fce:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:b44fc2661435f52f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:8e1bf81016432f27:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:daa919250a23c66d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:647167466551298e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:de770bc6cf478cab:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a06eb36ace9e1a49:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:e7bc9b8376e7f2e3:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:6201e742cf268a24:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:9adb4236b4ffe631:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c15ec877e4d704a9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a063a6a350b6c66c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f4ef0893dd833538:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:12005216f0cc0d3e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:2e70e191b3c15d51:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:9b48d49caf053bc5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:ad21d3da778e60e5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:ebeb182260103e51:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:93c25bdeb2c9dfeb:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:035a5dc07d13b112:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:bb9bfcc22799d939:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a917238be7b5f5fe:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:03a8dd0be2238962:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:36efdd0f2c2f08c0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:7fbe1c4ee6f3a434:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:1319f576f6e5d73e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:8879e836666e7919:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3c129b550a7693c2:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:87144fc5da852bde:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:419558eda6e2a4e6:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3cc10196a83ae223:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:cf2d69d6ec3d2b11:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:b24da370241aa208:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:cebf45cb6cb4f2a5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:139e8085485d865e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:36e4b66d5fea8749:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a016020a2780e043:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c567c210ee540bd1:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:e7cad39b98070e61:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f3aa85adf8778b0c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a4bf20d49d9cbb39:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:4088960a3701cb1a:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:a22cba256e3ad9b9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:24e82f521aabe34b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:8187450863644dc4:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:192d4bbe942983af:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f56c9223c866e6f5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:22a868bc68479cc3:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:cf1ec5eede624363:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:60761d48a08ff810:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c976f6e20e51fd1c:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:6c4e3d7cf4b621de:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f2be83ce4b52524e:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f38f3dc4e92baf1f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:806125445b405d69:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:92517f3f96168ec9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:fb97589f06f5acfb:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:6a39ca2c5f60b0e0:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3c2a2bf84631911d:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f5b506a40d9e7265:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:404e6daebb334da9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:3cb930a39c0fb93f:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:74a45f0d0f521d85:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:b63963cfb14c1321:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c210d371bee47f36:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:c2ec18c7cbe471d9:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:36940b6028fa3039:1": {
     "category": "a",
@@ -6307,7 +6307,7 @@
   "src/ui/operations.rs:c6c27a0c87dd8a20:1": {
     "category": "a",
     "reason": "Japanese source label for FieldId::ExpectReply; metadata::field_label_for selects English Expect a reply in English UI. CLI field name/value is preserved.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/presentation.rs:ad4a1d6eef0954dc:1": {
     "category": "a",
@@ -6855,12 +6855,12 @@
   "src/operations.rs:d64458c280168e4b:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:0e90aa354ca4c428:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/presentation/fields.rs:7436eeafe86f5a4e:1": {
     "category": "a",
@@ -6870,17 +6870,17 @@
   "src/ui/operations.rs:d64458c280168e4b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/operations.rs:98e384433a277ef5:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:38fcdd98792a6243:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/operations.rs:f9b03f26f7ebb13c:1": {
     "category": "a",
@@ -6895,26 +6895,26 @@
   "src/ui/operations.rs:a0a6d7143c6d3cf9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
   },
   "src/operations.rs:6717cd0cc0335f44:1": {
     "category": "a",
     "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
-  },
-  "src/operations.rs:19c49573dedafdb9:1": {
-    "category": "a",
-    "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
-    "source_tokens_sha256": "84e051dc06d6f147e92d0a7d31e26b044c9e5a799c90a4a9cf83c286339a02e4"
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   },
   "src/ui/operations.rs:d948f8c126dca97a:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
-    "source_tokens_sha256": "b4b67b82ebea8a856cb7ee06665b39a94665a666ac979260475ee3c358a7b56a"
+    "source_tokens_sha256": "c6a93a10072a7ba033641032ab6b89db3e0f5b0b98776bcdece50c1b8c4c7e2b"
+  },
+  "src/operations.rs:89c8f33e913bd0e6:1": {
+    "category": "a",
+    "reason": "Japanese is the intentional TUI operation-catalogue source, not model input. Labels and meanings render through src/ui/operations.rs::catalogue_label/catalogue_meaning -> src/ui/operations/metadata.rs::text_for; field labels/help use text_for with field_label_for/field_help_for; global options use global_argument_text. The owner decision and consumer audit are recorded in docs/development/decisions.md.",
+    "source_tokens_sha256": "8ef19dceafcb23a092e19cb5bd804bc29b3a93f22460eef5eb70684d0ce66092"
   }
 }
