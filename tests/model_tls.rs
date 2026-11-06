@@ -238,7 +238,9 @@ async fn tls_opt_out_covers_model_catalog_and_embeddings_without_leaking_to_othe
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(embedding.vectors, [vec![0.25, 0.75]]);
+    let n = (0.25_f64 * 0.25 + 0.75 * 0.75).sqrt();
+    assert!((f64::from(embedding.vectors[0][0]) - 0.25 / n).abs() < 1e-6);
+    assert!((f64::from(embedding.vectors[0][1]) - 0.75 / n).abs() < 1e-6);
     assert_eq!(embedding.dimension, 2);
     assert_eq!(fixture.requests.load(Ordering::SeqCst), 2);
     let fresh = fixture.client(None);

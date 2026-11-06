@@ -3669,3 +3669,17 @@ dumps every table except the executor's own request journal (`operation_receipt`
 (`root_revision`), edges and thread revisions. The undo offer ends at the next
 submission in the Thread, when its selection revision moves beyond the rewind's own
 +1, or when the Thread is left; Alt+U also needs an empty draft.
+
+## Unit-length embeddings at the provider boundary (#250)
+
+Decision: every embedding returned by the provider is scaled to unit L2 length in the
+model HTTP client (`unit_normalized`), the one place all embeddings pass through (index
+ingestion, probe, rebuild candidates, history/RAG queries, exact L2 fallback). No model
+name is consulted. Zero-length or non-finite vectors fail as a protocol error. Why:
+Gemini `gemini-embedding-001` returns normalized vectors only at 3,072 dimensions;
+reducing dimensions for #240 yields unnormalized vectors, and sqlite-vec L2 ranking then
+tracks vector length rather than meaning. Impact: already-unit vectors are unchanged
+within float tolerance, so existing 3,072-dimension spaces need no rebuild; reduced-
+dimension spaces built earlier stay unnormalized until rebuilt. The pre-normalization
+length is not recorded (optional in the issue; no consumer). Recheck when: a provider
+needs dot/cosine-specific semantics or a vector arrives from a path other than the HTTP client.

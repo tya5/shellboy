@@ -251,7 +251,10 @@ async fn same_snapshot_has_same_unicode_bounded_batches_and_fewer_requests() {
         for (source,encoded) in rows {
             let expected=match source.as_str(){"seed"=>('猫',1),"one"=>('猫',2),"two"=>('犬',2),"three"=>('鳥',2),"four"=>('魚',2),_=>panic!("unexpected source")};
             let vector:Vec<f32>=serde_json::from_str(&encoded).unwrap();
-            assert_eq!(vector,vec![expected.0 as u32 as f32,expected.1 as f32],"batch indices must retain source ownership");
+            // Stored vectors are unit-length (#250); the direction still identifies the source.
+            let (a,b)=(expected.0 as u32 as f64,expected.1 as f64);
+            let norm=(a*a+b*b).sqrt();
+            assert!((f64::from(vector[0])-a/norm).abs()<1e-6&&(f64::from(vector[1])-b/norm).abs()<1e-6,"batch indices must retain source ownership: {vector:?}");
         }
         Ok(())
     }).await.unwrap();

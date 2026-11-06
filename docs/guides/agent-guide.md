@@ -314,6 +314,8 @@ Treat an index pause notice as a historical stop record. Inspect `shellboy index
 
 For a requested dimension change, inspect status first and explain possible quality loss, candidate/active coexistence and charges. `vector_payload_bytes` is float32 vector payload (`segments × dimension × 4`), not physical SQLite/WAL size or guaranteed reclaimable bytes. Only after explicit consent may you use `shellboy index probe --dimensions N` (one potentially charged request) or a scoped `shellboy index rebuild ... --dimensions N` following its scope preview. Dimension support must not be guessed from a model alias; a failed probe/rebuild does not authorize trying alternatives. Probe observations are not a permanent capability catalogue. See [Index management](history-and-search.md#index-management-and-cost-previews).
 
+Shellboy scales every provider embedding (index and query) to unit L2 length before storing or comparing it, for all models, so a reduced dimension ranks consistently. Run `shellboy index probe --dimensions N` first, then the scoped `index rebuild --dimensions N`, only with the user's consent to cost, and compare search quality before relying on the new space; spaces built unnormalized at a reduced dimension need that rebuild.
+
 
 ### Receipt retention and expiry
 

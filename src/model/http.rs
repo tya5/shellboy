@@ -696,7 +696,7 @@ impl HttpModelClient {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            vectors[index] = Some(vector);
+            vectors[index] = Some(unit_normalized(vector)?);
         }
         Ok(EmbeddingResponse {
             vectors: vectors
@@ -707,6 +707,33 @@ impl HttpModelClient {
             usage: raw.get("usage").cloned(),
         })
     }
+}
+/// Scale a provider embedding to unit L2 length (#250). This is the single
+/// point every embedding passes through (index ingestion, probe, rebuild,
+/// query, RAG), so stored and query vectors are comparable by L2 for every
+/// model and dimension. Zero or overflowing length is a protocol failure.
+pub(crate) fn unit_normalized(mut vector: Vec<f32>) -> Result<Vec<f32>, ModelError> {
+    let norm = vector
+        .iter()
+        .map(|v| f64::from(*v) * f64::from(*v))
+        .sum::<f64>()
+        .sqrt();
+    if !norm.is_finite() || norm <= 0.0 {
+        return Err(ModelError::new(
+            "protocol",
+            "Embedding has zero or non-finite length",
+        ));
+    }
+    for v in &mut vector {
+        *v = (f64::from(*v) / norm) as f32;
+    }
+    if vector.iter().any(|v| !v.is_finite()) {
+        return Err(ModelError::new(
+            "protocol",
+            "Embedding has zero or non-finite length",
+        ));
+    }
+    Ok(vector)
 }
 fn validate_embedding_input(
     model: &str,
@@ -876,5 +903,60 @@ mod pool_generation_tests {
         let (_, still_new, unknown) = client.snapshot_pool().await.unwrap();
         assert_eq!(still_new, new);
         assert_eq!(unknown, ConnectionReuse::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod unit_normalization_tests {
+    use super::unit_normalized;
+
+    fn length(v: &[f32]) -> f64 {
+        v.iter().map(|x| f64::from(*x).powi(2)).sum::<f64>().sqrt()
+    }
+    fn l2(a: &[f32], b: &[f32]) -> f64 {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| (f64::from(*x) - f64::from(*y)).powi(2))
+            .sum::<f64>()
+            .sqrt()
+    }
+
+    #[test]
+    fn result_has_unit_length_and_is_idempotent() {
+        let once = unit_normalized(vec![3.0, 4.0, 12.0]).unwrap();
+        assert!((length(&once) - 1.0).abs() < 1e-6);
+        let twice = unit_normalized(once.clone()).unwrap();
+        for (a, b) in once.iter().zip(&twice) {
+            assert!((a - b).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn already_unit_vector_is_unchanged_within_float_tolerance() {
+        let unit = vec![0.6_f32, 0.0, -0.8];
+        let out = unit_normalized(unit.clone()).unwrap();
+        assert!(l2(&unit, &out) < 1e-6);
+    }
+
+    #[test]
+    fn zero_and_overflowing_vectors_fail() {
+        assert!(unit_normalized(vec![0.0, 0.0]).is_err());
+        assert!(unit_normalized(vec![f32::NAN, 1.0]).is_err());
+        assert!(unit_normalized(vec![f32::INFINITY, 1.0]).is_err());
+    }
+
+    #[test]
+    fn ranking_is_invariant_to_vector_length() {
+        let query = unit_normalized(vec![1.0, 0.2, 0.0]).unwrap();
+        let near = vec![1.0_f32, 0.1, 0.0];
+        let far = vec![0.0_f32, 1.0, 1.0];
+        // Raw L2 prefers the short `far` vector once `near` is scaled up.
+        let big_near: Vec<f32> = near.iter().map(|v| v * 50.0).collect();
+        assert!(l2(&query, &far) < l2(&query, &big_near));
+        let rank = |a: Vec<f32>, b: Vec<f32>| {
+            l2(&query, &unit_normalized(a).unwrap()) < l2(&query, &unit_normalized(b).unwrap())
+        };
+        assert!(rank(near.clone(), far.clone()));
+        assert!(rank(big_near, far.iter().map(|v| v * 0.01).collect()));
     }
 }

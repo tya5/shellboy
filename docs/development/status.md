@@ -1,5 +1,9 @@
 # Development status
 
+## Unit-length embeddings (#250; on branch issue-250/normalize-embeddings, CI pending)
+
+All provider embeddings are normalized to unit L2 length in the model HTTP client before storage or comparison. Synthetic-vector tests only; no real API. Docs: search design, history guide, agent guide, decisions. Resume: check CI on the branch tip.
+
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
 
 The owner now answers a decodable request with an unknown command, unknown

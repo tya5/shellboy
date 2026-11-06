@@ -16,6 +16,8 @@ Thread条件は「そのThreadが現在採用するpathと、そこからcomplet
 
 filterを満たす集合を順位付けの対象にする。全体の上位だけを取ってからfilterして、実際には存在する一致を取り逃がす実装にはしない。固定sqlite-vecの能力を実測し、索引形式を複製しない。DB workerで有限の結果を返し、候補の本文／ベクトル全件をRustへ載せない。候補chunk IDの配列とwitness検証cacheは候補数に比例する。sqlite-vec 0.1.9のrowid INによって適格集合へ絞ってからL2 KNNを実行する。vec0は1回のscanが全chunkを読むため(#240)、scanは`min(適格数, 4096)`件の1回だけにする。node単位にまとめるため、従来のk=limit*8から倍々に拡大する段階(最大4096)をその順序付き行の先頭から再現し、各nodeのspanは`limit`個のnodeが揃った段階までの行だけから作る(結果は従来のscanし直しと同一。ただし距離が完全に等しい行の順序は従来と同じく保証しない)。hit組み立て(provenance/thread_scope)は最終的に返すnodeだけで行う。それでも同一nodeのchunkで埋まる場合だけ、適格集合内の正確なL2走査へ切り替える。候補metadata走査はO(chunks)、fallbackはO(chunks×dimension)になり得る。
 
+
+
 distanceは利用中の索引spaceのL2距離で、小さいほど近い。確率や正答率ではなく、異なるembedding model／space間では比較しない。閾値指定は今回導入しない。filterはquery embeddingを生成する前にすべて適用するという意味ではなく、DB内のベクトル順位付け前に適用する。
 
 ## provenanceと区間

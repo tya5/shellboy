@@ -383,7 +383,7 @@ async fn embeddings_are_sorted_validated_and_dimension_is_finite() {
         )
         .await
         .unwrap();
-    assert_eq!(result.vectors, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+    assert_unit_vectors(&result.vectors, &[vec![1.0, 2.0], vec![3.0, 4.0]]);
     assert_eq!(result.dimension, 2);
     let request = request.await.unwrap();
     assert!(request.head.starts_with("POST /v1/embeddings HTTP/1.1"));
@@ -481,7 +481,7 @@ async fn requested_embedding_dimension_is_sent_and_validated_without_fallback() 
             json!({"model":"embed","input":["one"],"encoding_format":"float","dimensions":2})
         );
         if succeeds {
-            assert_eq!(result.unwrap().vectors, vec![vec![1.0, 1.0]]);
+            assert_unit_vectors(&result.unwrap().vectors, &[vec![1.0, 1.0]]);
         } else {
             let error = result.unwrap_err();
             assert_eq!(error.kind, "dimension_mismatch");
@@ -510,7 +510,7 @@ async fn requested_embedding_dimension_is_sent_and_validated_without_fallback() 
         )
         .await
         .unwrap();
-    assert_eq!(result.vectors, vec![vec![1.0, 2.0], vec![3.0, 4.0]]);
+    assert_unit_vectors(&result.vectors, &[vec![1.0, 2.0], vec![3.0, 4.0]]);
     let request = request.await.unwrap();
     assert_eq!(request.body["dimensions"], 2);
     assert_eq!(request.body["input"], json!(["one", "two"]));
@@ -1694,4 +1694,34 @@ async fn context_role_user_sends_inserted_context_as_user_and_default_is_unchang
         assert_eq!(user[0], developer[0]);
         assert_eq!(user[1], developer[1]);
     }
+}
+
+/// Each returned vector is the provider vector scaled to unit L2 length (#250).
+fn assert_unit_vectors(actual: &[Vec<f32>], raw: &[Vec<f32>]) {
+    assert_eq!(actual.len(), raw.len());
+    for (a, r) in actual.iter().zip(raw) {
+        let norm = r.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>().sqrt();
+        let length = a.iter().map(|v| f64::from(*v).powi(2)).sum::<f64>().sqrt();
+        assert!((length - 1.0).abs() < 1e-6, "{a:?}");
+        for (x, y) in a.iter().zip(r) {
+            assert!((f64::from(*x) - f64::from(*y) / norm).abs() < 1e-6);
+        }
+    }
+}
+
+#[tokio::test]
+async fn zero_length_embedding_is_rejected_not_silently_fixed() {
+    let raw = json!({"data":[{"index":0,"embedding":[0.0,0.0]}]});
+    let (client, _request, _server) = fake(
+        200,
+        "application/json",
+        serde_json::to_vec(&raw).unwrap(),
+        5,
+    )
+    .await;
+    let error = client
+        .embeddings("embed", &["a".into()], None, None, CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind, "protocol");
 }
