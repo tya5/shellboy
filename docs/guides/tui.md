@@ -71,7 +71,7 @@ refresh/subscription.
 
 ## Activity display
 
-Immediately after sending, local `送信受付中` (accepting submission) shows the frozen input. Once committed, one DB snapshot supplies both selected history and saved `反映待ち` (pending) rows above the composer. Saved input appears in one of these projections, never both. Pending rows include CLI/other-conversation senders and distinguish held/uncertain input and immediate delivery. `/queue` opens the full bounded list (128 rows, overflow count); Enter inspects delivery facts, O opens the original, D cancels one selected ID, and A confirms cancellation of only the displayed IDs. New arrivals are excluded from an existing confirmation. Unknown historical admission is not automatically replayed.
+Immediately after sending, local `送信受付中` (accepting submission) shows the frozen input. Once committed, one DB snapshot supplies both selected history and saved `反映待ち` (pending) rows above the composer. Saved input appears in one of these projections, never both. Pending rows include CLI/other-conversation senders and distinguish held/uncertain input and immediate delivery. `/queue` opens the full bounded list (128 rows, overflow count); Enter inspects delivery facts, O opens the original, D cancels one selected ID and A cancels only the displayed IDs, both at once with no Y step (see [Cancelling queued input](#cancelling-queued-input)); new arrivals are never included. Unknown historical admission is not automatically replayed.
 
 The configured send key queues normally at the next boundary. Ctrl+Enter sends immediately unless it is already configured as ordinary send; Ctrl+X then Ctrl+S is always the immediate-delivery chord while the composer owns input. Immediate delivery releases a foreground shell wait and preserves its process; it does not interrupt response generation. Esc first closes popups, completions and selection; in the bare conversation it interrupts the exact observed Turn. Background shells and owned children continue. Ctrl+C or `/stop` stops the whole Run and its owned work. No automatic background timeout is enabled.
 
@@ -358,6 +358,7 @@ Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn
 | Index management | Lowercase `s` status, `p` cost preview, `b` backfill, `t` retry, `r` rebuild; target and preview required before execution |
 | Conversation deletion confirmation | D/Space toggles descendants and requeries; Y executes when allowed; N/Esc cancel |
 | Action confirmation | Y confirms; N/Esc cancel |
+| Queued input (`/queue`, held rows) | D / A cancel at once; the status line reports the outcome and `/restore list` holds the text |
 | Shutdown grace exceeded | W/Enter wait; F force confirmation, then Y force quit |
 
 ### Typed operation forms
@@ -456,7 +457,7 @@ In `/threads` List mode, select a saved conversation and press Delete or Ctrl+D 
 
 Ctrl+A in List mode archives the selected conversation together with its descendants: they leave the list but nothing is deleted, history, search and usage are unchanged, and a Run in progress keeps running. A notice reports how many conversations were archived. Ctrl+G opens the archived list (titled `Archived conversations`), where Ctrl+A unarchives the selection and its descendants; Ctrl+G returns. A new Run on an archived conversation returns it to the list. Watch is not filtered by archive state: an archived conversation with live work still appears there. Unsent drafts cannot be archived. Selections over 256 conversations are refused. The `shellboy thread archive` commands do the same from a shell with explicit IDs.
 
-Deleting child conversations is off by default. Toggling D/Space requeries impact. Only Y with the latest impact permitting deletion executes; N/Esc cancel. Reasons explain live/stopping Run blockers and similar restrictions. State is checked again during execution even after confirmation, and failures remain in the list.
+Deleting child conversations is off by default. Toggling D/Space requeries impact. Only Y with the latest impact permitting deletion executes; N/Esc cancel. Activity in other conversations never disables Y or discards the open review: the counts and `Reviewed at` time are as of the preview, and the owner checks the target set and live Runs again when Y writes. A truly stale target (changed set, or a Run that started) is refused with the reason on screen; a changed set re-previews and needs a new Y, and a live Run leaves Y disabled until you stop it and review again. Reasons explain live/stopping Run blockers and similar restrictions. State is checked again during execution even after confirmation, and failures remain in the list.
 
 Deleting a background conversation selects an adjacent list row while leaving the open conversation intact. Deleting the open one discards its TUI draft state and moves to a new draft. This does not collectively delete shared source history or external attachment files; history reclamation follows existing GC. Unsaved draft rows are not handled by Thread deletion.
 
@@ -715,7 +716,11 @@ A focused row uses reverse video and bold without a caret, even without colors.
 Held marks use saved sender/completion facts: person `›`, external CLI/unknown
 `⇥`, model `↳`, completion-scheduled `↻`. State and hold reason appear on the
 right; time is omitted before the reason is shortened. Space opens a saved
-original, F6/Enter requests status, and `d` / `a` confirms cancellation of the
-selected / actually displayed saved IDs. Submitting local drafts have bounded
+original, F6/Enter requests status, and `d` / `a` cancels the
+selected / actually displayed saved IDs immediately (no confirmation). Submitting local drafts have bounded
 excerpts and no invented saved cancellation ID. `/queue`, `/replies` and draft
 restore remain available for the wider saved-input and reply workflows.
+
+## Cancelling queued input
+
+In `/queue` and the held rows above the composer, D (selected) and A (displayed IDs) cancel immediately; there is no Y step. A mis-key is recoverable: each cancelled input is archived, the status line reports the outcome per message ("Saved in /restore list"), and `/restore list` / `/restore draft ID` bring the text back (an empty composer also receives it automatically). A reply duty is not restored: if the cancelled input asked for a reply (`ReplyCancelled`), the sender's duty is cancelled and restoring the text does not recreate it; send a new request instead. Input the model already admitted is not cancelled (`すでに会話へ反映済み`).

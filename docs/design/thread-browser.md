@@ -182,6 +182,21 @@ cannot enable Y. `preview_stale` leaves every Thread visible, requests a new
 preview with a new request fence, and requires another explicit Y. Closing the
 dialog never causes a mutation retry. CLI omission remains supported by Core.
 
+### No staleness fence in the UI (#257)
+
+Changed events from any Thread no longer invalidate an open deletion or index
+confirmation (personal use; the fence did not protect anything the owner does not
+check). `ConfirmationSourcesChanged`, `Confirmation::StaleIndex`,
+`IndexPreviewState::Stale`, `Phase::Stale` and the frontend `confirmation_revision`
+are removed. An already computed preview stays on screen; the dialog's existing
+`Reviewed at` line states when its counts were taken. The one-shot `accepted_index` /
+`accepted_deletion` fence stays (a Y needs the preview that this request id
+follows) and is cleared only by a new preview or its use, not by `Changed`. The
+owner remains the guard: the marker comparison and live/stopping Run check in
+the delete transaction refuse a truly stale delete, and the dialog shows the
+reason (`preview_stale` re-previews; a live Run leaves Y disabled with the
+reason).
+
 ## アーカイブ（Issue #222 段階1）
 
 一覧（List）は既定でアーカイブ済みThreadを隠す。取得は`thread.list`の`archived`（exclude既定、include、only）で、cursorは`archived`ごとのscope文字列に結び付き、別modeへ持ち越せない。TUIはexcludeとonlyだけを使う。

@@ -41,7 +41,6 @@ pub(super) enum IndexPreviewState {
     Idle,
     Loading(IndexArgs),
     Ready(IndexArgs, String),
-    Stale(IndexArgs, String),
     Failed(IndexArgs, String),
     Hint(String),
 }
@@ -694,31 +693,6 @@ impl ManagementPopup {
         self.active_preview_attempt = None;
         self.ready_preview_attempt = None;
     }
-    pub(super) fn invalidate_index_preview(&mut self) {
-        self.active_preview_attempt = None;
-        self.ready_preview_attempt = None;
-        self.pending = None;
-        self.preview = match std::mem::take(&mut self.preview) {
-            IndexPreviewState::Ready(args, text) => IndexPreviewState::Stale(args, text),
-            IndexPreviewState::Loading(args) => {
-                let text = self
-                    .retained_preview
-                    .as_ref()
-                    .filter(|(previous, _)| previous == &args)
-                    .map(|(_, text)| text.clone())
-                    .unwrap_or_else(|| {
-                        local!(
-                            self.language,
-                            "取得中の確認は無効になりました",
-                            "The pending preview was invalidated"
-                        )
-                        .into()
-                    });
-                IndexPreviewState::Stale(args, text)
-            }
-            other => other,
-        };
-    }
     fn matches_preview(&self, args: &IndexArgs) -> bool {
         self.mode == ManagementMode::Index
             && self
@@ -800,22 +774,6 @@ impl ManagementPopup {
                         self.language,
                         "再試行preview | 取得済み",
                         "Retry preview | Captured"
-                    )
-                },
-                text.as_str(),
-            ),
-            IndexPreviewState::Stale(args, text) => (
-                if explicit_index_targets(args) {
-                    local!(
-                        self.language,
-                        "古い費用preview | 再取得が必要",
-                        "Stale cost preview | Refresh required"
-                    )
-                } else {
-                    local!(
-                        self.language,
-                        "古い再試行preview | 再取得が必要",
-                        "Stale retry preview | Refresh required"
                     )
                 },
                 text.as_str(),

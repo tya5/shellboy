@@ -165,26 +165,6 @@ fn archive_error(language: UiLanguage, error: &str) -> String {
         UiLanguage::En => format!("Could not load: {error}{sep}R Retry"),
     }
 }
-fn sender_count(language: UiLanguage, sender: &str, count: usize) -> String {
-    match (language, count == 1) {
-        (UiLanguage::Ja, _) => format!("{sender}: {count}件"),
-        (UiLanguage::En, true) => format!("{sender}: 1 input"),
-        (UiLanguage::En, false) => format!("{sender}: {count} inputs"),
-    }
-}
-fn cancel_detail(language: UiLanguage, count: usize, senders: &str) -> String {
-    match language {
-        UiLanguage::Ja => format!(
-            "表示された{count}件の入力を取り消しますか？\n{senders}\n新しく届いた入力は対象に含めません。取り消せた入力は /restore list に保存します。"
-        ),
-        UiLanguage::En if count == 1 => format!(
-            "Cancel 1 displayed input?\n{senders}\nNew arrivals are excluded. Cancelled input is saved in /restore list."
-        ),
-        UiLanguage::En => format!(
-            "Cancel {count} displayed inputs?\n{senders}\nNew arrivals are excluded. Cancelled inputs are saved in /restore list."
-        ),
-    }
-}
 #[derive(Default)]
 pub(super) struct QueuePopup {
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
@@ -424,43 +404,18 @@ impl UiState {
         self.details = Some(details);
         vec![action]
     }
-    pub(super) fn confirm_pending_cancel(&mut self, message_ids: Vec<String>) {
+    /// Cancels exactly the ids painted when the key was pressed. There is no
+    /// confirmation: the text is saved for `/restore`, and the outcome is
+    /// reported in the status line (a reply duty is not restored).
+    pub(super) fn cancel_pending_messages(&mut self, message_ids: Vec<String>) -> Vec<UiAction> {
         if message_ids.is_empty() {
-            return;
+            return vec![];
         }
-        let language = self.config.ui.language;
-        let mut counts = BTreeMap::<String, usize>::new();
-        for item in self
-            .view()
-            .pending_messages
-            .items
-            .iter()
-            .filter(|item| message_ids.contains(&item.message_id))
-        {
-            let sender = match (&item.sender_thread, language) {
-                (Some(id), UiLanguage::Ja) => format!("会話 {id}"),
-                (Some(id), UiLanguage::En) => format!("Conversation {id}"),
-                (None, _) => item.sender(language),
-            };
-            *counts.entry(sender).or_default() += 1;
-        }
-        let senders = counts
-            .into_iter()
-            .map(|(who, count)| {
-                let who = crate::presentation::sanitize_plain(&who, 0).0;
-                sender_count(language, &who, count)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let detail = cancel_detail(language, message_ids.len(), &senders);
-        let action = UiAction::CancelMessages {
+        self.queue_popup.visible = false;
+        vec![UiAction::CancelMessages {
             message_ids,
             target: self.recovery_target(),
-        };
-        self.confirmation = Some(Confirmation::MessageQueue {
-            action: Box::new(action),
-            detail,
-        });
+        }]
     }
     pub(super) fn queue_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         if self.queue_popup.replies {
@@ -590,8 +545,7 @@ impl UiState {
                     .filter(|(i, _)| mode == 'a' || *i == self.queue_popup.selected)
                     .map(|(_, item)| item.message_id.clone())
                     .collect();
-                self.confirm_pending_cancel(ids);
-                vec![]
+                self.cancel_pending_messages(ids)
             }
             _ => vec![],
         }
@@ -1100,7 +1054,7 @@ mod tests {
         );
     }
     #[test]
-    fn queue_confirmation_uses_only_the_displayed_ids_and_sanitizes_labels() {
+    fn queue_cancel_uses_only_the_displayed_ids_without_confirmation() {
         let mut ui = ui();
         ui.config.ui.language = UiLanguage::Ja;
         ui.select_thread("thread".into());
@@ -1120,23 +1074,8 @@ mod tests {
         );
         ui.apply(update);
         ui.slash("/queue");
-        ui.event(key(KeyCode::Char('a'), KeyModifiers::NONE));
-        let Some(Confirmation::MessageQueue { detail, .. }) = &ui.confirmation else {
-            panic!("confirmation required");
-        };
-        assert!(detail.contains("other-thread: 1件"));
-        let update = page(
-            &mut ui,
-            2,
-            PendingMessages {
-                items: vec![queued("first"), queued("second"), queued("new")],
-                total: 3,
-                ..Default::default()
-            },
-            vec![],
-        );
-        ui.apply(update);
-        let actions = ui.event(key(KeyCode::Char('y'), KeyModifiers::NONE));
+        let actions = ui.event(key(KeyCode::Char('a'), KeyModifiers::NONE));
+        assert!(ui.confirmation.is_none(), "cancel needs no Y");
         assert!(
             matches!(&actions[0],UiAction::CancelMessages {message_ids,..} if message_ids==&["first","second"])
         );
@@ -1471,30 +1410,16 @@ mod language_tests {
         );
     }
     #[test]
-    fn counts_and_cancel_messages_are_complete_for_zero_one_and_many() {
+    fn archive_counts_are_complete_for_zero_one_and_many() {
         for count in [0, 1, 2, 123] {
             for language in [UiLanguage::En, UiLanguage::Ja] {
                 let archive = archive_count(language, count);
-                let who = i18n::local!(language, "会話 raw-id", "Conversation raw-id");
-                let sender = sender_count(language, who, count);
-                let cancel = cancel_detail(language, count, &sender);
                 if language == UiLanguage::Ja {
                     assert_eq!(archive, format!("{count}件 | /restore draft ID"));
-                    assert_eq!(sender, format!("会話 raw-id: {count}件"));
-                    assert!(
-                        cancel.starts_with(&format!("表示された{count}件の入力を取り消しますか？"))
-                    );
-                    assert!(cancel.contains("新しく届いた入力は対象に含めません。"));
                 } else if count == 1 {
                     assert_eq!(archive, "1 draft | /restore draft ID");
-                    assert_eq!(sender, "Conversation raw-id: 1 input");
-                    assert!(cancel.starts_with("Cancel 1 displayed input?"));
-                    assert!(cancel.ends_with("Cancelled input is saved in /restore list."));
                 } else {
                     assert_eq!(archive, format!("{count} drafts | /restore draft ID"));
-                    assert_eq!(sender, format!("Conversation raw-id: {count} inputs"));
-                    assert!(cancel.starts_with(&format!("Cancel {count} displayed inputs?")));
-                    assert!(cancel.ends_with("Cancelled inputs are saved in /restore list."));
                 }
             }
         }
@@ -1665,26 +1590,24 @@ mod language_tests {
             pending(&mut ui);
             ui.view_mut().pending_messages.items.push(item("second-id"));
             ui.view_mut().pending_messages.total = 2;
-            ui.event(Event::Key(KeyEvent::new(
+            let actions = ui.event(Event::Key(KeyEvent::new(
                 KeyCode::Char('a'),
                 KeyModifiers::NONE,
             )));
-            let Some(Confirmation::MessageQueue { detail, action }) = &ui.confirmation else {
-                panic!("confirmation required");
-            };
-            assert!(detail.contains("/restore list"));
+            assert!(ui.confirmation.is_none(), "cancel needs no Y");
             assert!(
-                matches!(action.as_ref(), UiAction::CancelMessages { message_ids, .. } if message_ids == &["message-id", "second-id"])
+                matches!(&actions[..], [UiAction::CancelMessages { message_ids, .. }] if message_ids == &["message-id", "second-id"])
             );
-            ui.view_mut()
-                .pending_messages
-                .items
-                .push(item("new-arrival"));
-            let actions = ui.event(Event::Key(KeyEvent::new(
-                KeyCode::Char('y'),
-                KeyModifiers::NONE,
-            )));
-            assert!(actions.iter().any(|action| matches!(action, UiAction::CancelMessages { message_ids, .. } if message_ids == &["message-id", "second-id"])));
+            // A mis-key is reported: the owner outcome lands in the status line
+            // and names /restore, where the text can be brought back.
+            let target = ui.recovery_target();
+            ui.apply(UiUpdate::DraftRecovery {
+                target,
+                draft: None,
+                message: "Cancelled 2 inputs | Saved in /restore list".into(),
+                notification_id: Some("mis-key".into()),
+            });
+            assert!(ui.view().status.contains("/restore"));
         }
     }
 }

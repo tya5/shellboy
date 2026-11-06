@@ -413,7 +413,10 @@ adds no mandatory request field. Marked execution never falls back to unbounded
 selection; incomplete or different targets return typed preview_stale before
 mutation. Legacy unmarked behavior and existing Run-state checks remain. The UI
 uses a fresh preview and new confirmation after stale rejection, never an
-automatic deletion retry. No schema/queue/worker is added.
+automatic deletion retry. No schema/queue/worker is added. Changed events do not
+invalidate an open deletion or index confirmation (#257); the owner's marker and
+live-Run check at write time is the guard. Queued-input cancel (`/queue` D/A) needs no
+Y; the text stays in `/restore list`, and a reply duty is not restored.
 
 ## Display language and terminal width foundation (#139 / #35 stage A)
 

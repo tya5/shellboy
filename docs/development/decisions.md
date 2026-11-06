@@ -1,5 +1,28 @@
 # 開発判断
 
+## Confirmations are not invalidated by other Threads; queue cancel needs no Y (#257, 2026-11-07)
+
+Basis: personal use. Before the change any `EngineEvent::Changed` (any Thread) or a lagged
+event bumped `confirmation_revision`, cleared `accepted_index` / `accepted_deletion`, and sent
+`ConfirmationSourcesChanged`, which turned an open deletion dialog into `Phase::Stale` (Y
+disabled), an index confirmation into `Confirmation::StaleIndex`, and a ready index preview into
+`IndexPreviewState::Stale`; a Changed during a read also dropped the in-flight preview. State
+tests (`changed_deletion_preserves_evidence...`, `stale_deletion_review_disables_destructive_action`,
+`changed_confirmation_retains_preview...`) showed Y was a no-op after any change; the TUI itself was
+not driven (code and state tests only). Chosen: remove the whole mechanism instead of adding a
+variant. Kept: the one-shot `accepted_*` fence (a Y must follow the preview with the matching
+request id), now cleared only by a new preview or its use. The guard that matters stays in the
+owner: the target-marker comparison and live/stopping Run check at `src/control/db.rs`
+(delete transaction) refuse a truly stale delete, and the dialog shows the refusal.
+Lost: counts and cost estimates on screen may be slightly old (the dialog's `Reviewed at`
+time says when they were taken). Reconfirm if a delete ever removes a target the user did not
+review, or if index cost previews are found to mislead.
+
+Queued-input cancel (`/queue` D/A, held rows) no longer asks for Y: the text is archived and
+restorable with `/restore`, and the status line reports each outcome. A reply duty is not
+restored (documented in the TUI guide). Agent Guide is unaffected: the model-side
+`message cancel` CLI is unchanged. Reconfirm if mis-key cancellations are reported as lost work.
+
 ## Search speed: single KNN scan and two-stage visibility (#240, 2026-11-06)
 
 Basis: the measurement at

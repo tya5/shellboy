@@ -1,5 +1,14 @@
 # Development status
 
+## Confirmation staleness removed (#257; on branch issue-257/confirm-staleness, CI pending)
+
+Other Threads' Changed events no longer invalidate an open delete/index confirmation; the stale
+variants, `ConfirmationSourcesChanged` and `confirmation_revision` are gone, `accepted_*` is kept and
+not cleared on Changed. Queued-input cancel (`/queue` D/A) takes effect without Y. Owner marker and
+live-Run refusal unchanged and now covered by a UI refusal test. Docs: TUI guide, thread-browser
+design, effective spec, decisions, acceptance. Agent Guide unaffected (TUI-only; the model CLI
+`message cancel` is unchanged). Resume: check CI on the branch tip; TUI was not driven by hand.
+
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 
 `src/chat_client.rs` no longer polls once a second: it takes an `events.wait` baseline cursor before

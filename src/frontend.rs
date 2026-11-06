@@ -471,7 +471,6 @@ enum BackgroundResult {
         request_id: u64,
         args: ThreadDeleteArgs,
         execute: bool,
-        revision: u64,
         known_thread_ids: Vec<String>,
         result: Result<thread_deletion::Outcome, ApiError>,
     },
@@ -541,7 +540,6 @@ enum BackgroundResult {
         context: Option<ManagementContext>,
         args: IndexArgs,
         attempt: u64,
-        revision: u64,
         result: Result<String, ApiError>,
     },
     EditRequest {
@@ -1007,7 +1005,6 @@ async fn run_with_delivery(
     let mut external_observation: Option<inspection_external::ExternalObservation> = None;
     let mut pending_external: Option<(u64, inspection_external::ExternalReply)> = None;
     // Frontend receipt ordering is independent of UI update delivery.
-    let mut confirmation_revision = 0u64;
     let mut accepted_index: Option<(u64, IndexArgs)> = None;
     let mut accepted_deletion: Option<(u64, ThreadDeleteArgs)> = None;
     let mut pending_index: Option<u64> = None;
@@ -1860,7 +1857,6 @@ async fn run_with_delivery(
                             accepted_deletion = None;
                             pending_deletion = Some(request_id);
                         }
-                        let revision = confirmation_revision;
                         known_thread_ids = thread_deletion::candidates(known_thread_ids, &selection,
                             draft_saver.threads().chain(images.threads()).cloned());
                         if known_thread_ids.len() > thread_deletion::MAX_KNOWN_THREADS {
@@ -1878,7 +1874,7 @@ async fn run_with_delivery(
                                 language,
                             )
                             .await;
-                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, revision, known_thread_ids, result }).await;
+                            let _ = results.send(BackgroundResult::ThreadDeletion { request_id, args, execute, known_thread_ids, result }).await;
                         };
                         if execute {
                             let Ok(permit) = command_slots.clone().try_acquire_owned() else {
@@ -2098,7 +2094,6 @@ async fn run_with_delivery(
                     UiAction::IndexPreview { args, attempt } => {
                         accepted_index = None;
                         pending_index = Some(attempt);
-                        let revision = confirmation_revision;
                         let Ok(permit) = command_slots.clone().try_acquire_owned() else {
                             management_update(
                                 &updates,
@@ -2136,7 +2131,6 @@ async fn run_with_delivery(
                                     context,
                                     args,
                                     attempt,
-                                    revision,
                                     result,
                                 })
                                 .await;
@@ -3328,9 +3322,9 @@ async fn run_with_delivery(
                         }
                     } else { status_dirty = true; }
                 }
-                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, revision, mut known_thread_ids, result }) => {
+                Some(BackgroundResult::ThreadDeletion { request_id, args, execute, mut known_thread_ids, result }) => {
                     if !execute {
-                        if revision != confirmation_revision || pending_deletion != Some(request_id) {
+                        if pending_deletion != Some(request_id) {
                             continue;
                         }
                         pending_deletion = None;
@@ -3703,10 +3697,9 @@ async fn run_with_delivery(
                     context,
                     args,
                     attempt,
-                    revision,
                     result,
                 }) => match result {
-                    Ok(text) if revision == confirmation_revision && pending_index == Some(attempt) => {
+                    Ok(text) if pending_index == Some(attempt) => {
                         pending_index = None;
                         accepted_index = Some((attempt, args.clone()));
                         management_update(
@@ -3716,7 +3709,7 @@ async fn run_with_delivery(
                         )
                         .await
                     }
-                    Err(error) if revision == confirmation_revision && pending_index == Some(attempt) => {
+                    Err(error) if pending_index == Some(attempt) => {
                         pending_index = None;
                         management_update(
                             &updates,
@@ -3769,10 +3762,6 @@ async fn run_with_delivery(
                     if ui_subscription.belongs_to(owner) && !reply.is_closed() { update(&updates, UiUpdate::MemoryProbe(reply)).await; }
                 },
                 Ok(EngineEvent::Changed { thread_id, recovery }) => {
-                    confirmation_revision = confirmation_revision.wrapping_add(1);
-                    accepted_index = None;
-                    accepted_deletion = None;
-                    update(&updates, UiUpdate::ConfirmationSourcesChanged).await;
                     status_dirty |= status_enabled;
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
@@ -3828,10 +3817,6 @@ async fn run_with_delivery(
                     status(&updates, Some(thread_id), tool_group_notice(release, cancelled_calls, language)).await
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                    confirmation_revision = confirmation_revision.wrapping_add(1);
-                    accepted_index = None;
-                    accepted_deletion = None;
-                    update(&updates, UiUpdate::ConfirmationSourcesChanged).await;
                     status_dirty |= status_enabled;
                     management.inspection.resync();
                     descendants.resync();browser.request_resync(i18n::local!(language, "会話一覧の変更通知を取りこぼしました。最新のページから再取得します", "Conversation-list changes were missed. Reloading from the newest page"));
