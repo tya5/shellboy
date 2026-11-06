@@ -727,6 +727,7 @@ impl Store {
                     let result = store.send_content(
                         tx,
                         &MessageSendArgs {
+                            human: false,
                             expect_reply: false,
                             sender_label: None,
                             thread_id: Some(target),
@@ -1022,7 +1023,7 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,segment_chars:None,reduce_rounds:None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs { expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
+                let mut result=store.send_content(&tx,&MessageSendArgs { human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -1121,6 +1122,7 @@ impl Store {
                     store.send_content(
                         tx,
                         &MessageSendArgs {
+                            human: false,
                             expect_reply: false,
                             sender_label: None,
                             thread_id: Some(thread_id),
@@ -1770,7 +1772,7 @@ impl Store {
             now,
             SendContent {
                 elements: vec![json!({"type":"input_text","text":args.text})],
-                sender: MessageSender::recorded(caller, args.sender_label.clone(), false),
+                sender: MessageSender::recorded(caller, args.sender_label.clone(), args.human),
             },
         )
     }
@@ -3938,6 +3940,7 @@ mod agents_reference_tests {
             let accepted = store
                 .execute(
                     req(Command::MessageSend(MessageSendArgs {
+                        human: false,
                         expect_reply: false,
                         thread_id: Some(target.clone()),
                         text: "synthetic sender fixture".into(),
@@ -4067,6 +4070,7 @@ mod agents_reference_tests {
         let held = store
             .execute(
                 req(Command::MessageSend(MessageSendArgs {
+                    human: false,
                     expect_reply: false,
                     thread_id: Some(target),
                     text: "no authority from label".into(),
@@ -4328,6 +4332,7 @@ mod message_acknowledgement_state_tests {
         let request = Request::new(
             "fixture:typed-ack",
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 sender_label: None,
                 thread_id: Some("t".into()),
@@ -4653,6 +4658,7 @@ mod owned_child_notification_tests {
             let request = Request::new(
                 "fixture:new-child",
                 Command::MessageSend(MessageSendArgs {
+                    human: false,
                     expect_reply: false,
                     sender_label: None,
                     thread_id: Some("child".into()),
@@ -4719,6 +4725,7 @@ mod owned_child_notification_tests {
                             Request::new(
                                 "fixture:existing-child",
                                 Command::MessageSend(MessageSendArgs {
+                                    human: false,
                                     expect_reply: false,
                                     sender_label: None,
                                     thread_id: Some("child".into()),

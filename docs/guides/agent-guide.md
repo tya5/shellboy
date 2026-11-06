@@ -519,6 +519,13 @@ restart. See the CLI reference for the exact supported provider error shapes.
 
 Use `shellboy startup [--last N]` (default 5, maximum 20) to inspect startup-stage timings without starting the owner. The read is bounded to 16 MiB and 64 current/rotated log files. It exposes only stage names, timestamps, elapsed milliseconds, application/migration versions and totals; it never prints arbitrary log fields. `records_may_be_missing` is always true because diagnostics can be dropped or rotated, and missing stages are not zero.
 
+## Driving Shellboy with `chat --json`
+
+An external agent or test can drive a running owner with `printf 'message\n' | shellboy chat --json`:
+piped lines in, one JSON object per progress event and end message out (schema in the
+[CLI reference](cli-reference.md#interactive-chat-client-242)), recorded as `external_cli`. It
+uses the same RPCs as `message send` and `wait`; a model needs no chat client inside its own shell.
+
 ## Terminal-free startup (#5, v0.5.0)
 
 `serve --data-dir DIR --config FILE` can start a separate owner from a background

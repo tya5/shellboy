@@ -313,6 +313,10 @@ incomplete evidence stays unknown. This is a read-only provenance projection,
 not an old Core request-format compatibility path or identity reconstruction.
 Sender IDs do not require the originating Thread to still exist.
 
+`message.send` also accepts optional `human` (boolean, default false, omitted when false): `shellboy chat`
+sets it when stdin is a terminal so the sender is recorded as `human`, as for a TUI submission. It is an
+unverified client claim, never authority, and is ignored when a model Origin is present (kind `model`).
+
 `message.send` accepts optional `sender_label` (`--sender-label`): at most 64
 Unicode scalar values, no control characters or Unicode line/paragraph separators.
 Empty labels are allowed. Labels are self-asserted display metadata, never

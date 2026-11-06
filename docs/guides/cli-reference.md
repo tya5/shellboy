@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Agent Guide](agent-guide.md) · [Configuration](configuration.md)
 
-Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current 40 operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `docs`, `startup` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
+`chat` is the interactive line client (see [Interactive chat client](#interactive-chat-client-242)). Conversation/execution-control subcommands send local RPC to an already running owner; they never start it automatically. `shellboy` without arguments starts the TUI owner in an interactive terminal. The owner tables below describe the current 40 operations and `attach` alias in `src/cli.rs` / `src/protocol.rs`. `docs`, `startup` and `rag` are standalone commands requiring no owner; see [retrieving guides](docs.md) and [document/history search](rag.md) for syntax/results. The model has one tool, shell; these commands run inside that shell.
 
 ## Standalone commands
 
@@ -371,6 +371,81 @@ The reply arrives in a model sender's conversation, or external senders read
 An unanswered applied request gets one Run-end reminder, then `ignored` if still
 unanswered. Stop/recovery leaves it pending; combine a reply wait with
 `thread_settled` to detect stalls. See [Delegation](delegation.md).
+
+## Interactive chat client (#242)
+
+`shellboy chat [--thread THREAD] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]` is a thin
+line client over the owner RPCs a script could call itself: `thread create`,
+`message send`, `turn get` / `run get`, `wait`, `shell list` and `history get`. It adds no table,
+event, worker or queue and keeps no state beyond its own loop. An owner must already be
+running (`shellboy serve --data-dir DIR` or the TUI); otherwise chat exits 6 with a message
+that suggests `shellboy serve`. Without `--thread` it creates a Thread on the first input
+with the same options as `thread create` (`--cwd/--agents/--connection/--model/--effort/--parent`,
+caller cwd by default); these conflict with `--thread`.
+
+Input: one line is one message. A line ending in a backslash continues on the next line; the
+backslash is dropped and the lines are joined with a newline (to end a message with a literal
+backslash, add a trailing space). Blank messages are skipped. `/exit` as the first line of a
+message leaves the client. On a terminal chat prints `> ` / `... ` prompts; with piped stdin it
+prints none.
+
+Each message is sent as `message send` does, then chat follows it, printing one line per event:
+
+```text
+[thread] THREAD_ID
+[turn] running
+[tool] echo hello            (description, else the redacted command excerpt, at most 120 characters)
+[tool] exited, exit 0
+[turn] completed
+
+answer text
+```
+
+The end message is printed as plain text: Markdown is not rendered, terminal control characters are
+removed, and chat never emits color escapes, so `NO_COLOR` is always honoured. `--until` selects
+the end of the wait with the same vocabulary as `exec --result`: `turn-end` (default; the Turn's
+end message), `run-end` (the Run's last end message) or `reply` (sends an expected-reply message
+and prints the reply). `--timeout-ms` is a per-message deadline (default none); expiry prints one
+notice and returns to the prompt without stopping the work. An abnormal end (Turn or Run stopped
+or failed, `recovery_wait`, a message with no assigned Turn) prints one notice line and returns to
+the prompt; chat never retries.
+
+Interruption: the first Ctrl+C while a message is being followed requests `run stop` for that
+message's Run, exactly like Ctrl+C in the TUI (Esc, the Turn-only interrupt, has no chat
+equivalent), and keeps following until the Turn ends. A second Ctrl+C leaves the client and
+touches nothing further. Ctrl+C at the prompt, `/exit` and EOF (Ctrl+D) also leave the client.
+Leaving never stops the owner or any work except the Run stopped by the first Ctrl+C. With piped
+stdin, chat exits after EOF once the last message's wait has ended.
+
+Exit codes (same numbers as `exec`): 0 every message ended normally, 4 at least one message ended
+stopped/failed/recovery_wait/held, 5 at least one wait timed out (5 outranks 4), 6 owner, transport or
+output failure (including no owner), 2 invalid arguments.
+
+Sender: when stdin is a terminal, input is recorded as `sender.kind = human`, the same fact
+the TUI records for composer submissions; with piped stdin it is `external_cli`, like
+`message send`. Chat sets a wire field `human` on `message.send` for this; a model shell (which
+carries Origin) is always recorded as `model`. The choice is the client's own claim from a
+local terminal check. Neither value is proof of who typed: local IPC/OS access remains the
+authority, as with `--sender-label`.
+
+### `--json` line schema
+
+`--json` prints one JSON object per line on stdout instead of text (no prompts); diagnostics for
+failures also appear on stderr. Every line has exactly these keys; unavailable facts are `null`:
+`type`, `thread_id`, `run_id`, `turn_id`, `message_id`, `execution_id`, `node_id`, `state`, `summary`,
+`exit_code`, `at`, `text`. IDs are filled once known. `at` is the owner's saved shell
+start/end time for tool events and `null` otherwise or when unknown.
+
+| `type` | when | notable fields |
+| --- | --- | --- |
+| `thread` | Thread created (`state: created`) or selected (`selected`) | `thread_id` |
+| `message_accepted` | after `message send` | `message_id`, `run_id`, `turn_id` (null if unassigned), `state` = delivery status, `summary` = assignment |
+| `turn_state` | Turn state changes | `state` = Turn state |
+| `tool_started` / `tool_finished` | a shell execution of the followed Turn appears / ends | `execution_id`, `summary`, `state`, `exit_code`, `at` |
+| `run_stopping` | first Ctrl+C requested `run stop` | `run_id` |
+| `end_message` / `reply` | final text (`--until` turn-end,run-end / reply) | `node_id`, `text` (unmodified) |
+| `notice` | abnormal end, timeout (`state: timeout`), detach | `state`, `summary` |
+| `error` | the client failed (also exit code 6 etc.) | `summary` |
 
 ## Noninteractive work with a JSON result
 

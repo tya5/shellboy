@@ -269,6 +269,61 @@ fn main() -> ExitCode {
                 cli.operation_id,
             )))
         }
+        Some(CliCommand::Chat(options)) => {
+            if cli.operation_id.is_some() {
+                eprintln!("shellboy chat performs multiple RPCs; --operation-id is not accepted");
+                return ExitCode::from(2);
+            }
+            let data = match resolve_cli_data_dir(
+                cli.data_dir.as_deref(),
+                &PathEnvironment::current(),
+                &cwd,
+            ) {
+                Ok(data) => data,
+                Err(_) => {
+                    eprintln!("Cannot resolve owner data directory");
+                    return ExitCode::from(2);
+                }
+            };
+            let (signal, interrupts) = tokio::sync::mpsc::channel(4);
+            let stdin_is_tty = std::io::stdin().is_terminal();
+            let origin = origin(&data);
+            let result = runtime.block_on(async {
+                let relay = tokio::spawn(async move {
+                    while tokio::signal::ctrl_c().await.is_ok() {
+                        if signal.send(()).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+                let mut stdout = std::io::stdout();
+                let result = shellboy::chat_client::run(
+                    options,
+                    &data,
+                    &cwd,
+                    origin,
+                    tokio::io::BufReader::new(tokio::io::stdin()),
+                    &mut stdout,
+                    shellboy::chat_client::ChatEnv {
+                        stdin_is_tty,
+                        interrupts,
+                    },
+                )
+                .await;
+                relay.abort();
+                result
+            });
+            // A blocking stdin read cannot be cancelled; do not wait for it.
+            let code = match result {
+                Ok(code) => code,
+                Err(error) => {
+                    eprintln!("shellboy chat: {}", error.message);
+                    error.code
+                }
+            };
+            runtime.shutdown_background();
+            ExitCode::from(code)
+        }
         Some(CliCommand::Config { command }) => {
             match runtime.block_on(shellboy::config_setup::execute(
                 command,

@@ -856,6 +856,7 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
         assert_eq!(
             convert(&args).await,
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 sender_label: None,
                 thread_id: None,

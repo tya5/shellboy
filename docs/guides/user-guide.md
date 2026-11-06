@@ -324,6 +324,19 @@ check the reply state, retrieve the original reply, and summarize the results.
 
 A Thread's `AGENTS.md` reference points to working instructions. A new root Thread defaults to the cwd's `AGENTS.md`; it is read when preparing a new Turn, while a retry in the same Turn uses the saved snapshot. The Agent Guide explains product operations; a repository's root `AGENTS.md` supplies that repository's work instructions. They serve different purposes.
 
+### Talking without the TUI
+
+`shellboy chat` is a plain line client for a conversation owned by a running owner: start
+one with `shellboy serve --data-dir DIR` (or keep the TUI open), then run
+`shellboy --data-dir DIR chat` (add `--thread THREAD` to continue a conversation). Type a
+message and press Enter; end a line with a backslash to continue it on the next line. Chat prints
+one-line progress (`[turn] running`, `[tool] ...`) and then the end message as plain text. Ctrl+C
+stops the current Run (like the TUI); press it twice to leave. `/exit` or Ctrl+D leaves without
+stopping anything. Input typed in a terminal is recorded as a human sender; piped input
+(`printf 'hello\n' | shellboy chat --json`) is recorded as `external_cli`, and neither is proof of
+who typed it. See the [CLI reference](cli-reference.md#interactive-chat-client-242) for exit codes
+and the `--json` line format.
+
 ## 6. Interrupt and exit
 
 Ctrl+C stops the current Run and its owned work. Esc closes an open overlay; otherwise, it interrupts only the current Turn. Ctrl+B moves its current foreground shell into the background: the target shell continues, while any unexecuted later calls in the same group are canceled. This differs from changing screens. After backgrounding, the screen reports the target shell and treatment of later calls, and the model receives the corresponding result. If no later calls exist, no nonexistent cancellation is shown. An interruption progresses from stopping to interrupted according to saved state, distinctly from backgrounding or completion.

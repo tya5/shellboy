@@ -21,6 +21,7 @@ fn request(command: Command) -> Request {
 }
 fn send(expected: bool) -> Command {
     Command::MessageSend(MessageSendArgs {
+        human: false,
         expect_reply: expected,
         sender_label: None,
         thread_id: Some("recipient".into()),

@@ -113,6 +113,29 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn human_claim_is_ignored_when_a_model_origin_is_present() {
+        let origin = Origin {
+            instance_id: "i".into(),
+            thread_id: "t".into(),
+            run_id: "r".into(),
+            turn_id: "u".into(),
+            execution_id: "e".into(),
+            token: "x".into(),
+        };
+        assert_eq!(
+            MessageSender::recorded(Some(&origin), None, true).kind,
+            SenderKind::Model
+        );
+        assert_eq!(
+            MessageSender::recorded(None, None, true).kind,
+            SenderKind::Human
+        );
+        assert_eq!(
+            MessageSender::recorded(None, None, false).kind,
+            SenderKind::ExternalCli
+        );
+    }
+    #[test]
     fn sender_labels_count_unicode_scalars_and_reject_controls_without_echoing() {
         for label in ["", "名前", &"界".repeat(64)] {
             validate_sender_label(Some(label)).unwrap();

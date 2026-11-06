@@ -291,6 +291,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
             .request(Request::new(
                 op,
                 Command::MessageSend(crate::protocol::MessageSendArgs {
+                    human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,

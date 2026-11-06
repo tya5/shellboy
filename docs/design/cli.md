@@ -136,6 +136,24 @@ catalog. It never starts an owner, opens a conversation database or calls
 Responses/embeddings. Native subprocess tests isolate HOME/APPDATA/XDG paths and
 exercise only loopback mocks. See [configuration](config.md#first-run-setup-69).
 
+## Interactive line client: chat (#242)
+
+`chat [--thread ID] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]` is a thin owner
+client like `exec`: it composes `thread.create`, `message.send`, `turn.get`/`run.get`, `wait`,
+`shell.list` and `history.get` and adds no table, event, worker, queue or Core path. The
+Thread is created on the first input (caller cwd by default) unless `--thread` is given.
+Input is one line per message, a trailing backslash continues, `/exit` or EOF leaves. Progress
+comes only from saved facts polled while the assigned Turn/Run is followed: Turn state changes
+and the Turn's shell executions (started/finished), then the saved end message or reply.
+Ctrl+C sends `run.stop` for the followed Run (the TUI's Ctrl+C meaning); a second leaves the
+client. Abnormal ends and timeouts print one line and return to input; nothing is retried.
+Exit codes reuse exec's numbers (0/2/4/5/6). Admission rationale: no new mechanism; the one
+protocol addition is the optional `human` flag on `message.send` (default false, omitted when
+false), which records `sender.kind = human` as the TUI does for composer submissions. It is set
+only when stdin is a terminal, is ignored when a model Origin is present, and like a sender
+label it is an unverified claim, never authority. Piped stdin records `external_cli`.
+`--json` prints one fixed-key object per line (schema in the CLI reference).
+
 ## Noninteractive saved work: exec (#65)
 
 `exec --schema FILE [--thread ID] [TEXT | --text-stdin]` is a thin owner client:

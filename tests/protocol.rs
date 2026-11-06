@@ -828,6 +828,7 @@ fn current_output_and_history_results_require_observation_fields() {
 fn message_delivery_timing_is_one_optional_wire_field() {
     let command = |deliver| {
         Command::MessageSend(MessageSendArgs {
+            human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: None,

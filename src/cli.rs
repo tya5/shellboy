@@ -33,6 +33,8 @@ pub enum CliCommand {
     Serve,
     /// Ask a terminal-free owner to shut down; requires an explicit --data-dir.
     Shutdown,
+    /// Talk to a conversation line by line through a running owner; see docs for input and exit rules.
+    Chat(crate::chat_client::ChatOptions),
     /// Run saved work noninteractively; validate only its final JSON answer locally.
     Exec(crate::exec_client::ExecOptions),
     /// Inspect recorded work; no model call or persistent job engine.
@@ -839,6 +841,7 @@ impl Cli {
             }),
             CliCommand::Serve
             | CliCommand::Shutdown
+            | CliCommand::Chat(_)
             | CliCommand::Exec(_)
             | CliCommand::Docs { .. }
             | CliCommand::Startup(_)
@@ -906,6 +909,7 @@ impl Cli {
             },
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
+                    human: false,
                     expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,

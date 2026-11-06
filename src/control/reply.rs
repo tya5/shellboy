@@ -242,6 +242,7 @@ impl super::db::Store {
             let result = self.send(
                 tx,
                 &MessageSendArgs {
+                    human: false,
                     expect_reply: false,
                     sender_label: args.sender_label.clone(),
                     thread_id: Some(target.into()),

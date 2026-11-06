@@ -306,6 +306,19 @@ shellboy docs get --id shellboy/delegation をshellで読んでください。
 
 Threadの`AGENTS.md`参照先は作業上の指示です。新しいルートThreadの既定はcwdの`AGENTS.md`で、新Turnの準備で読み、同じTurnのretryは保存済みsnapshotを使います。Agent Guideは操作の説明書、リポジトリ直下の`AGENTS.md`はそのリポジトリの作業指示で、用途が異なります。
 
+### TUIを使わずに話す
+
+`shellboy chat` は、起動中のownerが持つ会話へ行単位で話しかける簡易クライアントです。
+先に `shellboy serve --data-dir DIR`（またはTUI）でownerを起動し、
+`shellboy --data-dir DIR chat` を実行します（既存の会話は `--thread THREAD`）。
+メッセージを入力してEnterで送信し、行末の `\` で次の行へ続けます。進行は
+`[turn] running` や `[tool] ...` の1行表示で、完了後に最終メッセージを
+プレーンテキストで表示します（Markdownは整形しません）。Ctrl+CでTUIと同じく
+現在のRunを停止し、2回目で終了します。`/exit` またはCtrl+Dは、作業を止めずに抜けます。
+端末から打った入力は人の送信として、パイプ入力は `external_cli` として記録されますが、
+どちらも打った人の証明ではありません。終了コードと `--json` の行形式は
+[CLIリファレンス](cli-reference.md#interactive-chat-client-242)を参照してください。
+
 ## 6. 中断・終了する
 
 Ctrl+Cは現在会話のRunと所有する背景処理の停止です。Escは開いた画面を閉じ、それ以外では現在のTurnだけを中断します。Ctrl+Bは現在のforeground shellを背景へ移す操作です。背景化では対象shellを継続し、同じgroupに未実行後続callがあれば取消しにします。画面を切り替える操作とは区別してください。 背景化後は対象shellと後続の扱いを画面へ通知し、モデルにも対応する結果を渡します。後続がない場合は存在しない取消しを表示しません。中断は保存済み状態に従って停止処理中から中断済みへ変わり、背景化や完了と区別されます。

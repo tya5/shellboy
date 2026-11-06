@@ -214,6 +214,7 @@ impl Fixture {
             .request(Request::new(
                 format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
                 Command::MessageSend(MessageSendArgs {
+                    human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -803,6 +804,7 @@ async fn run_end_selects_last_turn_after_processing_turn() {
         .request(Request::new(
             format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "later turn".into(),
@@ -899,4 +901,393 @@ async fn reply_mode_returns_explicit_reply_not_end_message() {
         json!({"value":"reply"})
     );
     fixture.close().await;
+}
+
+// ---- shellboy chat: thin client over the same owner RPCs ----
+
+fn chat_command(fixture: &Fixture, args: &[&str]) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+    command
+        .arg("--data-dir")
+        .arg(fixture.root.path().join("data"))
+        .arg("chat")
+        .args(args)
+        .current_dir(fixture.root.path())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command
+}
+fn tool_call(command: &str) -> String {
+    http(
+        200,
+        json!({"id":"chat-tool","status":"completed","output":[{"type":"function_call","call_id":"chat-call","name":"shell","arguments":json!({"command":command}).to_string()}]}),
+    )
+}
+fn json_lines(output: &Output) -> Vec<Value> {
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap_or_else(|_| panic!("not JSON: {l}")))
+        .collect()
+}
+async fn senders(fixture: &Fixture) -> Vec<String> {
+    fixture
+        .owner
+        .db
+        .call(|db| {
+            let mut stmt = db
+                .prepare("SELECT json_extract(sender_json,'$.kind') FROM receipt ORDER BY rowid")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap()
+}
+fn chat_options(tty_json: bool) -> shellboy::chat_client::ChatOptions {
+    shellboy::chat_client::ChatOptions {
+        thread_id: None,
+        create: shellboy::cli::ThreadCreateOptions {
+            agents: None,
+            cwd: None,
+            connection: None,
+            model: None,
+            effort: None,
+            parent_id: None,
+        },
+        json: tty_json,
+        until: shellboy::exec_client::ResultMode::TurnEnd,
+        timeout_ms: None,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_piped_json_session_with_tool_progress_and_multiline_input() {
+    let mut fixture = Fixture::new().await;
+    let mut command = chat_command(&fixture, &["--json"]);
+    let mut child = command.spawn().unwrap();
+    // Message 1 is one line; message 2 continues over a trailing backslash; /exit ignores the rest.
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"first question\nsecond \\\nline two\n/exit\nignored\n")
+        .await
+        .unwrap();
+    let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+    let first = fixture.next(&mut child).await;
+    assert!(first.body.to_string().contains("first question"));
+    first
+        .reply
+        .send(tool_call("echo chat-tool-output"))
+        .unwrap();
+    let after_tool = fixture.next(&mut child).await;
+    after_tool.reply.send(answer("answer one")).unwrap();
+    let second = fixture.next(&mut child).await;
+    assert!(
+        second.body.to_string().contains("second \\nline two"),
+        "{}",
+        second.body
+    );
+    second.reply.send(answer("answer two")).unwrap();
+    let output = crate::test_watchdog::watchdog("chat json", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let lines = json_lines(&output);
+    let types: Vec<&str> = lines.iter().map(|l| l["type"].as_str().unwrap()).collect();
+    let pos = |t: &str| {
+        types
+            .iter()
+            .position(|x| *x == t)
+            .unwrap_or_else(|| panic!("{t} missing in {types:?}"))
+    };
+    assert!(pos("thread") < pos("message_accepted"));
+    assert!(pos("tool_started") < pos("tool_finished"));
+    assert!(pos("tool_finished") < pos("end_message"));
+    let ends: Vec<&Value> = lines
+        .iter()
+        .filter(|l| l["type"] == "end_message")
+        .collect();
+    assert_eq!(ends.len(), 2);
+    assert_eq!(ends[0]["text"], "answer one");
+    assert_eq!(ends[1]["text"], "answer two");
+    let finished = lines.iter().find(|l| l["type"] == "tool_finished").unwrap();
+    assert_eq!(finished["exit_code"], 0);
+    assert!(
+        finished["summary"]
+            .as_str()
+            .unwrap()
+            .contains("echo chat-tool-output")
+    );
+    for line in &lines {
+        for key in [
+            "thread_id",
+            "run_id",
+            "turn_id",
+            "message_id",
+            "execution_id",
+            "node_id",
+            "state",
+            "summary",
+            "exit_code",
+            "at",
+            "text",
+        ] {
+            assert!(line.get(key).is_some(), "{key} missing in {line}");
+        }
+    }
+    assert_eq!(ends[0]["thread_id"], lines[0]["thread_id"]);
+    assert!(ends[0]["node_id"].is_string() && ends[0]["turn_id"].is_string());
+    // Piped stdin is not a terminal: external_cli.
+    assert_eq!(
+        senders(&fixture).await,
+        vec!["external_cli", "external_cli"]
+    );
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_terminal_input_records_human_and_prints_progress_and_plain_end_message() {
+    let mut fixture = Fixture::new().await;
+    let (_signal, interrupts) = mpsc::channel(4);
+    let data = fixture.root.path().join("data");
+    let cwd = fixture.root.path().to_path_buf();
+    let task = tokio::spawn(async move {
+        let mut out: Vec<u8> = Vec::new();
+        let result = shellboy::chat_client::run(
+            chat_options(false),
+            &data,
+            &cwd,
+            None,
+            tokio::io::BufReader::new(&b"hello\n"[..]),
+            &mut out,
+            shellboy::chat_client::ChatEnv {
+                stdin_is_tty: true,
+                interrupts,
+            },
+        )
+        .await;
+        (result, out)
+    });
+    let first = crate::test_watchdog::watchdog("chat human first", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    first.reply.send(tool_call("echo human-tool")).unwrap();
+    let second = crate::test_watchdog::watchdog("chat human second", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    second
+        .reply
+        .send(answer("**plain** reply\x1b[31m"))
+        .unwrap();
+    let (result, out) = crate::test_watchdog::watchdog("chat human", task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.unwrap(), 0);
+    let out = String::from_utf8(out).unwrap();
+    println!("--- sample chat session (terminal) ---\n{out}--- end ---");
+    assert!(out.starts_with("> "), "{out}");
+    assert!(out.contains("[thread] "));
+    assert!(out.contains("[turn] completed"));
+    assert!(out.contains("[tool] echo human-tool"), "{out}");
+    assert!(out.contains("[tool] exited, exit 0"), "{out}");
+    assert!(
+        out.contains("**plain** reply"),
+        "Markdown stays unrendered: {out}"
+    );
+    assert!(!out.contains('\x1b'), "no escape sequences are printed");
+    assert_eq!(senders(&fixture).await, vec!["human"]);
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_ctrl_c_stops_the_run_then_second_ctrl_c_leaves() {
+    let mut fixture = Fixture::new().await;
+    let (signal, interrupts) = mpsc::channel(4);
+    let data = fixture.root.path().join("data");
+    let cwd = fixture.root.path().to_path_buf();
+    let task = tokio::spawn(async move {
+        let mut out: Vec<u8> = Vec::new();
+        let result = shellboy::chat_client::run(
+            chat_options(false),
+            &data,
+            &cwd,
+            None,
+            tokio::io::BufReader::new(&b"long work\n"[..]),
+            &mut out,
+            shellboy::chat_client::ChatEnv {
+                stdin_is_tty: false,
+                interrupts,
+            },
+        )
+        .await;
+        (result, out)
+    });
+    // The model request stays unanswered, so the Run is live.
+    let pending = crate::test_watchdog::watchdog("chat ctrl-c request", fixture.incoming.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    signal.send(()).await.unwrap();
+    let (result, out) = crate::test_watchdog::watchdog("chat ctrl-c", task)
+        .await
+        .unwrap()
+        .unwrap();
+    let out = String::from_utf8(out).unwrap();
+    println!("--- sample chat session (Ctrl+C) ---\n{out}--- end ---");
+    assert_eq!(
+        result.unwrap(),
+        4,
+        "a stopped Run is an abnormal end: {out}"
+    );
+    assert!(out.contains("[stop] stopping the Run"), "{out}");
+    assert!(
+        out.contains("ended as stopped") || out.contains("[turn] stopped"),
+        "{out}"
+    );
+    drop(pending);
+    // Ctrl+C at the prompt leaves chat without sending anything.
+    let (signal, interrupts) = mpsc::channel(4);
+    let data = fixture.root.path().join("data");
+    let cwd = fixture.root.path().to_path_buf();
+    signal.send(()).await.unwrap();
+    signal.send(()).await.unwrap();
+    let (result, out) = crate::test_watchdog::watchdog("chat double ctrl-c", async move {
+        let mut out: Vec<u8> = Vec::new();
+        let result = shellboy::chat_client::run(
+            chat_options(false),
+            &data,
+            &cwd,
+            None,
+            tokio::io::BufReader::new(&b"more work\n"[..]),
+            &mut out,
+            shellboy::chat_client::ChatEnv {
+                stdin_is_tty: false,
+                interrupts,
+            },
+        )
+        .await;
+        (result, out)
+    })
+    .await
+    .unwrap();
+    // Interrupts queued before any prompt read exit the client at the prompt.
+    assert_eq!(result.unwrap(), 0);
+    assert!(
+        out.is_empty(),
+        "an interrupt at the prompt leaves before sending"
+    );
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_timeout_exits_five_without_stopping_work() {
+    let mut fixture = Fixture::new().await;
+    let mut command = chat_command(&fixture, &["--json", "--timeout-ms", "500"]);
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"slow work\n")
+        .await
+        .unwrap();
+    let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+    let pending = fixture.next(&mut child).await;
+    let output = crate::test_watchdog::watchdog("chat timeout", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    let lines = json_lines(&output);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l["type"] == "notice" && l["state"] == "timeout")
+    );
+    drop(pending);
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn chat_run_end_mode_waits_for_the_run_and_reports_abnormal_end_as_four() {
+    let mut fixture = Fixture::new().await;
+    let mut command = chat_command(&fixture, &["--json", "--until", "run-end"]);
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"work\n")
+        .await
+        .unwrap();
+    let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+    let first = fixture.next(&mut child).await;
+    first.reply.send(answer("run done")).unwrap();
+    let output = crate::test_watchdog::watchdog("chat run-end", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let lines = json_lines(&output);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l["type"] == "end_message" && l["text"] == "run done")
+    );
+    // A provider failure leaves the Turn without an end message: exit 4.
+    let mut command = chat_command(
+        &fixture,
+        &[
+            "--json",
+            "--thread",
+            lines[0]["thread_id"].as_str().unwrap(),
+        ],
+    );
+    let mut child = command.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"again\n")
+        .await
+        .unwrap();
+    let mut child = tokio::spawn(async move { child.wait_with_output().await.unwrap() });
+    let second = fixture.next(&mut child).await;
+    second
+        .reply
+        .send(http(
+            400,
+            json!({"error":{"message":"bad request","type":"invalid_request_error"}}),
+        ))
+        .unwrap();
+    let output = crate::test_watchdog::watchdog("chat failed turn", child)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert!(json_lines(&output).iter().any(|l| l["type"] == "notice"));
+    fixture.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_without_owner_exits_six_and_suggests_serve() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("data")).unwrap();
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .arg("--data-dir")
+        .arg(root.path().join("data"))
+        .arg("chat")
+        .current_dir(root.path())
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("shellboy serve"));
 }

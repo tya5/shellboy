@@ -328,6 +328,7 @@ impl Fixture {
             ipc::call(
                 &directory,
                 Command::MessageSend(MessageSendArgs {
+                    human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,

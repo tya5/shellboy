@@ -145,6 +145,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
         command(
             control,
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 sender_label: None,
                 thread_id: Some(thread["thread_id"].as_str().unwrap().into()),
@@ -325,6 +326,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
     let queued = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
@@ -444,6 +446,7 @@ async fn recovery_turn_interrupt_is_idempotent_and_stale_target_cannot_stop_repl
     command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
@@ -695,6 +698,7 @@ async fn ordinary_queued_input_keeps_foreground_group_intact_without_extra_model
     let queued = command(
         &control,
         Command::MessageSend(MessageSendArgs {
+            human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),

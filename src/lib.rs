@@ -3,6 +3,7 @@
 pub mod activity;
 pub mod app;
 pub mod attachments;
+pub mod chat_client;
 pub mod cli;
 pub mod client_operation;
 pub mod compaction;

@@ -1,5 +1,21 @@
 # Development status
 
+## Interactive chat client (#242; on branch issue-242/chat, not yet landed)
+
+`shellboy chat [--thread T] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]`
+(`src/chat_client.rs`) is a thin client over existing owner RPCs: no table, event, worker or
+queue. One line is one message (trailing backslash continues; `/exit`/EOF leaves); progress comes
+from polling Turn/Run state and the Turn's `shell list` rows; the end message prints as plain text.
+Ctrl+C = `run stop` of the followed Run (TUI Ctrl+C), second leaves. Exit codes 0/2/4/5/6 as exec.
+One wire addition: optional `human` on `message.send` (default false) so a terminal stdin records
+`sender.kind = human` like the TUI; piped stdin records `external_cli`; model Origin always wins.
+Tests (tests/exec_client.rs `chat_*`): piped JSON session with tool progress and multi-line input,
+terminal sender human plus plain output, Ctrl+C stop and prompt exit, timeout 5, run-end and
+failed-Turn exit 4, no-owner exit 6. Not tested: `--until reply` end to end (needs a model
+shell calling `message reply`), a real terminal and real SIGINT. Resume point: exact-tip default
+and all-OS CI.
+
+
 ## Storage vacuum (#238; landed on main 16f39d38, default and all-OS CI passed)
 
 `shellboy storage vacuum [--dry-run]` (standalone, `src/storage/vacuum.rs`): owner.lock

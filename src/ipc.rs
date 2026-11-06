@@ -437,6 +437,7 @@ mod frame_delivery_tests {
         let operation = "instance:oversized";
         let make = |text| {
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
@@ -515,6 +516,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
@@ -686,6 +688,7 @@ mod frame_delivery_tests {
             client,
             endpoint(),
             Command::MessageSend(MessageSendArgs {
+                human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,

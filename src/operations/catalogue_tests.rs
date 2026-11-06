@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 67, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 68, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -61,6 +61,18 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             "headless lifecycle must not be offered as a TUI form"
         );
     }
+    // Terminal line client (#242): its own prompt loop, never a TUI form.
+    let chat = leaves.remove("chat").expect("tracked chat path");
+    assert!(
+        chat.get_arguments()
+            .any(|arg| arg.get_long() == Some("until"))
+    );
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path.join(" ") == "chat"),
+        "chat must not be offered as a TUI form"
+    );
     // Standalone explicit maintenance (#238): owner-stopped, never a TUI form.
     let vacuum = leaves
         .remove("storage vacuum")
