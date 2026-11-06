@@ -201,8 +201,10 @@ change may split it only after all readers enforce the required visibility.
 
 GCはDB内のpageを空けるだけでファイルは縮まない。縮める手段は `shellboy storage vacuum [--dry-run]` のみで、明示したときだけ実行する（自動・incremental・auto_vacuumは採用しない）。`storage check` と同じstandaloneコマンドで、owner.lockを `OwnerLock::acquire` で取得できないとき（owner動作中）は `invalid_state` で拒否する。dry-runも同様。対象は会話DB `shellboy.db` のみ。standalone RAG storeは別ファイル・別lockで、同時に対象にしない。
 
-報告値は推測しない。縮む量 = `freelist_count × page_size`（VACUUMが返す量の正確な値）、現在のDB/WALファイルサイズ、`live_bytes = (page_count − freelist_count) × page_size`、必要な空き = `2 × live_bytes`（SQLite VACUUMはlive pageの全コピーを一時ファイルに作り、WAL経由で書き戻すため、それぞれliveサイズ以下。一時ファイルは `temp_store_directory` でdata dir配下の `tmp` に置き、data dirのファイルシステム空きだけで判定できる）、`fs2::available_space`。空きが足りなければ実行を `storage_limit` で拒否し、DBに触れない（dry-runは `sufficient_space:false` で報告）。
+報告値は推測しない。縮む量の下限 = `freelist_count × page_size`（VACUUMは半端に空いたpageも詰めるので実際にはこれ以上縮み得る。保証される下限であり正確な値ではない）、現在のDB/WALファイルサイズ、`live_bytes = (page_count − freelist_count) × page_size`。必要な空き = 一時コピー `live_bytes`（`temp_store_directory` でdata dir配下の `tmp` に置く。別deviceなら個別に判定）+ WAL `32 + live_pages × (page_size + 24)`（全live pageがフレームヘッダ24 byte付きでWALを通る）+ 現在の `-shm` サイズ。SQLiteの動作からの上限で、実行の実測ではない。`fs2::available_space` と比較し、足りなければ実行を `storage_limit` で拒否してDBに触れない（dry-runは `sufficient_space:false` で報告）。
 
-実行順: WAL checkpoint(TRUNCATE) → VACUUM → checkpoint(TRUNCATE) → quick_check。前後のファイルサイズを返す。VACUUMはSQLiteの保証によりatomicで、失敗・中断でも元のDBが残る。新しい表・設定・workerは追加しない。
+実行順: WAL checkpoint(TRUNCATE)（owner.lockを持たない読み手（request inspect、RAG履歴read）が読取りtransactionを持つとbusyになるので、結果行を検査し、busyなら変更前に `invalid_state` で拒否）→ VACUUM → checkpoint(TRUNCATE)（読み手のため未完了なら成功とせず `invalid_state`。DBは整合、ファイルは未縮小）→ quick_check。前後のファイルサイズを返す。VACUUMはSQLiteの保証によりatomicで、失敗・中断でも元のDBが残る。新しい表・設定・workerは追加しない。
 
 VACUUMはファイルをその場で書き換えるのでdev/inodeは変わらず、[docs-and-rag](docs-and-rag.md) のhistory参照が束縛するfile identityは保たれる。identityが変わる環境では従来どおり保守的に失効し、再検索が必要になる。node ID・版・本文は変わらない。
+
+VACUUMはINTEGER PRIMARY KEYも索引も持たない表のrowidを振り直す。現行スキーマにはその表はなく、将来の表はそのようなrowidに依存してはならない。

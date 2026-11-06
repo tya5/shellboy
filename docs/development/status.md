@@ -5,10 +5,10 @@
 `shellboy storage vacuum [--dry-run]` (standalone, `src/storage/vacuum.rs`): owner.lock
 required (refused with `invalid_state` while an owner runs), conversation DB only
 (`rag` store untouched), reports freelist x page_size, file/WAL sizes and the free
-space needed (`2 x live_bytes`, basis in the output), refuses with `storage_limit`
+space needed (temp copy + WAL frames + shm, basis in the output), refuses with `storage_limit`
 when short, then checkpoint(TRUNCATE) -> VACUUM -> checkpoint -> quick_check and
 before/after sizes. No schema, setting or table change. In-place VACUUM keeps the
-file inode, so docs-and-rag history references stay valid (unix test). Tests: five unit
+file inode, a reader holding the WAL is detected (refused before, error after), so docs-and-rag history references stay valid (unix test). Tests: five unit
 tests in `vacuum.rs` and `cli_process::storage_vacuum_cli_*`. Resume point:
 exact-tip default and all-OS CI.
 

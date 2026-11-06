@@ -1,5 +1,19 @@
 # Validation record
 
+## Storage vacuum (#238)
+
+Verified (macOS local plus ubuntu/macOS/windows CI, synthetic temp databases only): dry-run
+figures equal the PRAGMA values and change nothing; the file shrinks by at least the
+freelist bytes with `integrity_check` ok and rows intact; the inode is unchanged
+(Unix); refusal while the owner lock is held; refusal on an injected small free-space
+value with the database bytes unchanged; refusal while another connection holds a read
+transaction on a WAL with pending frames; the CLI path on a real schema. Not verified:
+a kill or power loss in the middle of VACUUM (relied on SQLite atomicity), a real
+disk-full during VACUUM (only the pre-check with an injected value), a reader appearing
+during VACUUM (the post-VACUUM incomplete-checkpoint error is not exercised), a
+different-device `tmp` directory, Windows file-identity behaviour beyond CI passing the
+unit tests, and a multi-GiB database.
+
 ## Compaction marker and post-compaction input (#230)
 
 Verified (macOS, synthetic databases and render tests only): read-time link of the

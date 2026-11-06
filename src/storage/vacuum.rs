@@ -11,11 +11,12 @@ use crate::protocol::{ApiError, ErrorCode};
 use serde_json::{Value, json};
 use std::path::Path;
 
-/// SQLite's VACUUM builds a copy of all live pages in a temporary file and then
-/// writes every page back through the WAL. Both are bounded by the live size,
-/// so the space needed is `2 * live_bytes`. The temp file is forced into the
-/// data directory so one filesystem check covers both.
-const BASIS: &str = "VACUUM writes a full copy of the live pages to a temporary file in the data directory and then rewrites them through the WAL; each is at most (page_count - freelist_count) * page_size, so the data-directory filesystem needs twice that";
+/// SQLite VACUUM builds a copy of all live pages in a temporary file (at most
+/// `live_bytes`; placed in `<data-dir>/tmp`) and writes every live page back
+/// through the WAL: a 32-byte WAL header plus one frame per page, each frame a
+/// 24-byte header followed by the page. The WAL index file (`-shm`) is counted at
+/// its measured current size. Required free space is the sum of the three.
+const BASIS: &str = "temp copy (live_bytes) + WAL (32 + live_pages * (page_size + 24)) + current -shm size; live_bytes = (page_count - freelist_count) * page_size";
 
 fn sqlite(error: rusqlite::Error) -> ApiError {
     crate::app::storage_error(StorageError::Sqlite(error))
@@ -23,6 +24,31 @@ fn sqlite(error: rusqlite::Error) -> ApiError {
 
 fn file_len(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Result row of `wal_checkpoint(TRUNCATE)`: (busy, log frames, checkpointed frames).
+fn checkpoint_truncate(connection: &Connection) -> Result<(i64, i64, i64), ApiError> {
+    connection
+        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .map_err(sqlite)
+}
+
+fn same_device(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::metadata(a), std::fs::metadata(b)) {
+            (Ok(a), Ok(b)) => a.dev() == b.dev(),
+            _ => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (a, b);
+        true
+    }
 }
 
 fn pragma(connection: &Connection, name: &str) -> Result<u64, ApiError> {
@@ -63,12 +89,23 @@ pub(super) fn vacuum_directory(
         OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(sqlite)?;
+    // Fail fast instead of waiting on a reader (request inspection and RAG
+    // history reads open the DB without the owner lock).
+    connection
+        .busy_timeout(std::time::Duration::ZERO)
+        .map_err(sqlite)?;
     if !dry_run {
         // Fold the WAL first so the "before" size is the real file and the
         // WAL does not carry stale frames into the rewrite.
-        connection
-            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
-            .map_err(sqlite)?;
+        let (busy, log, done) = checkpoint_truncate(&connection)?;
+        if busy != 0 || log != done {
+            return Err(ApiError::new(
+                ErrorCode::InvalidState,
+                "Another process holds a read transaction on the database, so the WAL cannot be truncated",
+            )
+            .hint("Stop other shellboy commands that read this data directory, then run again")
+            .details(json!({"wal_checkpoint":{"busy":busy,"log_frames":log,"checkpointed_frames":done}})));
+        }
     } else {
         connection
             .execute_batch("PRAGMA query_only=ON")
@@ -78,7 +115,12 @@ pub(super) fn vacuum_directory(
     let page_count = pragma(&connection, "page_count")?;
     let freelist = pragma(&connection, "freelist_count")?;
     let live_bytes = page_count.saturating_sub(freelist) * page_size;
-    let required = live_bytes.saturating_mul(2);
+    let live_pages = page_count.saturating_sub(freelist);
+    let wal_bound = 32 + live_pages.saturating_mul(page_size + 24);
+    let shm_bytes = file_len(&data_dir.join("shellboy.db-shm"));
+    let required = live_bytes
+        .saturating_add(wal_bound)
+        .saturating_add(shm_bytes);
     let free = available(data_dir)
         .map_err(|error| ApiError::new(ErrorCode::IoFailed, error.to_string()))?;
     let before = file_len(&db_path);
@@ -91,12 +133,26 @@ pub(super) fn vacuum_directory(
         "db_file_bytes": before,
         "wal_bytes": file_len(&wal_path),
         "live_bytes": live_bytes,
+        "required_temp_bytes": live_bytes,
+        "required_wal_bytes": wal_bound,
+        "shm_bytes": shm_bytes,
         "required_free_bytes": required,
         "required_free_basis": BASIS,
         "filesystem_free_bytes": free,
         "sufficient_space": free >= required,
     });
-    if free < required {
+    // The temp copy lives in <data-dir>/tmp; check it separately only when that
+    // directory is on another device than the data directory itself.
+    let temp_dir = data_dir.join("tmp");
+    let mut sufficient = free >= required;
+    if temp_dir.is_dir() && !same_device(data_dir, &temp_dir) {
+        let temp_free = available(&temp_dir)
+            .map_err(|error| ApiError::new(ErrorCode::IoFailed, error.to_string()))?;
+        result["tmp_filesystem_free_bytes"] = json!(temp_free);
+        sufficient = free >= required.saturating_sub(live_bytes) && temp_free >= live_bytes;
+    }
+    result["sufficient_space"] = json!(sufficient);
+    if !sufficient {
         if dry_run {
             // A preview still reports the shortfall; only the real run refuses.
             return Ok(result);
@@ -134,9 +190,17 @@ pub(super) fn vacuum_directory(
     // VACUUM is atomic: a failure or crash leaves the previous database intact.
     connection.execute_batch("VACUUM").map_err(sqlite)?;
     drop(reset);
-    connection
-        .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
-        .map_err(sqlite)?;
+    let (busy, log, done) = checkpoint_truncate(&connection)?;
+    if busy != 0 || log != done {
+        // VACUUM committed (the DB is consistent) but a reader keeps the WAL
+        // from being folded back, so the file has not shrunk yet.
+        return Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "VACUUM completed but the WAL could not be truncated because another process holds a read transaction; the file has not shrunk yet",
+        )
+        .hint("Stop other shellboy commands that read this data directory; the WAL is folded in when the last connection closes")
+        .details(json!({"wal_checkpoint":{"busy":busy,"log_frames":log,"checkpointed_frames":done},"db_file_bytes_before":before,"db_file_bytes":file_len(&db_path),"wal_bytes":file_len(&wal_path)})));
+    }
     let quick: String = connection
         .query_row("PRAGMA quick_check", [], |row| row.get(0))
         .map_err(sqlite)?;
@@ -200,7 +264,10 @@ mod tests {
         assert_eq!(out["freelist_pages"], fl);
         assert_eq!(out["reclaimable_bytes"], fl * ps);
         assert_eq!(out["live_bytes"], (pc - fl) * ps);
-        assert_eq!(out["required_free_bytes"], 2 * (pc - fl) * ps);
+        assert_eq!(
+            out["required_free_bytes"],
+            (pc - fl) * ps + 32 + (pc - fl) * (ps + 24) + out["shm_bytes"].as_u64().unwrap()
+        );
         assert_eq!(out["db_file_bytes"], size);
         assert_eq!(out["dry_run"], true);
         assert!(out.get("db_file_bytes_after").is_none());
@@ -251,6 +318,35 @@ mod tests {
             let error = vacuum_directory(root.path(), dry, &real).unwrap_err();
             assert_eq!(error.code, ErrorCode::InvalidState);
         }
+    }
+
+    #[test]
+    fn refuses_while_a_reader_holds_the_wal_and_changes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let writer = fixture(root.path());
+        writer
+            .execute("INSERT INTO t(body) VALUES(randomblob(100))", [])
+            .unwrap();
+        let path = root.path().join("shellboy.db");
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let _: i64 = reader
+            .query_row("SELECT count(*) FROM t", [], |r| r.get(0))
+            .unwrap();
+        let before = file_len(&path);
+        let error = vacuum_directory(root.path(), false, &real).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(
+            error.message.contains("read transaction"),
+            "{}",
+            error.message
+        );
+        assert_eq!(file_len(&path), before);
+        reader.execute_batch("COMMIT").unwrap();
+        drop(reader);
+        drop(writer);
+        let out = vacuum_directory(root.path(), false, &real).unwrap();
+        assert!(out["bytes_freed"].as_u64().unwrap() > 0);
     }
 
     #[test]
