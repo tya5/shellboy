@@ -345,7 +345,8 @@ impl UiState {
                         _ => None,
                     })
                     .collect();
-                self.confirm_pending_cancel(ids);
+                self.dirty = true;
+                return Some(self.cancel_pending_messages(ids));
             }
             KeyCode::F(7) => {}
             KeyCode::Char(_) | KeyCode::Backspace | KeyCode::Delete => {}
@@ -516,12 +517,10 @@ mod tests {
         let mut ui = ui();
         ui.held_select(0);
         ui.active_view_mut().pending_messages.items = vec![item("new-unpainted")];
-        ui.region_key(key(KeyCode::Char('a')));
-        let Some(Confirmation::MessageQueue { action, .. }) = ui.confirmation else {
-            panic!()
-        };
+        let actions = ui.region_key(key(KeyCode::Char('a'))).unwrap();
+        assert!(ui.confirmation.is_none(), "no Y confirmation");
         assert!(
-            matches!(*action, UiAction::CancelMessages { message_ids, .. } if message_ids == ["a", "b"])
+            matches!(&actions[..], [UiAction::CancelMessages { message_ids, .. }] if message_ids == &["a", "b"])
         );
     }
     #[test]

@@ -1050,9 +1050,10 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .parse::<u64>()
         .unwrap();
     assert!(characters > 64 * 1024);
+    observer.store.database.call(|db|{db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)SELECT 'doomed','doomed',cwd,agents_path,profile_id,model_id,'now' FROM thread WHERE id='source'",[])?;Ok(())}).await.unwrap();
     let deletion = ThreadDeleteArgs {
         preview_marker: None,
-        thread_id: "source".into(),
+        thread_id: "doomed".into(),
         descendants: false,
     };
     send.send(UiAction::ThreadDeletion {
@@ -1073,7 +1074,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         _ => None,
     })
     .await;
-    // Leave the invalidation in the UI channel, as if input raced delivery.
+    // Another Thread changes after the preview (#257): the reviewed Y must still work.
     let changed = observer
         .request(Request::new(
             format!("{}:preview-race", observer.store.instance_id),
@@ -1092,10 +1093,6 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         ))
         .await;
     assert!(changed.ok);
-    next_update(&mut incoming, |update| {
-        matches!(update, UiUpdate::ConfirmationSourcesChanged).then_some(())
-    })
-    .await;
     send.send(UiAction::ThreadDeletion {
         request_id: 31,
         args: deletion,
@@ -1108,20 +1105,15 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         UiUpdate::ThreadDeletion {
             request_id: 31,
             execute: true,
+            result: Ok(_),
+            ..
+        } => Some(()),
+        UiUpdate::ThreadDeletion {
+            request_id: 31,
+            execute: true,
             result: Err(error),
             ..
-        } if error.message.contains("削除確認が古く") => Some(()),
-        _ => None,
-    })
-    .await;
-    send.send(UiAction::ConfirmedIndex {
-        command: Command::IndexBackfill(scope.clone()),
-        attempt: 7,
-    })
-    .await
-    .unwrap();
-    next_update(&mut incoming, |update| match update {
-        UiUpdate::Status { text, .. } if text.contains("索引確認が古く") => Some(()),
+        } => panic!("a change in another Thread must not refuse a reviewed deletion: {error:?}"),
         _ => None,
     })
     .await;
@@ -1188,7 +1180,11 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         .database
         .call(|db| {
             assert_eq!(
-                db.query_row("SELECT COUNT(*) FROM thread", [], |r| r.get::<_, i64>(0))?,
+                db.query_row(
+                    "SELECT COUNT(*) FROM thread WHERE deleted_at IS NULL",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
                 1
             );
             assert_eq!(

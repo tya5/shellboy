@@ -633,7 +633,7 @@ fn rejected_current_index_preview_finishes_loading_without_closing_owner() {
 }
 
 #[test]
-fn changed_confirmation_retains_preview_and_rejects_old_reply_and_execution() {
+fn open_index_confirmation_is_independent_of_other_thread_changes_and_executes() {
     let mut ui = UiState::new(&Config::default(), fixture_cwd());
     ui.insert("/index all", false);
     let first = ui.event(key(KeyCode::Enter));
@@ -650,15 +650,29 @@ fn changed_confirmation_retains_preview_and_rejects_old_reply_and_execution() {
     });
     assert!(ui.event(key(KeyCode::Char('b'))).is_empty());
     assert!(matches!(ui.confirmation, Some(Confirmation::Index { .. })));
-    ui.apply(UiUpdate::ConfirmationSourcesChanged);
     assert!(
-        matches!(&ui.confirmation, Some(Confirmation::StaleIndex { detail }) if detail.contains("captured result at fixed time"))
+        matches!(&ui.confirmation, Some(Confirmation::Index { detail, .. }) if detail.contains("captured result at fixed time"))
     );
-    assert!(ui.event(key(KeyCode::Char('y'))).is_empty());
-    assert!(matches!(
-        ui.confirmation,
-        Some(Confirmation::StaleIndex { .. })
-    ));
+    // No other-thread change can invalidate the open confirmation: Y runs it.
+    let confirmed = ui.event(key(KeyCode::Char('y')));
+    assert!(
+        matches!(&confirmed[..], [UiAction::ConfirmedIndex { attempt: a, .. }] if *a == attempt)
+    );
+    let mut ui = UiState::new(&Config::default(), fixture_cwd());
+    ui.insert("/index all", false);
+    let first = ui.event(key(KeyCode::Enter));
+    let owner = context(&first[0]);
+    let attempt = preview_attempt(&first);
+    let args = ui.management.scope.clone().unwrap();
+    ui.apply(UiUpdate::ScopedManagement {
+        context: owner,
+        update: Box::new(UiUpdate::IndexPreviewReady {
+            args: args.clone(),
+            attempt,
+            text: "x".into(),
+        }),
+    });
+    assert!(ui.event(key(KeyCode::Char('b'))).is_empty());
     ui.event(key(KeyCode::Esc));
     let renewed = ui.event(key(KeyCode::Char('p')));
     let new_owner = context(&renewed[0]);
@@ -792,21 +806,4 @@ fn failed_index_preview_retains_only_stale_same_scope_evidence() {
         management::IndexPreviewState::Failed(_, _)
     ));
     assert!(ui.event(key(KeyCode::Char('b'))).is_empty());
-
-    let pending = ui.management.begin_preview(args.clone());
-    ui.management.invalidate_index_preview();
-    assert!(
-        matches!(&ui.management.preview, management::IndexPreviewState::Stale(_, text) if text == "previous preview")
-    );
-    assert!(
-        !ui.management
-            .accept_preview(pending, args.clone(), "late".into())
-    );
-
-    ui.management.reset_preview();
-    ui.management.begin_preview(args);
-    ui.management.invalidate_index_preview();
-    assert!(
-        matches!(&ui.management.preview, management::IndexPreviewState::Stale(_, text) if text != "previous preview")
-    );
 }

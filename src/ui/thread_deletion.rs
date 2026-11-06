@@ -21,7 +21,6 @@ fn failure_text(error: &crate::protocol::ApiError, language: UiLanguage) -> Stri
 enum Phase {
     Loading,
     Ready(Value),
-    Stale(Option<Value>),
     Executing,
     Failed(crate::protocol::ApiError),
     InvalidPreview,
@@ -59,13 +58,6 @@ impl DeletionDialog {
         self.request_id == request_id
             && self.args.thread_id == args.thread_id
             && self.args.descendants == args.descendants
-    }
-    pub(super) fn invalidate(&mut self) {
-        self.phase = match std::mem::replace(&mut self.phase, Phase::Stale(None)) {
-            Phase::Ready(value) => Phase::Stale(Some(value)),
-            Phase::Loading => Phase::Stale(None),
-            other => other,
-        };
     }
     fn can_execute(&self) -> bool {
         self.args.preview_marker.is_some()
@@ -118,15 +110,10 @@ impl DeletionDialog {
             Phase::InvalidPreview => text.push_str(local!(language,
                 "\n削除できません: 削除影響の対象が一致しません。もう一度開いてください\n閉じてから再度選んでください。",
                 "\nCould not delete: The deletion preview target does not match. Open it again.\nClose this screen and select the target again.")),
-            Phase::Stale(None) => text.push_str(local!(language,
-                "\n確認が古くなりました。閉じて再確認してください。Y は使えません。",
-                "\nThe preview is stale. Close and review again. Y is disabled.")),
-            Phase::Ready(value) | Phase::Stale(Some(value)) => {
+            Phase::Ready(value) => {
                 let number = |pointer: &str| value.pointer(pointer).and_then(Value::as_u64)
                     .map_or_else(|| local!(language, "不明", "unknown").to_owned(), |value| value.to_string());
-                text.push_str(if matches!(self.phase, Phase::Stale(_)) {
-                    local!(language, "\n確認が古くなりました。閉じて再確認してください。Y は使えません。", "\nThe preview is stale. Close and review again. Y is disabled.")
-                } else if self.args.preview_marker.is_none() {
+                text.push_str(if self.args.preview_marker.is_none() {
                     local!(language, "\n確認の目印を取得できません。対象範囲を狭めて再確認してください。Y は使えません。", "\nNo preview marker is available. Narrow the scope and review again. Y is disabled.")
                 } else if self.can_execute() {
                     local!(language, "\n削除できます。Y で実行します。", "\nDeletion is available. Press Y to execute.")
@@ -597,64 +584,6 @@ mod observation_tests {
 }
 
 #[cfg(test)]
-mod invalidation_tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn changed_deletion_preserves_evidence_disables_y_and_rejects_late_preview() {
-        let mut config = Config::default();
-        config.ui.language = UiLanguage::Ja;
-        let mut ui = UiState::new(&config, std::env::temp_dir());
-        let action = ui.begin_thread_deletion("thread".into()).pop().unwrap();
-        let UiAction::ThreadDeletion {
-            request_id, args, ..
-        } = action
-        else {
-            panic!("preview")
-        };
-        let value = json!({"thread_id":"thread", "descendants":false, "deletable_now":true,
-            "selection":{"thread_count":1}});
-        let captured_at = chrono::DateTime::parse_from_rfc3339("2026-10-30T04:05:06Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        ui.apply_thread_deletion(
-            request_id,
-            args.clone(),
-            false,
-            Ok(ThreadDeletionReply::Preview(value.clone(), captured_at)),
-        );
-        ui.apply(UiUpdate::ConfirmationSourcesChanged);
-        ui.apply_thread_deletion(
-            request_id,
-            args,
-            false,
-            Ok(ThreadDeletionReply::Preview(
-                json!({"thread_id":"thread", "descendants":false, "deletable_now":true}),
-                chrono::Utc::now(),
-            )),
-        );
-        let Some(Confirmation::ThreadDeletion(dialog)) = &ui.confirmation else {
-            panic!("dialog")
-        };
-        assert!(matches!(&dialog.phase, Phase::Stale(Some(saved)) if saved == &value));
-        assert!(dialog.text().contains("古く"));
-        assert_eq!(dialog.captured_at, Some(captured_at));
-        assert!(dialog.text().contains("2026-10-30T04:05:06Z"));
-        assert!(dialog.footer().contains("Y 使用不可"));
-        assert!(
-            ui.thread_deletion_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
-                .is_empty()
-        );
-        let actions = ui.thread_deletion_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
-        assert!(matches!(
-            actions.as_slice(),
-            [UiAction::ThreadDeletion { execute: false, .. }]
-        ));
-    }
-}
-
-#[cfg(test)]
 mod marker_entry_tests {
     use super::*;
     #[test]
@@ -712,21 +641,6 @@ mod language_rendering_tests {
             }
         }
         super::super::i18n::verify_screen(show_ready, expected);
-    }
-
-    #[test]
-    fn stale_deletion_review_disables_destructive_action() {
-        fn configure(ui: &mut UiState) {
-            show_ready(ui);
-            ui.apply(UiUpdate::ConfirmationSourcesChanged);
-        }
-        fn expected(language: UiLanguage) -> &'static [&'static str] {
-            match language {
-                UiLanguage::En => &["thread-fixture", "Y disabled"],
-                UiLanguage::Ja => &["thread-fixture", "Y 使用不可"],
-            }
-        }
-        super::super::i18n::verify_screen(configure, expected);
     }
 
     #[test]

@@ -14,6 +14,14 @@ Run and write/EOF/stop any shell. Ownership still drives notices and the stop ca
 Tests: `tests/control_db.rs` (non-owner stop with receipt origin, retry race, replay),
 `tests/runtime.rs` (real shell CLI stops another Run). Docs: thread-organization,
 guides, decisions. Resume: CI on the branch tip, then owner review.
+## Confirmation staleness removed (#257; on branch issue-257/confirm-staleness, CI pending)
+
+Other Threads' Changed events no longer invalidate an open delete/index confirmation; the stale
+variants, `ConfirmationSourcesChanged` and `confirmation_revision` are gone, `accepted_*` is kept and
+not cleared on Changed. Queued-input cancel (`/queue` D/A) takes effect without Y. Owner marker and
+live-Run refusal unchanged and now covered by a UI refusal test. Docs: TUI guide, thread-browser
+design, effective spec, decisions, acceptance. Agent Guide unaffected (TUI-only; the model CLI
+`message cancel` is unchanged). Resume: check CI on the branch tip; TUI was not driven by hand.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 
