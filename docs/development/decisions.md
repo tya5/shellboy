@@ -3726,15 +3726,25 @@ Hint-completeness findings (fixed in the same change): `message.send` that is qu
 (no wake), `thread.prune` (non-dry-run) and `attachment.add` that is not delivered live
 committed without `changed()`; each now reports its Thread in `changed_threads`.
 ## D-248-1: Rejected closed summary is frozen for the current Turn (2026-11-06)
+## D-248-1: Rejected summaries are remembered per Turn under unknown coverage (2026-11-07)
 
-Decision: when a proactive attempt adopts nothing and its rejection came from the closed
-(older-Turn) summary stage, the existing guard flag `summary_frozen_current_turn` is set
-(when the newest tool anchor is already in the current Turn). No new table, field or
-counter. Reason: with a coverage-limited forecast (`marks:null`) every new tool frontier
-counted as new eligible content; the closed range cannot change while the current Turn
-appends. The closed summary also returned before the active stages (`prefix_first`), so
-a deterministic rejection starved them; the freeze lets the next boundary reach them.
-Not changed: after any adoption the guard is cleared and a rejected closed range may be
-tried once more (the path changed). The designed prefix-then-active pair
-(`insufficient` then `met`) is not this bug. Recheck when: the cached over-limit reduce
-output (2a, see acceptance) is addressed, or active-stage rejections repeat on real data.
+Decision: with a coverage-limited forecast (`marks:null`), a deterministic rejection
+(`invalid_state` only; not cancellation or transient failures) is remembered in the
+guard by two booleans (`summary_frozen_current_turn` for the closed range, new serde-
+default `active_summary_rejected` for the active-Turn summary). No counter, table or
+worker. The closed flag is set when nothing was adopted and the closed summary stage was
+rejected. An adoption that touched only active stages (closed spill not adopted, closed
+summary not run) keeps the guard and rebases its witness (`mark_refresh`) instead of
+clearing it; a displayed status after such an adoption is the existing saved-guard
+status. Any closed-range adoption, a new Turn or a path rewrite drops the flags; an
+adopted active summary resets the active flag. Reason: r1 (freeze only) was erased by the
+next adopted active spill, and the active spill's epoch bump changes the summary part
+key, so cached parts missed and real map/reduce requests were spent every two boundaries
+(review of r1). Accepted trade-off: a later, wider closed range in the same Turn stays
+blocked until a path rewrite or new Turn (policy.rs summary range can widen). Target:
+at most one rejected attempt per summary stage per Turn under unknown coverage; spill
+passes may still start per boundary. Not measured: real-Turn cost after the fix needs live
+snapshots, which a read-only copy cannot replay without API calls. Recheck when: a real
+Turn shows more than one rejected attempt per stage, or finding 2a is fixed.
+Prompt-cache risk: active spills change the replayed prefix (reasoning epoch bump); that
+existed before this change and is not altered by it.

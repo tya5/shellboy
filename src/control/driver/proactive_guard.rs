@@ -29,6 +29,11 @@ pub(super) struct Guard {
     refresh_revision: Option<i64>,
     #[serde(default)]
     summary_frozen_current_turn: bool,
+    // #248: an active-Turn summary was rejected deterministically while the
+    // forecast is unknown; blocked until a summary adoption, a new Turn or a
+    // path rewrite. A flag, not a counter.
+    #[serde(default)]
+    active_summary_rejected: bool,
     pub reason: Reason,
     invalid_state: u32,
     other_rejections: u32,
@@ -73,8 +78,33 @@ impl Guard {
         self.summary_frozen_current_turn = frozen;
     }
 
+    /// Only meaningful under unknown coverage; known marks already separate
+    /// new from attempted middles.
+    pub(super) fn set_active_summary_rejected(&mut self, rejected: bool) {
+        self.active_summary_rejected = rejected && self.marks.is_none();
+    }
+
+    pub(super) fn blocks_unknown_middle(&self, snapshot: &Snapshot) -> bool {
+        self.active_summary_rejected
+            && self.turn == snapshot.turn
+            && snapshot
+                .input
+                .as_ref()
+                .is_some_and(|input| input.extends(&self.witness))
+    }
+
+    /// An adoption that touched only active stages must not erase evidence
+    /// about stages it did not run (#248); the caller rebases the witness.
+    pub(super) fn keeps_through_active_adoption(&self, turn: &str) -> bool {
+        self.marks.is_none()
+            && self.turn == turn
+            && (self.summary_frozen_current_turn || self.active_summary_rejected)
+    }
+
     /// When the latest tool anchor is already in the protected current Turn,
-    /// appending another tool cannot add older summary sources. Path rewrites
+    /// appending another tool does not add older summary sources. A later
+    /// wider closed range in the same Turn stays blocked until a path rewrite
+    /// or a new Turn (accepted trade-off, #248). Path rewrites
     /// and new Turns remain eligible for a fresh forecast.
     pub(super) fn blocks_unknown_summary(&self, snapshot: &Snapshot) -> bool {
         self.summary_frozen_current_turn
@@ -184,6 +214,14 @@ impl Guard {
             refresh_revision: None,
             summary_frozen_current_turn: previous.is_some_and(|guard| {
                 guard.summary_frozen_current_turn
+                    && guard.turn == snapshot.turn
+                    && snapshot
+                        .input
+                        .as_ref()
+                        .is_some_and(|input| input.extends(&guard.witness))
+            }),
+            active_summary_rejected: previous.is_some_and(|guard| {
+                guard.active_summary_rejected
                     && guard.turn == snapshot.turn
                     && snapshot
                         .input
@@ -506,6 +544,7 @@ mod tests {
             mutable_protection: false,
             refresh_revision: None,
             summary_frozen_current_turn: false,
+            active_summary_rejected: false,
             reason: Reason::NoNewTarget,
             invalid_state: 0,
             other_rejections: 0,
@@ -529,6 +568,28 @@ mod tests {
             saved.has_new_targets(None),
             "incomplete evidence must not be mistaken for no targets"
         );
+    }
+
+    #[test]
+    fn active_summary_rejection_is_kept_only_under_unknown_coverage_and_old_files_load() {
+        let mut known = guard(Some(vec![mark("middle", 1, 10)]));
+        known.set_active_summary_rejected(true);
+        assert!(!known.keeps_through_active_adoption("synthetic-turn"));
+        let mut unknown = guard(None);
+        assert!(!unknown.keeps_through_active_adoption("synthetic-turn"));
+        unknown.set_active_summary_rejected(true);
+        assert!(unknown.keeps_through_active_adoption("synthetic-turn"));
+        assert!(!unknown.keeps_through_active_adoption("another-turn"));
+        unknown.set_active_summary_rejected(false);
+        assert!(!unknown.keeps_through_active_adoption("synthetic-turn"));
+        let mut old = serde_json::to_value(&unknown).unwrap();
+        old.as_object_mut()
+            .unwrap()
+            .remove("active_summary_rejected");
+        let restored: Guard = serde_json::from_value(old).unwrap();
+        assert!(restored.valid() && !restored.active_summary_rejected);
+        unknown.freeze_summary_for_current_turn(true);
+        assert!(unknown.keeps_through_active_adoption("synthetic-turn"));
     }
 
     #[test]

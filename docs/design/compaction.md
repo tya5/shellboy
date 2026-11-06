@@ -437,10 +437,20 @@ replacement as new input. When the newest tool anchor belongs to the current
 protected Turn, later appended groups there do not unfreeze that rejected older
 summary; an intervening path rewrite or new Turn is evaluated again. This freeze
 is also recorded when the closed-range (older Turns) summary was rejected without
-adopting anything (#248): the range, reusable parts and limit are unchanged while the
-current Turn only appends tool output, so coverage-limited evidence does not repeat
-it at every tool boundary. The next boundary then reaches the active-Turn stages
-(spill, summary) instead of re-running the closed summary. The latest tool group, every active-Turn user input, the latest completed
+adopting anything (#248), but only for a deterministic rejection (`invalid_state`),
+never for a cancellation or transient provider failure. Appended current-Turn tool
+output does not add older summary sources, so under unknown coverage the same
+rejected closed summary is not attempted again at each tool boundary; a later,
+wider closed range in the same Turn stays blocked until a path rewrite or a new Turn.
+The freeze survives an adoption that touched only active stages (the witness is
+rebased like a partial spill); it is dropped by any closed-range adoption. A second
+flag records a deterministically rejected active-Turn summary under unknown coverage:
+it blocks further active summaries until a summary adoption, a new Turn or a path
+rewrite. Per Turn this yields at most one rejected attempt per summary stage under
+unknown coverage; spill passes may still start at every boundary and are not counted.
+Active spills bump the reasoning epoch, which is part of the summary part key, so a
+closed summary retried after such a spill cannot reuse cached parts and spends real
+requests; the flags above avoid that repeat. The latest tool group, every active-Turn user input, the latest completed
 Turn, pending receipts and held deliveries retain their existing protections.
 The active-Turn summary remains eligible only through the #182 plan (all tool
 rounds of the Turn); its evidence is separate from the older-Turn summary
