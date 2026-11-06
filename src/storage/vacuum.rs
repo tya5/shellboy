@@ -122,8 +122,18 @@ pub(super) fn vacuum_directory(
             temp.to_string_lossy().as_ref(),
         )
         .map_err(sqlite)?;
+    // temp_store_directory is process-global in SQLite: restore it afterwards so
+    // a deleted directory cannot break later connections in the same process.
+    struct ResetTemp<'a>(&'a Connection);
+    impl Drop for ResetTemp<'_> {
+        fn drop(&mut self) {
+            let _ = self.0.pragma_update(None, "temp_store_directory", "");
+        }
+    }
+    let reset = ResetTemp(&connection);
     // VACUUM is atomic: a failure or crash leaves the previous database intact.
     connection.execute_batch("VACUUM").map_err(sqlite)?;
+    drop(reset);
     connection
         .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
         .map_err(sqlite)?;
