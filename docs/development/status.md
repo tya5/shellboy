@@ -7,6 +7,16 @@ cargo checks and run `docs-checks` (language audit and the two document Python
 tests). `docs/guides/` (embedded by Rust) always forces the full run. Decision
 unit-tested; branch workflow_dispatch proves parsing and the full path. The
 skip on a real main push is not yet observed. Details: setup.md.
+## Startup app_meta range scans (#219; on branch issue-219/app-meta-range, CI pending)
+
+Startup interrupted-work recovery (`src/app.rs`) used `key LIKE 'compact.pending.%' OR
+key LIKE 'compact.inflight.%'` (SELECT and DELETE) and `key LIKE 'wait.pending.%'`
+(DELETE). LIKE cannot use the `app_meta` primary key, so each was a full scan of the
+summary.part.* / index.* rows. They are now primary-key ranges (`key>='p.' AND key<'p/'`).
+Measured on the user's v0.9.0 startup: interrupted_work 1,207 ms, of which 660 ms was
+that one SELECT/DELETE pair (49,730 fullscan steps); the after-fix time is not measured
+here (unit test checks plan and result equality only). Other LIKE uses on app_meta are
+not on the startup path and were left unchanged.
 
 ## Branch view (#237; on branch issue-237/branch-view, CI pending)
 

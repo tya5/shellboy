@@ -270,11 +270,11 @@ impl DataOwner {
             let repair_failures = std::mem::take(&mut report.failures);
             report.failures = capture_failures;
             report.failures.extend(repair_failures.into_iter().take(32-report.failures.len()));
-            let queued=tx.prepare("SELECT value FROM app_meta WHERE key LIKE 'compact.pending.%' OR key LIKE 'compact.inflight.%'")?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
+            let queued=tx.prepare(STARTUP_QUEUED_SELECT)?.query_map([],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>,_>>()?;
             let cancelled=serde_json::json!({"kind":"compact","state":"failed","result_uncertain":true,"ended_at":now,"outcome":{"error":ApiError::new(ErrorCode::InvalidState,"Previous instance ended; compaction was cancelled without replay")}}).to_string();
             for body in queued{if let Ok(ids)=serde_json::from_str::<Vec<String>>(&body){for operation in ids{tx.execute("INSERT OR REPLACE INTO app_meta(key,value) VALUES(?1,?2)",rusqlite::params![crate::compaction::CompactionKeys::result(&operation),cancelled])?;}}}
-            tx.execute("DELETE FROM app_meta WHERE key LIKE 'compact.pending.%' OR key LIKE 'compact.inflight.%'",[])?;
-            tx.execute("DELETE FROM app_meta WHERE key LIKE 'wait.pending.%'",[])?;
+            tx.execute(STARTUP_QUEUED_DELETE,[])?;
+            tx.execute(STARTUP_WAIT_DELETE,[])?;
             tx.execute("DELETE FROM runtime_pin",[])?;
             tx.commit()?;
             Ok(report)
@@ -399,6 +399,104 @@ impl DataOwner {
         tokio::task::spawn_blocking(move || lock.finish_session())
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "Owner marker worker failed"))?
+    }
+}
+
+// Startup recovery prefix predicates as primary-key ranges (#219). The old
+// `key LIKE 'prefix.%'` form cannot use the app_meta primary key (LIKE is
+// case-insensitive and the column is BINARY), so it scanned every summary.part.* /
+// index.* row (660 ms on a real database). These keys are only ever written by
+// CompactionKeys::{pending,inflight} and `wait.pending.{operation}` as exact
+// lowercase ASCII prefixes, so the byte range [`prefix.`, `prefix/`) ('/' is '.'+1)
+// selects the same rows as LIKE; LIKE's `_`/`%` wildcards do not occur in the prefixes.
+const STARTUP_QUEUED_SELECT: &str = "SELECT value FROM app_meta WHERE (key>='compact.pending.' AND key<'compact.pending/') OR (key>='compact.inflight.' AND key<'compact.inflight/')";
+const STARTUP_QUEUED_DELETE: &str = "DELETE FROM app_meta WHERE (key>='compact.pending.' AND key<'compact.pending/') OR (key>='compact.inflight.' AND key<'compact.inflight/')";
+const STARTUP_WAIT_DELETE: &str =
+    "DELETE FROM app_meta WHERE key>='wait.pending.' AND key<'wait.pending/'";
+
+#[cfg(test)]
+mod startup_range_tests {
+    use super::*;
+
+    const OLD_SELECT: &str = "SELECT key FROM app_meta WHERE key LIKE 'compact.pending.%' OR key LIKE 'compact.inflight.%' ORDER BY key";
+    const NEW_SELECT: &str = "SELECT key FROM app_meta WHERE (key>='compact.pending.' AND key<'compact.pending/') OR (key>='compact.inflight.' AND key<'compact.inflight/') ORDER BY key";
+
+    fn fixture() -> rusqlite::Connection {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE app_meta(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL)",
+        )
+        .unwrap();
+        let keys = [
+            crate::compaction::CompactionKeys::new("thread:1").pending(),
+            crate::compaction::CompactionKeys::new("thread:日本").pending(),
+            crate::compaction::CompactionKeys::new("a%_b").inflight(),
+            crate::compaction::CompactionKeys::new("thread:1").automatic_active(),
+            crate::compaction::CompactionKeys::result("op"),
+            "compact.pending".into(),
+            "compact.pendingx.t".into(),
+            "compact.pending/t".into(),
+            "wait.pending.w1".into(),
+            "wait.pending".into(),
+            "summary.part.abc".into(),
+            "index.preview.x".into(),
+        ];
+        for key in keys {
+            db.execute("INSERT INTO app_meta VALUES(?1,'v')", [key])
+                .unwrap();
+        }
+        db
+    }
+
+    fn keys(db: &rusqlite::Connection, sql: &str) -> Vec<String> {
+        db.prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn range_predicates_match_like_and_use_the_primary_key() {
+        let db = fixture();
+        let old = keys(&db, OLD_SELECT);
+        assert_eq!(old.len(), 3);
+        assert_eq!(keys(&db, NEW_SELECT), old);
+        let old_wait = keys(
+            &db,
+            "SELECT key FROM app_meta WHERE key LIKE 'wait.pending.%' ORDER BY key",
+        );
+        let new_wait = keys(
+            &db,
+            "SELECT key FROM app_meta WHERE key>='wait.pending.' AND key<'wait.pending/' ORDER BY key",
+        );
+        assert_eq!(old_wait, new_wait);
+        for sql in [
+            STARTUP_QUEUED_SELECT,
+            STARTUP_QUEUED_DELETE,
+            STARTUP_WAIT_DELETE,
+        ] {
+            let plan: Vec<String> = db
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map([], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            let joined = plan.join("\n");
+            assert!(
+                joined.contains("SEARCH") && !joined.contains("SCAN"),
+                "{sql}: {joined}"
+            );
+            assert!(
+                joined.contains("PRIMARY KEY") || joined.contains("sqlite_autoindex_app_meta_1"),
+                "{joined}"
+            );
+        }
+        let removed = db.execute(STARTUP_QUEUED_DELETE, []).unwrap();
+        assert_eq!(removed, 3);
+        assert_eq!(db.execute(STARTUP_WAIT_DELETE, []).unwrap(), 1);
     }
 }
 

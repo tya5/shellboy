@@ -3617,3 +3617,15 @@ a previewed non-current alternative opens that Thread and otherwise keeps its us
 meaning; prune from the panel opens the existing form (dry run selected) rather than
 adding a second confirmation. Recheck when: real families approach 256 Threads, a
 compaction-heavy Thread shows a wrong point, or the user wants compare.
+
+## D-219-1: Startup app_meta prefix scans become primary-key ranges (2026-11-06)
+
+`interrupted_work` startup recovery replaced `LIKE 'compact.pending.%'`, `LIKE
+'compact.inflight.%'` and `LIKE 'wait.pending.%'` with `key>='prefix.' AND key<'prefix/'`.
+Equivalence: these keys are written only by `CompactionKeys::pending/inflight` and
+`wait.pending.{operation}` as exact lowercase ASCII prefixes, so LIKE's ASCII case folding
+and its `%`/`_` wildcards (absent from the literal prefixes) never differ from the byte
+range ('/' is '.'+1). EXPLAIN QUERY PLAN changes from `SCAN app_meta` to `SEARCH app_meta
+USING INDEX sqlite_autoindex_app_meta_1 (key>? AND key<?)` (MULTI-INDEX OR for the pair).
+Share: 660 of 1,207 ms measured on a real startup. No new index or schema. Recheck when a
+key with an upper-case or differently written prefix is introduced.
