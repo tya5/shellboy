@@ -702,15 +702,85 @@ async fn stopping_run_is_announced() {
     command(&control, Command::RunStop(RunTarget { run_id: run }))
         .await
         .unwrap();
-    // The stopping state is announced without waiting for the reply grace period.
+    // The stop is announced without waiting for the reply grace period. `stopping` can be
+    // brief, so either saved state counts: a client reading after the hint may see `stopped`.
     until_saved(
         &control,
         &at,
         &t,
-        "SELECT count(*) FROM run WHERE thread_id=?1 AND state='stopping'",
+        "SELECT count(*) FROM run WHERE thread_id=?1 AND state IN ('stopping','stopped')",
     )
     .await;
     drop(first);
+    close(control, owner, server).await;
+}
+
+/// The final `stopped` commit has its own hint. While a database job holds the worker no
+/// commit can happen and `events.wait` still answers, so the cursor taken there is past every
+/// earlier hint and before the `stopped` commit. Only a hint from after the release can end
+/// the poll. If the Run already passed `stopping` before the hold, that round proves nothing
+/// and another Thread tries again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stopped_transition_has_its_own_hint() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let mut exercised = false;
+    for _ in 0..16 {
+        let t = thread(&control).await;
+        send(&control, &t, "first").await;
+        let first = incoming(&control, &mut receive).await;
+        let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
+        command(
+            &control,
+            Command::RunStop(RunTarget {
+                run_id: run.clone(),
+            }),
+        )
+        .await
+        .unwrap();
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (entered, state) = tokio::sync::oneshot::channel();
+        let hold = {
+            let control = control.clone();
+            tokio::spawn(async move {
+                control
+                    .store
+                    .database
+                    .call(move |db| {
+                        let state: String =
+                            db.query_row("SELECT state FROM run WHERE id=?1", [run], |r| r.get(0))?;
+                        let holding = state == "stopping";
+                        let _ = entered.send(state);
+                        if holding {
+                            let _ = released.recv();
+                        }
+                        Ok(())
+                    })
+                    .await
+            })
+        };
+        if watchdog("database hold", state).await.unwrap().unwrap() == "stopping" {
+            let at = quiet(&control).await;
+            release.send(()).unwrap();
+            until_saved(
+                &control,
+                &at,
+                &t,
+                "SELECT count(*) FROM run WHERE thread_id=?1 AND state='stopped'",
+            )
+            .await;
+            exercised = true;
+        }
+        watchdog("database hold end", hold)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        drop(first);
+        if exercised {
+            break;
+        }
+    }
+    assert!(exercised, "no round held a Run in stopping");
     close(control, owner, server).await;
 }
 
