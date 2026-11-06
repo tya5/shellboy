@@ -541,6 +541,13 @@ args!(ThreadBranchesArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cursor: Option<String>
 });
+// Explicit Thread IDs to archive or unarchive; empty means the calling Thread (#222).
+args!(ThreadArchiveArgs {
+    #[serde(default)]
+    thread_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    descendants: bool
+});
 args!(ThreadRewindArgs {
     #[serde(default)]
     thread_id: Option<String>,
@@ -621,13 +628,40 @@ fn timeout_ms() -> u64 {
 fn utf8() -> String {
     DEFAULT_ENCODING.to_owned()
 }
-args!(ThreadListArgs { #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String> });
+/// Which Threads `thread list` returns with respect to archiving (#222).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchivedFilter {
+    #[default]
+    Exclude,
+    Include,
+    Only,
+}
+impl ArchivedFilter {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exclude => "exclude",
+            Self::Include => "include",
+            Self::Only => "only",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        [Self::Exclude, Self::Include, Self::Only]
+            .into_iter()
+            .find(|mode| mode.as_str() == value)
+    }
+    pub fn is_exclude(&self) -> bool {
+        *self == Self::Exclude
+    }
+}
+args!(ThreadListArgs { #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter });
 impl Default for ThreadListArgs {
     fn default() -> Self {
         Self {
             limit: list_limit(),
             cursor: None,
             query: None,
+            archived: ArchivedFilter::Exclude,
         }
     }
 }
@@ -764,6 +798,10 @@ pub enum Command {
     ThreadPrune(ThreadPruneArgs),
     #[serde(rename = "thread.rewind")]
     ThreadRewind(ThreadRewindArgs),
+    #[serde(rename = "thread.archive")]
+    ThreadArchive(ThreadArchiveArgs),
+    #[serde(rename = "thread.unarchive")]
+    ThreadUnarchive(ThreadArchiveArgs),
     #[serde(rename = "thread.set")]
     ThreadSet(Box<ThreadSetArgs>),
     #[serde(rename = "message.reply")]
@@ -1014,8 +1052,8 @@ args!(RevisitSummary {
     pending: bool,
     consumed_count: u64
 });
-args!(ThreadSummary { #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, excerpt: String });
-args!(ThreadDetails { #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] segment_chars: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_segment_chars: Option<u64>, #[serde(default)] reduce_rounds: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_reduce_rounds: Option<u64>, #[serde(default)] awaiting_reply: Vec<Value>, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
+args!(ThreadSummary { #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, excerpt: String });
+args!(ThreadDetails { #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] segment_chars: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_segment_chars: Option<u64>, #[serde(default)] reduce_rounds: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_reduce_rounds: Option<u64>, #[serde(default)] awaiting_reply: Vec<Value>, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String> });
 args!(MessageDetails { sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
 args!(
     #[derive(Eq)]

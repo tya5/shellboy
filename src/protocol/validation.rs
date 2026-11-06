@@ -211,6 +211,24 @@ impl ThreadRewindArgs {
     }
 }
 
+/// Most explicit Thread IDs one archive or unarchive call accepts.
+pub(crate) const MAX_ARCHIVE_THREADS: usize = 200;
+
+impl ThreadArchiveArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        if self.thread_ids.len() > MAX_ARCHIVE_THREADS {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                format!("thread archive accepts at most {MAX_ARCHIVE_THREADS} Thread IDs"),
+            ));
+        }
+        for id in &self.thread_ids {
+            nonempty(id, "thread_id")?;
+        }
+        Ok(())
+    }
+}
+
 /// `""` clears the Thread override; digits set it (0 disables proactive compaction).
 pub(crate) fn parse_auto_compact_at(value: &str) -> Result<Option<i64>, ApiError> {
     if value.is_empty() {
@@ -537,6 +555,7 @@ impl Command {
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadPrune(a) => a.validate(),
             Self::ThreadRewind(a) => a.validate(),
+            Self::ThreadArchive(a) | Self::ThreadUnarchive(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;

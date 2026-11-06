@@ -61,7 +61,8 @@ named_jobs! {
     ThreadList => thread_list, ThreadGet => thread_get, ThreadBranches => thread_branches, UsageGet => usage_get,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
-    ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadSet => thread_set,
+    ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
+    ThreadUnarchive => thread_unarchive, ThreadSet => thread_set,
     MessageSend => message_send, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnGet => turn_get, Wait => wait, HistoryList => history_list, HistoryGet => history_get,
@@ -123,7 +124,12 @@ impl Kind {
             | Kind::AttachmentList => PureRead,
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
             // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
-            Kind::MessageReply | Kind::ThreadPrune | Kind::ThreadRewind => MutationDeclaredBound,
+            // Archive: at most 200 IDs, descendants walk capped at 256 (control::archive).
+            Kind::MessageReply
+            | Kind::ThreadPrune
+            | Kind::ThreadRewind
+            | Kind::ThreadArchive
+            | Kind::ThreadUnarchive => MutationDeclaredBound,
             Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
@@ -187,7 +193,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            49,
+            51,
             "classify new kinds and update this ratchet"
         );
     }
@@ -198,6 +204,8 @@ mod tests {
             Kind::MessageReply,
             Kind::ThreadPrune,
             Kind::ThreadRewind,
+            Kind::ThreadArchive,
+            Kind::ThreadUnarchive,
             Kind::OwnerShutdown,
             Kind::ThreadCreate,
             Kind::ThreadFork,

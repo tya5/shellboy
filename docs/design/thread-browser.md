@@ -181,3 +181,12 @@ the optional bounded target marker and includes it in execution; a missing marke
 cannot enable Y. `preview_stale` leaves every Thread visible, requests a new
 preview with a new request fence, and requires another explicit Y. Closing the
 dialog never causes a mutation retry. CLI omission remains supported by Core.
+
+## アーカイブ（Issue #222 段階1）
+
+一覧（List）は既定でアーカイブ済みThreadを隠す。取得は`thread.list`の`archived`（exclude既定、include、only）で、cursorは`archived`ごとのscope文字列に結び付き、別modeへ持ち越せない。TUIはexcludeとonlyだけを使う。
+
+- Ctrl+A: 選択した保存済み会話と子孫をアーカイブする。アーカイブ一覧では同じ範囲を解除する。子孫を含めるのが既定（量産される作業の木に合わせる。元に戻せるため確認popupは出さない）。未保存の下書き行は対象外で説明を出す。実行は`thread.archive`/`thread.unarchive`（`descendants: true`、256件超は`input_limit`で全体を拒否）。結果の件数を一覧のnoticeへ表示する。
+- Ctrl+G: 一覧とアーカイブ一覧を切り替える。切替えで行を捨てて新しい世代で再取得し、選択は引き継がない。アーカイブ一覧の枠題は「アーカイブ済みの会話 / Archived conversations」とし、新しいglyphは使わず語で示す。`/threads`を開き直すと既定の一覧へ戻る。Watchはアーカイブを理由に隠さない（実行中の作業を見失わないため）。
+- 既存の割当てと衝突しない: 一覧が使う他のキーはEsc、矢印、Home/End、PgDn、Enter、F1、Tab、Delete/Ctrl+D、Ctrl+R、Watch内のCtrl+S、Alt+R、Alt+Oで、文字とBackspaceは絞込み、全体ではCtrl+Q、Ctrl+C、F2を保つ。
+- 変更通知: 実行結果は通常のchanged Threadで届き、既存のpatchが行を一覧から外す（または戻す）。patchはアーカイブmodeで所属を判定し、古いpageが外した行を戻さない既存のrow version規則に従う。Info（F1）は`archived_at`を表示する。

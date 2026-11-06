@@ -10123,3 +10123,26 @@ and 40 columns with left/right preview and Enter. Not verified: a real terminal 
 PTY capture of the panel or marker was taken), Windows and Linux (CI only), the
 panel against a very large real database, and the `←`/`→` keys in terminals that
 report them differently.
+
+## Thread archive (#222 stage 1)
+
+macOS ARM64 through `rust-slot`, disposable DBs, no provider. Store tests (`tests/thread_archive.rs`) cover
+archive and unarchive of one Thread (result keys, `updated_at` unchanged, `revision` advanced, `already`
+no-ops), `--descendants` over a three-level tree with `not_found` IDs, the 200-ID and 256-Thread bounds (a
+refused subtree changes nothing; exactly 256 is accepted), the three list modes with paging and cursors
+refused across modes in both directions, restored order after unarchive, archived Threads still readable
+(`thread get`, `history list`), counted (`usage --include-children`) and found by `thread list --query`
+with `--archived include`, a message to an idle archived Thread starting a Run and unarchiving it with one
+`thread_unarchived` context entry, archiving a Thread with a live Run, and a message into that live Run
+leaving it archived. Unit tests check that the default and archived pages walk their partial index with no
+sort and that the default page costs the same VM steps with 20 or 3,000 archived Threads
+(`INDEXED BY` pins the index; without it the planner chose `threads_updated` plus a sort). TUI tests cover
+key dispatch (Ctrl+A archive and unarchive, Ctrl+G list switch with a new generation and no carried rows,
+plain letters still filter, Watch and drafts refuse), patch membership in both lists, the archived list
+title and key labels at two widths in English and Japanese, the result notices in both languages, and the
+F1 information. The release-upgrade checker tests cover schema 31 to 32 (column, both partial indexes, rows
+preserved) and the new default (public v0.9.0 to schema 32). Not verified: Windows/Linux local runs (CI is
+recorded with the final SHA), a real terminal (no PTY capture of the archived list was taken), search over
+an archived Thread through the semantic index (no code path reads `archived_at` outside the list, summary
+and archive code), and archive of very large real databases.
+

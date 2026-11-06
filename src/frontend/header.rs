@@ -150,6 +150,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         return Err(header_scalar_limit(&field));
     }
     let details = ThreadDetails {
+        archived_at: None,
         auto_compact_at: row.get::<_, Option<i64>>(15)?.map(|v| v as u64),
         effective_auto_compact_at: None,
         segment_chars: None,

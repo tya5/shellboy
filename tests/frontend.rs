@@ -1422,6 +1422,7 @@ async fn queued_database_query_does_not_delay_quit_grace_notification() {
         filter: String::new(),
         generation: 1,
         mode: Default::default(),
+        archived: Default::default(),
         descendant_root: None,
         seen_completions: Vec::new(),
         seen_history_limited: false,

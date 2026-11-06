@@ -346,7 +346,7 @@ Ordinary lists, detail fields, and forms use Up/Down for selection and PgUp/PgDn
 | Screen | Keys |
 | --- | --- |
 | Help | Up/Down/PgUp/PgDn scroll; Esc/Enter/F1 close |
-| Conversation list | Text/Backspace filter; Up/Down select; Left/Right collapse/expand/navigate parents and children; Home/End first/last; Enter switches; PgDn adds next page; Ctrl+R refreshes; F1 information; Delete/Ctrl+D deletion confirmation; Esc returns |
+| Conversation list | Text/Backspace filter; Up/Down select; Left/Right collapse/expand/navigate parents and children; Home/End first/last; Enter switches; PgDn adds next page; Ctrl+R refreshes; F1 information; Delete/Ctrl+D deletion confirmation; Ctrl+A archives the selected conversation and its descendants (unarchives in the archived list); Ctrl+G switches between the list and the archived list; Esc returns |
 | Management/search results | Tab / Shift+Tab select fields; Up/Down/PgUp/PgDn scroll; Enter field details; C copies value; A action form; W cancels explicit-wait observation; Esc returns |
 | Conversation details (F6) | Up/Down select item, Enter opens fields; Up/Down select fields; V concise/internal view; O source; F7/L links; C copies value; A source-fetch form; Esc closes |
 | Source | PgUp/PgDn scroll current page; O refreshes selected source; N next page; P first page; C copies current page source |
@@ -453,6 +453,8 @@ history. Normal source availability/GC rules still apply.
 ### Deleting from the conversation list
 
 In `/threads` List mode, select a saved conversation and press Delete or Ctrl+D for impact and confirmation. On macOS, fn+delete means Delete; ordinary delete/Backspace still removes filter characters.
+
+Ctrl+A in List mode archives the selected conversation together with its descendants: they leave the list but nothing is deleted, history, search and usage are unchanged, and a Run in progress keeps running. A notice reports how many conversations were archived. Ctrl+G opens the archived list (titled `Archived conversations`), where Ctrl+A unarchives the selection and its descendants; Ctrl+G returns. A new Run on an archived conversation returns it to the list. The archived list is not shown in Watch, and unsent drafts cannot be archived. Selections over 256 conversations are refused. The `shellboy thread archive` commands do the same from a shell with explicit IDs.
 
 Deleting child conversations is off by default. Toggling D/Space requeries impact. Only Y with the latest impact permitting deletion executes; N/Esc cancel. Reasons explain live/stopping Run blockers and similar restrictions. State is checked again during execution even after confirmation, and failures remain in the list.
 

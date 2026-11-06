@@ -34,6 +34,8 @@ impl Command {
             Self::ThreadDeletePreview(_) => ("thread.delete_preview", CommandRoute::Database),
             Self::ThreadPrune(_) => ("thread.prune", CommandRoute::Database),
             Self::ThreadRewind(_) => ("thread.rewind", CommandRoute::Database),
+            Self::ThreadArchive(_) => ("thread.archive", CommandRoute::Database),
+            Self::ThreadUnarchive(_) => ("thread.unarchive", CommandRoute::Database),
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
             Self::MessageReply(_) => ("message.reply", CommandRoute::Database),
             Self::MessageSend(_) => ("message.send", CommandRoute::Database),
@@ -110,6 +112,8 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
+            | Self::ThreadArchive(_)
+            | Self::ThreadUnarchive(_)
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)
@@ -155,6 +159,8 @@ impl Command {
             | Self::ThreadDeletePreview(_)
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
+            | Self::ThreadArchive(_)
+            | Self::ThreadUnarchive(_)
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)
@@ -204,7 +210,9 @@ impl Command {
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
             | Self::ContextEdit(_)
-            | Self::ThreadRewind(_) => true,
+            | Self::ThreadRewind(_)
+            | Self::ThreadArchive(_)
+            | Self::ThreadUnarchive(_) => true,
             Self::OwnerShutdown(_)
             | Self::Status(_)
             | Self::ModelList(_)
@@ -275,6 +283,8 @@ impl Command {
             | Self::ThreadDelete(_)
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
+            | Self::ThreadArchive(_)
+            | Self::ThreadUnarchive(_)
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)

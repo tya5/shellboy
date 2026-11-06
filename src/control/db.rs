@@ -1,4 +1,5 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
+mod archive;
 mod execute_kind;
 mod run_action;
 pub(crate) mod thread_summary;
@@ -1411,6 +1412,8 @@ impl Store {
                 }
                 Ok(result)
             }
+            Command::ThreadArchive(args) => archive::run(tx, args, caller, true, now),
+            Command::ThreadUnarchive(args) => archive::run(tx, args, caller, false, now),
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }
@@ -2031,6 +2034,8 @@ fn assign_message(
             now,
         )
         .map_err(sql_error)?;
+        // New work on an archived Thread makes it visible again (#222).
+        archive::clear_for_new_run(tx, id, actor(caller), now).map_err(sql_error)?;
         let turn_id = super::state::create_turn_tx(tx, id, &run_id, now, now).map_err(sql_error)?;
         // A human's new instruction, or an owning parent's explicit terminal
         // child restart, is the resume boundary for unassigned saved input.
@@ -2124,7 +2129,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;
@@ -2262,6 +2267,15 @@ fn thread_excerpt(connection: &Connection, thread: &str) -> Result<String> {
     Ok(String::new())
 }
 
+/// A cursor never crosses archived modes: each mode has its own scope string.
+fn list_scope(mode: ArchivedFilter) -> &'static str {
+    match mode {
+        ArchivedFilter::Exclude => "thread.list",
+        ArchivedFilter::Include => "thread.list.include_archived",
+        ArchivedFilter::Only => "thread.list.only_archived",
+    }
+}
+
 pub(crate) fn thread_list(
     connection: &Connection,
     args: &ThreadListArgs,
@@ -2274,7 +2288,7 @@ pub(crate) fn thread_list(
         })
         .map_err(sql_error)?;
     let (key, watermark) = if let Some(token) = &args.cursor {
-        let cursor = PageCursor::decode(token, "thread.list", filter, 0, None)?;
+        let cursor = PageCursor::decode(token, list_scope(args.archived), filter, 0, None)?;
         (
             Some(cursor.last_sort_key),
             i64::try_from(cursor.watermark)
@@ -2292,7 +2306,7 @@ pub(crate) fn thread_list(
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
     let mut statement = connection
-        .prepare(&thread_summary::page_sql())
+        .prepare(&thread_summary::page_sql(args.archived))
         .map_err(sql_error)?;
     let mut rows = statement
         .query(params![
@@ -2330,7 +2344,7 @@ pub(crate) fn thread_list(
         Some(
             PageCursor {
                 version: 1,
-                scope: "thread.list".into(),
+                scope: list_scope(args.archived).into(),
                 filter: filter.into(),
                 last_sort_key: serde_json::to_string(&(
                     last.updated_at.clone(),
@@ -2949,7 +2963,7 @@ mod thread_list_plan_tests {
         let plans: Vec<String> = db
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                thread_summary::page_sql()
+                thread_summary::page_sql(ArchivedFilter::Exclude)
             ))
             .unwrap()
             .query_map(params![100_i64, "", "", 50], |r| r.get(3))
@@ -2979,6 +2993,81 @@ mod thread_list_plan_tests {
         // The outer Thread pagination may sort; the scalar Run lookup must use
         // its covering index instead of reading every Run in each Thread.
     }
+
+    fn outer_plan(db: &Connection, mode: ArchivedFilter) -> Vec<String> {
+        db.prepare(&format!(
+            "EXPLAIN QUERY PLAN {}",
+            thread_summary::page_sql(mode)
+        ))
+        .unwrap()
+        .query_map(params![100_i64, "", "", 50], |r| r.get(3))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    }
+
+    #[test]
+    fn each_archived_mode_seeks_its_partial_index_without_sorting_or_scanning_threads() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        for (mode, index) in [
+            (ArchivedFilter::Exclude, "threads_visible_updated"),
+            (ArchivedFilter::Only, "threads_archived_updated"),
+        ] {
+            let plans = outer_plan(&db, mode);
+            assert!(
+                plans
+                    .iter()
+                    .any(|p| p.contains("SCAN t") && p.contains(index)),
+                "{mode:?} must walk {index} in order: {plans:?}"
+            );
+            assert!(
+                !plans.iter().any(|p| p.contains("TEMP B-TREE")),
+                "{mode:?} must not sort the Threads: {plans:?}"
+            );
+        }
+        let include = outer_plan(&db, ArchivedFilter::Include);
+        assert!(
+            !include
+                .iter()
+                .any(|p| p.contains("threads_archived_updated")),
+            "{include:?}"
+        );
+    }
+
+    #[test]
+    fn default_page_cost_does_not_grow_with_archived_threads() {
+        let steps = |archived: u32| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{})
+                 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
+                 SELECT printf('a%05d',x),'/','','p','m','2026-11-02T00:00:00Z','2026-11-03T00:00:00Z' FROM n;
+                 WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<60)
+                 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+                 SELECT printf('v%05d',x),'/','','p','m','2026-11-01T00:00:00Z' FROM n;",
+                archived
+            ))
+            .unwrap();
+            // Archived rows are the newest by `updated_at`: a residual filter would
+            // have to walk past all of them before reaching one visible Thread.
+            let mut statement = db
+                .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude))
+                .unwrap();
+            let rows = statement
+                .query_map(params![1_000_000_i64, "", "", 50], |_| Ok(()))
+                .unwrap()
+                .count();
+            assert_eq!(rows, 50);
+            statement.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let (few, many) = (steps(20), steps(3000));
+        assert!(
+            many < few + few / 4,
+            "default page read grew with archived Threads: {few} -> {many} VM steps"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -3006,6 +3095,7 @@ mod activity_list_tests {
                     limit: 50,
                     cursor,
                     query: None,
+                    archived: Default::default(),
                 },
             )
             .unwrap();

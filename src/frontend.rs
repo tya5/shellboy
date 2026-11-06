@@ -1786,6 +1786,25 @@ async fn run_with_delivery(
                             }
                         });
                     }
+                    // Thread list Ctrl+A: archive (or unarchive) with descendants, then
+                    // report the count in the list notice. The row itself leaves or
+                    // joins the list through the ordinary changed-Thread patch.
+                    UiAction::ArchiveThreads { thread_id, archive } => {
+                        let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                            update(&updates, UiUpdate::ThreadsArchived { archive, result: Err(i18n::local!(language, "操作キューが満杯です。完了後に再操作してください", "The operation queue is full. Wait for completion, then try again").into()) }).await;
+                            continue;
+                        };
+                        let control = control.clone();
+                        let sender = updates.worker();
+                        spawn_work(&mut workers, permit, async move {
+                            let args = ThreadArchiveArgs { thread_ids: vec![thread_id], descendants: true };
+                            let command = if archive { Command::ThreadArchive(args) } else { Command::ThreadUnarchive(args) };
+                            let result = request(&control, command).await.map(|value| {
+                                value[if archive { "archived" } else { "unarchived" }].as_array().map_or(0, Vec::len)
+                            }).map_err(|error| error.message);
+                            update(&sender, UiUpdate::ThreadsArchived { archive, result }).await;
+                        });
+                    }
                     // Human /retry is an action on the current conversation. F8
                     // Manage(RunRetry) remains an explicit inspectable report.
                     UiAction::Command(Command::RunRetry(args)) => {
@@ -2407,7 +2426,7 @@ async fn run_with_delivery(
                     UiAction::ObserveDescendants {generation,roots}=>{
                         if let Err(error)=descendants.observe(generation,roots) {update(&updates,UiUpdate::Descendants {generation,read_sequence:message_queue::read_revision(),counts:Vec::new(),error:Some(error.to_string())}).await;}
                     },
-                    UiAction::LoadThreads {cursor,filter,generation,mode,descendant_root,seen_completions,seen_history_limited}=>{
+                    UiAction::LoadThreads {cursor,filter,generation,mode,archived,descendant_root,seen_completions,seen_history_limited}=>{
                         let page_stop=match browser.begin_page_view(generation,filter.clone(),mode,descendant_root.clone()) {
                             Ok(Some(stop))=>stop,Ok(None)=>continue,
                             Err(error)=>{update(&updates,UiUpdate::ThreadListFailed {generation,error:error.to_string()}).await;continue;}
@@ -2420,7 +2439,7 @@ async fn run_with_delivery(
                                     if mode==BrowserMode::Watch {
                                         watch_page::read(&control,watch_page::Request {filter,cursor,descendant_root,seen_completions,seen_history_limited,limit:DEFAULT_LIST_LIMIT as usize},page_stop.clone(),progress_slots,diagnostics).await.map(ThreadPageResult::Watch)
                                     } else {
-                                        browser::page(&control,ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter)},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
+                                        browser::page(&control,ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter),archived},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
                                     }
                                 }=>value,
                             };
@@ -4581,6 +4600,7 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                archived_at: None,
                 last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
@@ -4595,6 +4615,7 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
+                archived_at: None,
                 last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,

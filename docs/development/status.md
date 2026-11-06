@@ -3,6 +3,20 @@
 ## Unit-length embeddings (#250; on branch issue-250/normalize-embeddings, CI pending)
 
 All provider embeddings are normalized to unit L2 length in the model HTTP client before storage or comparison. Synthetic-vector tests only; no real API. Docs: search design, history guide, agent guide, decisions. Resume: check CI on the branch tip.
+## Thread archive (#222 stage 1; on branch issue-222/archive, CI pending)
+
+Migration 32 adds nullable `thread.archived_at` and the partial list indexes
+`threads_visible_updated` / `threads_archived_updated`. New operations
+`thread.archive` / `thread.unarchive` (up to 200 explicit IDs, `--descendants`
+capped at 256 Threads in all, no filter-driven bulk write), `thread list
+--archived exclude|include|only` (cursors bound to the mode), `archived_at` in
+summaries and `thread get`. Archive is metadata only: `updated_at` is untouched,
+a live Run does not block it, and a new Run clears it (`thread_unarchived` context
+entry). TUI: Ctrl+A archives the selected conversation with its descendants (or
+unarchives in the archived list), Ctrl+G toggles the archived list; the archived
+state is shown with words. Design: thread-organization.md "Stage 1 as
+implemented"; decisions D-222-1. Stages 2-4 (re-parent, tags, pin) are not started.
+Resume point: CI on the final SHA, then owner review.
 
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
 

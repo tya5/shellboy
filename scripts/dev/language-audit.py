@@ -340,7 +340,7 @@ CATALOGUE_PROOF = {
     },
     'src/ui/operations.rs': {
         'cdf8536fc4654255a83a3fad9095a1277dc7423b7798c4cacdd2e03b24ba6f9d',
-        'cf6d600a439dad85a962b9fa509667c84b953f7dd125939dd6f9a5f7583cd5cb',
+        'd8d259ce403c0fe00ab5ef900d70a33560e97798a8f40ec5ae87f5fb9a655202',
     },
 }
 

@@ -28,7 +28,7 @@ fn columns_from() -> String {
         "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
     COALESCE(u.state,latest.state), latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
     {revisit_pending},{revisit_delivered},
-    u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation
+    u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at
 FROM thread t {activity_joins}
 "
     )
@@ -96,6 +96,7 @@ pub(crate) struct RawSummary {
     pub(crate) identity: SummaryIdentity,
     revisit_pending: bool,
     revisit_delivered: u64,
+    pub(crate) archived_at: Option<String>,
 }
 
 /// Saved identities/times, never an invented timestamp for a phase transition.
@@ -109,10 +110,33 @@ pub(crate) struct SummaryIdentity {
     pub turn_generation: Option<u64>,
 }
 
-pub(super) fn page_sql() -> String {
+/// Every mode repeats its partial-index predicate literally so SQLite can use
+/// `threads_visible_updated` / `threads_archived_updated` (see the plan tests).
+pub(super) fn page_sql(mode: ArchivedFilter) -> String {
     let columns_from = columns_from();
+    // INDEXED BY pins the partial index: without table statistics the planner
+    // prefers `threads_updated` plus a sort, which reads past every archived Thread.
+    let (predicate, columns_from) = match mode {
+        ArchivedFilter::Exclude => (
+            "t.deleted_at IS NULL AND t.archived_at IS NULL",
+            columns_from.replacen(
+                "FROM thread t ",
+                "FROM thread t INDEXED BY threads_visible_updated ",
+                1,
+            ),
+        ),
+        ArchivedFilter::Only => (
+            "t.deleted_at IS NULL AND t.archived_at IS NOT NULL",
+            columns_from.replacen(
+                "FROM thread t ",
+                "FROM thread t INDEXED BY threads_archived_updated ",
+                1,
+            ),
+        ),
+        ArchivedFilter::Include => ("t.deleted_at IS NULL", columns_from),
+    };
     format!(
-        "{columns_from}WHERE t.deleted_at IS NULL AND t.rowid<=?1
+        "{columns_from}WHERE {predicate} AND t.rowid<=?1
       AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
       ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4"
     )
@@ -139,6 +163,7 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         },
         revisit_pending: row.get(14)?,
         revisit_delivered: row.get::<_, i64>(15)?.unsigned_abs(),
+        archived_at: row.get(21)?,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
@@ -154,6 +179,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         latest_run_stop_reason: raw.stop_reason,
         revisit: crate::control::revisit::summary(raw.revisit_pending, raw.revisit_delivered),
         updated_at: raw.updated_at,
+        archived_at: raw.archived_at,
         excerpt,
     }
 }

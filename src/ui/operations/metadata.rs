@@ -77,6 +77,7 @@ impl Form {
             "reduce_rounds" => FieldId::ReduceRounds,
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
+            "archived" => FieldId::Archived,
             "sender_label" => FieldId::SenderLabel,
             "deliver" => FieldId::Deliver,
             "expect_reply" => FieldId::ExpectReply,
@@ -594,6 +595,14 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ThreadRewind => {
             local!(language, "会話 · 巻き戻し", "Conversation · Rewind")
         }
+        OperationId::ThreadArchive => {
+            local!(language, "会話 · アーカイブ", "Conversation · Archive")
+        }
+        OperationId::ThreadUnarchive => local!(
+            language,
+            "会話 · アーカイブ解除",
+            "Conversation · Unarchive"
+        ),
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
         OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
@@ -756,6 +765,16 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定ノードまでの履歴に選択経路を戻します。切り取った部分は子Threadとして残り、シェルの副作用は戻りません。",
             "Cut the selected path back to the specified node. The removed part is kept as a child Thread; shell side effects are not undone."
+        ),
+        OperationId::ThreadArchive => local!(
+            language,
+            "指定Threadと選択した子孫を既定の一覧から外します。削除ではなく、履歴・検索・使用量・受信は変わらず、新しいRunが始まると一覧へ戻ります。",
+            "Hide the specified Thread and selected descendants from the default list. This is not deletion: history, search, usage and receiving messages are unchanged, and a new Run returns the Thread to the list."
+        ),
+        OperationId::ThreadUnarchive => local!(
+            language,
+            "指定Threadと選択した子孫のアーカイブを解除し、既定の一覧へ戻します。",
+            "Unarchive the specified Thread and selected descendants and return them to the default list."
         ),
         OperationId::ThreadSet => local!(
             language,
@@ -1056,6 +1075,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         ),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
+        FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
         FieldId::ExpectReply => local!(language, "返信を依頼", "Expect a reply"),
         FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
@@ -1345,8 +1365,13 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Descendants => local!(
             language,
-            "親子関係上の子孫Threadも削除／削除影響確認へ含めます。",
-            "Include descendant Threads in deletion or its impact preview."
+            "親子関係上の子孫Threadも削除／削除影響確認／アーカイブの対象へ含めます。",
+            "Include descendant Threads in deletion, its impact preview, or archiving."
+        ),
+        FieldId::Archived => local!(
+            language,
+            "空は既定（アーカイブ済みを隠す）。includeは両方、onlyはアーカイブ済みだけを一覧します。",
+            "Empty is the default (archived are hidden). include lists both; only lists archived conversations."
         ),
         FieldId::SenderLabel => local!(
             language,

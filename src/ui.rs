@@ -552,6 +552,11 @@ pub enum UiAction {
         roots: Vec<String>,
     },
     WatchAction(WatchActionTarget),
+    /// Archive or unarchive one Thread and its descendants from the Thread list.
+    ArchiveThreads {
+        thread_id: String,
+        archive: bool,
+    },
     ObserveLiveWork {
         thread_id: String,
         generation: u64,
@@ -756,6 +761,7 @@ pub enum UiAction {
         filter: String,
         generation: u64,
         mode: BrowserMode,
+        archived: crate::protocol::ArchivedFilter,
         descendant_root: Option<String>,
         seen_completions: Vec<CompletionIdentity>,
         seen_history_limited: bool,
@@ -1076,6 +1082,10 @@ pub enum UiUpdate {
     ThreadListFailed {
         generation: u64,
         error: String,
+    },
+    ThreadsArchived {
+        archive: bool,
+        result: Result<usize, String>,
     },
     Threads {
         generation: u64,
@@ -3235,6 +3245,9 @@ impl UiState {
             UiUpdate::ThreadListFailed { generation, error } => {
                 self.thread_browser.failed(generation, error)
             }
+            UiUpdate::ThreadsArchived { archive, result } => {
+                self.thread_browser.archive_result(archive, result)
+            }
             UiUpdate::Threads {
                 generation,
                 read_sequence,
@@ -3246,7 +3259,13 @@ impl UiState {
                 watch_page,
                 notice,
             } => {
-                let drafts = self.local_drafts(self.thread_browser.filter());
+                // Unsent drafts are never archived; the archived list has none.
+                let drafts =
+                    if self.thread_browser.archived() == crate::protocol::ArchivedFilter::Only {
+                        Vec::new()
+                    } else {
+                        self.local_drafts(self.thread_browser.filter())
+                    };
                 let active = self.view().thread_id.clone();
                 if !self.thread_browser.apply(
                     generation,
@@ -4459,6 +4478,7 @@ impl UiState {
                 parent_id: None,
                 state: i18n::local!(self.config.ui.language, "未保存", "Not saved").into(),
                 updated_at: String::new(),
+                archived_at: None,
                 excerpt: view.draft.text.chars().take(80).collect(),
             })
             .filter(|thread| {
@@ -6186,6 +6206,9 @@ impl UiState {
                 }
             }
             threads::ThreadOutcome::Delete(thread) => self.begin_thread_deletion(thread),
+            threads::ThreadOutcome::Archive(thread_id, archive) => {
+                vec![UiAction::ArchiveThreads { thread_id, archive }]
+            }
             threads::ThreadOutcome::None => vec![],
             threads::ThreadOutcome::Load(action) => vec![*action],
             threads::ThreadOutcome::Open(thread) => self.select_thread(thread),
@@ -8760,6 +8783,7 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            archived_at: None,
             auto_compact_at: None,
             effective_auto_compact_at: None,
             segment_chars: None,

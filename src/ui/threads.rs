@@ -6,7 +6,7 @@ use super::watch::{
     WatchState, WatchSummary,
 };
 use super::{UiAction, popup};
-use crate::protocol::ThreadSummary;
+use crate::protocol::{ArchivedFilter, ThreadSummary};
 use crate::ui::text_width::UnicodeWidthStr;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use pulldown_cmark::{Event, Options, Parser, TagEnd};
@@ -43,6 +43,7 @@ enum BrowserText {
     LoadingExcerpt,
     UnsupportedAction,
     DraftCannotDelete,
+    DraftCannotArchive,
     WatchControls,
     ListControls,
     ListFullKeys,
@@ -97,6 +98,12 @@ impl BrowserText {
             (Ja, Self::DraftCannotDelete) => {
                 "未送信の下書きはこの一覧から削除できません。切り替えて本文や添付を編集してください"
             }
+            (En, Self::DraftCannotArchive) => {
+                "Unsent drafts cannot be archived here. Send the draft first or open it to edit."
+            }
+            (Ja, Self::DraftCannotArchive) => {
+                "未送信の下書きはアーカイブできません。送信するか、切り替えて編集してください"
+            }
             (En, Self::WatchControls) => {
                 "Tab: List. Ctrl+S: Confirm stopping the target Run. Alt+R: Confirm retrying recovery. Alt+O: Saved output details. Watch does not delete conversations."
             }
@@ -104,26 +111,26 @@ impl BrowserText {
                 "Tab: 一覧へ。Ctrl+S: 対象Runの停止確認。Alt+R: 復旧対象の再試行確認。Alt+O: 保存出力の詳細。監視画面では削除しません。"
             }
             (En, Self::ListControls) => {
-                "Delete / Ctrl+D: Review deletion impact (does not delete yet). On macOS use fn+delete. In confirmation, D/Space toggles descendants, Y executes, N/Esc returns to the list."
+                "Left/Right: Fold or unfold children. Ctrl+R: Reload the list. Delete / Ctrl+D: Review deletion impact (does not delete yet). On macOS use fn+delete. In confirmation, D/Space toggles descendants, Y executes, N/Esc returns to the list. Ctrl+A: Archive the selected conversation and its descendants (hidden from this list, not deleted; reversible). Ctrl+G: Switch between this list and the archived list, where Ctrl+A unarchives. A new Run on an archived conversation unarchives it."
             }
             (Ja, Self::ListControls) => {
-                "Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。"
+                "←→: 子の開閉。Ctrl+R: 一覧の再取得。Delete / Ctrl+D: 削除影響と確認を開く（まだ削除しません）。macOSのDeleteはfn+deleteで入力できます。確認画面のD/Spaceで子孫も含めるか変更し、Yで実行、N/Escで一覧へ戻ります。Ctrl+A: 選択した会話と子孫をアーカイブ（一覧から隠すだけで削除しません。元に戻せます）。Ctrl+G: この一覧とアーカイブ一覧を切替え、アーカイブ一覧ではCtrl+Aで解除します。アーカイブ済みの会話で新しいRunが始まると一覧へ戻ります。"
             }
             (En, Self::ListFullKeys) => crate::ui::text_width::glyphs::select(
-                "Esc Back · ↑↓ Select · ←→ Fold · Enter Open · Ctrl+D Delete · Tab Watch · F1 Info · Ctrl+R Refresh",
-                "Esc Back | ^v Select | <> Fold | Enter Open | Ctrl+D Delete | Tab Watch | F1 Info | Ctrl+R Refresh",
+                "Esc Back · ↑↓ Select · Enter Open · Ctrl+D Delete · Ctrl+A {A} · Ctrl+G {G} · Tab Watch · F1 Info",
+                "Esc Back | ^v Select | Enter Open | Ctrl+D Delete | Ctrl+A {A} | Ctrl+G {G} | Tab Watch | F1 Info",
             ),
             (Ja, Self::ListFullKeys) => crate::ui::text_width::glyphs::select(
-                "Esc戻る ↑↓選択 ←→展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得",
-                "Esc戻る ^v選択 <>展開 Enter切替 Delete/Ctrl+D削除 Tab監視 F1会話情報 Ctrl+R再取得",
+                "Esc戻る ↑↓選択 Enter切替 Delete/Ctrl+D削除 Ctrl+A{A} Ctrl+G{G} Tab監視 F1会話情報",
+                "Esc戻る ^v選択 Enter切替 Delete/Ctrl+D削除 Ctrl+A{A} Ctrl+G{G} Tab監視 F1会話情報",
             ),
             (En, Self::ListKeys) => crate::ui::text_width::glyphs::select(
-                "Esc Back · Enter Open · Ctrl+D Delete\nUp/Down Select · F1 Info · Ctrl+R Refresh",
-                "Esc Back | Enter Open | Ctrl+D Delete\nUp/Down Select | F1 Info | Ctrl+R Refresh",
+                "Esc Back · Enter Open · Ctrl+D Delete · Ctrl+A {A}\nUp/Down Select · F1 Info · Ctrl+R Refresh · Ctrl+G {G}",
+                "Esc Back | Enter Open | Ctrl+D Delete | Ctrl+A {A}\nUp/Down Select | F1 Info | Ctrl+R Refresh | Ctrl+G {G}",
             ),
             (Ja, Self::ListKeys) => crate::ui::text_width::glyphs::select(
-                "Esc戻る Enter切替 Delete/Ctrl+D削除\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得",
-                "Esc戻る Enter切替 Delete/Ctrl+D削除\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得",
+                "Esc戻る Enter切替 Delete/Ctrl+D削除 Ctrl+A{A}\n↑↓選択 ←→開閉 F1会話情報 Ctrl+R再取得 Ctrl+G{G}",
+                "Esc戻る Enter切替 Delete/Ctrl+D削除 Ctrl+A{A}\n^v選択 <>開閉 F1会話情報 Ctrl+R再取得 Ctrl+G{G}",
             ),
             (En, Self::ListCompactKeys) => crate::ui::text_width::glyphs::select(
                 "Esc Back · Enter Open · Ctrl+D Delete\nUp/Down Select · F1 Info",
@@ -216,6 +223,7 @@ enum BrowserMessage<'a> {
         fetched: usize,
         loading: bool,
         failed: bool,
+        archived: bool,
     },
     WatchTitle {
         count: usize,
@@ -266,10 +274,16 @@ impl BrowserMessage<'_> {
                     fetched,
                     loading,
                     failed,
+                    archived,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "Conversations · {count} shown / {fetched} fetched{}",
-                "Conversations | {count} shown / {fetched} fetched{}",
+                "{} · {count} shown / {fetched} fetched{}",
+                "{} | {count} shown / {fetched} fetched{}",
+                if archived {
+                    "Archived conversations"
+                } else {
+                    "Conversations"
+                },
                 if loading {
                     crate::ui::text_width::glyphs::select(" · Loading", " | Loading")
                 } else if failed {
@@ -285,10 +299,16 @@ impl BrowserMessage<'_> {
                     fetched,
                     loading,
                     failed,
+                    archived,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "会話一覧 · {count}件 / 取得{fetched}件{}",
-                "会話一覧 | {count}件 / 取得{fetched}件{}",
+                "{} · {count}件 / 取得{fetched}件{}",
+                "{} | {count}件 / 取得{fetched}件{}",
+                if archived {
+                    "アーカイブ済みの会話"
+                } else {
+                    "会話一覧"
+                },
                 if loading {
                     crate::ui::text_width::glyphs::select(" · 読込み中", " | 読込み中")
                 } else if failed {
@@ -507,13 +527,18 @@ impl BrowserMessage<'_> {
                     controls,
                 },
             ) => format!(
-                "Conversation ID: {}\nTitle: {title}\nWorking folder: {}\nParent conversation: {}\nState: {phase}\nNative state: {}\nLatest Run stop reason: {}\nUpdated: {}\n\n{excerpt}{page}\n\n{controls}\nType / Backspace to filter.",
+                "Conversation ID: {}\nTitle: {title}\nWorking folder: {}\nParent conversation: {}\nState: {phase}\nNative state: {}\nLatest Run stop reason: {}\nUpdated: {}{}\n\n{excerpt}{page}\n\n{controls}\nType / Backspace to filter.",
                 thread.thread_id,
                 thread.cwd,
                 thread.parent_id.as_deref().unwrap_or("root"),
                 thread.state,
                 thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
-                thread.updated_at
+                thread.updated_at,
+                thread
+                    .archived_at
+                    .as_deref()
+                    .map(|at| format!("\nArchived: {at}"))
+                    .unwrap_or_default()
             ),
             (
                 Ja,
@@ -526,13 +551,18 @@ impl BrowserMessage<'_> {
                     controls,
                 },
             ) => format!(
-                "会話ID: {}\nタイトル: {title}\n作業フォルダー: {}\n親の会話: {}\n状態: {phase}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}\n\n{excerpt}{page}\n\n{controls}文字入力/Backspaceは絞り込みです。",
+                "会話ID: {}\nタイトル: {title}\n作業フォルダー: {}\n親の会話: {}\n状態: {phase}\nNative state: {}\nLatest Run stop reason: {}\n更新日時: {}{}\n\n{excerpt}{page}\n\n{controls}文字入力/Backspaceは絞り込みです。",
                 thread.thread_id,
                 thread.cwd,
                 thread.parent_id.as_deref().unwrap_or("root"),
                 thread.state,
                 thread.latest_run_stop_reason.as_deref().unwrap_or("none"),
-                thread.updated_at
+                thread.updated_at,
+                thread
+                    .archived_at
+                    .as_deref()
+                    .map(|at| format!("\nアーカイブ日時: {at}"))
+                    .unwrap_or_default()
             ),
             (
                 En,
@@ -614,6 +644,8 @@ pub(super) struct ThreadBrowser {
     paint: std::cell::Cell<Option<popup::PaintBounds>>,
     collapsed: BTreeSet<String>,
     mode: BrowserMode,
+    /// List mode only: which archived Threads the list shows (the TUI uses Exclude or Only).
+    archived: ArchivedFilter,
     descendant_root: Option<String>,
     descendant_count: Option<super::watch::DescendantCount>,
     descendant_status: Option<String>,
@@ -672,6 +704,8 @@ pub(super) enum ThreadOutcome {
     Load(Box<UiAction>),
     Open(String),
     Delete(String),
+    /// Archive (`true`) or unarchive (`false`) a Thread and its descendants.
+    Archive(String, bool),
     Info(String),
     WatchAction(WatchActionTarget),
 }
@@ -802,6 +836,7 @@ impl ThreadBrowser {
             filter: self.filter.clone(),
             generation: self.generation,
             mode: self.mode,
+            archived: self.archived,
             descendant_root: self.descendant_root().map(str::to_owned),
             seen_completions: if self.mode == BrowserMode::Watch {
                 self.watch.borrow().seen_completions()
@@ -814,6 +849,55 @@ impl ThreadBrowser {
     }
     pub fn mode(&self) -> BrowserMode {
         self.mode
+    }
+    /// Name the keys for the current view: archive/unarchive and where Ctrl+G goes.
+    fn archive_key_labels(&self, keys: &str) -> String {
+        let (archive, switch) = match (self.archived == ArchivedFilter::Only, self.language) {
+            (false, UiLanguage::En) => ("Archive", "Archived"),
+            (true, UiLanguage::En) => ("Unarchive", "List"),
+            (false, UiLanguage::Ja) => ("アーカイブ", "アーカイブ一覧"),
+            (true, UiLanguage::Ja) => ("アーカイブ解除", "会話一覧"),
+        };
+        keys.replace("{A}", archive).replace("{G}", switch)
+    }
+    pub fn archived(&self) -> ArchivedFilter {
+        self.archived
+    }
+    /// Localized outcome of an archive or unarchive key, shown as the list notice.
+    pub fn archive_result(&mut self, archive: bool, result: Result<usize, String>) {
+        let (ja, en) = match (archive, result) {
+            (true, Ok(0)) => (
+                "既にアーカイブ済みです".to_owned(),
+                "Already archived".to_owned(),
+            ),
+            (true, Ok(count)) => (
+                format!(
+                    "{count}件の会話をアーカイブしました（削除ではありません）。Ctrl+Gで一覧を切り替え、Ctrl+Aで解除できます"
+                ),
+                format!(
+                    "Archived {count} conversation(s); nothing was deleted. Ctrl+G switches lists and Ctrl+A unarchives"
+                ),
+            ),
+            (false, Ok(0)) => (
+                "既にアーカイブされていません".to_owned(),
+                "Already not archived".to_owned(),
+            ),
+            (false, Ok(count)) => (
+                format!("{count}件の会話のアーカイブを解除しました"),
+                format!("Unarchived {count} conversation(s)"),
+            ),
+            (true, Err(error)) => (
+                format!("アーカイブできませんでした: {error}"),
+                format!("Could not archive: {error}"),
+            ),
+            (false, Err(error)) => (
+                format!("アーカイブを解除できませんでした: {error}"),
+                format!("Could not unarchive: {error}"),
+            ),
+        };
+        self.notice = Some(ja);
+        self.notice_en = Some(en);
+        self.notice_seen.set(false);
     }
     pub fn set_descendant_count(&mut self, count: Option<super::watch::DescendantCount>) {
         self.descendant_count = count;
@@ -850,6 +934,7 @@ impl ThreadBrowser {
     ) -> UiAction {
         self.visible = true;
         self.mode = BrowserMode::List;
+        self.archived = ArchivedFilter::Exclude;
         self.descendant_root = None;
         self.watch_visible_ids.get_mut().clear();
         self.watch_scope_ids.clear();
@@ -1375,7 +1460,14 @@ impl ThreadBrowser {
                 )
             };
             let uncertain = !known_match && limited.contains(&id);
-            if !known_match && !uncertain {
+            // List membership by archive state; Watch shows live work either way.
+            let member = self.mode != BrowserMode::List
+                || match self.archived {
+                    ArchivedFilter::Exclude => row.archived_at.is_none(),
+                    ArchivedFilter::Only => row.archived_at.is_some(),
+                    ArchivedFilter::Include => true,
+                };
+            if !member || (!known_match && !uncertain) {
                 changed |= self.remove_patch_row(&id, read_sequence);
                 continue;
             }
@@ -1814,6 +1906,47 @@ impl ThreadBrowser {
             }
         }
         if self.mode == BrowserMode::List
+            && key.modifiers == KeyModifiers::CONTROL
+            && matches!(key.code, KeyCode::Char('g' | 'G'))
+        {
+            // Switch between the default list and the archived list. Rows of the
+            // other view are dropped at once; the selection is not carried over.
+            self.archived = if self.archived == ArchivedFilter::Only {
+                ArchivedFilter::Exclude
+            } else {
+                ArchivedFilter::Only
+            };
+            self.clear_preferred();
+            self.reconfirming_row = None;
+            self.items.clear();
+            self.selected = 0;
+            self.invalidate_tree();
+            *self.table_state.get_mut() = TableState::default();
+            self.table_body_rows.set(0);
+            return ThreadOutcome::Load(Box::new(self.begin(None)));
+        }
+        if self.mode == BrowserMode::List
+            && key.modifiers == KeyModifiers::CONTROL
+            && matches!(key.code, KeyCode::Char('a' | 'A'))
+        {
+            self.clear_preferred();
+            return self
+                .items
+                .get(self.selected)
+                .map_or(ThreadOutcome::None, |thread| {
+                    if thread.thread_id.starts_with("draft:") {
+                        ThreadOutcome::Info(
+                            BrowserText::DraftCannotArchive.render(self.language).into(),
+                        )
+                    } else {
+                        ThreadOutcome::Archive(
+                            thread.thread_id.clone(),
+                            self.archived != ArchivedFilter::Only,
+                        )
+                    }
+                });
+        }
+        if self.mode == BrowserMode::List
             && (key.code == KeyCode::Delete
                 || (matches!(key.code, KeyCode::Char('d' | 'D'))
                     && key.modifiers == KeyModifiers::CONTROL))
@@ -2239,6 +2372,7 @@ impl ThreadBrowser {
             fetched: threads.len(),
             loading,
             failed: error.is_some(),
+            archived: self.archived == ArchivedFilter::Only,
         }
         .render(self.language);
         let footer_width = usize::from(area.width.saturating_sub(8).min(108));
@@ -2262,6 +2396,7 @@ impl ThreadBrowser {
             } else {
                 BrowserText::Back.render(self.language).to_owned()
             };
+            keys = self.archive_key_labels(&keys);
             if next_cursor {
                 let last_width = keys.lines().next_back().unwrap_or_default().width();
                 if last_width + BrowserText::MoreKey.render(self.language).width() <= footer_width {
@@ -3068,7 +3203,13 @@ mod tests {
         let rows = vec![thread("fixture", None)];
         for (width, height) in [(60, 18), (120, 38)] {
             let shown = text(&capture(&rows, 0, width, height, None));
-            for meaning in ["Esc戻る", "Enter切替", "F1会話情報", "Ctrl+R再取得"] {
+            // The single-line wide footer trades Ctrl+R for the archive keys (F1 names it).
+            let meanings: &[&str] = if width >= 100 {
+                &["Esc戻る", "Enter切替", "F1会話情報", "Ctrl+Aアーカイブ"]
+            } else {
+                &["Esc戻る", "Enter切替", "F1会話情報", "Ctrl+R再取得"]
+            };
+            for meaning in meanings {
                 assert!(
                     shown.contains(meaning),
                     "{width}x{height}: missing{meaning}: {shown}"
@@ -3277,6 +3418,7 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            archived_at: None,
             last_end_message: None,
             last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
@@ -4112,6 +4254,7 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            archived_at: None,
             last_end_message: None,
             last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
@@ -4355,6 +4498,7 @@ mod patch_tests {
     use super::*;
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
+            archived_at: None,
             last_end_message: None,
             last_input: None,
             thread_id: id.into(),
@@ -5077,6 +5221,295 @@ mod patch_tests {
 }
 
 #[cfg(test)]
+mod archive_tests {
+    use super::*;
+    use crate::ui::watch::BrowserMode;
+
+    fn row(id: &str, archived: bool) -> ThreadSummary {
+        ThreadSummary {
+            last_end_message: None,
+            last_input: None,
+            thread_id: id.into(),
+            title: format!("title {id}"),
+            cwd: "/synthetic".into(),
+            parent_id: None,
+            state: "idle".into(),
+            activity: crate::activity::ActivityPhase::Idle,
+            latest_run_stop_reason: None,
+            revisit: None,
+            updated_at: "2026-10-01".into(),
+            archived_at: archived.then(|| "2026-11-06T00:00:00Z".into()),
+            excerpt: String::new(),
+        }
+    }
+    fn ctrl(ch: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
+    }
+    fn opened(language: UiLanguage, items: Vec<ThreadSummary>) -> ThreadBrowser {
+        let mut browser = ThreadBrowser::default();
+        browser.set_language(language);
+        browser.open(String::new(), vec![], None);
+        assert!(browser.apply(
+            browser.generation,
+            10,
+            None,
+            items,
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        browser
+    }
+    fn patch(browser: &ThreadBrowser, rows: Vec<ThreadSummary>) -> BrowserPatch {
+        BrowserPatch {
+            generation: browser.generation,
+            read_sequence: 20,
+            rows,
+            display_times: vec![],
+            missing_ids: vec![],
+            limited_titles: vec![],
+            excerpt: None,
+            watch_summaries: vec![],
+        }
+    }
+
+    #[test]
+    fn ctrl_a_archives_the_selection_and_ctrl_g_switches_lists_without_carrying_rows() {
+        let mut browser = opened(UiLanguage::En, vec![row("a", false), row("b", false)]);
+        assert_eq!(browser.archived(), ArchivedFilter::Exclude);
+        let selected = browser.items()[browser.selected()].thread_id.clone();
+        assert!(matches!(
+            browser.key(ctrl('a')),
+            ThreadOutcome::Archive(id, true) if id == selected
+        ));
+        // Ctrl+G requests the archived list in a new generation and empties the rows.
+        let before = browser.generation;
+        let ThreadOutcome::Load(action) = browser.key(ctrl('g')) else {
+            panic!("Ctrl+G must reload");
+        };
+        assert!(matches!(
+            *action,
+            UiAction::LoadThreads {
+                archived: ArchivedFilter::Only,
+                cursor: None,
+                generation,
+                ..
+            } if generation == browser.generation && generation != before
+        ));
+        assert!(browser.items().is_empty());
+        assert!(browser.apply(
+            browser.generation,
+            11,
+            None,
+            vec![row("z", true)],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        // In the archived list the same key unarchives.
+        assert!(matches!(
+            browser.key(ctrl('a')),
+            ThreadOutcome::Archive(id, false) if id == "z"
+        ));
+        let ThreadOutcome::Load(action) = browser.key(ctrl('g')) else {
+            panic!("Ctrl+G must reload");
+        };
+        assert!(matches!(
+            *action,
+            UiAction::LoadThreads {
+                archived: ArchivedFilter::Exclude,
+                ..
+            }
+        ));
+        // Plain letters still filter; only Control chords are archive keys.
+        browser.key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+        browser.key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(browser.filter(), "ag");
+        // Reopening the list returns to the default view.
+        browser.key(ctrl('g'));
+        assert_eq!(browser.archived(), ArchivedFilter::Only);
+        browser.open(String::new(), vec![], None);
+        assert_eq!(browser.archived(), ArchivedFilter::Exclude);
+    }
+
+    #[test]
+    fn archive_keys_do_nothing_in_watch_and_refuse_unsent_drafts() {
+        let mut browser = opened(UiLanguage::En, vec![row("a", false)]);
+        browser.items.push(row("draft:x", false));
+        browser.selected = 1;
+        assert!(matches!(browser.key(ctrl('a')), ThreadOutcome::Info(_)));
+        browser.mode = BrowserMode::Watch;
+        assert!(matches!(browser.key(ctrl('a')), ThreadOutcome::None));
+        let before = browser.archived();
+        assert!(matches!(browser.key(ctrl('g')), ThreadOutcome::None));
+        assert_eq!(browser.archived(), before);
+    }
+
+    #[test]
+    fn patches_follow_archive_membership_of_the_current_list() {
+        let mut browser = opened(UiLanguage::En, vec![row("a", false), row("b", false)]);
+        // Archiving elsewhere removes the row from the default list.
+        assert!(browser.patch(patch(&browser, vec![row("a", true)])));
+        assert_eq!(
+            browser
+                .items()
+                .iter()
+                .map(|r| r.thread_id.as_str())
+                .collect::<Vec<_>>(),
+            ["b"]
+        );
+        // An auto-unarchived Thread comes back as an ordinary row.
+        assert!(browser.patch(patch(&browser, vec![row("a", false)])));
+        assert_eq!(browser.items().len(), 2);
+        // The archived list accepts only archived rows.
+        browser.key(ctrl('g'));
+        assert!(browser.apply(
+            browser.generation,
+            30,
+            None,
+            vec![row("z", true)],
+            vec![],
+            None,
+            vec![],
+            None
+        ));
+        let mut late = patch(&browser, vec![row("y", false), row("x", true)]);
+        late.read_sequence = 40;
+        browser.patch(late);
+        let ids: Vec<_> = browser
+            .items()
+            .iter()
+            .map(|r| r.thread_id.clone())
+            .collect();
+        assert!(ids.contains(&"x".to_owned()) && ids.contains(&"z".to_owned()));
+        assert!(!ids.contains(&"y".to_owned()));
+        // Unarchiving there removes the row from the archived list.
+        let mut gone = patch(&browser, vec![row("z", false)]);
+        gone.read_sequence = 50;
+        browser.patch(gone);
+        assert!(!browser.items().iter().any(|r| r.thread_id == "z"));
+    }
+
+    fn paint(browser: &ThreadBrowser, width: u16, height: u16) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| browser.draw(frame, frame.area(), None, true))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..height)
+            .map(|y| {
+                let mut line = String::new();
+                let mut x = 0;
+                while x < width {
+                    let symbol = buffer[(x, y)].symbol();
+                    line.push_str(symbol);
+                    x += symbol.width().max(1) as u16;
+                }
+                line
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn views_name_archive_state_in_words_in_both_languages() {
+        for (language, normal, archived, archive_key, unarchive_key, switch_to, switch_back) in [
+            (
+                UiLanguage::En,
+                "Conversations",
+                "Archived conversations",
+                "Ctrl+A Archive",
+                "Ctrl+A Unarchive",
+                "Ctrl+G Archived",
+                "Ctrl+G List",
+            ),
+            (
+                UiLanguage::Ja,
+                "会話一覧",
+                "アーカイブ済みの会話",
+                "Ctrl+Aアーカイブ",
+                "Ctrl+Aアーカイブ解除",
+                "Ctrl+Gアーカイブ一覧",
+                "Ctrl+G会話一覧",
+            ),
+        ] {
+            let mut browser = opened(language, vec![row("a", false)]);
+            let screen = paint(&browser, 120, 14);
+            assert!(
+                screen.contains(normal) && !screen.contains(archived),
+                "{language:?}\n{screen}"
+            );
+            assert!(
+                screen.contains(archive_key) && screen.contains(switch_to),
+                "{language:?}\n{screen}"
+            );
+            // The narrower two-line footer keeps both keys too.
+            let medium = paint(&browser, 80, 14);
+            assert!(
+                medium.contains(archive_key) && medium.contains(switch_to),
+                "{language:?}\n{medium}"
+            );
+            browser.key(ctrl('g'));
+            browser.apply(
+                browser.generation,
+                11,
+                None,
+                vec![row("z", true)],
+                vec![],
+                None,
+                vec![],
+                None,
+            );
+            let screen = paint(&browser, 120, 14);
+            assert!(screen.contains(archived), "{language:?}\n{screen}");
+            assert!(
+                screen.contains(unarchive_key) && screen.contains(switch_back),
+                "{language:?}\n{screen}"
+            );
+            assert!(!screen.contains("{A}") && !screen.contains("{G}"));
+        }
+    }
+
+    #[test]
+    fn archive_results_are_reported_in_the_selected_language() {
+        let mut browser = opened(UiLanguage::En, vec![row("a", false)]);
+        browser.archive_result(true, Ok(3));
+        let screen = paint(&browser, 140, 14);
+        assert!(screen.contains("Archived 3 conversation(s)"), "{screen}");
+        browser.archive_result(false, Err("boom".into()));
+        assert!(paint(&browser, 140, 14).contains("Could not unarchive: boom"));
+        let mut ja = opened(UiLanguage::Ja, vec![row("a", false)]);
+        ja.archive_result(true, Ok(2));
+        assert!(paint(&ja, 140, 14).contains("2件の会話をアーカイブしました"));
+        ja.archive_result(true, Ok(0));
+        assert!(paint(&ja, 140, 14).contains("既にアーカイブ済みです"));
+    }
+
+    #[test]
+    fn info_shows_the_archive_time_in_both_languages() {
+        for (language, label) in [
+            (UiLanguage::En, "Archived: 2026-11-06"),
+            (UiLanguage::Ja, "アーカイブ日時: 2026-11-06"),
+        ] {
+            let mut browser = opened(language, vec![row("a", true)]);
+            let ThreadOutcome::Info(text) =
+                browser.key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE))
+            else {
+                panic!("F1 shows information");
+            };
+            assert!(text.contains(label), "{text}");
+            assert!(
+                text.contains("Ctrl+A"),
+                "controls name the archive key: {text}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod watch_integration_tests {
     use super::super::watch::{WatchActionKind, WatchDetail};
     use super::super::{UiState, UiUpdate};
@@ -5084,6 +5517,7 @@ mod watch_integration_tests {
     use crossterm::event::Event;
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            archived_at: None,
             last_end_message: None,
             last_input: None,
             thread_id: id.into(),
@@ -5804,6 +6238,7 @@ mod language_tests {
 
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            archived_at: None,
             last_end_message: None,
             last_input: None,
             revisit: None,
@@ -6037,7 +6472,7 @@ mod language_tests {
             let wide = BrowserText::ListFullKeys.render(language);
             assert_eq!(wide.lines().count(), 1, "{language:?}: {wide}");
             assert!(wide.width() <= 108, "{language:?}: {wide}");
-            for key in ["Esc", "Enter", "Ctrl+D", "Tab", "F1", "Ctrl+R"] {
+            for key in ["Esc", "Enter", "Ctrl+D", "Ctrl+A", "Ctrl+G", "Tab", "F1"] {
                 assert!(wide.contains(key), "{language:?}: {wide}");
             }
             let medium = BrowserText::ListKeys.render(language);

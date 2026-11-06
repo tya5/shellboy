@@ -10,9 +10,11 @@ CREATE TABLE thread(
  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0), reasoning_epoch INTEGER NOT NULL DEFAULT 0 CHECK(reasoning_epoch>=0),
  cursor_node_id TEXT REFERENCES node(id), deleted_at TEXT, updated_at TEXT NOT NULL,
  selection_revision INTEGER NOT NULL DEFAULT 0 CHECK(selection_revision>=0),
- profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0), segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000), reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16));
+ profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0), segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000), reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16), archived_at TEXT);
 
 CREATE INDEX threads_updated ON thread(deleted_at,updated_at DESC,id);
+CREATE INDEX threads_visible_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL;
+CREATE INDEX threads_archived_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NOT NULL;
 
 CREATE TABLE thread_path(
  thread_id TEXT NOT NULL REFERENCES thread(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0),
@@ -704,4 +706,5 @@ CREATE INDEX model_attempt_active_recovery ON model_attempt(state) WHERE state I
 INSERT INTO schema_migration(version,name) VALUES(29,'0029_active_attempt_recovery_index');
 INSERT INTO schema_migration(version,name) VALUES(30,'0030_thread_auto_compact_at');
 INSERT INTO schema_migration(version,name) VALUES(31,'0031_thread_summary_parameters');
-PRAGMA user_version=31;
+INSERT INTO schema_migration(version,name) VALUES(32,'0032_thread_archive');
+PRAGMA user_version=32;

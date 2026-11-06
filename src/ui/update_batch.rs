@@ -64,6 +64,7 @@ impl UiUpdate {
             | Self::ManagementDetail { .. }
             | Self::Initialize { .. }
             | Self::ThreadListFailed { .. }
+            | Self::ThreadsArchived { .. }
             | Self::Threads { .. }
             | Self::Thread { .. }
             | Self::StorageFailed { .. }

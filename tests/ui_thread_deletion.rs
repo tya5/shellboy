@@ -26,6 +26,7 @@ fn list(ui: &mut UiState, ids: &[&str]) {
             .iter()
             .enumerate()
             .map(|(position, id)| ThreadSummary {
+                archived_at: None,
                 last_end_message: None,
                 last_input: None,
                 activity: shellboy::activity::ActivityPhase::Idle,
@@ -187,6 +188,7 @@ fn background_success_updates_the_list_and_invalidates_old_pages_without_switchi
         generation: old,
         requested_cursor: None,
         threads: vec![ThreadSummary {
+            archived_at: None,
             last_end_message: None,
             last_input: None,
             activity: shellboy::activity::ActivityPhase::Idle,

@@ -64,6 +64,7 @@ async fn list(
                 limit,
                 cursor,
                 query: query.map(Into::into),
+                archived: Default::default(),
             }),
         )
         .await,
@@ -355,6 +356,7 @@ async fn displayed_title_search_paginates_matches_and_retains_query_watermark() 
                 limit: 2,
                 cursor: first.next_cursor,
                 query: Some("changed".into()),
+                archived: Default::default(),
             })),
             None,
         )
