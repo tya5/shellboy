@@ -176,13 +176,13 @@ impl ThreadForkArgs {
     }
 }
 
-<<<<<<< HEAD
 impl ThreadPruneArgs {
     fn validate(&self) -> Result<(), ApiError> {
         optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
         nonempty(&self.before_node_id, "before_node_id")
     }
-=======
+}
+
 /// `""` clears the Thread override; digits set it (0 disables proactive compaction).
 pub(crate) fn parse_auto_compact_at(value: &str) -> Result<Option<i64>, ApiError> {
     if value.is_empty() {
@@ -197,7 +197,6 @@ pub(crate) fn parse_auto_compact_at(value: &str) -> Result<Option<i64>, ApiError
         .parse::<i64>()
         .map(Some)
         .map_err(|_| invalid("auto_compact_at is out of range"))
->>>>>>> 8154c865f5 (Add per-Thread proactive compaction threshold (thread set --auto-compact-at, migration 30))
 }
 
 impl ThreadSetArgs {
