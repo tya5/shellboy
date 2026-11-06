@@ -10107,3 +10107,19 @@ tests (public v0.8.2 schema 28 to 29) pass locally; an exact-binary upgrade
 check and the owner's real startup time are not verified. CI results are
 recorded in the status entry.
 
+
+## Branch view (#237)
+
+Local, macOS arm64 (Darwin), `sh scripts/check.sh` (fmt, clippy -D warnings, all
+test targets, db-observation feature test) passed on the branch tip, with the
+language-classification audit `--check` at zero pending. Covered by tests: tree
+building (fork and rewind children, nested forks, deleted parent, cycles, no shared
+prefix, ancestor and family caps, paging and cursor expiry, last-request scan bound,
+excerpt bounds), real fork + rewind results through `Store` (`tests/thread_branches.rs`),
+panel render in English and Japanese at 100, 44, 30 and 20 columns with glyph and
+ASCII-fallback tree pieces, a 14-level tree and 120 branches, keys and dispatch
+(open, fork, prune form with the dry run, next page, Esc), the inline marker at 100
+and 40 columns with left/right preview and Enter. Not verified: a real terminal (no
+PTY capture of the panel or marker was taken), Windows and Linux (CI only), the
+panel against a very large real database, and the `←`/`→` keys in terminals that
+report them differently.
