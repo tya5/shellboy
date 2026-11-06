@@ -142,6 +142,11 @@ shellboy events wait                       # baseline: returns a cursor at once
 shellboy events wait --after 'CURSOR' --thread CHILD_A --thread CHILD_B --timeout-ms 30000
 ```
 
+Models: pass `--thread` with other Threads' IDs and never your own. Your own adoption of input,
+tool start and finish all change your Thread and would wake you every round at a token cost. To
+supervise children prefer `wait` with `thread_settled` (next section); use `events wait` mainly
+for tools and clients outside a model Turn.
+
 `status:"changed"` lists the Threads that changed (`changes[].thread_id`); then read
 their saved state (`thread get`, `turn get`, `history list`). Keep `result.cursor`, even
 after `timeout`. `more:true` means call again immediately. `resync_required` means

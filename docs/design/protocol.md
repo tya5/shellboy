@@ -546,3 +546,7 @@ evicted, raising the floor). Memory only; it dies with `Control`, has no task or
 the owner keeps nothing per client. The call is admitted in an ordinary request slot,
 returns on a matching change, timeout, caller disconnect or owner shutdown, and is
 cancellable by the shared runtime-observation wrapper. Models may call it.
+
+The cursor moves past changes to Threads excluded by `thread_ids`; a client that adds a Thread to the
+filter reads it once. A pending call at owner shutdown or caller disconnect ends with an error
+(`read_only`, not applied); after an owner restart the next call returns `resync_required`.

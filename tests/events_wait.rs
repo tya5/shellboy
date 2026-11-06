@@ -7,9 +7,9 @@ use shellboy::{
     control::Control,
     protocol::{
         ApiError, AttachmentAddArgs, AttachmentKind, AttachmentRemoveArgs, Command, Deliver,
-        ErrorCode, EventCursor, EventsWaitArgs, MessageCancelArgs, MessageSendArgs, Request,
-        RunTarget, ThreadDeleteArgs, ThreadForkArgs, ThreadPruneArgs, ThreadRewindArgs,
-        ThreadSetArgs, ThreadTarget,
+        ErrorCode, EventCursor, EventsWaitArgs, MessageCancelArgs, MessageReplyArgs,
+        MessageSendArgs, Request, RunTarget, ThreadDeleteArgs, ThreadForkArgs, ThreadPruneArgs,
+        ThreadRewindArgs, ThreadSetArgs, ThreadTarget,
     },
 };
 use std::{sync::Arc, time::Duration};
@@ -106,20 +106,21 @@ fn advanced<'a>(
         }
     }
 }
-/// Follow hints from `from` until the saved fact (`sql` counts > 0) is visible. A hint must
-/// keep arriving until then; a commit with no later `changed()` ends in a failed timeout.
+/// Follow hints from `from` until the saved fact (`sql` counts > 0) is visible; returns the
+/// cursor reached so the next step starts exactly there. A hint must keep arriving until then; a commit with no later `changed()` ends in a failed timeout.
 #[track_caller]
-fn until_saved<'a>(
+fn until_saved_within<'a>(
     control: &'a Arc<Control>,
     from: &'a str,
     thread: &'a str,
     sql: &'static str,
-) -> impl std::future::Future<Output = ()> + 'a {
+    timeout_ms: u64,
+) -> impl std::future::Future<Output = String> + 'a {
     let caller = std::panic::Location::caller();
     async move {
         let mut at = from.to_owned();
         loop {
-            let result = ev(control, Some(&at), &[thread], 30_000).await;
+            let result = ev(control, Some(&at), &[thread], timeout_ms).await;
             assert_eq!(
                 result["status"],
                 "changed",
@@ -129,10 +130,19 @@ fn until_saved<'a>(
             );
             at = cursor(&result);
             if count(control, sql, thread).await > 0 {
-                return;
+                return at;
             }
         }
     }
+}
+#[track_caller]
+fn until_saved<'a>(
+    control: &'a Arc<Control>,
+    from: &'a str,
+    thread: &'a str,
+    sql: &'static str,
+) -> impl std::future::Future<Output = String> + 'a {
+    until_saved_within(control, from, thread, sql, 30_000)
 }
 async fn command(control: &Arc<Control>, command: Command) -> Result<Value, ApiError> {
     let response = control
@@ -365,7 +375,13 @@ async fn long_poll_ends_on_disconnect_and_on_owner_shutdown() {
     let receipts = control
         .store
         .database
-        .call(|db| Ok(db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))?))
+        .call(|db| {
+            Ok(db.query_row(
+                "SELECT (SELECT count(*) FROM operation_receipt)+(SELECT count(*) FROM app_meta WHERE key LIKE 'wait.pending.%')",
+                [],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
         .await
         .unwrap();
     assert_eq!(
@@ -516,8 +532,7 @@ async fn message_run_turn_and_tool_transitions_advance_the_clock_at_each_step() 
     // Tool start, then tool finish: each saved fact is announced after its commit.
     let at = quiet(&control).await;
     request1.reply.send((200, json!({"id":"r1","status":"completed","output":[{"type":"function_call","id":"i1","call_id":"c1","name":"shell","arguments":json!({"command":"sleep 1"}).to_string()}]}))).unwrap();
-    until_saved(&control, &at, &t, "SELECT count(*) FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1").await;
-    let at = quiet(&control).await;
+    let at = until_saved(&control, &at, &t, "SELECT count(*) FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1").await;
     until_saved(&control, &at, &t, "SELECT count(*) FROM shell_execution s JOIN run r ON r.id=s.owner_run_id WHERE r.thread_id=?1 AND s.state NOT IN ('starting','running','stopping')").await;
     let request2 = incoming(&control, &mut receive).await;
     // Turn and Run completion.
@@ -654,5 +669,228 @@ async fn attachment_add_and_remove_advance_the_clock() {
     .await
     .unwrap();
     advanced(&control, &at, &t).await;
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn filter_of_sixty_four_returns_exactly_those_and_the_cursor_skips_other_threads() {
+    let (_root, owner, control, _receive, server) = fixture().await;
+    let base = baseline(&control).await;
+    let mut created = Vec::new();
+    for _ in 0..70 {
+        created.push(thread(&control).await);
+    }
+    let wanted: Vec<&str> = created[..64].iter().map(String::as_str).collect();
+    let result = ev(&control, Some(&base), &wanted, 0).await;
+    // One entry per Thread, so a 64-ID filter can never need a second page.
+    assert_eq!(ids(&result), created[..64]);
+    assert_eq!(result["more"], false);
+    // The cursor moved past the six unfiltered Threads: they are not reported later.
+    let again = ev(&control, Some(&cursor(&result)), &[], 0).await;
+    assert_eq!(again["status"], "timeout");
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stopping_run_is_announced() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let t = thread(&control).await;
+    send(&control, &t, "first").await;
+    let first = incoming(&control, &mut receive).await;
+    let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
+    let at = quiet(&control).await;
+    command(&control, Command::RunStop(RunTarget { run_id: run }))
+        .await
+        .unwrap();
+    // The stopping state is announced without waiting for the reply grace period.
+    until_saved(
+        &control,
+        &at,
+        &t,
+        "SELECT count(*) FROM run WHERE thread_id=?1 AND state='stopping'",
+    )
+    .await;
+    drop(first);
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reply_settlement_is_announced() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let t = thread(&control).await;
+    let sent = command(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            human: false,
+            expect_reply: true,
+            sender_label: None,
+            thread_id: Some(t.clone()),
+            text: "please reply".into(),
+            deliver: Deliver::Next,
+        }),
+    )
+    .await
+    .unwrap();
+    let id = sent["message_id"].as_str().unwrap().to_owned();
+    let request = incoming(&control, &mut receive).await;
+    // As in tests/reply.rs: mark the message admitted so that a reply is eligible.
+    {
+        let id = id.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&id])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
+    let at = quiet(&control).await;
+    command(
+        &control,
+        Command::MessageReply(MessageReplyArgs {
+            message_id: id.clone(),
+            text: "the reply".into(),
+            sender_label: None,
+        }),
+    )
+    .await
+    .unwrap();
+    advanced(&control, &at, &t).await;
+    request.reply.send((200, answer("done"))).unwrap();
+    settled(&control, &t).await;
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn recovery_wait_and_retry_are_announced() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let t = thread(&control).await;
+    let at = quiet(&control).await;
+    send(&control, &t, "will fail").await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((500, json!({"error":{"message":"fixture server error"}})))
+        .unwrap();
+    let at = until_saved(
+        &control,
+        &at,
+        &t,
+        "SELECT count(*) FROM turn WHERE thread_id=?1 AND state='recovery_wait'",
+    )
+    .await;
+    let run = text(&control, "SELECT id FROM run WHERE thread_id=?1", &t).await;
+    command(&control, Command::RunRetry(RunTarget { run_id: run }))
+        .await
+        .unwrap();
+    let request = incoming(&control, &mut receive).await;
+    request.reply.send((200, answer("recovered"))).unwrap();
+    until_saved(
+        &control,
+        &at,
+        &t,
+        "SELECT count(*) FROM turn WHERE thread_id=?1 AND state='completed'",
+    )
+    .await;
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn background_shell_exit_after_the_answer_is_announced() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let t = thread(&control).await;
+    let start = quiet(&control).await;
+    send(&control, &t, "start background work").await;
+    incoming(&control, &mut receive).await.reply.send((200, json!({"id":"r1","status":"completed","output":[{"type":"function_call","id":"i1","call_id":"c1","name":"shell","arguments":json!({"command":"sleep 1","background":true}).to_string()}]}))).unwrap();
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, answer("started")))
+        .unwrap();
+    // The Turn answers while the Run stays live for the owned background shell; its exit
+    // later creates a second Turn (the collector's changed() announces the committed exit).
+    let at = until_saved(
+        &control,
+        &start,
+        &t,
+        "SELECT count(*) FROM turn WHERE thread_id=?1 AND state='completed'",
+    )
+    .await;
+    until_saved(
+        &control,
+        &at,
+        &t,
+        "SELECT count(*)/2 FROM turn WHERE thread_id=?1",
+    )
+    .await;
+    // The exit is delivered to the model as a new Turn; finish it.
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, answer("noted")))
+        .unwrap();
+    settled(&control, &t).await;
+    close(control, owner, server).await;
+}
+
+/// F1 regression: a Turn created from queued input must be announced when `next()` commits,
+/// not later at `admit_attempt`, which the provider rate gate (another Thread's 429) can delay.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turn_created_from_queued_input_is_announced_while_the_rate_gate_is_held() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let a = thread(&control).await;
+    let b = thread(&control).await;
+    send(&control, &a, "one").await;
+    let first = incoming(&control, &mut receive).await;
+    command(
+        &control,
+        Command::MessageSend(MessageSendArgs {
+            human: false,
+            expect_reply: false,
+            sender_label: None,
+            thread_id: Some(a.clone()),
+            text: "queued".into(),
+            deliver: Deliver::Complete,
+        }),
+    )
+    .await
+    .unwrap();
+    // Another Thread's 429 holds the shared rate gate.
+    send(&control, &b, "gate").await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((429, json!({"error":{"message":"fixture rate limit"}})))
+        .unwrap();
+    // Wait until the 429 is processed (the gate is set before the Turn leaves running).
+    watchdog("rate limit processed", async {
+        while count(
+            &control,
+            "SELECT count(*) FROM turn WHERE thread_id=?1 AND state='recovery_wait'",
+            &b,
+        )
+        .await
+            == 0
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let at = quiet(&control).await;
+    first.reply.send((200, answer("first answer"))).unwrap();
+    // The gate holds the next request for tens of seconds; the Turn must be announced
+    // at its commit, long before that (a guard against a delayed hint, not a latency promise).
+    until_saved_within(
+        &control,
+        &at,
+        &a,
+        "SELECT count(*)/2 FROM turn WHERE thread_id=?1",
+        5_000,
+    )
+    .await;
+    drop(receive);
     close(control, owner, server).await;
 }

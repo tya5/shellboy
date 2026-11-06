@@ -1,5 +1,18 @@
 # Validation record
 
+## events.wait change hints (#243 stage B)
+
+Verified (macOS local, synthetic temp databases and a loopback fake provider; ubuntu/macOS/windows
+CI on the tip recorded in the PR report): clock order, merging, 64-change paging with `more`,
+filter, resume, timeout 0, resync after another owner instance, malformed and forged cursors,
+disconnect and owner shutdown ending a pending poll without receipts or `wait.pending` rows, and
+one hint-completeness test per mutation family (create/set/fork/rewind/prune/delete, message
+send/queued/held/cancel/reply, run and turn transitions, tool start and finish, background shell
+exit, run stop and retry, recovery wait, adopted compaction, attachment add/remove, and a Turn
+created from queued input while another Thread holds the provider rate gate). Not verified:
+resync after the 4096-Thread floor end to end (unit test only), clock memory bytes, behaviour
+with many concurrent long-polls, Windows named-pipe long-poll latency.
+
 ## Storage vacuum (#238)
 
 Verified (macOS local plus ubuntu/macOS/windows CI, synthetic temp databases only): dry-run

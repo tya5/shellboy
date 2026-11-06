@@ -605,7 +605,13 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
             control.changed(&thread);
             control.kick_quiet(thread).await;
         }
-        control.changed.notify_waiters();
+        // The commit may have created a Turn and applied queued input: announce it now,
+        // not at the later admit_attempt (compaction and the rate gate can delay that).
+        if matches!(&result, Ok(Next::Ready(_))) {
+            control.changed(&thread_id);
+        } else {
+            control.changed.notify_waiters();
+        }
     }
     if let Err(error) = &result
         && !error.is_storage_failure()

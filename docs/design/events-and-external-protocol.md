@@ -137,17 +137,17 @@ held for map updates, never across `.await`, never on the UI OS thread):
   all ≈40 producers already go through it);
 - `by_thread: HashMap<ThreadId, u64>` and `by_seq: BTreeMap<u64, ThreadId>`:
   only the latest seq per Thread is kept (coalescing);
-- `floor: u64`: when entries exceed `MAX_CHANGE_ENTRIES` (proposal 4096 Threads),
+- `floor: u64`: when entries exceed `MAX_CHANGE_THREADS` (4096 Threads),
   the oldest entry is evicted and `floor` rises to its seq.
 
 Bounds: entry count is fixed; memory is entries × (two map nodes + one Thread
-ID string). Measure the actual bytes in a test rather than estimating.
+ID string). The actual bytes are not measured (recorded in D-243-1).
 Owner: `Control`; dropped with it; no task, worker or queue. Shutdown:
 `begin_shutdown` already calls `changed.notify_waiters()` and cancels `stop`,
 which ends pending long-polls.
 
 Burst behaviour: 10 000 changes to one Thread occupy one entry. Overflow only
-happens when more than `MAX_CHANGE_ENTRIES` distinct Threads change between two
+happens when more than `MAX_CHANGE_THREADS` distinct Threads change between two
 polls of one client; that client gets `resync_required`, never a silent gap.
 
 ### 2.3 Operation `events.wait` (receipt-free long-poll)
@@ -192,7 +192,7 @@ Properties:
   client only receives larger coalesced batches or `resync_required`.
 - Auth: identical to other read operations (peer-uid check on Unix, optional
   Origin). No new authority. A model Origin is not given ownership edges and
-  does not enter Turn `waiting`; whether models should use it at all is open (Q3).
+  does not enter Turn `waiting`; models may use it (user decision, Q3).
 - Admission: ordinary IPC permit, like `wait` (24 shared). A bridge must
   multiplex one long-poll for all browser tabs.
 - No receipt, no `app_meta` row: it is an observation (fresh re-observation on
@@ -214,8 +214,8 @@ output `Notify`); clients use `shell read` / `wait shell_output` for live output
 Model text deltas (`EngineEvent::Stream`) are never saved and are not covered;
 see E3.
 
-CLI: `shellboy events [--after CURSOR] [--thread ID]... [--timeout-ms N] [--follow]`
-prints one JSON result per line; `--follow` loops client-side. Also usable by
+CLI (implemented): `shellboy events wait [--after CURSOR] [--thread ID]... [--timeout-ms N]`
+prints one JSON result per call; a `--follow` loop is not implemented (clients loop). Also usable by
 scripts and as the reference consumer for the contract tests.
 
 ### 2.4 Correctness risk: hint completeness
@@ -373,14 +373,14 @@ A2 and D must land before `shellboy-web` depends on the RPC.
   (memory only for `events.wait`) but measure with several clients.
 - Long-polls share the 24 ordinary permits with `wait` and mutations; many
   chats plus a bridge reduce capacity. A dedicated small class would change the
-  documented 28-permit budget; decide after measurement (Q6).
+  documented 28-permit budget; decide after measurement (Q6, answered for now: shared slots).
 - Coalescing hides intermediate states; documented, durable facts remain.
 - Without E3, the Web UI cannot show token streaming like the TUI.
 - Protocol 3 breaks every mixed-release pair once (acceptable pre-1.0 under
   the current same-release rule, but it is a visible break).
 - Schema truthfulness is limited by `Value` fields until they are typed.
 
-## 7. Open questions for the user
+## 7. Questions for the user (Q3, Q6, Q7, Q8 answered 2026-11-06; see the status line; the rest open)
 
 1. Approve replacing "no capability negotiation" (protocol.md PR1-10) with
    `Welcome.capabilities` and a one-time bump to protocol 3?

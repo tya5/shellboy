@@ -440,8 +440,9 @@ impl Control {
     async fn runtime_events_wait(
         self: &Arc<Self>,
         args: EventsWaitArgs,
-        disconnected: CancellationToken,
+        _disconnected: CancellationToken,
     ) -> Result<Value, ApiError> {
+        // Shutdown and caller disconnect cancel this future in `runtime_observation`.
         use super::change_clock::Poll;
         let result = |status, seq: u64, changes: Vec<(String, u64)>, more| {
             let cursor = EventCursor {
@@ -513,8 +514,6 @@ impl Control {
             tokio::select! {
                 _ = &mut notified => {}
                 _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {}
-                _ = self.stop.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Owner is shutting down")),
-                _ = disconnected.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Observation caller disconnected")),
             }
         }
     }
