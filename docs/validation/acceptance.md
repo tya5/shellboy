@@ -8,6 +8,23 @@ retry one recovery Turn concurrently (one wins, the other `invalid_state`, owner
 unchanged); same operation ID replay returns the saved result; a real shell CLI from
 an independent Run writes to and stops another Run's shell and Run. Results: see the
 final report for the commit. Not verified: behavior on Windows/Linux outside CI.
+## Confirmation staleness removed (#257)
+
+Before the change (main 1ee2ac11): the state tests `changed_deletion_preserves_evidence_disables_y_and_rejects_late_preview`
+and `stale_deletion_review_disables_destructive_action` passed, i.e. after a Changed event from any Thread the open deletion dialog
+was `Phase::Stale` with Y disabled; `tests/frontend.rs` (edit_adapter...) passed while asserting that after a
+`thread set` on another Thread the frontend refused the reviewed execute with "削除確認が古く" and the reviewed
+`ConfirmedIndex` with "索引確認が古く". So in code and in these tests a delete or index confirmation could not be accepted
+while another Thread changed. The real TUI was not driven by hand, so "unreachable in practice" is inferred, not observed.
+
+After: those assertions are inverted. `tests/frontend.rs` executes the reviewed deletion after the change and
+expects success; `tests/frontend_reactivity.rs` `unrelated_owner_changed_does_not_block_a_reviewed_deletion` deletes
+through the real owner after an unrelated change, and `..._keeps_index_confirmation_and_preview_usable` gets
+`ConfirmedIndex` from Y; `tests/ui_thread_deletion.rs` `owner_refusal_of_a_live_run_is_shown_after_another_thread_changed`
+shows the owner's live-Run refusal on screen (the marker refusal `preview_stale` keeps its existing test and
+`tests/delete_marker.rs`). Queue cancel: `queue_cancel_uses_only_the_displayed_ids_without_confirmation`,
+`locale_does_not_expand_the_captured_cancellation_scope` (status line shows the outcome and /restore). Environment:
+macOS, temporary data dirs, local mock only; no paid API. Windows and Linux: CI only (see status for run IDs).
 
 ## Chat on events.wait (#243 stage C)
 

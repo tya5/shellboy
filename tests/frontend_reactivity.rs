@@ -44,7 +44,6 @@ struct Fixture {
     index_preview_ready: usize,
     index_preview_failed: usize,
     deletion_preview_responses: usize,
-    confirmation_changed: usize,
 }
 impl Fixture {
     async fn new(url: &str) -> Self {
@@ -156,7 +155,6 @@ impl Fixture {
             index_preview_ready: 0,
             index_preview_failed: 0,
             deletion_preview_responses: 0,
-            confirmation_changed: 0,
         };
         fixture
             .until("initial selected header", |ui, screen| {
@@ -184,7 +182,6 @@ impl Fixture {
             UiUpdate::IndexPreviewReady { .. } => self.index_preview_ready += 1,
             UiUpdate::IndexPreviewFailed { .. } => self.index_preview_failed += 1,
             UiUpdate::ThreadDeletion { execute: false, .. } => self.deletion_preview_responses += 1,
-            UiUpdate::ConfirmationSourcesChanged => self.confirmation_changed += 1,
             _ => {}
         }
         match &update {
@@ -1916,7 +1913,7 @@ async fn index_observation_retains_success_after_one_failed_explicit_refresh() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() {
+async fn unrelated_owner_changed_keeps_index_confirmation_and_preview_usable() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     let mut fixture = Fixture::build_in(
         "http://127.0.0.1:9/v1",
@@ -1946,7 +1943,6 @@ async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() 
     let before = fixture.pump().await;
     assert_eq!(before.matches("索引処理の実行確認").count(), 1, "{before}");
     assert!(before.contains("資料数: 1"), "{before}");
-    let previous = fixture.confirmation_changed;
     let (result, _) = fixture
         .cli_thread(
             "unrelated",
@@ -1954,47 +1950,28 @@ async fn unrelated_owner_changed_invalidates_both_index_confirmation_surfaces() 
         )
         .await;
     assert_eq!(result["ok"], true, "{result}");
-    let stale = fixture
-        .observed_until("unrelated change reaches frontend", |f, _| {
-            f.confirmation_changed > previous
-        })
-        .await;
-    assert_eq!(fixture.confirmation_changed, previous + 1);
-    assert_eq!(
-        stale.matches("N / Esc 戻る | 再確認が必要").count(),
-        1,
-        "{stale}"
-    );
-    assert!(stale.contains("資料数: 1"), "{stale}");
+    let after = fixture.pump().await;
+    assert!(!after.contains("再確認が必要"), "{after}");
+    assert!(after.contains("資料数: 1"), "{after}");
     let actions = fixture.ui.event(Event::Key(KeyEvent::new(
         KeyCode::Char('y'),
         KeyModifiers::NONE,
     )));
-    assert!(actions.is_empty(), "stale confirmation must never dispatch");
-    fixture
-        .ui
-        .event(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
-    let stale_preview = fixture.pump().await;
-    assert_eq!(
-        stale_preview.matches("古い費用preview").count(),
-        1,
-        "{stale_preview}"
+    assert!(
+        matches!(actions.as_slice(), [UiAction::ConfirmedIndex { .. }]),
+        "another thread's change must not block a reviewed confirmation: {actions:?}"
     );
-    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
-        KeyCode::Char('b'),
-        KeyModifiers::NONE,
-    )));
-    assert!(actions.is_empty(), "stale preview must not confirm");
-    assert_eq!(
-        fixture.index_preview_ready, 1,
-        "Changed must not re-run preview"
-    );
-    assert_eq!(fixture.index_preview_failed, 0);
+    for action in actions {
+        fixture.actions.send(action).await.unwrap();
+    }
+    let reported = fixture.pump().await;
+    assert!(!reported.contains("古くなりました"), "{reported}");
+    assert_eq!(fixture.index_preview_ready, 1, "no re-preview was needed");
     fixture.finish().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_probe() {
+async fn unrelated_owner_changed_does_not_block_a_reviewed_deletion() {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     let mut fixture = Fixture::build_in(
         "http://127.0.0.1:9/v1",
@@ -2042,7 +2019,6 @@ async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_prob
         db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) VALUES('unrelated-delete','before',?1,'','fixture','fixture0','now')", [cwd])?;
         Ok(())
     }).await.unwrap();
-    let previous = fixture.confirmation_changed;
     let (result, _) = fixture
         .cli_thread(
             "unrelated-delete",
@@ -2057,41 +2033,51 @@ async fn unrelated_owner_changed_invalidates_deletion_preview_without_a_new_prob
         )
         .await;
     assert_eq!(result["ok"], true, "{result}");
-    let stale = fixture
-        .observed_until("unrelated deletion change reaches frontend", |f, _| {
-            f.confirmation_changed > previous
-        })
-        .await;
-    assert_eq!(fixture.confirmation_changed, previous + 1);
-    assert_eq!(stale.matches("確認が古くなりました").count(), 1, "{stale}");
-    assert_eq!(stale.matches("対象会話: 1").count(), 1, "{stale}");
+    let after = fixture.pump().await;
+    assert!(!after.contains("確認が古くなりました"), "{after}");
+    assert_eq!(after.matches("対象会話: 1").count(), 1, "{after}");
+    let actions = fixture.ui.event(Event::Key(KeyEvent::new(
+        KeyCode::Char('y'),
+        KeyModifiers::NONE,
+    )));
     assert!(
-        fixture
-            .ui
-            .event(Event::Key(KeyEvent::new(
-                KeyCode::Char('y'),
-                KeyModifiers::NONE,
-            )))
-            .is_empty()
+        matches!(
+            actions.as_slice(),
+            [UiAction::ThreadDeletion { execute: true, .. }]
+        ),
+        "another thread's change must not block Y: {actions:?}"
     );
+    for action in actions {
+        fixture.actions.send(action).await.unwrap();
+    }
     assert_eq!(
         fixture.deletion_preview_responses, 1,
-        "Changed must not re-probe"
+        "no re-preview was needed"
     );
-    let live = fixture
-        .control
-        .store
-        .database
-        .call(|db| {
-            Ok(db.query_row(
-                "SELECT deleted_at IS NULL FROM thread WHERE id='reactive'",
-                [],
-                |row| row.get::<_, bool>(0),
-            )?)
-        })
-        .await
-        .unwrap();
-    assert!(live, "stale confirmation must not delete the thread");
+    let deleted = watchdog("reviewed deletion applied", async {
+        loop {
+            fixture.pump().await;
+            let live = fixture
+                .control
+                .store
+                .database
+                .call(|db| {
+                    Ok(db.query_row(
+                        "SELECT deleted_at IS NULL FROM thread WHERE id='reactive'",
+                        [],
+                        |row| row.get::<_, bool>(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            if !live {
+                return true;
+            }
+            fixture.wait_update_or_action().await;
+        }
+    })
+    .await;
+    assert!(deleted.unwrap());
     fixture.finish().await;
 }
 

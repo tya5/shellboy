@@ -32,7 +32,6 @@ impl UiUpdate {
             | Self::ProgramStatus(_)
             | Self::DbWorkerActivity(_)
             | Self::GcDiagnostics(_)
-            | Self::ConfirmationSourcesChanged
             | Self::BrowserPatch { .. }
             | Self::BrowserPatchFailed { .. }
             | Self::BrowserResync { .. }

@@ -277,8 +277,6 @@ impl UpdateTarget for BufferedUpdates {
 }
 fn latest_key(value: &UiUpdate) -> Option<String> {
     Some(match value {
-        // This safety fence is coalesced but cannot be evicted by display updates.
-        UiUpdate::ConfirmationSourcesChanged => "confirmation-sources-changed".into(),
         UiUpdate::ProgramStatus(_) => "program_status".into(),
         UiUpdate::DbWorkerActivity(_) => "db-worker-activity".into(),
         UiUpdate::GcDiagnostics(_) => "gc-diagnostics".into(),
@@ -353,29 +351,6 @@ mod tests {
             batch: receipt_delivery::Batch::new(receipts),
         }
     }
-    #[test]
-    fn confirmation_invalidation_survives_full_outbox_and_latest_eviction() {
-        let (tx, _rx) = std::sync::mpsc::sync_channel(1);
-        tx.send(UiUpdate::RecoveryBell).unwrap();
-        let out = BufferedUpdates::new(tx);
-        for n in 0..CRITICAL_LIMIT {
-            assert!(out.defer(critical(n as u64)).is_none());
-        }
-        assert!(out.defer(UiUpdate::ConfirmationSourcesChanged).is_none());
-        for n in 0..(LATEST_LIMIT + 10) {
-            assert!(
-                out.defer(UiUpdate::Status {
-                    thread_id: Some(format!("thread-{n}")),
-                    text: "display".into(),
-                })
-                .is_none()
-            );
-        }
-        let pending = out.delivery.pending.lock().unwrap();
-        assert!(pending.latest.contains_key("confirmation-sources-changed"));
-        assert!(pending.latest.len() <= LATEST_LIMIT);
-    }
-
     #[test]
     fn live_display_pressure_coalesces_without_consuming_critical_delivery_slots() {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);

@@ -706,13 +706,6 @@ pub(super) fn confirmation_footer(
 ) -> Option<&'static str> {
     match confirmation {
         Confirmation::ThreadDeletion(_) | Confirmation::ForceQuit => None,
-        Confirmation::StaleIndex { .. } => Some(crate::ui::text_width::glyphs::localized!(
-            language,
-            "N / Esc 戻る · 再確認が必要\n↑↓/PgUp/PgDn 閲覧",
-            "N / Esc 戻る | 再確認が必要\n^v/PgUp/PgDn 閲覧",
-            "N / Esc Back · Review again\n↑↓/PgUp/PgDn Scroll",
-            "N / Esc Back | Review again\n^v/PgUp/PgDn Scroll"
-        )),
         _ => Some(crate::ui::text_width::glyphs::localized!(
             language,
             "N / Esc 戻る · Y 実行\n↑↓/PgUp/PgDn 閲覧",
@@ -774,14 +767,6 @@ pub(super) fn confirmation_text(
             })
         }
         Confirmation::Rewind { facts, .. } => Some(facts.text(language)),
-        Confirmation::StaleIndex { detail } => Some(match language {
-            UiLanguage::Ja => format!(
-                "確認は古くなりました。実行できません。閉じてプレビューをやり直してください。\n{detail}"
-            ),
-            UiLanguage::En => format!(
-                "This confirmation is stale and cannot execute. Close it and preview again.\n{detail}"
-            ),
-        }),
         _ => None,
     }
 }
@@ -1735,24 +1720,6 @@ mod confirmation_language_tests {
             }
         }
         super::super::i18n::verify_screen(configure, expected);
-    }
-
-    #[test]
-    fn stale_index_confirmation_preserves_detail_and_never_offers_execution() {
-        let confirmation = Confirmation::StaleIndex {
-            detail: "opaque fixture".into(),
-        };
-        let text = confirmation_text(&confirmation, UiLanguage::En).unwrap();
-        assert!(text.contains("stale") && text.contains("cannot execute"));
-        assert!(text.contains("opaque fixture"));
-        let footer = confirmation_footer(&confirmation, UiLanguage::En).unwrap();
-        assert!(!footer.contains("Y Execute"));
-        assert!(footer.contains("N / Esc"));
-        assert!(
-            confirmation_text(&confirmation, UiLanguage::Ja)
-                .unwrap()
-                .contains("実行できません")
-        );
     }
 
     #[test]

@@ -631,3 +631,32 @@ fn complete_looking_preview_without_target_marker_cannot_enable_y() {
     });
     assert!(key(&mut ui, KeyCode::Char('y')).is_empty());
 }
+
+#[test]
+fn owner_refusal_of_a_live_run_is_shown_after_another_thread_changed() {
+    let mut ui = ui();
+    list(&mut ui, &["parent"]);
+    let (id, args) = request(key(&mut ui, KeyCode::Delete), false);
+    accept(&mut ui, id, &args, true);
+    // Nothing else happening in the app disables Y: the reviewed preview runs.
+    let (execute_id, execute_args) = request(key(&mut ui, KeyCode::Char('y')), true);
+    // A Run started after the preview; the owner refuses at write time.
+    ui.apply(UiUpdate::ThreadDeletion {
+        request_id: execute_id,
+        args: execute_args,
+        execute: true,
+        result: Err(ApiError::new(
+            ErrorCode::InvalidState,
+            "stop every selected Thread before deleting it",
+        )),
+    });
+    let shown = screen(&mut ui);
+    assert!(
+        shown.contains("stop every selected Thread before deleting it"),
+        "{shown}"
+    );
+    assert!(
+        key(&mut ui, KeyCode::Char('y')).is_empty(),
+        "no retry with the refused preview"
+    );
+}

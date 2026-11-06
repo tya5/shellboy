@@ -875,7 +875,6 @@ impl From<crate::usage::StandardUsage> for ContextUsage {
 
 #[derive(Clone, Debug)]
 pub enum UiUpdate {
-    ConfirmationSourcesChanged,
     WatchDetails {
         generation: u64,
         read_sequence: u64,
@@ -1341,10 +1340,6 @@ pub enum ThreadDeletionReply {
 #[derive(Clone, Debug)]
 enum Confirmation {
     Watch(WatchActionTarget),
-    MessageQueue {
-        action: Box<UiAction>,
-        detail: String,
-    },
     ThreadDeletion(thread_deletion::DeletionDialog),
     /// One-key rewind (#246): the owner's dry-run facts, executed on Y.
     Rewind {
@@ -1360,9 +1355,6 @@ enum Confirmation {
         command: Command,
         detail: String,
         attempt: u64,
-    },
-    StaleIndex {
-        detail: String,
     },
     Operation {
         command: Command,
@@ -1778,9 +1770,7 @@ impl Confirmation {
             return text;
         }
         match self {
-            Confirmation::MessageQueue { detail, .. } | Confirmation::Operation { detail, .. } => {
-                detail.clone()
-            }
+            Confirmation::Operation { detail, .. } => detail.clone(),
             Confirmation::ThreadDeletion(dialog) => dialog.text(),
             Confirmation::ForceQuit => i18n::Message::ForceQuitBody.render(language),
             _ => unreachable!("confirmation text is localized by overlay"),
@@ -2826,20 +2816,6 @@ impl UiState {
         match update {
             UiUpdate::DbWorkerActivity(_) | UiUpdate::GcDiagnostics(_) => {
                 unreachable!("handled before per-view updates")
-            }
-            UiUpdate::ConfirmationSourcesChanged => {
-                self.confirmation_cache.clear();
-                self.management.invalidate_index_preview();
-                match &mut self.confirmation {
-                    Some(Confirmation::ThreadDeletion(dialog)) => dialog.invalidate(),
-                    Some(Confirmation::Index { detail, .. }) => {
-                        self.confirmation = Some(Confirmation::StaleIndex {
-                            detail: detail.clone(),
-                        });
-                    }
-                    _ => {}
-                }
-                self.dirty = true;
             }
             UiUpdate::SendOperation {
                 draft_id,
@@ -5737,11 +5713,7 @@ impl UiState {
         self.management.close();
         if matches!(
             self.confirmation,
-            Some(
-                Confirmation::Index { .. }
-                    | Confirmation::StaleIndex { .. }
-                    | Confirmation::Operation { .. }
-            )
+            Some(Confirmation::Index { .. } | Confirmation::Operation { .. })
         ) {
             self.confirmation = None;
         }
@@ -5998,10 +5970,6 @@ impl UiState {
                     vec![]
                 }
             }
-            Some(Confirmation::MessageQueue { action, .. }) => {
-                self.queue_popup.visible = false;
-                vec![*action]
-            }
             Some(Confirmation::EditStop {
                 draft_id,
                 revision,
@@ -6025,10 +5993,6 @@ impl UiState {
             }) => {
                 self.management.reset_preview();
                 vec![UiAction::ConfirmedIndex { command, attempt }]
-            }
-            Some(Confirmation::StaleIndex { detail }) => {
-                self.set_confirmation(Confirmation::StaleIndex { detail });
-                vec![]
             }
             Some(Confirmation::Operation { command, .. }) => vec![UiAction::Manage(command)],
             Some(Confirmation::ThreadDeletion(_)) => {
@@ -7397,7 +7361,12 @@ mod layout_cache_tests {
         for policy in [Some(1), Some(2), None] {
             text_width::set_terminal_width(policy);
             for language in [crate::config::UiLanguage::En, crate::config::UiLanguage::Ja] {
-                let confirmation = Confirmation::StaleIndex { detail: raw.into() };
+                let confirmation = Confirmation::Operation {
+                    command: Command::ThreadGet(ThreadTarget {
+                        thread_id: Some("fixture".into()),
+                    }),
+                    detail: raw.into(),
+                };
                 assert!(confirmation.text(language).contains(raw));
                 let footer = confirmation.footer(language);
                 let (separator, arrows) = if policy == Some(1) {
@@ -7561,21 +7530,17 @@ mod layout_cache_tests {
     #[test]
     fn confirmation_helpers_are_used_by_the_real_bilingual_screen() {
         fn configure(ui: &mut UiState) {
-            ui.confirmation = Some(Confirmation::StaleIndex {
+            ui.confirmation = Some(Confirmation::Operation {
+                command: Command::ThreadGet(ThreadTarget {
+                    thread_id: Some("fixture".into()),
+                }),
                 detail: "INDEX-ID".into(),
             });
         }
         fn expected(language: crate::config::UiLanguage) -> &'static [&'static str] {
             match language {
-                crate::config::UiLanguage::En => &[
-                    "Confirm action",
-                    "cannot execute",
-                    "INDEX-ID",
-                    "Review again",
-                ],
-                crate::config::UiLanguage::Ja => {
-                    &["実行の確認", "実行できません", "INDEX-ID", "再確認が必要"]
-                }
+                crate::config::UiLanguage::En => &["Confirm action", "INDEX-ID", "Y Execute"],
+                crate::config::UiLanguage::Ja => &["実行の確認", "INDEX-ID", "Y 実行"],
             }
         }
         i18n::verify_screen(configure, expected);
