@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 66, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 67, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -61,6 +61,23 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             "headless lifecycle must not be offered as a TUI form"
         );
     }
+    // Standalone explicit maintenance (#238): owner-stopped, never a TUI form.
+    let vacuum = leaves
+        .remove("storage vacuum")
+        .expect("tracked standalone vacuum path");
+    let actual = vacuum
+        .get_arguments()
+        .filter(|arg| !matches!(arg.get_id().as_str(), "help" | "version"))
+        .map(|arg| format!("--{}", arg.get_long().expect("named options only")))
+        .collect::<BTreeSet<_>>();
+    let mut expected = BTreeSet::from(["--dry-run".to_owned()]);
+    expected.extend(GLOBAL_ARGUMENTS.iter().map(|arg| arg.spelling.to_owned()));
+    assert_eq!(actual, expected);
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path.join(" ") == "storage vacuum")
+    );
     // A standalone read-only debug client (#137), deliberately not a TUI form:
     // it reads the database directly and never routes through an owner.
     let request = leaves
