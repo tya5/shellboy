@@ -44,3 +44,57 @@ test('API failure records fallback output and summary', async () => {
   assert.equal(output.reuse, 'false');
   assert.match(summary.join(' '), /executing full checks/);
 });
+
+// #245 docs-only decision
+const BEFORE = 'a'.repeat(40);
+const docsContext = {...context, payload: {...context.payload, before: BEFORE, after: 'b'.repeat(40)}};
+function compareApi(files) {
+  return {rest: {repos: {compareCommitsWithBasehead: 'compare'}},
+    paginate: async (method, params) => {
+      assert.equal(method, 'compare');
+      assert.equal(params.basehead, `${BEFORE}...${'b'.repeat(40)}`);
+      return [{files: files.map(f => typeof f === 'string' ? {filename: f} : f)}];
+    }};
+}
+const docsOnly = async (files, ctx = docsContext) => (await gate.decideDocsOnly({github: compareApi(files), context: ctx})).docsOnly;
+test('documentation-only diff skips cargo checks', async () => {
+  assert.equal(await docsOnly(['docs/development/status.md', 'docs/design/x.md', 'README.md', 'docs/assets/a.png']), true);
+});
+test('any code, script, workflow or nested md file forces full run', async () => {
+  for (const path of ['src/lib.rs', 'scripts/ci-reuse.cjs', '.github/workflows/ci.yml', 'Cargo.toml', 'config.example.toml', 'src/notes.md']) {
+    assert.equal(await docsOnly(['docs/a.md', path]), false, path);
+  }
+});
+test('embedded guides force full run, including renames out of them', async () => {
+  assert.equal(await docsOnly(['docs/guides/user-guide.md']), false);
+  assert.equal(await docsOnly(['docs/guides/user-guide.ja.md']), false);
+  assert.equal(await docsOnly([{filename: 'docs/old.md', previous_filename: 'docs/guides/agent-guide.md'}]), false);
+  assert.ok(gate.embeddedDocPrefixes.includes('docs/guides/'));
+});
+test('undeterminable diffs run everything', async () => {
+  assert.equal(await docsOnly([]), false);
+  assert.equal(await docsOnly(new Array(3000).fill('docs/a.md')), false);
+  for (const before of [undefined, '0'.repeat(40), 'short']) {
+    assert.equal(await docsOnly(['docs/a.md'], {...docsContext, payload: {...docsContext.payload, before}}), false);
+  }
+  assert.equal(await docsOnly(['docs/a.md'], {...docsContext, eventName: 'workflow_dispatch'}), false);
+  assert.equal(await docsOnly(['docs/a.md'], {...docsContext, ref: 'refs/heads/other'}), false);
+});
+test('entrypoint sets docs_only; API failure and reuse fall back to false', async () => {
+  const run = async (github, ctx) => {
+    const output = {};
+    const core = {setOutput: (k, v) => output[k] = v, info() {},
+      summary: {addHeading() {return this;}, addRaw() {return this;}, async write() {}}};
+    await gate({github, context: ctx, core});
+    return output;
+  };
+  const noRuns = files => ({...compareApi(files), paginate: async (m, p) =>
+    m === 'compare' ? compareApi(files).paginate(m, p) : []});
+  const github = files => ({rest: {actions: {listWorkflowRuns: 'runs'}, repos: {compareCommitsWithBasehead: 'compare'}},
+    paginate: noRuns(files).paginate});
+  assert.deepEqual(await run(github(['docs/a.md']), docsContext), {reuse: 'false', docs_only: 'true'});
+  assert.deepEqual(await run(github(['src/a.rs']), docsContext), {reuse: 'false', docs_only: 'false'});
+  const failing = {rest: {actions: {listWorkflowRuns: 'runs'}, repos: {compareCommitsWithBasehead: 'compare'}},
+    paginate: async m => { if (m === 'compare') throw Error('boom'); return []; }};
+  assert.equal((await run(failing, docsContext)).docs_only, 'false');
+});

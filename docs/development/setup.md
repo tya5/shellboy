@@ -180,6 +180,26 @@ logic has lightweight Node built-in tests, executed by Linux CI with
 `node --test scripts/tests/ci-reuse.test.cjs`; Node is not a product dependency.
 Measurement and release jobs are unchanged.
 
+### Documentation-only main pushes (#245)
+
+The `reuse` job (`scripts/ci-reuse.cjs`) also emits `docs_only`. For a push to
+main it compares `before...after` from the push payload; when every changed
+path (including a rename's previous path) is under `docs/` or is a top-level
+`*.md`, the three-OS `check` job is skipped and the Linux `docs-checks` job runs
+the language-classification audit plus `test_validation_documents.py` and
+`test_readme_overview.py`. Everything else runs the full checks: any other path,
+an empty or 3000-file diff, a missing/all-zero `before`, a compare API failure,
+and `workflow_dispatch` or any non-main ref. Exact-SHA reuse is evaluated first;
+when it reuses, `docs_only` is false.
+
+Documents that Rust reads are never light: `embeddedDocPrefixes` in
+`ci-reuse.cjs` (the one list; currently `docs/guides/`, `include_str!`-embedded by
+`src/docs.rs`, `src/ui/operations.rs`, `src/frontend/ui_diagnostics.rs`) forces
+the full run. Add a prefix there when Rust or a test starts reading another doc.
+The decision is unit-tested in `scripts/tests/ci-reuse.test.cjs`. The skip itself
+can only be observed on real main pushes; record those runs in the validation
+status when they occur.
+
 ## Small developer tools
 
 `python3 scripts/dev/record-delta.py [--base origin/main] [--repo WORKTREE]`

@@ -58,6 +58,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       reuse: ${{ steps.evidence.outputs.reuse }}
+      docs_only: ${{ steps.evidence.outputs.docs_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,9 +70,27 @@ jobs:
           script: |
             const reuse = require('./scripts/ci-reuse.cjs');
             await reuse({github, context, core});
+  docs-checks:
+    # #245: documentation-only main pushes skip the three-OS cargo checks.
+    needs: reuse
+    if: needs.reuse.outputs.docs_only == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check language classification consistency
+        run: python3 scripts/dev/language-audit.py --classifications scripts/dev/language-classifications.json --summary
+      - name: Check documents read by Python tests
+        run: |
+          set -e
+          for t in test_validation_documents.py test_readme_overview.py; do
+            python3 -m unittest discover -s scripts/tests -p "$t"
+          done
   check:
     needs: reuse
-    if: always() && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true'
+    if: always() && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
     strategy:
       fail-fast: false
       matrix:

@@ -1,5 +1,13 @@
 # Development status
 
+## Documentation-only CI skip (#245; on branch issue-245/docs-only-ci, not yet landed)
+
+`reuse` emits `docs_only`; documentation-only main pushes skip the three-OS
+cargo checks and run `docs-checks` (language audit and the two document Python
+tests). `docs/guides/` (embedded by Rust) always forces the full run. Decision
+unit-tested; branch workflow_dispatch proves parsing and the full path. The
+skip on a real main push is not yet observed. Details: setup.md.
+
 ## Branch view (#237; on branch issue-237/branch-view, CI pending)
 
 Branches are Threads (no tables, no migration). `shellboy thread branches [--thread T]
