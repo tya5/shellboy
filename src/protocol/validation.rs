@@ -193,6 +193,13 @@ impl ThreadPruneArgs {
     }
 }
 
+impl ThreadRewindArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        optional_nonempty(self.thread_id.as_deref(), "thread_id")?;
+        nonempty(&self.node_id, "node_id")
+    }
+}
+
 /// `""` clears the Thread override; digits set it (0 disables proactive compaction).
 pub(crate) fn parse_auto_compact_at(value: &str) -> Result<Option<i64>, ApiError> {
     if value.is_empty() {
@@ -518,6 +525,7 @@ impl Command {
             Self::ThreadCreate(a) => a.validate(),
             Self::ThreadFork(a) => a.validate(),
             Self::ThreadPrune(a) => a.validate(),
+            Self::ThreadRewind(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;
                 if let Some(marker) = &a.preview_marker

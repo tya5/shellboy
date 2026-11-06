@@ -183,6 +183,11 @@ pub enum ThreadCommand {
         after_help = "Explicit only; nothing prunes automatically. Preview first, then run:\n  shellboy thread prune --thread THREAD_ID --before NODE_ID --dry-run\n  shellboy thread prune --thread THREAD_ID --before NODE_ID\n  shellboy storage collect --category history   # optional: reclaim now and read the counts\n\nOmitting --thread targets the calling Thread. Originals still held by another live Thread (a fork) are kept. After the history GC reclaims them, a summary restore, original search and `history get` of those nodes report them as pruned. GC frees pages inside the database file but does not shrink it (no automatic VACUUM). Use `history get` to read what you need before pruning."
     )]
     Prune(ThreadPruneOptions),
+    /// Cut this Thread's selected path back to a node; the removed part stays as a child Thread.
+    #[command(
+        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or queued messages, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. Attachments whose message leaves the path are not sent."
+    )]
+    Rewind(ThreadRewindOptions),
     /// Inspect deletion blockers and direct references without deleting anything.
     DeletePreview(ThreadDeleteOptions),
     Set(ThreadSetOptions),
@@ -460,6 +465,15 @@ pub struct ThreadPruneOptions {
     /// Report what would be pruned without changing anything.
     #[arg(long)]
     pub dry_run: bool,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ThreadRewindOptions {
+    /// Target Thread; omitted means the calling Thread (refused while it is running).
+    #[arg(long = "thread")]
+    pub thread_id: Option<String>,
+    /// The node that becomes the end of the selected path.
+    #[arg(long = "node")]
+    pub node_id: String,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadSetOptions {
@@ -893,6 +907,10 @@ impl Cli {
                     thread_id: a.thread_id,
                     before_node_id: a.before_node_id,
                     dry_run: a.dry_run,
+                }),
+                ThreadCommand::Rewind(a) => C::ThreadRewind(wire::ThreadRewindArgs {
+                    thread_id: a.thread_id,
+                    node_id: a.node_id,
                 }),
                 ThreadCommand::Set(a) => C::ThreadSet(Box::new(wire::ThreadSetArgs {
                     agents: path_option(a.agents)?,

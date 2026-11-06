@@ -15,6 +15,7 @@ mod raw_witness;
 pub(crate) use node_row::NodeRow;
 pub mod prune;
 pub(crate) mod reachability;
+pub mod rewind;
 /// Integration-test hook for read visibility.
 #[doc(hidden)]
 pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<bool> {

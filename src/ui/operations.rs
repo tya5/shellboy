@@ -52,6 +52,7 @@ ThreadList,
     ThreadFork,
     ThreadDelete,
     ThreadPrune,
+    ThreadRewind,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -181,6 +182,7 @@ impl OpKind {
         match self {
             Self::ThreadList => Some("/threads"),
             Self::ThreadFork => Some("/fork"),
+            Self::ThreadRewind => Some("/rewind"),
             Self::ThreadSet => Some("/model | /effort"),
             Self::MessageSend => Some("Enter"),
             Self::RunRetry => Some("/retry"),
@@ -1255,6 +1257,12 @@ impl Form {
                     }))
                 },
             ),
+            OpKind::ThreadRewind => (vec![thread(), node()], |form, _cwd| {
+                Ok(Command::ThreadRewind(ThreadRewindArgs {
+                    thread_id: Some(form.owned("thread")?),
+                    node_id: form.owned("node")?,
+                }))
+            }),
             OpKind::ThreadDelete => (
                 vec![
                     thread(),
@@ -2344,6 +2352,11 @@ mod tests {
                 json!({"thread_id":id(1),"before_node_id":id(2),"dry_run":true}),
             ),
             (
+                OpKind::ThreadRewind,
+                "thread.rewind",
+                json!({"thread_id":id(1),"node_id":id(2)}),
+            ),
+            (
                 OpKind::ThreadSet,
                 "thread.set",
                 json!({"thread_id":id(1),"model":"model"}),
@@ -2504,6 +2517,7 @@ mod tests {
             "thread.fork",
             "thread.delete",
             "thread.prune",
+            "thread.rewind",
             "thread.set",
             "message.send",
             "message.reply",
@@ -2616,6 +2630,7 @@ mod tests {
                     name,
                     "thread.create"
                         | "thread.fork"
+                        | "thread.rewind"
                         | "thread.delete"
                         | "thread.set"
                         | "message.send"
@@ -3195,10 +3210,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 60);
+        assert_eq!(rows.len(), 61);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            60
+            61
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3210,7 +3225,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 60);
+        assert_eq!(operations.rows().len(), 61);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

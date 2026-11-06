@@ -1384,6 +1384,20 @@ impl Store {
                 }
                 MutationResult::value(value)
             }
+            Command::ThreadRewind(args) => {
+                let id = target(args.thread_id.as_deref(), caller)?;
+                let branch = uuid::Uuid::new_v4().to_string();
+                let mut value =
+                    history::rewind::rewind_thread(tx, &id, &args.node_id, &branch, now)?;
+                let stored: String = tx
+                    .query_row("SELECT title FROM thread WHERE id=?1", [&id], |r| r.get(0))
+                    .map_err(sql_error)?;
+                value["title"] = json!(thread_display_title(tx, &id, &stored)?);
+                let mut result = MutationResult::value(value)?;
+                result.changed_threads.push(id);
+                result.changed_threads.push(branch);
+                Ok(result)
+            }
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }

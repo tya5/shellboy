@@ -882,6 +882,18 @@ impl Page {
             ),
         );
         page.entry(
+            local!(
+                config.ui.language,
+                "/rewind [依頼の項目ID]",
+                "/rewind [REQUEST_ITEM_ID]"
+            ),
+            local!(
+                config.ui.language,
+                "同じ会話を以前の依頼の直前に戻す。切り取った部分は子会話に残る（実行中は不可。シェルの副作用は戻らない）",
+                "Move this conversation back to just before an earlier request; the removed part stays as a child conversation (not while running; shell side effects are not undone)"
+            ),
+        );
+        page.entry(
             "/compact-max",
             local!(
                 config.ui.language,

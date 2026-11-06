@@ -587,6 +587,9 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "会話 · 原文の解放",
             "Conversation · Prune originals"
         ),
+        OperationId::ThreadRewind => {
+            local!(language, "会話 · 巻き戻し", "Conversation · Rewind")
+        }
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
         OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
@@ -739,6 +742,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定ノードより前で採用済みの要約・spillの原文を、このThreadの保持から外します。回収は既存の到達性GCが行い、元に戻せません。",
             "Release this Thread's hold on originals of summaries and spills adopted before the node. The existing reachability GC reclaims them; this cannot be undone."
+        ),
+        OperationId::ThreadRewind => local!(
+            language,
+            "指定ノードまでの履歴に選択経路を戻します。切り取った部分は子Threadとして残り、シェルの副作用は戻りません。",
+            "Cut the selected path back to the specified node. The removed part is kept as a child Thread; shell side effects are not undone."
         ),
         OperationId::ThreadSet => local!(
             language,

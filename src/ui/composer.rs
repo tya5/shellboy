@@ -147,6 +147,11 @@ impl CommandHint {
                 "Fork conversation from history"
             ),
             "/edit" => local!(language, "依頼を編集して分岐", "Edit request and fork"),
+            "/rewind" => local!(
+                language,
+                "依頼の前まで戻す（残りは子会話）",
+                "Rewind to before a request (rest kept as a child)"
+            ),
             "/compact-max" => local!(
                 language,
                 "APIなしで最大縮小",
@@ -245,6 +250,7 @@ const COMMANDS: &[CommandHint] = &[
     CommandHint { name: "/index" },
     CommandHint { name: "/fork" },
     CommandHint { name: "/edit" },
+    CommandHint { name: "/rewind" },
     CommandHint {
         name: "/compact-max",
     },
@@ -912,7 +918,7 @@ mod contract_tests {
             );
             assert_eq!(ui.view().draft.text, format!("{} ", hint.name));
             let argument = match hint.name {
-                "/switch" | "/edit" | "/fork" | "/copy" | "/detach" => "sample-id",
+                "/switch" | "/edit" | "/rewind" | "/fork" | "/copy" | "/detach" => "sample-id",
                 "/effort" => "none",
                 "/attach" => "sample.txt",
                 "/search" => "needle",

@@ -169,6 +169,8 @@ mod thread_browser;
 mod thread_exit_marker;
 #[path = "../thread_prune.rs"]
 mod thread_prune;
+#[path = "../thread_rewind.rs"]
+mod thread_rewind;
 #[path = "../thread_titles.rs"]
 mod thread_titles;
 #[path = "../tool_cancel_reasons.rs"]

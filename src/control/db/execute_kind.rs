@@ -61,7 +61,7 @@ named_jobs! {
     ThreadList => thread_list, ThreadGet => thread_get, UsageGet => usage_get,
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
-    ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadSet => thread_set,
+    ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadSet => thread_set,
     MessageSend => message_send, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnGet => turn_get, Wait => wait, HistoryList => history_list, HistoryGet => history_get,
@@ -121,7 +121,8 @@ impl Kind {
             | Kind::HistoryRelations
             | Kind::AttachmentList => PureRead,
             // Bounded closure (65,536 sources) in one transaction; see history::prune.
-            Kind::MessageReply | Kind::ThreadPrune => MutationDeclaredBound,
+            // Rewind refuses paths over history::rewind::PATH_LIMIT nodes.
+            Kind::MessageReply | Kind::ThreadPrune | Kind::ThreadRewind => MutationDeclaredBound,
             Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
@@ -185,7 +186,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            47,
+            48,
             "classify new kinds and update this ratchet"
         );
     }
@@ -195,6 +196,7 @@ mod tests {
         let writers = [
             Kind::MessageReply,
             Kind::ThreadPrune,
+            Kind::ThreadRewind,
             Kind::OwnerShutdown,
             Kind::ThreadCreate,
             Kind::ThreadFork,
