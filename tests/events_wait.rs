@@ -8,8 +8,8 @@ use shellboy::{
     protocol::{
         ApiError, AttachmentAddArgs, AttachmentKind, AttachmentRemoveArgs, Command, Deliver,
         ErrorCode, EventCursor, EventsWaitArgs, MessageCancelArgs, MessageReplyArgs,
-        MessageSendArgs, Request, RunTarget, ThreadDeleteArgs, ThreadForkArgs, ThreadPruneArgs,
-        ThreadRewindArgs, ThreadSetArgs, ThreadTarget,
+        MessageSendArgs, Request, RunTarget, ThreadArchiveArgs, ThreadDeleteArgs, ThreadForkArgs,
+        ThreadPruneArgs, ThreadRewindArgs, ThreadSetArgs, ThreadTarget,
     },
 };
 use std::{sync::Arc, time::Duration};
@@ -892,5 +892,52 @@ async fn turn_created_from_queued_input_is_announced_while_the_rate_gate_is_held
     )
     .await;
     drop(receive);
+    close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn archive_unarchive_and_auto_unarchive_by_a_new_run_are_announced() {
+    let (_root, owner, control, mut receive, server) = fixture().await;
+    let t = thread(&control).await;
+    let archive_args = || ThreadArchiveArgs {
+        thread_ids: vec![t.clone()],
+        descendants: false,
+    };
+    let archived = "SELECT count(*) FROM thread WHERE id=?1 AND archived_at IS NOT NULL";
+    let at = quiet(&control).await;
+    command(&control, Command::ThreadArchive(archive_args()))
+        .await
+        .unwrap();
+    let at = until_saved(&control, &at, &t, archived).await;
+    command(&control, Command::ThreadUnarchive(archive_args()))
+        .await
+        .unwrap();
+    until_saved(
+        &control,
+        &at,
+        &t,
+        "SELECT count(*) FROM thread WHERE id=?1 AND archived_at IS NULL",
+    )
+    .await;
+    // A new Run on an archived idle Thread unarchives it; the saved change is announced.
+    let at = quiet(&control).await;
+    command(&control, Command::ThreadArchive(archive_args()))
+        .await
+        .unwrap();
+    let at = until_saved(&control, &at, &t, archived).await;
+    send(&control, &t, "wake the archived thread").await;
+    until_saved(
+        &control,
+        &at,
+        &t,
+        "SELECT count(*) FROM thread WHERE id=?1 AND archived_at IS NULL",
+    )
+    .await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, answer("ok")))
+        .unwrap();
+    settled(&control, &t).await;
     close(control, owner, server).await;
 }
