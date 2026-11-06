@@ -312,7 +312,12 @@ pub(super) async fn maybe_compact(
     let middle_new = if evidence.exhausted_active {
         widened_active
     } else {
-        has_kind("middle:") || (calibrated && has_kind("partial:"))
+        (has_kind("middle:") || (calibrated && has_kind("partial:")))
+            && !(marks.is_none()
+                && budget
+                    .guard
+                    .as_ref()
+                    .is_some_and(|guard| guard.blocks_unknown_middle(snapshot)))
     };
     let active_spill_new = calibrated && spill_new;
     let any_summary_new = middle_new || summary_new;
@@ -677,6 +682,15 @@ pub(super) async fn maybe_compact(
     let adopted = observation["outcome"] == "adopted";
     let summary_rejected = observation.get("summary_error").is_some();
     let summary_deferred = observation["summary_deferred"] == true;
+    let stage_outcome = |stage: &str| observation["stages"][stage]["outcome"].as_str();
+    let closed_rejected = stage_outcome("closed_summary") == Some("rejected");
+    let active_rejected = stage_outcome("active_summary") == Some("rejected");
+    let active_summary_adopted = stage_outcome("active_summary") == Some("adopted");
+    let closed_untouched = observation["stages"]["closed_summary"]["ran"] == false
+        && observation["stages"]["closed_spill"]["adopted_groups"]
+            .as_u64()
+            .unwrap_or(0)
+            == 0;
     budget.prefix_adopted = adopted && !summary_rejected && summary_scope == "prefix";
     if !adopted || summary_rejected || (summary_deferred && preserve_guard_after_spill) {
         let rejection = observation
@@ -728,11 +742,10 @@ pub(super) async fn maybe_compact(
                         .is_some_and(|candidate| candidate.mutable_protection),
                 );
             }
-            // #248: a closed-range summary that adopted nothing leaves the
-            // same range, parts and limit while the current Turn only appends
-            // tool output. Reuse the existing freeze so that unknown coverage
-            // does not repeat it at every tool boundary.
-            if !adopted && summary_scope == "prefix" && rejection.is_some() {
+            // #248: only deterministic rejections are remembered; a cancel or a
+            // transient provider failure may succeed on the next boundary.
+            let deterministic = reason == Reason::RejectedInvalidState;
+            if !adopted && deterministic && closed_rejected {
                 current.freeze_summary_for_current_turn(
                     guard::anchor_is_current_turn(
                         control,
@@ -741,6 +754,9 @@ pub(super) async fn maybe_compact(
                     )
                     .await?,
                 );
+            }
+            if (deterministic && active_rejected) || (adopted && active_summary_adopted) {
+                current.set_active_summary_rejected(deterministic && active_rejected);
             }
             if summary_deferred && adopted {
                 current.set_reason(reason);
@@ -771,6 +787,25 @@ pub(super) async fn maybe_compact(
                 )
             }
             _ => {}
+        }
+    } else if let Some(mut kept) = budget
+        .guard
+        .clone()
+        .filter(|saved| closed_untouched && saved.keeps_through_active_adoption(&snapshot.turn))
+    {
+        // #248: the adoption changed only active-Turn content. Keep the
+        // evidence about the closed range and rebase its witness.
+        let revision = guard::current_revision(control, &snapshot.thread).await?;
+        if active_summary_adopted {
+            kept.set_active_summary_rejected(false);
+        }
+        kept.mark_refresh(revision);
+        let reason = kept.reason;
+        if guard::save(control, snapshot, revision as u64, &kept, reason).await? {
+            budget.guard = Some(kept);
+            budget.status_context = Some((snapshot.run.clone(), snapshot.turn.clone()));
+        } else {
+            budget.guard = None;
         }
     } else {
         guard::clear(control, &snapshot.thread).await?;

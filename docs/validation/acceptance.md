@@ -1,6 +1,6 @@
 # Validation record
 
-## Repeated rejected closed summary (#248, 2026-11-06)
+## Repeated rejected closed summary (#248, 2026-11-07, r2)
 
 Real data (read-only `VACUUM INTO` copy, deleted after): Thread 38fcb3e3, one Turn,
 301 automatic attempts 03:58-05:28 UTC (200 in the reported hour). Each attempt record
@@ -11,13 +11,16 @@ reduction", `model_requests/reduce_requests: 0`, `summary_characters 2343 > limi
 coverage treats each new tool frontier as new, and the closed summary ran first and
 returned its error before any active stage ran. 2a (inference from zero requests with
 reduce rounds configured >= 1): every reduce round is served from the part cache, whose
-over-limit output is deterministic, so retries cannot succeed; not changed here. The floor
-2000 applies to the summary including appended source-ID lines. 2b: the active stages were
-never reached (`prefix_first`). The three single-request cycles (threads 34387187, eab639b4,
-ea5a1f3e) are the designed pair: prefix summary adopted with verification `insufficient`
-(source 8k-76k characters vs 211k-255k to remove), then the active stage `met`.
-Synthetic: `proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_grows`
-fails without the change and passes with it. Not verified on real data after the fix.
+over-limit output is deterministic; not changed (follow-up). 2b: active stages were never
+reached (`prefix_first`). The three single-request cycles (34387187, eab639b4, ea5a1f3e)
+are the designed pair: prefix summary adopted with verification `insufficient`, then the
+active stage `met`.
+Synthetic (fixture with an oversized current Turn, 16 further tool rounds, every summary
+rejected): r1 had 8 rejected closed summaries (the freeze was erased by adopted active
+spills); r2 has 1 closed and 1 active rejection and 1 summary request, 17 attempts (spill
+passes still start). Not verified on real data after the fix, and the real-Turn cost cannot
+be replayed from a copy without API calls. The active-summary repeat block has a unit test
+only; the integration fixture cannot make the active spill a no-op.
 
 ## Storage vacuum (#238)
 

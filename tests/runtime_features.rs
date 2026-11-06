@@ -3791,6 +3791,19 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 /// is therefore unchanged by appended tool groups.
 #[tokio::test]
 async fn proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_grows() {
+    rejected_summaries_under_growth("echo grow").await;
+}
+
+/// Empty tool output variant: stage rejections stay at most one per Turn. The
+/// blocked-repeat state for an active summary rejected under unknown coverage
+/// is unit-tested in `proactive_guard` (the fixture's active spill always adopts,
+/// which has its own pending-target gate).
+#[tokio::test]
+async fn proactive_rejected_active_summary_is_not_repeated_as_the_current_turn_grows() {
+    rejected_summaries_under_growth(if cfg!(windows) { "$null" } else { "true" }).await;
+}
+
+async fn rejected_summaries_under_growth(command: &'static str) {
     crate::test_watchdog::watchdog("proactive rejected summary gate", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
@@ -3804,7 +3817,7 @@ async fn proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_g
             settled(&control, &target).await;
         }
         send(&control, &target, &"protected current ".repeat(70_000)).await;
-        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"shell","arguments":json!({"command":"echo grow"}).to_string()}]});
+        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]});
         for index in 0..3 {
             let request = incoming(&control, &mut receive).await;
             assert_ne!(request.body["tools"], json!([]));
@@ -3813,48 +3826,38 @@ async fn proactive_rejected_closed_summary_is_not_repeated_as_the_current_turn_g
         let summary = incoming(&control, &mut receive).await;
         assert_eq!(summary.body["tools"], json!([]), "the threshold starts the closed summary");
         summary.reply.send((200, answer(" "))).unwrap();
-        // The Turn keeps growing at or above the threshold. The unchanged closed
-        // range is not summarized again; only the growing active Turn may be
-        // tried, and it is a different stage with its own new sources.
+        // The Turn keeps growing at or above the threshold for 16 more tool
+        // rounds. Every summary request is rejected (empty). Under unknown
+        // coverage each stage may be rejected at most once in this Turn.
         let mut summaries = 0;
-        for index in 3..9 {
+        for index in 3..19 {
             let request = incoming(&control, &mut receive).await;
             if request.body["tools"] == json!([]) {
                 summaries += 1;
                 request.reply.send((200, answer(" "))).unwrap();
+                // The summary attempt continues to its ordinary request.
+                let ordinary = incoming(&control, &mut receive).await;
+                ordinary.reply.send((200, tool(index, 200 + index))).unwrap();
                 continue;
             }
             request.reply.send((200, tool(index, 200 + index))).unwrap();
         }
         let last = incoming(&control, &mut receive).await;
-        if last.body["tools"] == json!([]) {
-            summaries += 1;
-            last.reply.send((200, answer(" "))).unwrap();
-            let last = incoming(&control, &mut receive).await;
-            last.reply.send((200, answer("finished"))).unwrap();
-        } else {
-            last.reply.send((200, answer("finished"))).unwrap();
-        }
+        last.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        assert!(summaries <= 2, "summary requests after the rejection: {summaries}");
-        // Oldest first: a rejected closed summary may be attempted again only
-        // after something was adopted (the path then changed), never directly.
-        let mut rejected_pending = false;
-        let mut closed_attempts = 0;
-        for event in events.iter().rev() {
+        let (mut closed_rejected, mut active_rejected) = (0, 0);
+        for event in &events {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
             let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
             let record: Value = serde_json::from_str(&record).unwrap();
-            if record["stages"]["closed_summary"]["ran"] == true {
-                closed_attempts += 1;
-                assert!(!rejected_pending, "same rejected closed range repeated without an adoption: {events:#?}");
-                rejected_pending = record["stages"]["closed_summary"]["outcome"] == "rejected";
-            } else if record["outcome"] == "adopted" {
-                rejected_pending = false;
-            }
+            closed_rejected += (record["stages"]["closed_summary"]["outcome"] == "rejected") as u32;
+            active_rejected += (record["stages"]["active_summary"]["outcome"] == "rejected") as u32;
         }
-        assert!(closed_attempts >= 1, "{events:#?}");
+        eprintln!("summaries={summaries} closed_rejected={closed_rejected} active_rejected={active_rejected} events={}", events.len());
+        assert_eq!(closed_rejected, 1, "one rejected closed summary per Turn: {events:#?}");
+        assert!(active_rejected <= 1, "one rejected active summary per Turn: {events:#?}");
+        assert!(summaries <= 2, "summary requests over 16 rounds: {summaries}");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
 }

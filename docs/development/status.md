@@ -4,9 +4,11 @@
 
 All provider embeddings are normalized to unit L2 length in the model HTTP client before storage or comparison. Synthetic-vector tests only; no real API. Docs: search design, history guide, agent guide, decisions. Resume: check CI on the branch tip.
 ## Repeated rejected closed summary (#248; on branch issue-248/repeat-gate, CI pending)
+## Repeated rejected summaries (#248; on branch issue-248/repeat-gate-r2, CI pending)
 
-Guard now freezes a rejected, non-adopted closed-range summary for the current Turn
-(D-248-1), with an integration regression test. Open: 2a (over-limit cached reduce
+Guard remembers deterministic closed and active summary rejections per Turn under unknown
+coverage and keeps them through active-only adoptions (D-248-1), with an integration
+regression test and a guard unit test. Open: 2a (over-limit cached reduce
 output, no code change) is reported in the validation record. Resume: land after CI.
 
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
