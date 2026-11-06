@@ -557,3 +557,15 @@ cancellable by the shared runtime-observation wrapper. Models may call it.
 The cursor moves past changes to Threads excluded by `thread_ids`; a client that adds a Thread to the
 filter reads it once. A pending call at owner shutdown or caller disconnect ends with an error
 (`read_only`, not applied); after an owner restart the next call returns `resync_required`.
+
+## Live text on `events.wait` (#243 E3)
+
+`include_text` (default false) adds `live_text` to the result: one entry per attempt in the filter
+that holds text, sorted by Thread ID, `{thread_id, attempt_id, gap, deltas:[{offset, reasoning, text}]}`.
+Absent unless asked. `status` gains `text`, returned when text is new and no change is; `baseline` and
+`resync_required` carry everything retained. `offset` counts Unicode scalar values already streamed by
+that attempt, reasoning and refusal included; it restarts with each attempt, and a retry has a new
+`attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
+`live_text` holds no text. The text is never saved, not a position in saved output and not part of any
+receipt; bounds are 64 KiB charged per attempt and 16 attempts, and all of it fits one frame. Client rule
+and state record: [events-and-external-protocol](events-and-external-protocol.md) 2.5.

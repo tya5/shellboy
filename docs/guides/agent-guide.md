@@ -184,6 +184,10 @@ re-read every Thread you track. Hints coalesce and are not data; for a conclusio
 must not miss a transition, use `wait` with `thread_settled` (see below). Details:
 [CLI reference](cli-reference.md#change-hints-events-wait-243).
 
+`events wait --text` exists for UI clients that preview an answer being written. Do not use it to follow
+another Thread: the text is unsaved and lossy, can be replaced by a retry, wakes you for each delta at a
+token cost, and may never match the saved answer. Wait for the Thread to settle and read saved history.
+
 ### Wait for any child Thread
 
 Use one wait for several child Threads, not a repeated ThreadList comparison:
