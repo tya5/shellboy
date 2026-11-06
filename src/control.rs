@@ -142,6 +142,8 @@ pub struct Control {
     ui_events: ui_events::UiEvents,
     changed: Notify,
     change_clock: change_clock::ChangeClock,
+    /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
+    text_changed: Notify,
     shell_output_changed: Notify,
     stop: CancellationToken,
     diagnostics: crate::diagnostics::Diagnostics,
@@ -313,6 +315,7 @@ impl Control {
             ui_events: ui_events::UiEvents::new(),
             changed: Notify::new(),
             change_clock: change_clock::ChangeClock::new(),
+            text_changed: Notify::new(),
             shell_output_changed: Notify::new(),
             stop: CancellationToken::new(),
             diagnostics: owner.diagnostics.clone(),
@@ -408,6 +411,26 @@ impl Control {
             recovery,
         });
         self.changed.notify_waiters();
+    }
+    /// One unsaved model delta: memory only, no DB, never waits for a reader.
+    fn stream_delta(
+        &self,
+        thread: &str,
+        attempt: &str,
+        text: &str,
+        reasoning: bool,
+        stream_char_offset: usize,
+    ) {
+        self.change_clock
+            .record_text(thread, attempt, stream_char_offset as u64, text, reasoning);
+        self.publish_event(EngineEvent::Stream {
+            thread_id: thread.into(),
+            node_id: attempt.into(),
+            text: text.into(),
+            reasoning,
+            stream_char_offset,
+        });
+        self.text_changed.notify_waiters();
     }
 
     /// This task never waits for a model or owned shell to finish. Individual

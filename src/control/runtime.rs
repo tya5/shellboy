@@ -454,7 +454,8 @@ impl Control {
     ) -> Result<Value, ApiError> {
         // Shutdown and caller disconnect cancel this future in `runtime_observation`.
         use super::change_clock::Poll;
-        let result = |status, seq: u64, changes: Vec<(String, u64)>, more| {
+        let include_text = args.include_text;
+        let result = |status, seq: u64, changes: Vec<(String, u64)>, more, text| {
             let cursor = EventCursor {
                 v: 1,
                 instance_id: self.store.instance_id.clone(),
@@ -470,27 +471,20 @@ impl Control {
                         .map(|(thread_id, seq)| EventChange { thread_id, seq })
                         .collect(),
                     more,
+                    live_text: include_text.then_some(text),
                 },
                 ErrorCode::InvalidState,
                 "Cannot encode events result",
             )
         };
         let Some(token) = args.after.as_deref() else {
-            return result(
-                EventsWaitStatus::Baseline,
-                self.change_clock.head(),
-                vec![],
-                false,
-            );
+            let (head, text) = self.change_clock.snapshot(&args.thread_ids, include_text);
+            return result(EventsWaitStatus::Baseline, head, vec![], false, text);
         };
         let after = EventCursor::decode(token)?;
         if after.instance_id != self.store.instance_id {
-            return result(
-                EventsWaitStatus::ResyncRequired,
-                self.change_clock.head(),
-                vec![],
-                false,
-            );
+            let (head, text) = self.change_clock.snapshot(&args.thread_ids, include_text);
+            return result(EventsWaitStatus::ResyncRequired, head, vec![], false, text);
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(args.timeout_ms));
@@ -498,31 +492,44 @@ impl Control {
             let notified = self.changed.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            match self.change_clock.poll(after.seq, &args.thread_ids) {
+            let text_notified = self.text_changed.notified();
+            tokio::pin!(text_notified);
+            if include_text {
+                text_notified.as_mut().enable();
+            }
+            match self
+                .change_clock
+                .poll(after.seq, &args.thread_ids, include_text)
+            {
                 None => {
                     return Err(ApiError::new(
                         ErrorCode::InvalidArgument,
                         "events cursor is ahead of this owner; restart without --after",
                     ));
                 }
-                Some(Poll::Resync { head }) => {
-                    return result(EventsWaitStatus::ResyncRequired, head, vec![], false);
+                Some(Poll::Resync { head, text }) => {
+                    return result(EventsWaitStatus::ResyncRequired, head, vec![], false, text);
                 }
                 Some(Poll::Ready {
                     changes,
                     more,
                     cursor,
+                    text,
                 }) => {
                     if !changes.is_empty() {
-                        return result(EventsWaitStatus::Changed, cursor, changes, more);
+                        return result(EventsWaitStatus::Changed, cursor, changes, more, text);
+                    }
+                    if text.iter().any(|attempt| !attempt.deltas.is_empty()) {
+                        return result(EventsWaitStatus::Text, cursor, vec![], false, text);
                     }
                     if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
-                        return result(EventsWaitStatus::Timeout, cursor, vec![], false);
+                        return result(EventsWaitStatus::Timeout, cursor, vec![], false, text);
                     }
                 }
             }
             tokio::select! {
                 _ = &mut notified => {}
+                _ = &mut text_notified, if include_text => {}
                 _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {}
             }
         }
