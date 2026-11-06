@@ -298,7 +298,7 @@ Logical usage, reclaimable bytes, DB/WAL physical size, and SQLite reusable page
 
 ## Change hints: `events wait` (#243)
 
-`shellboy events wait [--after CURSOR] [--thread THREAD ...] [--timeout-ms N]` is a
+`shellboy events wait [--after CURSOR] [--thread THREAD ...] [--timeout-ms N] [--text]` is a
 receipt-free long-poll. It answers "which Threads changed after this cursor?" without
 reading saved data, so a client can stop polling `run get` / `turn get` / `shell list`
 on a timer and read them only after a hint.
@@ -330,7 +330,28 @@ Rules:
   The owner keeps no per-client buffer. The call holds one ordinary request slot while it
   waits; a bridge serving several clients should share one long-poll.
 - Shell output bytes and model text deltas are not Thread hints. Use `shell read` or
-  `wait` with `shell_output` for live output.
+  `wait` with `shell_output` for live output, and `--text` for model text.
+
+### Unsaved model text: `--text`
+
+`--text` adds `live_text` to the result, for UI clients that show an answer as it is written. It is a
+lossy preview held in memory, never saved; saved output (`history list`) is what stays. The same call
+and the same `cursor` still report changes, so one long-poll covers both.
+
+Example: `{"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,"live_text":[{"thread_id":"01J...","attempt_id":"01K...","gap":false,"deltas":[{"offset":5,"reasoning":false,"text":" world"}]}]}`.
+
+| Field | Meaning |
+|---|---|
+| `status` | `text` when text is new and no change is; `changed` when both are. `baseline` and `resync_required` return all retained text |
+| `attempt_id` | The model attempt writing. A retry is a new attempt: discard what you showed |
+| `gap` | `true`: text after your position was lost. Discard what you showed; what follows is only the retained tail |
+| `deltas[].offset` | Unicode scalar values (not bytes, not UTF-16 units) already streamed by this attempt, reasoning and refusal text included. Not a position in saved output |
+| `deltas[].reasoning` | `true` for model reasoning text |
+
+A Thread you were showing that is missing from `live_text` holds no text: its attempt ended, or it was
+dropped because more than 16 attempts were streaming. Discard the preview and read saved facts. Each
+attempt keeps at most 64 KiB; text unread when an attempt ends is gone. When you add a Thread to
+`--thread`, take a new baseline.
 
 ## Cursors
 
