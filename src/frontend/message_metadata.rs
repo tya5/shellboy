@@ -311,6 +311,7 @@ pub(super) async fn enrich(
     for (target, node) in nodes.iter_mut().zip(projected) {
         *target = node;
     }
+    super::branch_markers::enrich(control, viewed_thread, nodes).await;
     super::compaction_markers::enrich(control, viewed_thread, nodes).await
 }
 

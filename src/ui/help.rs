@@ -882,6 +882,14 @@ impl Page {
             ),
         );
         page.entry(
+            local!(config.ui.language, "/branches [会話ID]", "/branches [THREAD_ID]"),
+            local!(
+                config.ui.language,
+                "分岐（fork・編集・巻き戻しで分かれた子会話）を木で表示。Enterで開く・Fで分岐・Pで原文を手放す。会話中の分岐点の行は履歴選択中に←→で見比べ、Enterで移る",
+                "Show the branch tree (children made by fork, edit or rewind). Enter opens, F forks, P prunes. A branch point row in the conversation: with a history item selected, ←→ browse the alternatives and Enter opens one"
+            ),
+        );
+        page.entry(
             local!(
                 config.ui.language,
                 "/rewind [依頼の項目ID]",

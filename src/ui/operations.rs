@@ -355,6 +355,17 @@ impl Operations {
         }
         result
     }
+    /// The open form's operation and the named fields' values (UI tests).
+    #[cfg(test)]
+    pub(super) fn open_form_values(&self, keys: &[&str]) -> Option<(OpKind, Vec<String>)> {
+        let form = self.form.as_ref()?;
+        Some((
+            form.operation,
+            keys.iter()
+                .map(|key| form.value(key).map(str::to_owned).unwrap_or_default())
+                .collect(),
+        ))
+    }
     pub(super) fn set_language(&mut self, language: UiLanguage) {
         if self.language == language {
             return;
@@ -2685,6 +2696,7 @@ mod tests {
                         | "model.list"
                         | "thread.list"
                         | "thread.get"
+                        | "thread.branches"
                         | "usage.get"
                         | "shell.list"
                         | "compact.list"

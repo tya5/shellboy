@@ -287,6 +287,32 @@ impl UiState {
                 }
                 Some(vec![])
             }
+            KeyCode::Left | KeyCode::Right
+                if self
+                    .selected_history_item()
+                    .is_some_and(|item| self.view().has_branch_marker(&item.primary_node_id)) =>
+            {
+                // Preview the next alternative at a branch marker (#237); never switches.
+                let delta = if key.code == KeyCode::Left { -1 } else { 1 };
+                if let Some(item) = self.selected_history_item() {
+                    self.active_view_mut()
+                        .step_branch_preview(&item.primary_node_id, delta);
+                    self.dirty = true;
+                }
+                Some(vec![])
+            }
+            KeyCode::Enter
+                if self
+                    .selected_history_item()
+                    .and_then(|item| self.view().branch_target(&item.primary_node_id))
+                    .is_some() =>
+            {
+                // A previewed branch opens its Thread (#237); the followed one keeps Enter's usual meaning.
+                let target = self
+                    .selected_history_item()
+                    .and_then(|item| self.view().branch_target(&item.primary_node_id));
+                Some(target.map(|thread| self.select_thread(thread)).unwrap_or_default())
+            }
             KeyCode::Enter => Some(
                 if self
                     .selected_history_item()
@@ -1007,6 +1033,120 @@ mod tests {
         assert!(
             matches!(actions.as_slice(), [UiAction::LoadOriginal { node_id, .. }] if node_id == "original-b")
         );
+    }
+
+    fn branch_ui(language: crate::config::UiLanguage) -> UiState {
+        use crate::presentation::branch_marker::{Alt, BranchMarker};
+        let mut config = Config::default();
+        config.ui.language = language;
+        let mut ui = UiState::new(&config, std::env::temp_dir());
+        ui.select_thread("thread".into());
+        let alt = |id: &str, text: &str| Alt {
+            thread_id: id.into(),
+            excerpt: Some(text.into()),
+        };
+        let body = "answer before the fork".to_owned();
+        let mut presentation = crate::presentation::project(
+            "assistant_response",
+            &serde_json::json!({"output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "answer before the fork"}]}]}),
+            &body,
+            0,
+        );
+        presentation.branch_marker = Some(BranchMarker {
+            alternatives: vec![
+                alt("first", "fix the tests"),
+                alt("thread", "make CI pass"),
+                alt("third", "try with mocks"),
+            ],
+            current: 1,
+            preview: 1,
+        });
+        ui.apply(UiUpdate::History {
+            thread_id: "thread".into(),
+            generation: ui.view().generation,
+            nodes: vec![UiNode {
+                node_id: "anchor".into(),
+                role: "assistant_response".into(),
+                text: body,
+                total_chars: 22,
+                presentation,
+                ..Default::default()
+            }],
+            pending: Default::default(),
+            read_revision: 1,
+            before_cursor: None,
+            append: false,
+            first_ordinal: 0,
+            selection_revision: 1,
+            total_nodes: 1,
+        });
+        ui
+    }
+    fn screen_at(ui: &mut UiState, width: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
+        terminal.draw(|frame| draw(frame, ui)).unwrap();
+        screen_text(&terminal)
+    }
+    #[test]
+    fn branch_marker_row_follows_the_arrow_keys_and_enter_opens_the_previewed_thread() {
+        use crate::config::UiLanguage;
+        // Wide characters leave continuation cells; compare without spaces.
+        let squash = |text: String| text.replace(['\n', '\u{a0}', ' '], "");
+        for (language, current, branch) in [
+            (UiLanguage::En, "current", "branch"),
+            (UiLanguage::Ja, "今の枝", "別の枝"),
+        ] {
+            let mut ui = branch_ui(language);
+            for width in [100u16, 40] {
+                let shown = screen_at(&mut ui, width);
+                println!("--- {language:?} inline marker, {width} columns ---\n{shown}");
+                let flat = squash(shown.clone());
+                assert!(flat.contains("↳2/3⋯"), "{shown}");
+                assert!(flat.contains(current) && flat.contains("\"makeCIpass\""), "{shown}");
+            }
+            // ←/→ need the history item to be selected first, and never switch Threads.
+            assert!(key(&mut ui, KeyCode::Right).is_empty());
+            assert_eq!(ui.view().nodes()[0].presentation.branch_marker.as_ref().unwrap().preview, 1);
+            key(&mut ui, KeyCode::Tab);
+            assert!(ui.view().items.active);
+            assert!(key(&mut ui, KeyCode::Right).is_empty());
+            let shown = squash(screen_at(&mut ui, 100));
+            assert!(shown.contains("↳3/3⋯") && shown.contains("trywithmocks"), "{shown}");
+            assert!(shown.contains(branch), "{shown}");
+            key(&mut ui, KeyCode::Right);
+            let shown = squash(screen_at(&mut ui, 100));
+            assert!(shown.contains("↳1/3⋯") && shown.contains("fixthetests"), "wraps: {shown}");
+            key(&mut ui, KeyCode::Left);
+            assert!(squash(screen_at(&mut ui, 100)).contains("↳3/3⋯"));
+            assert_eq!(ui.view().thread_id.as_deref(), Some("thread"), "previewing never switches");
+            let actions = key(&mut ui, KeyCode::Enter);
+            assert!(
+                actions.iter().any(|a| matches!(a, UiAction::SelectThread { thread_id, .. } if thread_id == "third"))
+                    || ui.view().thread_id.as_deref() == Some("third"),
+                "Enter opens the previewed branch"
+            );
+        }
+    }
+    #[test]
+    fn enter_on_the_followed_alternative_keeps_its_usual_meaning() {
+        let mut ui = branch_ui(crate::config::UiLanguage::En);
+        key(&mut ui, KeyCode::Tab);
+        let before = ui.view().thread_id.clone();
+        key(&mut ui, KeyCode::Enter);
+        assert_eq!(ui.view().thread_id, before);
+        assert_eq!(
+            ui.view().nodes()[0].presentation.branch_marker.as_ref().unwrap().preview,
+            1
+        );
+    }
+    #[test]
+    fn previewing_changes_the_render_stamp_so_cached_rows_are_rebuilt() {
+        let mut ui = branch_ui(crate::config::UiLanguage::En);
+        ui.active_view_mut().nodes_mut_for_test()[0].presentation.projection_stamp = Some([7; 32]);
+        let before = ui.view().nodes()[0].presentation.projection_stamp;
+        assert!(ui.active_view_mut().step_branch_preview("anchor", 1));
+        assert_ne!(before, ui.view().nodes()[0].presentation.projection_stamp);
+        assert!(!ui.active_view_mut().step_branch_preview("missing", 1));
     }
 
     #[test]

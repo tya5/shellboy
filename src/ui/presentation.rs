@@ -581,6 +581,15 @@ fn node_lines_inner(
             width,
         ));
     }
+    if let Some(marker) = &node.presentation.branch_marker {
+        out.extend(indented_wrap(
+            vec![Line::from(Span::styled(
+                marker.render(language).replacen(' ', "\u{a0}", 1),
+                Style::default().fg(theme::MUTED),
+            ))],
+            width,
+        ));
+    }
     for notice in omission_notices(language, node) {
         let row = Line::from(Span::styled(notice, Style::default().fg(theme::MUTED)));
         if conversational || node.presentation.kind == PresentationKind::Event {

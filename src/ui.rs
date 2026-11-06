@@ -51,6 +51,7 @@ pub use inspection::{
     HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot,
     InspectionTarget, ListInspectionScope,
 };
+mod branches;
 mod held_input;
 mod message_queue;
 mod models;
@@ -685,6 +686,12 @@ pub enum UiAction {
         generation: u64,
         draft_revision: u64,
     },
+    /// One page of `thread branches` for the branch panel (#237).
+    LoadBranches {
+        thread_id: String,
+        request_id: u64,
+        cursor: Option<String>,
+    },
     SendEdited {
         generation: u64,
         now: bool,
@@ -1239,6 +1246,11 @@ pub enum UiUpdate {
         cancelled_calls: u64,
         counts_capped: bool,
         state: String,
+    },
+    BranchesLoaded {
+        request_id: u64,
+        append: bool,
+        result: Result<serde_json::Value, String>,
     },
     EditRequestLoaded {
         thread_id: String,
@@ -1845,6 +1857,8 @@ pub struct UiState {
     details: Option<details::Details>,
     operations: Option<operations::Operations>,
     models: Option<models::ModelPicker>,
+    branches: Option<branches::BranchPanel>,
+    next_branches_request: u64,
     queue_popup: message_queue::QueuePopup,
     send_now: bool,
     immediate_chord: bool,
@@ -1970,6 +1984,8 @@ impl UiState {
             details: None,
             operations: None,
             models: None,
+            branches: None,
+            next_branches_request: 0,
             queue_popup: message_queue::QueuePopup::default(),
             send_now: false,
             immediate_chord: false,
@@ -3687,6 +3703,9 @@ impl UiState {
                     view.on_progress(tool_calls, cancelled_calls, counts_capped, state);
                 }
             }
+            UiUpdate::BranchesLoaded { request_id, append, result } => {
+                self.branches_loaded(request_id, append, result);
+            }
             UiUpdate::EditRequestLoaded {
                 thread_id,
                 node_id,
@@ -4421,6 +4440,7 @@ impl UiState {
         self.operations = None;
         self.invalidate_management();
         self.models = None;
+        self.branches = None;
         self.cancel_input_recall();
         if let Some(thread) = self.view().thread_id.clone() {
             let generation = self.view().generation;
@@ -4500,6 +4520,7 @@ impl UiState {
         self.operations = None;
         self.invalidate_management();
         self.models = None;
+        self.branches = None;
         self.cancel_input_recall();
         if let Some(thread) = self.view().thread_id.clone() {
             let generation = self.view().generation;
@@ -5069,6 +5090,7 @@ impl UiState {
                     self.command_error(i18n::local!(self.config.ui.language, "/rewind [user-node-id] は保存済みの過去の依頼で使えます", "/rewind [user-node-id] requires an earlier saved request"))
                 }
             }
+            "/branches" => self.open_branches((!argument.is_empty()).then(|| argument.to_owned())),
             "/index" => self.index_command(argument),
             "/search" if !argument.is_empty() => {
                 self.management.scope = None;
@@ -5743,6 +5765,9 @@ impl UiState {
             return self.select_agents(args.clone());
         }
 
+        if let Command::ThreadBranches(args) = &command {
+            return self.open_branches(args.thread_id.clone());
+        }
         self.details = None;
         match &command {
             Command::IndexBackfill(args)
@@ -6018,6 +6043,10 @@ impl UiState {
         }
         if let Some(models) = &mut self.models {
             models.draw(frame, area);
+            link_regions.clear();
+        }
+        if let Some(branches) = &self.branches {
+            branches.draw(frame, area);
             link_regions.clear();
         }
         if self.help_visible && self.help_above_popups {

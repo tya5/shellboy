@@ -8,6 +8,7 @@ pub(super) enum Overlay {
     Selection,
     Models,
     Operations,
+    Branches,
     Details,
     Management,
     Queue,
@@ -26,6 +27,8 @@ impl UiState {
             Some(Overlay::Models)
         } else if self.operations.is_some() {
             Some(Overlay::Operations)
+        } else if self.branches.is_some() {
+            Some(Overlay::Branches)
         } else if self.details.is_some() {
             Some(Overlay::Details)
         } else if self.queue_popup.visible {
@@ -309,6 +312,7 @@ impl UiState {
             | Overlay::Selection
             | Overlay::Models
             | Overlay::Operations
+            | Overlay::Branches
             | Overlay::Details),
         ) = self.top_overlay()
         {
@@ -587,6 +591,7 @@ impl UiState {
                     operations::Outcome::None => vec![],
                 }
             }
+            Overlay::Branches => self.branches_key(key),
             Overlay::Details => self.detail_key(key),
             Overlay::Management => self.management_key(key),
             Overlay::Help => {
@@ -1123,6 +1128,9 @@ mod tests {
                     result: Ok(vec!["model-a".into(), "LEAK".into()]),
                 });
             }
+            Overlay::Branches => {
+                ui.open_branches(Some("thread".into()));
+            }
             Overlay::Selection => ui.selection_mode = true,
             Overlay::Confirmation => {
                 ui.confirmation = Some(Confirmation::Operation {
@@ -1137,13 +1145,14 @@ mod tests {
             Overlay::Shutdown => ui.lifecycle.begin(),
         }
     }
-    const OWNERS: [Overlay; 9] = [
+    const OWNERS: [Overlay; 10] = [
         Overlay::Threads,
         Overlay::Help,
         Overlay::Management,
         Overlay::Details,
         Overlay::Operations,
         Overlay::Models,
+        Overlay::Branches,
         Overlay::Selection,
         Overlay::Confirmation,
         Overlay::Shutdown,

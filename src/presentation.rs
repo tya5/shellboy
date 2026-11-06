@@ -32,6 +32,7 @@ pub mod messages;
 mod projection;
 pub mod rows;
 pub use projection::project;
+pub mod branch_marker;
 pub mod compaction_marker;
 mod summary;
 use crate::terminal_links::valid_link_target as http;
@@ -897,6 +898,9 @@ pub struct NodePresentation {
     /// response (#230); drawn as one note row, never part of the saved body.
     #[serde(skip)]
     pub compaction_note: Option<compaction_marker::MarkerFacts>,
+    /// Branch divergence at this node (#237); drawn as one row after the node.
+    #[serde(skip)]
+    pub branch_marker: Option<branch_marker::BranchMarker>,
     #[serde(default)]
     pub event_class: EventClass,
     pub kind: PresentationKind,

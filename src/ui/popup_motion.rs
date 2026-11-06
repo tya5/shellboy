@@ -23,6 +23,10 @@ impl UiState {
                 .operations
                 .as_ref()
                 .and_then(operations::Operations::paint_bounds),
+            overlay::Overlay::Branches => self
+                .branches
+                .as_ref()
+                .and_then(branches::BranchPanel::paint_bounds),
             overlay::Overlay::Details => self
                 .details
                 .as_ref()
@@ -73,6 +77,10 @@ impl UiState {
                 .operations
                 .as_mut()
                 .is_some_and(|operations| operations.wheel(delta)),
+            overlay::Overlay::Branches => self
+                .branches
+                .as_mut()
+                .is_some_and(|panel| panel.wheel(delta as isize)),
             overlay::Overlay::Details => {
                 let view = &self.views[&self.active];
                 self.details

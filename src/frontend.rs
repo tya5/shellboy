@@ -6,6 +6,7 @@ use admission::{spawn_read, spawn_work};
 mod browser;
 mod browser_read;
 mod client_operations;
+mod branch_markers;
 mod compaction_markers;
 mod copying;
 mod draft_images;
@@ -550,6 +551,11 @@ enum BackgroundResult {
         draft_revision: u64,
         result: Result<EditableRequest, ApiError>,
     },
+    Branches {
+        request_id: u64,
+        append: bool,
+        result: Result<Value, ApiError>,
+    },
 }
 struct EditableRequest {
     text: String,
@@ -683,6 +689,34 @@ fn draft_input(
         })
         .collect::<Result<Vec<_>, ApiError>>()?;
     Ok((content, files))
+}
+/// One page of the branch tree for the panel (#237); the DB worker does the reads.
+async fn load_branches(
+    control: &Control,
+    thread_id: &str,
+    cursor: Option<String>,
+) -> Result<Value, ApiError> {
+    let thread = thread_id.to_owned();
+    let result = async {
+        control
+            .store
+            .database
+            .call(move |db| {
+                Ok(crate::history::branches::branches(
+                    db,
+                    &thread,
+                    &crate::protocol::ThreadBranchesArgs {
+                        thread_id: Some(thread.clone()),
+                        limit: crate::protocol::MAX_LIST_LIMIT,
+                        cursor,
+                    },
+                ))
+            })
+            .await
+            .map_err(storage_error)?
+    }
+    .await;
+    checked_storage(control, result).await
 }
 async fn load_edit_request(
     control: &Control,
@@ -2086,6 +2120,29 @@ async fn run_with_delivery(
                                     revision,
                                     result,
                                 })
+                                .await;
+                        });
+                    }
+                    UiAction::LoadBranches { thread_id, request_id, cursor } => {
+                        let append = cursor.is_some();
+                        let Ok(permit) = command_slots.clone().try_acquire_owned() else {
+                            update(
+                                &updates,
+                                UiUpdate::BranchesLoaded {
+                                    request_id,
+                                    append,
+                                    result: Err(i18n::local!(language, "履歴操作を準備中です。完了後に再操作してください", "Preparing a history operation. Wait for completion, then try again").into()),
+                                },
+                            )
+                            .await;
+                            continue;
+                        };
+                        let control = control.clone();
+                        let sender = background_tx.clone();
+                        spawn_work(&mut workers, permit, async move {
+                            let result = load_branches(&control, &thread_id, cursor).await;
+                            let _ = sender
+                                .send(BackgroundResult::Branches { request_id, append, result })
                                 .await;
                         });
                     }
@@ -3631,6 +3688,17 @@ async fn run_with_delivery(
                     }
                     _ => {},
                 },
+                Some(BackgroundResult::Branches { request_id, append, result }) => {
+                    update(
+                        &updates,
+                        UiUpdate::BranchesLoaded {
+                            request_id,
+                            append,
+                            result: result.map_err(|error| error.to_string()),
+                        },
+                    )
+                    .await
+                }
                 Some(BackgroundResult::EditRequest {
                     thread_id,
                     node_id,

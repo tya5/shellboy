@@ -147,6 +147,7 @@ impl CommandHint {
                 "Fork conversation from history"
             ),
             "/edit" => local!(language, "依頼を編集して分岐", "Edit request and fork"),
+            "/branches" => local!(language, "分岐の木を表示", "Show the branch tree"),
             "/rewind" => local!(
                 language,
                 "依頼の前まで戻す（残りは子会話）",
@@ -251,6 +252,7 @@ const COMMANDS: &[CommandHint] = &[
     CommandHint { name: "/fork" },
     CommandHint { name: "/edit" },
     CommandHint { name: "/rewind" },
+    CommandHint { name: "/branches" },
     CommandHint {
         name: "/compact-max",
     },

@@ -1740,6 +1740,45 @@ impl ThreadView {
     }
 }
 impl ThreadView {
+    /// Move the previewed alternative of a branch marker (#237). Display only:
+    /// the node's source is unchanged, so its render stamp folds in the preview.
+    pub(super) fn step_branch_preview(&mut self, node_id: &str, delta: isize) -> bool {
+        let Some(node) = self.nodes.iter_mut().find(|node| node.node_id == node_id) else {
+            return false;
+        };
+        let Some(marker) = node.presentation.branch_marker.as_mut() else {
+            return false;
+        };
+        if !marker.step(delta) {
+            return false;
+        }
+        let preview = marker.preview;
+        if let Some(stamp) = node.presentation.projection_stamp.as_mut() {
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(*stamp);
+            hasher.update(preview.to_le_bytes());
+            *stamp = hasher.finalize().into();
+        }
+        self.mark_source_changed();
+        true
+    }
+    /// The Thread a previewed branch marker would open from this node.
+    pub(super) fn branch_target(&self, node_id: &str) -> Option<String> {
+        self.nodes
+            .iter()
+            .find(|node| node.node_id == node_id)?
+            .presentation
+            .branch_marker
+            .as_ref()?
+            .target()
+            .map(str::to_owned)
+    }
+    pub(super) fn has_branch_marker(&self, node_id: &str) -> bool {
+        self.nodes
+            .iter()
+            .any(|node| node.node_id == node_id && node.presentation.branch_marker.is_some())
+    }
     pub(super) fn history_revision(&self) -> u64 {
         self.history_revision
     }
