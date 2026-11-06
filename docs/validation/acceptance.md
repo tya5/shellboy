@@ -25,6 +25,29 @@ shows the owner's live-Run refusal on screen (the marker refusal `preview_stale`
 `tests/delete_marker.rs`). Queue cancel: `queue_cancel_uses_only_the_displayed_ids_without_confirmation`,
 `locale_does_not_expand_the_captured_cancellation_scope` (status line shows the outcome and /restore). Environment:
 macOS, temporary data dirs, local mock only; no paid API. After the rebase onto 5e140d30 the unrelated test `foreign_thread_latest_message_limits_keep_source_available_and_read_while_writer_is_held` failed on main too (solo run on ac3bbc50) because its fixed 2026-10-31 receipt date aged out of the 7-day receipt window on 2026-11-07; the fixture now uses times relative to now. Windows and Linux: CI only (see status for run IDs).
+## Never-ending background shell (#255)
+
+Reproduced on macOS (Darwin 25.3, arm64) with a temporary data dir and a loopback mock provider; no
+paid API, real data dir untouched. A Turn started `until false; do sleep 1; done` with `background:true`
+and then answered. State after the Turn ended:
+
+| Surface | Observed |
+|---|---|
+| Run | `live` (not completed), as the docs say; Turn completed |
+| `run get` | `state: live`, `owned_execution_ids: [id]` (no elapsed) |
+| `thread get` | `shells_count: 1`, current `run_id` |
+| `status --thread` | `run` item `live` and `shell` item `running` with `execution_id`, `elapsed_ms` |
+| `shell list` | the execution, command excerpt, `started_at`, `running` |
+| `wait thread_settled` (timeout) | before: `timeout`, "targets continue", no mention of the shell; after: `owned_shells` with execution ID, Run, elapsed ms |
+| Run stop | Run `stopping` then `stopped`; shell `stopped`, `group_cleanup_confirmed: true`; `owned_execution_ids` empty |
+| Watch | phase Background (existing unit tests in `src/ui/watch.rs`); not exercised against this live fixture |
+| TUI | owned-work panel row with command, state, elapsed (new paint test `answered_run_kept_live_by_one_shell_paints_the_shell_state_and_elapsed_time`, En and Ja) |
+
+Verified on macOS only (local test runs): the integration test above, the paint test, the
+`language-audit.py` CI invocation (no refresh of the classifications needed). Not verified: Linux and
+Windows runs (the test uses a PowerShell loop on Windows; CI results are in the branch report), a real
+terminal, a real provider, an owner restart with the shell live, Watch painted from this fixture. No
+wall-clock bound is asserted; the wait timeout is only an input.
 
 ## Chat on events.wait (#243 stage C)
 
