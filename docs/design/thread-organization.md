@@ -40,8 +40,8 @@ Completed); no surveyed product offers arbitrary re-parenting.
   child's progress report (`thread get` → `parent_id` → `message send`) would wake
   and bill. Folders, pin and archive are separate, flat per-Thread attributes.
 - **User decision 2026-11-06: no folders.** Parent tree for meaningful relations, tags for placement/cross-cutting groups, automatic grouping by cwd. Stage 3 below is Tags.
-- Recommended order: **Stage 1 archive**, Stage 2 re-parent, Stage 3 tags (was folder),
-  Stage 4 pin. Tags (many per Thread) and ownership transfer are not recommended.
+- Order (user decision): **Stage 1 archive**, Stage 2 re-parent, Stage 3 tags and cwd grouping.
+  **User decision 2026-11-07: no pin.** Ownership transfer is not recommended.
 
 ## 1. What `parent_id` does today
 
@@ -285,7 +285,7 @@ each concept keeps one meaning:
 Bulk "archive everything with tag X" is `thread list --tag X` then
 `thread archive` with those IDs (no filter-driven bulk writes).
 
-### Pin (stage 4)
+### Pin (dropped by the user, 2026-11-07; kept as study record)
 
 `thread.pinned_at TEXT`. Pinned Threads are listed separately, not re-sorted into
 the main order (re-sorting would change the cursor key): `thread list --pinned`
@@ -351,13 +351,12 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
    re-parent with a live owned Run (old owner keeps stop/retry/notices, new parent
    refused until the Run ends, then owns the next Run), branch view divergence
    after a move, usage and delete following the current tree, preview_stale.
-3. **Folder**: column, `--folder` on set/list, `thread folders`, inheritance at
-   create/fork/rewind, TUI filter.
-4. **Pin**: column, `--pinned`, pinned page in TUI/Web.
-5. Optional: retry authority aligned with stop (any owning ancestor Run).
+3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above):
+   many tags per Thread, automatic grouping by cwd, TUI filter.
+4. Optional: retry authority aligned with stop (any owning ancestor Run).
 
-Not recommended: ownership transfer of live Runs; folder Threads; tags (for now);
-filter-driven bulk writes; automatic archiving.
+Not recommended: ownership transfer of live Runs; folder Threads;
+filter-driven bulk writes; automatic archiving. Dropped by the user: pin (2026-11-07).
 
 ## Stage 1 as implemented (archive, migration 32)
 
