@@ -163,6 +163,8 @@ mod storage_checkpoint;
 mod storage_hot_queries;
 #[path = "../terminal_links.rs"]
 mod terminal_links;
+#[path = "../thread_branches.rs"]
+mod thread_branches;
 #[path = "../thread_browser.rs"]
 mod thread_browser;
 #[path = "../thread_exit_marker.rs"]

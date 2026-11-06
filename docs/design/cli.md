@@ -15,6 +15,7 @@ shellboy thread delete-preview --thread ID [--descendants]
 shellboy thread delete --thread ID [--descendants]
 shellboy thread prune [--thread ID] --before NODE [--dry-run]
 shellboy thread rewind [--thread ID] --node NODE
+shellboy thread branches [--thread ID] [--limit 50] [--cursor TOKEN]
 shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--segment-chars N|''] [--reduce-rounds N|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)

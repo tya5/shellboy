@@ -541,3 +541,31 @@ Issue #51 supersedes the instruction-reference part of X19: show the saved
 AGENTS reference (or the unsaved root default) without claiming file existence
 or successful observation. `/agents` displays the full path. No UI filesystem
 observation is added.
+
+## Branch marker and branch panel (#237)
+
+Branches are Threads (see [History](history.md#branches-237)); both views are
+display only and read one `thread branches` result on the DB worker.
+
+**Inline marker.** `NodePresentation.branch_marker` is attached by the page enrich
+(`frontend/branch_markers.rs`) to the node where branches diverge and drawn as one
+muted row after the node, like the compaction note: `↳ p/n ⋯ <current|branch>
+"excerpt"` (`今の枝` / `別の枝`). Glyphs are the existing `↳` (child) and `⋯` (wait);
+the excerpt is clipped by display width (40 columns). The row wraps with the common
+indented wrap and keeps its mark with `p/n` by a no-break space. The previewed
+alternative is display state: `←` / `→` on a selected history item rewrite the marker's
+preview and fold it into the node's render stamp so cached rows rebuild; Enter opens
+the previewed Thread when it is not the followed one. No new item kind, key owner
+or cache is added; the seal hash includes the marker.
+
+**Panel.** `Overlay::Branches` (`ui/branches.rs`) is a popup like the model picker:
+`panel_recorded` frame, `popup::list` rows, up to three detail lines below. Rows use
+only `◉` (heading), `├─ └─ │` with their existing ASCII forms, `⬦` for pruned
+originals, and words for states. Wide rows (>= 64 columns) carry time and size;
+narrow rows keep the tree prefix, state word and excerpt and leave the rest to the
+detail lines. The prefix is trimmed from the outside (ellipsis) so that at least 24
+columns remain for the state and excerpt. F8 keeps its usual ownership (the panel
+does not close on F6-F8, per the overlay policy test). Opening, forking and
+the prune form reuse `select_thread`, `thread fork` and the existing F8 prune form;
+the panel itself never mutates. The F8 entry `会話 | 分岐の木` is the `thread branches`
+operation: submitting its form opens the panel instead of showing raw JSON.

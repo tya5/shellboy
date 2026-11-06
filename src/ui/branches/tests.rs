@@ -37,10 +37,38 @@ fn sample() -> Value {
     page(
         vec![
             item("r", None, "current", None, "make CI pass", 38),
-            item("a", Some("r"), "branch", Some((3, "n3", "fix the tests")), "try with mocks", 21),
-            item("b", Some("r"), "branch", Some((3, "n3", "fix the tests")), "split the module", 24),
-            item("c", Some("r"), "branch", Some((9, "n9", "update the README")), "add English", 12),
-            item("a1", Some("a"), "branch", Some((15, "n15", "try with mocks")), "use a fake clock", 25),
+            item(
+                "a",
+                Some("r"),
+                "branch",
+                Some((3, "n3", "fix the tests")),
+                "try with mocks",
+                21,
+            ),
+            item(
+                "b",
+                Some("r"),
+                "branch",
+                Some((3, "n3", "fix the tests")),
+                "split the module",
+                24,
+            ),
+            item(
+                "c",
+                Some("r"),
+                "branch",
+                Some((9, "n9", "update the README")),
+                "add English",
+                12,
+            ),
+            item(
+                "a1",
+                Some("a"),
+                "branch",
+                Some((15, "n15", "try with mocks")),
+                "use a fake clock",
+                25,
+            ),
         ],
         None,
     )
@@ -53,7 +81,9 @@ fn panel(language: UiLanguage, value: &Value) -> BranchPanel {
 fn render(panel: &BranchPanel, width: u16, height: u16) -> String {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
-    terminal.draw(|frame| panel.draw(frame, frame.area())).unwrap();
+    terminal
+        .draw(|frame| panel.draw(frame, frame.area()))
+        .unwrap();
     let mut text = String::new();
     for y in 0..height {
         let mut line = String::new();
@@ -110,7 +140,11 @@ fn tree_lists_each_thread_then_its_points_in_path_order_with_branches_under_them
             "T c"
         ]
     );
-    assert_eq!(panel.selected_thread(), Some("r"), "opens on the viewed Thread");
+    assert_eq!(
+        panel.selected_thread(),
+        Some("r"),
+        "opens on the viewed Thread"
+    );
 }
 
 #[test]
@@ -123,7 +157,10 @@ fn wide_english_render_uses_tree_glyphs_and_puts_time_and_size_on_the_row() {
     assert!(text.contains("├─ \"fix the tests\""), "{text}");
     assert!(text.contains("│  ├─ branch \"try with mocks\""), "{text}");
     assert!(text.contains("│  │  └─ \"try with mocks\""), "{text}");
-    assert!(text.contains("│  │     └─ branch \"use a fake clock\""), "{text}");
+    assert!(
+        text.contains("│  │     └─ branch \"use a fake clock\""),
+        "{text}"
+    );
     assert!(text.contains("└─ \"update the README\""), "{text}");
     assert!(text.contains("38 nodes"), "{text}");
     assert!(text.contains("current \"make CI pass\""), "{text}");
@@ -138,7 +175,10 @@ fn wide_japanese_render_is_localized() {
     assert!(text.contains("分岐点 3"), "{text}");
     assert!(text.contains("今の会話 \"make CI pass\""), "{text}");
     assert!(text.contains("38件"), "{text}");
-    assert!(text.contains("Enter 開く") && text.contains("P 手放す"), "{text}");
+    assert!(
+        text.contains("Enter 開く") && text.contains("P 手放す"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -149,7 +189,11 @@ fn narrow_render_drops_time_and_size_from_rows_and_keeps_them_in_the_detail_area
         assert!(text.contains("├─") && text.contains("└─"), "{text}");
         assert!(!text.contains("11-0") || text.lines().count() > 0);
         // The selected Thread's time and size are in the detail lines, not the tree rows.
-        let size = if language == UiLanguage::En { "38 nodes" } else { "38件" };
+        let size = if language == UiLanguage::En {
+            "38 nodes"
+        } else {
+            "38件"
+        };
         let rows_with_size = text
             .lines()
             .filter(|l| l.contains(size) && (l.contains('├') || l.contains('└')))
@@ -171,7 +215,10 @@ fn very_narrow_width_still_draws_without_panicking_or_overflowing() {
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let text = with_glyphs(|| render(&panel(language, &sample()), width, 16));
             for line in text.lines() {
-                assert!(text_width::UnicodeWidthStr::width(line) <= usize::from(width), "{line:?}");
+                assert!(
+                    text_width::UnicodeWidthStr::width(line) <= usize::from(width),
+                    "{line:?}"
+                );
             }
         }
     }
@@ -209,7 +256,10 @@ fn deep_trees_trim_outer_levels_instead_of_overflowing() {
     for line in text.lines() {
         assert!(text_width::UnicodeWidthStr::width(line) <= 40, "{line:?}");
     }
-    assert!(text.contains("level 13"), "the deepest Thread stays readable: {text}");
+    assert!(
+        text.contains("level 13"),
+        "the deepest Thread stays readable: {text}"
+    );
 }
 
 #[test]
@@ -242,8 +292,14 @@ fn pruned_originals_and_running_show_as_state_words_with_the_existing_summary_ma
     value["items"][1]["pruned_originals"] = json!(true);
     value["items"][2]["running"] = json!(true);
     let text = with_glyphs(|| render(&panel(UiLanguage::En, &value), 110, 24));
-    assert!(text.contains("branch ⬦ pruned \"try with mocks\""), "{text}");
-    assert!(text.contains("branch running \"split the module\""), "{text}");
+    assert!(
+        text.contains("branch ⬦ pruned \"try with mocks\""),
+        "{text}"
+    );
+    assert!(
+        text.contains("branch running \"split the module\""),
+        "{text}"
+    );
     let ja = with_glyphs(|| render(&panel(UiLanguage::Ja, &value), 110, 24));
     assert!(ja.contains("⬦ 原文解放済"), "{ja}");
     assert!(ja.contains("実行中"), "{ja}");
@@ -259,7 +315,11 @@ fn selection_skips_point_rows_and_keys_dispatch_the_documented_operations() {
     }
     assert_eq!(seen, ["a", "a1", "b", "c"]);
     panel.key(key(KeyCode::Down));
-    assert_eq!(panel.selected_thread(), Some("c"), "stops at the last Thread");
+    assert_eq!(
+        panel.selected_thread(),
+        Some("c"),
+        "stops at the last Thread"
+    );
     panel.key(key(KeyCode::Home));
     assert_eq!(panel.selected_thread(), Some("r"));
     panel.key(key(KeyCode::Down));
@@ -273,8 +333,14 @@ fn selection_skips_point_rows_and_keys_dispatch_the_documented_operations() {
         Outcome::Prune { thread_id, node_id } if thread_id == "a" && node_id == "tip-a"
     ));
     assert!(matches!(panel.key(key(KeyCode::Esc)), Outcome::Close));
-    assert!(matches!(panel.key(key(KeyCode::F(8))), Outcome::None), "F8 keeps popup ownership");
-    assert!(matches!(panel.key(key(KeyCode::Char('n'))), Outcome::None), "no further page");
+    assert!(
+        matches!(panel.key(key(KeyCode::F(8))), Outcome::None),
+        "F8 keeps popup ownership"
+    );
+    assert!(
+        matches!(panel.key(key(KeyCode::Char('n'))), Outcome::None),
+        "no further page"
+    );
 }
 
 #[test]
@@ -283,10 +349,25 @@ fn a_next_page_appends_and_keeps_the_selection() {
     first["next_cursor"] = json!("cursor-1");
     let mut panel = panel(UiLanguage::En, &first);
     panel.key(key(KeyCode::Down));
-    assert!(matches!(panel.key(key(KeyCode::Char('n'))), Outcome::Load { cursor } if cursor == "cursor-1"));
+    assert!(
+        matches!(panel.key(key(KeyCode::Char('n'))), Outcome::Load { cursor } if cursor == "cursor-1")
+    );
     panel.begin_page(2);
-    assert!(matches!(panel.key(key(KeyCode::Char('n'))), Outcome::None), "not while loading");
-    let more = page(vec![item("z", Some("r"), "branch", Some((30, "n30", "late")), "later", 4)], None);
+    assert!(
+        matches!(panel.key(key(KeyCode::Char('n'))), Outcome::None),
+        "not while loading"
+    );
+    let more = page(
+        vec![item(
+            "z",
+            Some("r"),
+            "branch",
+            Some((30, "n30", "late")),
+            "later",
+            4,
+        )],
+        None,
+    );
     panel.accept(&more, true);
     assert_eq!(panel.selected_thread(), Some("a"));
     assert_eq!(thread_order(&panel).last(), Some(&"z"));
@@ -309,8 +390,8 @@ fn limits_and_failures_are_stated() {
 
 mod owner {
     use super::*;
-    use crate::ui::{UiAction, UiState, UiUpdate};
     use crate::protocol::Command;
+    use crate::ui::{UiAction, UiState, UiUpdate};
 
     fn state() -> UiState {
         let mut config = crate::config::Config {
@@ -329,7 +410,13 @@ mod owner {
     fn open(ui: &mut UiState) -> u64 {
         let actions = ui.slash("/branches r");
         let request_id = match &actions[..] {
-            [UiAction::LoadBranches { thread_id, request_id, cursor: None }] if thread_id == "r" => *request_id,
+            [
+                UiAction::LoadBranches {
+                    thread_id,
+                    request_id,
+                    cursor: None,
+                },
+            ] if thread_id == "r" => *request_id,
             other => panic!("expected one LoadBranches, got {}", other.len()),
         };
         ui.apply(UiUpdate::BranchesLoaded {
@@ -343,18 +430,28 @@ mod owner {
     #[test]
     fn slash_and_the_f8_operation_open_the_panel_with_one_bounded_read() {
         let mut ui = state();
-        assert!(ui.slash("/branches").is_empty(), "no saved conversation: an error, no read");
+        assert!(
+            ui.slash("/branches").is_empty(),
+            "no saved conversation: an error, no read"
+        );
         assert!(ui.branches.is_none());
         open(&mut ui);
         assert!(ui.branches.is_some());
-        assert_eq!(ui.top_overlay(), Some(crate::ui::overlay::Overlay::Branches));
+        assert_eq!(
+            ui.top_overlay(),
+            Some(crate::ui::overlay::Overlay::Branches)
+        );
         let mut ui = state();
-        let actions = ui.execute_operation(Command::ThreadBranches(crate::protocol::ThreadBranchesArgs {
-            thread_id: Some("r".into()),
-            limit: 50,
-            cursor: None,
-        }));
-        assert!(matches!(&actions[..], [UiAction::LoadBranches { thread_id, cursor: None, .. }] if thread_id == "r"));
+        let actions = ui.execute_operation(Command::ThreadBranches(
+            crate::protocol::ThreadBranchesArgs {
+                thread_id: Some("r".into()),
+                limit: 50,
+                cursor: None,
+            },
+        ));
+        assert!(
+            matches!(&actions[..], [UiAction::LoadBranches { thread_id, cursor: None, .. }] if thread_id == "r")
+        );
     }
 
     #[test]
@@ -372,7 +469,10 @@ mod owner {
             append: false,
             result: Err("storage busy".into()),
         });
-        assert!(matches!(ui.branches.as_ref().unwrap().load, Load::Failed(_)));
+        assert!(matches!(
+            ui.branches.as_ref().unwrap().load,
+            Load::Failed(_)
+        ));
     }
 
     #[test]
@@ -383,7 +483,9 @@ mod owner {
         let actions = ui.event(crossterm::event::Event::Key(key(KeyCode::Enter)));
         assert!(ui.branches.is_none());
         assert!(
-            actions.iter().any(|a| matches!(a, UiAction::SelectThread { thread_id, .. } if thread_id == "a"))
+            actions
+                .iter()
+                .any(|a| matches!(a, UiAction::SelectThread { thread_id, .. } if thread_id == "a"))
                 || ui.view().thread_id.as_deref() == Some("a"),
             "the branch Thread is opened"
         );
@@ -419,7 +521,10 @@ mod owner {
         open(&mut ui);
         ui.event(crossterm::event::Event::Key(key(KeyCode::Down)));
         let actions = ui.event(crossterm::event::Event::Key(key(KeyCode::Char('p'))));
-        assert!(actions.is_empty(), "nothing is pruned from the panel itself");
+        assert!(
+            actions.is_empty(),
+            "nothing is pruned from the panel itself"
+        );
         assert!(ui.branches.is_none());
         let operations = ui.operations.as_ref().expect("the prune form");
         let (kind, values) = operations

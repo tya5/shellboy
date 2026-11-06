@@ -23,9 +23,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::sql_error;
-use crate::protocol::{
-    ApiError, ErrorCode, MAX_LIST_LIMIT, Page, PageCursor, ThreadBranchesArgs,
-};
+use crate::protocol::{ApiError, ErrorCode, MAX_LIST_LIMIT, Page, PageCursor, ThreadBranchesArgs};
 
 /// Ancestors followed upward from the requested Thread.
 pub const ANCESTOR_LIMIT: usize = 32;
@@ -114,13 +112,19 @@ fn not_found() -> ApiError {
     ApiError::new(ErrorCode::ThreadNotFound, "Thread not found")
 }
 fn live_thread(db: &Connection, id: &str) -> Result<Option<(String, Option<String>)>, ApiError> {
-    db.prepare_cached("SELECT title,parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL")
-        .map_err(sql_error)?
-        .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
-        .optional()
-        .map_err(sql_error)
+    db.prepare_cached(
+        "SELECT title,parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",
+    )
+    .map_err(sql_error)?
+    .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
+    .optional()
+    .map_err(sql_error)
 }
-fn children(db: &Connection, parent: &str, limit: usize) -> Result<Vec<(String, String)>, ApiError> {
+fn children(
+    db: &Connection,
+    parent: &str,
+    limit: usize,
+) -> Result<Vec<(String, String)>, ApiError> {
     db.prepare_cached("SELECT id,title FROM thread WHERE parent_thread_id=?1 AND deleted_at IS NULL ORDER BY id LIMIT ?2")
         .map_err(sql_error)?
         .query_map(params![parent, limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -213,16 +217,24 @@ fn node_at(db: &Connection, thread: &str, ordinal: i64) -> Result<Option<String>
         .map_err(sql_error)
 }
 /// Ordinal of the last node both paths share, or None when they share none.
-fn shared_end(db: &Connection, child: &str, parent: &str, child_len: i64, parent_len: i64) -> Result<Option<i64>, ApiError> {
+fn shared_end(
+    db: &Connection,
+    child: &str,
+    parent: &str,
+    child_len: i64,
+    parent_len: i64,
+) -> Result<Option<i64>, ApiError> {
     let common = child_len.min(parent_len);
     if common == 0 {
         return Ok(None);
     }
     let same = |ordinal: i64| -> Result<bool, ApiError> {
-        Ok(match (node_at(db, child, ordinal)?, node_at(db, parent, ordinal)?) {
-            (Some(a), Some(b)) => a == b,
-            _ => false,
-        })
+        Ok(
+            match (node_at(db, child, ordinal)?, node_at(db, parent, ordinal)?) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            },
+        )
     };
     if !same(0)? {
         return Ok(None);
@@ -244,7 +256,9 @@ fn excerpt_of(node_id: String, payload: Option<String>) -> Excerpt {
         .map(|payload| super::conversation_excerpt(&payload, EXCERPT_CHARS + 1))
         .map(|text| crate::presentation::sanitize_plain(&text, 0).0)
         .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "));
-    let truncated = text.as_ref().is_some_and(|t| t.chars().count() > EXCERPT_CHARS);
+    let truncated = text
+        .as_ref()
+        .is_some_and(|t| t.chars().count() > EXCERPT_CHARS);
     Excerpt {
         node_id,
         text: text.map(|t| t.chars().take(EXCERPT_CHARS).collect()),
@@ -268,7 +282,12 @@ fn exists(db: &Connection, sql: &str, thread: &str) -> Result<bool, ApiError> {
         .map_err(sql_error)
 }
 
-fn item(db: &Connection, member: &Member, requested: &str, chain: &[String]) -> Result<BranchItem, ApiError> {
+fn item(
+    db: &Connection,
+    member: &Member,
+    requested: &str,
+    chain: &[String],
+) -> Result<BranchItem, ApiError> {
     let length = path_len(db, &member.id)?;
     let tip = if length > 0 {
         let tip_node = node_at(db, &member.id, length - 1)?;
@@ -320,8 +339,16 @@ fn item(db: &Connection, member: &Member, requested: &str, chain: &[String]) -> 
         } else {
             "branch"
         },
-        running: exists(db, "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))", &member.id)?,
-        pruned_originals: exists(db, "SELECT EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND r.state='pruned')", &member.id)?,
+        running: exists(
+            db,
+            "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",
+            &member.id,
+        )?,
+        pruned_originals: exists(
+            db,
+            "SELECT EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND r.state='pruned')",
+            &member.id,
+        )?,
         size: Size {
             path_nodes: length,
             nodes_after_divergence: divergence.as_ref().map(|d| length - d.ordinal - 1),
@@ -334,15 +361,26 @@ fn item(db: &Connection, member: &Member, requested: &str, chain: &[String]) -> 
 }
 
 fn root_revision(db: &Connection) -> Result<u64, ApiError> {
-    db.query_row("SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'", [], |r| r.get::<_, i64>(0))
-        .map(|v| v.max(0) as u64)
-        .map_err(sql_error)
+    db.query_row(
+        "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='root_revision'",
+        [],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|v| v.max(0) as u64)
+    .map_err(sql_error)
 }
 
 /// `thread branches`: one page of the family tree plus its bounds.
-pub fn branches(db: &Connection, requested: &str, args: &ThreadBranchesArgs) -> Result<Value, ApiError> {
+pub fn branches(
+    db: &Connection,
+    requested: &str,
+    args: &ThreadBranchesArgs,
+) -> Result<Value, ApiError> {
     if args.limit == 0 || args.limit > MAX_LIST_LIMIT {
-        return Err(ApiError::new(ErrorCode::InvalidArgument, "branch limit must be in 1..=200"));
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "branch limit must be in 1..=200",
+        ));
     }
     let family = family(db, requested, Scope::Full)?;
     let revision = root_revision(db)?;
@@ -350,7 +388,10 @@ pub fn branches(db: &Connection, requested: &str, args: &ThreadBranchesArgs) -> 
     let offset = match &args.cursor {
         Some(token) => {
             let cursor = PageCursor::decode(token, SCOPE, &filter, revision, None)?;
-            cursor.last_sort_key.parse::<usize>().map_err(|_| expired())?
+            cursor
+                .last_sort_key
+                .parse::<usize>()
+                .map_err(|_| expired())?
         }
         None => 0,
     };
@@ -379,7 +420,8 @@ pub fn branches(db: &Connection, requested: &str, args: &ThreadBranchesArgs) -> 
         None
     };
     let page = Page { items, next_cursor };
-    let mut value = serde_json::to_value(page).map_err(|_| ApiError::new(ErrorCode::InvalidState, "branches are not serializable"))?;
+    let mut value = serde_json::to_value(page)
+        .map_err(|_| ApiError::new(ErrorCode::InvalidState, "branches are not serializable"))?;
     value["thread_id"] = requested.into();
     value["root_thread_id"] = family.chain[0].clone().into();
     value["family_threads"] = family.members.len().into();
@@ -396,7 +438,10 @@ pub fn branches(db: &Connection, requested: &str, args: &ThreadBranchesArgs) -> 
     Ok(value)
 }
 fn expired() -> ApiError {
-    ApiError::new(ErrorCode::CursorExpired, "branch page position is unavailable")
+    ApiError::new(
+        ErrorCode::CursorExpired,
+        "branch page position is unavailable",
+    )
 }
 
 /// One alternative at a divergence point.
@@ -426,7 +471,10 @@ fn group(items: &[BranchItem], lineage: &[String]) -> Vec<(String, String, Vec<u
         let (Some(divergence), Some(parent)) = (&item.divergence, &item.parent_thread_id) else {
             continue;
         };
-        match groups.iter_mut().find(|(p, n, _)| p == parent && n == &divergence.node_id) {
+        match groups
+            .iter_mut()
+            .find(|(p, n, _)| p == parent && n == &divergence.node_id)
+        {
             Some((_, _, members)) => members.push(index),
             None => groups.push((parent.clone(), divergence.node_id.clone(), vec![index])),
         }
@@ -470,7 +518,9 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
             let id = &items[index].thread_id;
             let first: Option<String> = match node_at(db, id, ordinal + 1)? {
                 Some(next) => db
-                    .query_row("SELECT created_at FROM node WHERE id=?1", [next], |r| r.get(0))
+                    .query_row("SELECT created_at FROM node WHERE id=?1", [next], |r| {
+                        r.get(0)
+                    })
                     .optional()
                     .map_err(sql_error)?,
                 None => None,
@@ -501,7 +551,11 @@ pub fn markers(db: &Connection, thread: &str, nodes: &[String]) -> Result<Vec<Ma
             .iter()
             .enumerate()
             .filter_map(|(i, a)| {
-                family.chain.iter().position(|c| c == &a.thread_id).map(|depth| (depth, i))
+                family
+                    .chain
+                    .iter()
+                    .position(|c| c == &a.thread_id)
+                    .map(|depth| (depth, i))
             })
             .max()
             .map(|(_, i)| i);

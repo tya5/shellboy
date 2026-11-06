@@ -26,8 +26,18 @@ fn node(db: &Connection, id: &str, kind: &str, at: &str, text: &str) {
 /// Nodes named `u:*` are user requests, everything else is an answer.
 fn path(db: &Connection, thread: &str, nodes: &[&str]) {
     for (ordinal, id) in nodes.iter().enumerate() {
-        let kind = if id.starts_with("u:") { "user" } else { "assistant" };
-        node(db, id, kind, &format!("2026-11-01T00:{ordinal:02}:00Z"), &format!("text of {id}"));
+        let kind = if id.starts_with("u:") {
+            "user"
+        } else {
+            "assistant"
+        };
+        node(
+            db,
+            id,
+            kind,
+            &format!("2026-11-01T00:{ordinal:02}:00Z"),
+            &format!("text of {id}"),
+        );
         db.execute(
             "INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES(?1,?2,?3)",
             params![thread, ordinal as i64, id],
@@ -60,7 +70,11 @@ fn fork_child_diverges_at_the_last_shared_node_and_parent_continues() {
     thread(&db, "root", None, "Root");
     thread(&db, "child", Some("root"), "");
     path(&db, "root", &["u:1", "a:1", "u:2", "a:2", "u:3", "a:3"]);
-    path(&db, "child", &["u:1", "a:1", "u:2", "a:2", "u:x", "a:x", "u:y"]);
+    path(
+        &db,
+        "child",
+        &["u:1", "a:1", "u:2", "a:2", "u:x", "a:x", "u:y"],
+    );
     let value = read(&db, "root");
     assert_eq!(value["root_thread_id"], "root");
     let root = find(&value, "root");
@@ -137,8 +151,11 @@ fn deleted_parent_roots_its_own_family_and_deleted_children_are_skipped() {
     path(&db, "orphan", &["u:1", "a:1"]);
     path(&db, "kid", &["u:1", "a:1", "u:k"]);
     path(&db, "dead", &["u:1", "a:1", "u:d"]);
-    db.execute("UPDATE thread SET deleted_at='x' WHERE id IN ('gone','dead')", [])
-        .unwrap();
+    db.execute(
+        "UPDATE thread SET deleted_at='x' WHERE id IN ('gone','dead')",
+        [],
+    )
+    .unwrap();
     let value = read(&db, "kid");
     assert_eq!(value["root_thread_id"], "orphan");
     assert_eq!(value["root_parent_unavailable"], true);
@@ -182,7 +199,11 @@ fn state_flags_show_running_and_pruned_originals() {
     path(&db, "c", &["u:1", "a:1", "u:2"]);
     db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','c','live','2026-11-01T00:00:00Z')", []).unwrap();
     db.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES('rep','a:1','k','1','1','pruned','2026-11-01T00:00:00Z')", []).unwrap();
-    db.execute("INSERT INTO thread_replacement(thread_id,replacement_id)VALUES('p','rep')", []).unwrap();
+    db.execute(
+        "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES('p','rep')",
+        [],
+    )
+    .unwrap();
     let value = read(&db, "p");
     assert_eq!(find(&value, "c")["running"], true);
     assert_eq!(find(&value, "p")["running"], false);
@@ -197,19 +218,28 @@ fn excerpts_are_single_line_bounded_and_skip_oversized_or_collected_payloads() {
     path(&db, "t", &["u:1", "a:1"]);
     let long = format!("line one\nline two {}", "x".repeat(400));
     node(&db, "u:long", "user", "2026-11-01T01:00:00Z", &long);
-    db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',2,'u:long')", []).unwrap();
+    db.execute(
+        "INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',2,'u:long')",
+        [],
+    )
+    .unwrap();
     let value = read(&db, "t");
     let request = &find(&value, "t")["tip"]["last_request"];
     let text = request["text"].as_str().unwrap();
     assert!(text.starts_with("line one line two xxx"));
     assert_eq!(text.chars().count(), EXCERPT_CHARS);
     assert_eq!(request["truncated"], true);
-    db.execute("UPDATE node SET payload_json=NULL WHERE id='u:long'", []).unwrap();
+    db.execute("UPDATE node SET payload_json=NULL WHERE id='u:long'", [])
+        .unwrap();
     let value = read(&db, "t");
     let request = &find(&value, "t")["tip"]["last_request"];
     assert_eq!(request["node_id"], "u:long");
     assert!(request["text"].is_null());
-    db.execute("UPDATE node SET payload_json='{}',payload_bytes=?1 WHERE id='u:long'", [PAYLOAD_BYTES + 1]).unwrap();
+    db.execute(
+        "UPDATE node SET payload_json='{}',payload_bytes=?1 WHERE id='u:long'",
+        [PAYLOAD_BYTES + 1],
+    )
+    .unwrap();
     assert!(find(&read(&db, "t"), "t")["tip"]["last_request"]["text"].is_null());
 }
 
@@ -241,7 +271,12 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
     assert_eq!(first["family_threads"], 6);
     let cursor = first["next_cursor"].as_str().unwrap().to_owned();
     let second = branches(&db, "r", &args(2, Some(cursor.clone()))).unwrap();
-    let third = branches(&db, "r", &args(2, second["next_cursor"].as_str().map(str::to_owned))).unwrap();
+    let third = branches(
+        &db,
+        "r",
+        &args(2, second["next_cursor"].as_str().map(str::to_owned)),
+    )
+    .unwrap();
     assert!(third["next_cursor"].is_null());
     let all: Vec<&str> = [&first, &second, &third]
         .iter()
@@ -251,10 +286,16 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
     assert_eq!(all, ["r", "c0", "c1", "c2", "c3", "c4"]);
     // A different Thread cannot reuse the cursor, and a changed tree expires it.
     assert_eq!(
-        branches(&db, "c0", &args(2, Some(cursor.clone()))).unwrap_err().code,
+        branches(&db, "c0", &args(2, Some(cursor.clone())))
+            .unwrap_err()
+            .code,
         ErrorCode::CursorExpired
     );
-    db.execute("UPDATE app_meta SET value='1' WHERE key='root_revision'", []).unwrap();
+    db.execute(
+        "UPDATE app_meta SET value='1' WHERE key='root_revision'",
+        [],
+    )
+    .unwrap();
     assert_eq!(
         branches(&db, "r", &args(2, Some(cursor))).unwrap_err().code,
         ErrorCode::CursorExpired
@@ -264,7 +305,9 @@ fn pages_are_bounded_stable_and_expire_when_the_tree_changes() {
         ErrorCode::InvalidArgument
     );
     assert_eq!(
-        branches(&db, "r", &args(MAX_LIST_LIMIT + 1, None)).unwrap_err().code,
+        branches(&db, "r", &args(MAX_LIST_LIMIT + 1, None))
+            .unwrap_err()
+            .code,
         ErrorCode::InvalidArgument
     );
 }
@@ -356,7 +399,11 @@ fn a_rewound_thread_shows_itself_ending_at_the_point_and_the_cut_part() {
     path(&db, "cut", &["u:1", "a:1", "u:2", "a:2"]);
     let marks = markers(&db, "t", &["a:1".to_string()]).unwrap();
     assert_eq!(marks.len(), 1);
-    let ids: Vec<&str> = marks[0].alternatives.iter().map(|a| a.thread_id.as_str()).collect();
+    let ids: Vec<&str> = marks[0]
+        .alternatives
+        .iter()
+        .map(|a| a.thread_id.as_str())
+        .collect();
     // The Thread that ends here sorts before the part that continues.
     assert_eq!(ids, ["t", "cut"]);
     assert_eq!(marks[0].current, 0);

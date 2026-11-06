@@ -3598,3 +3598,22 @@ prefix) is wanted; the fork copy is the other half of the cost. Child "started
 after NODE" is by time (first own node, or fork node), so a fork extended later is
 listed by its first own activity; shell "after NODE" compares `started_at` with the
 node's `created_at`.
+
+## D-237-1: Branch view reads fork relations; no storage, bounded family (2026-11-06)
+
+Decision: `thread branches` and the TUI branch marker/panel (#237) add no table,
+event, worker, queue or migration (branches are Threads, user decision). The
+divergence node is found by bisection over `thread_path` point lookups instead of
+storing a fork node; payload bytes are not summed (`bytes` null); the family is
+capped at 256 Threads with the ancestor chain always kept; the cursor is an offset
+bound to `root_revision`. Reason: the bounded reads are the whole cost of the view,
+and a stored fork point would need a migration for data (the shared prefix) that the
+paths already hold. Impact: the shown divergence can be the bisection's boundary
+after a compaction rewrote a path before it (documented in History); a family above
+256 Threads is shown in part with `family_truncated`; a tip's last request is
+searched only 256 path rows back. TUI choices: the inline marker reuses the
+`compaction_note` slot pattern rather than a new item kind, so Enter on a node with
+a previewed non-current alternative opens that Thread and otherwise keeps its usual
+meaning; prune from the panel opens the existing form (dry run selected) rather than
+adding a second confirmation. Recheck when: real families approach 256 Threads, a
+compaction-heavy Thread shows a wrong point, or the user wants compare.

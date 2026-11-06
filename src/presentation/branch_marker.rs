@@ -47,7 +47,11 @@ impl BranchMarker {
     /// The Thread Enter opens, when it is not the one already followed.
     pub fn target(&self) -> Option<&str> {
         (self.preview != self.current)
-            .then(|| self.alternatives.get(self.preview).map(|a| a.thread_id.as_str()))
+            .then(|| {
+                self.alternatives
+                    .get(self.preview)
+                    .map(|a| a.thread_id.as_str())
+            })
             .flatten()
     }
     pub fn render(&self, language: UiLanguage) -> String {
@@ -58,7 +62,11 @@ impl BranchMarker {
             (false, true) => "branch",
             (false, false) => "別の枝",
         };
-        let excerpt = match self.alternatives.get(self.preview).and_then(|a| a.excerpt.as_deref()) {
+        let excerpt = match self
+            .alternatives
+            .get(self.preview)
+            .and_then(|a| a.excerpt.as_deref())
+        {
             Some(text) if !text.is_empty() => format!("\"{}\"", clip(text)),
             _ if en => "(no request)".to_owned(),
             _ => "(依頼なし)".to_owned(),
@@ -94,9 +102,18 @@ mod tests {
     fn marker() -> BranchMarker {
         BranchMarker {
             alternatives: vec![
-                Alt { thread_id: "a".into(), excerpt: Some("fix the tests".into()) },
-                Alt { thread_id: "b".into(), excerpt: Some("try with mocks".into()) },
-                Alt { thread_id: "c".into(), excerpt: None },
+                Alt {
+                    thread_id: "a".into(),
+                    excerpt: Some("fix the tests".into()),
+                },
+                Alt {
+                    thread_id: "b".into(),
+                    excerpt: Some("try with mocks".into()),
+                },
+                Alt {
+                    thread_id: "c".into(),
+                    excerpt: None,
+                },
             ],
             current: 1,
             preview: 1,
@@ -105,8 +122,14 @@ mod tests {
     #[test]
     fn renders_position_excerpt_and_which_alternative_in_both_languages() {
         let mut m = marker();
-        assert_eq!(m.render(UiLanguage::En), "↳ 2/3 ⋯ current \"try with mocks\"");
-        assert_eq!(m.render(UiLanguage::Ja), "↳ 2/3 ⋯ 今の枝 \"try with mocks\"");
+        assert_eq!(
+            m.render(UiLanguage::En),
+            "↳ 2/3 ⋯ current \"try with mocks\""
+        );
+        assert_eq!(
+            m.render(UiLanguage::Ja),
+            "↳ 2/3 ⋯ 今の枝 \"try with mocks\""
+        );
         m.step(-1);
         assert_eq!(m.render(UiLanguage::En), "↳ 1/3 ⋯ branch \"fix the tests\"");
         assert_eq!(m.target(), Some("a"));

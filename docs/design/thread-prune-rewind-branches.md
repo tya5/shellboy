@@ -8,8 +8,15 @@ below is the study; where it excludes spills or reports `candidate_payload_bytes
 only as a fact, the adopted behavior above wins. R1 (rewind) is adopted by the user (2026-11-06) in a simpler form: branches are
 Threads. No `thread_branch` tables and no migration; the cut-off part becomes an
 ordinary fork child and there is no in-place forward (#236; see
-[History](history.md#rewind-236)). The R1 storage design below is superseded; R2/B1
-(switch/forward, branch panel) remain a study, not adopted.** Original status line: It covers three user directions from 2026-11-06:
+[History](history.md#rewind-236)). The R1 storage design below is superseded; R2
+(switch/forward) stays a study, not adopted. B1 (branch view, option d) is adopted
+by the user (2026-11-06) as branches-are-Threads: no `thread_branch` tables and no
+migration; the tree is read from fork relations (#237; see
+[History](history.md#branches-237)). Differences from §4: the panel and the
+`thread branches` CLI list Threads of one family instead of `thread_branch` rows;
+switching opens the branch Thread; the panel keys are Enter (open), F (fork),
+P (prune form), N (more), Esc; F8 holds an entry and there is also `/branches` (no
+F11/F12); cursor and bounds are those of History. Compare stays out of scope.** Original status line: It covers three user directions from 2026-11-06:
 explicit prune of compacted originals, rewind in place, and a branch view in
 the TUI. For the branch view the user chose option (d): an inline marker plus a
 branch panel. Evidence comes from reading the code at `origin/main` `7cb82d3923`.

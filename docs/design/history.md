@@ -82,6 +82,47 @@ fork node) is after it, each as count plus up to 20 items, and unanswered replie
 [the study](thread-prune-rewind-branches.md) R1 and the cost record in
 [decisions](../development/decisions.md).
 
+## Branches (#237)
+
+**Branches are Threads.** A branch is a child Thread (`thread.parent_thread_id`)
+made by fork, `/edit` or `thread rewind` that shares a `thread_path` prefix with
+its parent. `thread branches` and the TUI branch view add no table, event, worker
+or queue; they read what exists (`src/history/branches.rs`, one DB-worker read).
+
+- **Family.** Walk `parent_thread_id` upward from the requested Thread (at most
+  32 ancestors; a missing or deleted parent, or a cycle, ends the walk and the
+  Thread roots its own family), then list the ancestor chain followed by a breadth-
+  first walk of live children, capped at 256 Threads (`family_truncated`). The
+  chain is never cut, so the requested Thread is always listed.
+- **Divergence.** For a child C of P the divergence node is the last node both
+  selected paths share. Paths are prefixes of each other until they diverge, so it
+  is found by bisection over `(thread_id, ordinal)` point lookups (about
+  2 log2 N lookups). The probe at ordinal 0 must agree first, otherwise
+  `divergence_unknown = no_shared_prefix`. After a compaction rewrote either
+  path before the divergence the result is the bisection's boundary, not a
+  proven first mismatch; documented, not guarded. A rewind child extends its parent
+  (`parent_continues = false`).
+- **Size and time.** `path_nodes` is `MAX(ordinal)+1` (ordinals are contiguous),
+  O(log N); payload bytes are not summed (`bytes` null). The tip time is the tip
+  node's `created_at`. The last request is the newest `kind='user'` node within 256
+  path rows of the tip; payloads over 64 KiB are not parsed.
+- **Paging.** Items are the family list in that order. The cursor is the offset,
+  bound to `root_revision`: every fork/rewind/edit bumps it, so a cursor from
+  before expires (`cursor_expired`) instead of mixing two trees.
+- **Inline markers.** `markers()` runs with each history page enrich (at most 128
+  nodes): the ancestor chain and their direct children only, grouped by
+  (parent, divergence node); the alternatives at a point are the parent and each
+  child that diverged there, ordered by the creation time of their first node after
+  it; a point is shown only for a node on the page and only when the viewed Thread
+  follows one of the alternatives. A Thread with no parent and no child costs one
+  existence read. Markers are cosmetic: a failed read leaves the ordinary rows.
+- **Deleted parents.** A child of a deleted parent is a family root without a
+  divergence; deleted children are not listed. Deleting a branch child does not
+  change the parent.
+
+Design record: [the study](thread-prune-rewind-branches.md) (B1, option d, adopted
+as branches-are-Threads) and [decisions](../development/decisions.md) D-237-1.
+
 ## Pruned originals (#235)
 
 `thread prune` releases a Thread's hold on originals of adopted summaries and

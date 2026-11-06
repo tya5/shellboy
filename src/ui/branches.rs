@@ -333,13 +333,10 @@ impl BranchPanel {
         let prefix = trim_prefix(&row.prefix, width.saturating_sub(PREFIX_RESERVE).max(6));
         match &row.kind {
             RowKind::Point { request } => {
-                let text = request
-                    .as_deref()
-                    .filter(|t| !t.is_empty())
-                    .map_or_else(
-                        || local!(self.language, "(依頼なし)", "(no request)").to_owned(),
-                        |t| format!("\"{}\"", clip(t, EXCERPT_MAX)),
-                    );
+                let text = request.as_deref().filter(|t| !t.is_empty()).map_or_else(
+                    || local!(self.language, "(依頼なし)", "(no request)").to_owned(),
+                    |t| format!("\"{}\"", clip(t, EXCERPT_MAX)),
+                );
                 clip_all(&format!("{prefix}{text}"), width)
             }
             RowKind::Thread(i) => {
@@ -388,11 +385,14 @@ impl BranchPanel {
             });
         }
         if self.family_truncated || self.ancestors_truncated {
-            lines.push(local!(
-                self.language,
-                "上限のため一部のみ表示しています",
-                "Showing part of the tree (limit reached)"
-            ).to_owned());
+            lines.push(
+                local!(
+                    self.language,
+                    "上限のため一部のみ表示しています",
+                    "Showing part of the tree (limit reached)"
+                )
+                .to_owned(),
+            );
         }
         lines.into_iter().map(|l| clip_all(&l, width)).collect()
     }
@@ -500,7 +500,11 @@ fn trim_prefix(prefix: &str, budget: usize) -> String {
     while start < chars.len() && chars[start..].iter().collect::<String>().width() + 1 > budget {
         start += 3;
     }
-    format!("{}{}", glyphs::ellipsis(), chars[start.min(chars.len())..].iter().collect::<String>())
+    format!(
+        "{}{}",
+        glyphs::ellipsis(),
+        chars[start.min(chars.len())..].iter().collect::<String>()
+    )
 }
 
 /// The tree: each Thread, then its divergence points (ordered along its path),
@@ -522,7 +526,15 @@ fn build_rows(entries: &[Entry]) -> Vec<Row> {
     let mut rows = Vec::new();
     let mut visited = vec![false; entries.len()];
     for root in roots {
-        emit(entries, &children, root, String::new(), String::new(), &mut visited, &mut rows);
+        emit(
+            entries,
+            &children,
+            root,
+            String::new(),
+            String::new(),
+            &mut visited,
+            &mut rows,
+        );
     }
     rows
 }
@@ -679,14 +691,14 @@ impl super::UiState {
             }
             Outcome::Fork { thread_id, node_id } => {
                 self.branches = None;
-                vec![super::UiAction::Command(crate::protocol::Command::ThreadFork(
-                    crate::protocol::ThreadForkArgs {
+                vec![super::UiAction::Command(
+                    crate::protocol::Command::ThreadFork(crate::protocol::ThreadForkArgs {
                         agents: None,
                         thread_id,
                         node_id,
                         cwd: None,
-                    },
-                ))]
+                    }),
+                )]
             }
             Outcome::Prune { thread_id, node_id } => {
                 // Prune is irreversible: the existing form opens with the dry run

@@ -3703,7 +3703,11 @@ impl UiState {
                     view.on_progress(tool_calls, cancelled_calls, counts_capped, state);
                 }
             }
-            UiUpdate::BranchesLoaded { request_id, append, result } => {
+            UiUpdate::BranchesLoaded {
+                request_id,
+                append,
+                result,
+            } => {
                 self.branches_loaded(request_id, append, result);
             }
             UiUpdate::EditRequestLoaded {

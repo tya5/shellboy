@@ -282,6 +282,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/fork [NODE_ID]` | New Thread sharing history through the specified node |
 | `/edit [USER_NODE_ID]` | Load the original request into a separate editing draft; branch on send |
 | `/rewind [USER_NODE_ID]` | Move this conversation back to just before an earlier request (same Thread, ID and title); the removed part stays as a child conversation, so opening that child undoes it. Conversation only: shell side effects are not undone and the result lists later shell executions and child conversations. Refused while work is running or messages are queued. |
+| `/branches [THREAD_ID]` | Open the branch panel: the tree of this conversation's branches (see [Branches](#branches)) |
 | `/compact` | Request spill/summary at a safe boundary |
 | `/search QUERY` | Conversation search in the active embedding space |
 | `/index [status\|all\|thread\|threads ID...]` | Index management; `thread` means current Thread |
@@ -303,6 +304,14 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/quit` | Normal shutdown |
 
 Omitting the node in `/fork` suggests the anchor or tail; `/edit` and `/rewind` suggest the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active, confirm stopping it with Y before proceeding.
+
+## Branches
+
+A branch is a child conversation (a Thread) made by `/fork`, `/edit` or `/rewind` that shares the start of its parent's history. Nothing is stored for the tree itself: it is read from the saved conversations (`shellboy thread branches` returns the same facts as JSON).
+
+**In the conversation.** Where branches diverge, one muted row follows the last shared message: `↳ 2/3 ⋯ current "make CI pass"`. `2/3` is the alternative shown (the order is by when its first message was written); `current` marks the one this conversation follows, `branch` another (Japanese: `今の枝`, `別の枝`) and the quoted text is that alternative's last request. A conversation that was rewound shows itself ending at the point next to the removed part. Select the message in history focus (Tab, then Up/Down); `←` / `→` move through the alternatives (previewing never switches), and Enter opens the previewed one when it is not the current one (on the current alternative Enter keeps its usual meaning). Markers are read with each history page of up to 128 nodes; a branch made after the page was loaded appears when the page is read again.
+
+**Branch panel.** `/branches` or F8 `会話 | 分岐の木` opens it (F11 and F12 are not used). Rows are drawn with `├─ └─ │` (`+- \- |` when the terminal does not draw them as single-width): each conversation, then its divergence points in path order (the quoted request at the point), then the branches that diverged there; only points and tips are listed. A row shows the state (`current`, `parent`, `branch`; `running`; `⬦ pruned` when the originals were released with `thread prune`), the last request, and, at 64 columns or more, the time and number of messages. Below 64 columns those move to the detail lines under the list. Keys: Up/Down/PgUp/PgDn/Home/End select, Enter opens the selected conversation, F forks from its tip (`thread fork`), P opens the prune form (`会話 | 原文の解放`) with that conversation and its tip filled in and the dry run selected, N reads the next page, Esc closes. At most 256 conversations are listed per family, read in pages of 200; when the limit cuts the tree the panel says so. Comparing branches is not part of the panel yet.
 
 ## Overlays and selection mode
 

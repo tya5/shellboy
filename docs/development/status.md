@@ -1,5 +1,23 @@
 # Development status
 
+## Branch view (#237; on branch issue-237/branch-view, CI pending)
+
+Branches are Threads (no tables, no migration). `shellboy thread branches [--thread T]
+[--limit N] [--cursor C]` (wire `thread.branches`, OperationId `ThreadBranches`, F8
+`会話 | 分岐の木`) is a read-only, paged tree of T's family with divergence node, tip
+last request, time, size (`path_nodes`; `bytes` null), state, running and
+pruned flags. TUI: the inline marker `↳ p/n ⋯ current|branch "excerpt"` after the node
+where branches diverge (history item selected: left/right preview, Enter opens), and
+the `/branches` panel (`ui/branches.rs`: Enter open, F fork, P prune form, N more).
+Bounds: 256 Threads per family, 32 ancestors, 200 items per page, 256 rows to find a
+last request, 160-character excerpts, markers on pages of at most 128 nodes. Only
+existing glyphs are used (`◉ ↳ ⋯ ├─ └─ │ ⬦` and their fallbacks). Tests:
+`src/history/branches/tests.rs`, `src/ui/branches/tests.rs`,
+`ui::history_interaction` branch tests, `tests/thread_branches.rs`. Decision:
+D-237-1. Not done: compare, markers on live-streamed tail nodes (they appear on the
+next page read), live refresh of an open panel (reopen to read again). Resume point:
+exact-tip default and all-OS CI.
+
 ## Interactive chat client (#242; on branch issue-242/chat, not yet landed)
 
 `shellboy chat [--thread T] [--until turn-end|run-end|reply] [--timeout-ms N] [--json]`

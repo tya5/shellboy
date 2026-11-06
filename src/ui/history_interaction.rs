@@ -311,7 +311,11 @@ impl UiState {
                 let target = self
                     .selected_history_item()
                     .and_then(|item| self.view().branch_target(&item.primary_node_id));
-                Some(target.map(|thread| self.select_thread(thread)).unwrap_or_default())
+                Some(
+                    target
+                        .map(|thread| self.select_thread(thread))
+                        .unwrap_or_default(),
+                )
             }
             KeyCode::Enter => Some(
                 if self
@@ -1102,23 +1106,44 @@ mod tests {
                 println!("--- {language:?} inline marker, {width} columns ---\n{shown}");
                 let flat = squash(shown.clone());
                 assert!(flat.contains("↳2/3⋯"), "{shown}");
-                assert!(flat.contains(current) && flat.contains("\"makeCIpass\""), "{shown}");
+                assert!(
+                    flat.contains(current) && flat.contains("\"makeCIpass\""),
+                    "{shown}"
+                );
             }
             // ←/→ need the history item to be selected first, and never switch Threads.
             assert!(key(&mut ui, KeyCode::Right).is_empty());
-            assert_eq!(ui.view().nodes()[0].presentation.branch_marker.as_ref().unwrap().preview, 1);
+            assert_eq!(
+                ui.view().nodes()[0]
+                    .presentation
+                    .branch_marker
+                    .as_ref()
+                    .unwrap()
+                    .preview,
+                1
+            );
             key(&mut ui, KeyCode::Tab);
             assert!(ui.view().items.active);
             assert!(key(&mut ui, KeyCode::Right).is_empty());
             let shown = squash(screen_at(&mut ui, 100));
-            assert!(shown.contains("↳3/3⋯") && shown.contains("trywithmocks"), "{shown}");
+            assert!(
+                shown.contains("↳3/3⋯") && shown.contains("trywithmocks"),
+                "{shown}"
+            );
             assert!(shown.contains(branch), "{shown}");
             key(&mut ui, KeyCode::Right);
             let shown = squash(screen_at(&mut ui, 100));
-            assert!(shown.contains("↳1/3⋯") && shown.contains("fixthetests"), "wraps: {shown}");
+            assert!(
+                shown.contains("↳1/3⋯") && shown.contains("fixthetests"),
+                "wraps: {shown}"
+            );
             key(&mut ui, KeyCode::Left);
             assert!(squash(screen_at(&mut ui, 100)).contains("↳3/3⋯"));
-            assert_eq!(ui.view().thread_id.as_deref(), Some("thread"), "previewing never switches");
+            assert_eq!(
+                ui.view().thread_id.as_deref(),
+                Some("thread"),
+                "previewing never switches"
+            );
             let actions = key(&mut ui, KeyCode::Enter);
             assert!(
                 actions.iter().any(|a| matches!(a, UiAction::SelectThread { thread_id, .. } if thread_id == "third"))
@@ -1135,14 +1160,21 @@ mod tests {
         key(&mut ui, KeyCode::Enter);
         assert_eq!(ui.view().thread_id, before);
         assert_eq!(
-            ui.view().nodes()[0].presentation.branch_marker.as_ref().unwrap().preview,
+            ui.view().nodes()[0]
+                .presentation
+                .branch_marker
+                .as_ref()
+                .unwrap()
+                .preview,
             1
         );
     }
     #[test]
     fn previewing_changes_the_render_stamp_so_cached_rows_are_rebuilt() {
         let mut ui = branch_ui(crate::config::UiLanguage::En);
-        ui.active_view_mut().nodes_mut_for_test()[0].presentation.projection_stamp = Some([7; 32]);
+        ui.active_view_mut().nodes_mut_for_test()[0]
+            .presentation
+            .projection_stamp = Some([7; 32]);
         let before = ui.view().nodes()[0].presentation.projection_stamp;
         assert!(ui.active_view_mut().step_branch_preview("anchor", 1));
         assert_ne!(before, ui.view().nodes()[0].presentation.projection_stamp);
