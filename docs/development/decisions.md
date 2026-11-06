@@ -3669,3 +3669,17 @@ dumps every table except the executor's own request journal (`operation_receipt`
 (`root_revision`), edges and thread revisions. The undo offer ends at the next
 submission in the Thread, when its selection revision moves beyond the rewind's own
 +1, or when the Thread is left; Alt+U also needs an empty draft.
+
+## D-248-1: Rejected closed summary is frozen for the current Turn (2026-11-06)
+
+Decision: when a proactive attempt adopts nothing and its rejection came from the closed
+(older-Turn) summary stage, the existing guard flag `summary_frozen_current_turn` is set
+(when the newest tool anchor is already in the current Turn). No new table, field or
+counter. Reason: with a coverage-limited forecast (`marks:null`) every new tool frontier
+counted as new eligible content; the closed range cannot change while the current Turn
+appends. The closed summary also returned before the active stages (`prefix_first`), so
+a deterministic rejection starved them; the freeze lets the next boundary reach them.
+Not changed: after any adoption the guard is cleared and a rejected closed range may be
+tried once more (the path changed). The designed prefix-then-active pair
+(`insufficient` then `met`) is not this bug. Recheck when: the cached over-limit reduce
+output (2a, see acceptance) is addressed, or active-stage rejections repeat on real data.

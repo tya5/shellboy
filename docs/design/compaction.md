@@ -435,7 +435,12 @@ the selected path while coverage remains unknown, its exact committed selection
 revision permits the guard to refresh its own witness without treating that
 replacement as new input. When the newest tool anchor belongs to the current
 protected Turn, later appended groups there do not unfreeze that rejected older
-summary; an intervening path rewrite or new Turn is evaluated again. The latest tool group, every active-Turn user input, the latest completed
+summary; an intervening path rewrite or new Turn is evaluated again. This freeze
+is also recorded when the closed-range (older Turns) summary was rejected without
+adopting anything (#248): the range, reusable parts and limit are unchanged while the
+current Turn only appends tool output, so coverage-limited evidence does not repeat
+it at every tool boundary. The next boundary then reaches the active-Turn stages
+(spill, summary) instead of re-running the closed summary. The latest tool group, every active-Turn user input, the latest completed
 Turn, pending receipts and held deliveries retain their existing protections.
 The active-Turn summary remains eligible only through the #182 plan (all tool
 rounds of the Turn); its evidence is separate from the older-Turn summary

@@ -1,5 +1,11 @@
 # Development status
 
+## Repeated rejected closed summary (#248; on branch issue-248/repeat-gate, CI pending)
+
+Guard now freezes a rejected, non-adopted closed-range summary for the current Turn
+(D-248-1), with an integration regression test. Open: 2a (over-limit cached reduce
+output, no code change) is reported in the validation record. Resume: land after CI.
+
 ## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
 
 The owner now answers a decodable request with an unknown command, unknown
