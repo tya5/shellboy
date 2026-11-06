@@ -365,7 +365,7 @@ Managed PNGs live under `<data_dir>/managed/clipboard/`; their absolute `path` i
 
 While the owner runs, GC starts automatically and repeats about one minute after each pass;
 raw/history DB work uses batches of up to 128 records, not a 128-per-minute quota.
-SQLite pages freed by collection are reused; no automatic VACUUM shrinks the DB file.
+SQLite pages freed by collection are reused; no automatic VACUUM shrinks the DB file. To shrink it, quit Shellboy, check `shellboy storage vacuum --dry-run` (reclaimable bytes and the free space needed), then run `shellboy storage vacuum`; it only runs when you ask.
 To reduce logical storage, inspect `shellboy storage status`, run `shellboy storage collect`,
 then preview unwanted conversations with `shellboy thread delete-preview --thread THREAD_ID`
 before `shellboy thread delete --thread THREAD_ID`. Collection respects protection and sharing;

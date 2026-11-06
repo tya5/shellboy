@@ -273,7 +273,24 @@ Key `storage status` fields:
 
 Default logical warning is 8GiB and maximum 10GiB. At the maximum, conversations are not automatically deleted: new work is rejected with `storage_limit` or enters recovery wait. Distinguish a body already accepted/saved from an operation rejected before acceptance. Stop, shutdown records, and GC remain allowed. Going below the limit after collection still requires explicit retry of a recovery Turn.
 
-Reclaiming SQLite bodies need not immediately shrink DB files. Reusable pages differ from OS free capacity. No automatic VACUUM runs. Avoid copying/deleting DB/WAL/SHM separately while running; for backups shut down normally and handle the saved data as a whole.
+Reclaiming SQLite bodies need not immediately shrink DB files. Reusable pages differ from OS free capacity. No automatic VACUUM runs; to shrink the file, use the explicit command below. Avoid copying/deleting DB/WAL/SHM separately while running; for backups shut down normally and handle the saved data as a whole.
+
+### Shrinking the database file (explicit VACUUM)
+
+After `thread prune` and the history GC (`shellboy storage collect --category history`) free pages inside `shellboy.db`, the file keeps its size. To return that space to the OS, stop Shellboy (the owner) and run, from a shell outside it:
+
+```
+shellboy --data-dir DIR storage vacuum --dry-run
+shellboy --data-dir DIR storage vacuum
+```
+
+Nothing runs it automatically and there is no incremental or auto vacuum. It is refused (`invalid_state`) while any owner holds the data directory, so a model running inside Shellboy cannot run it; ask the user.
+
+The preview (and the start of a real run) reports exact SQLite facts, not estimates: `reclaimable_bytes` is `freelist_count x page_size`, the amount VACUUM returns; `db_file_bytes` and `wal_bytes` are the current file sizes. The space VACUUM needs, `required_free_bytes`, is `2 x live_bytes` where `live_bytes = (page_count - freelist_count) x page_size`. Basis: SQLite VACUUM builds a copy of all live pages in a temporary file (Shellboy places it in `DIR/tmp`) and then writes them back through the WAL; each is at most the live size. This is an upper bound taken from that behaviour, not a measurement of a particular run. If `filesystem_free_bytes` is smaller, the real run fails with `storage_limit` before touching the database.
+
+A real run checkpoints the WAL (TRUNCATE) first, runs VACUUM, checkpoints again, verifies `quick_check`, and reports `db_file_bytes_before`, `db_file_bytes_after` and `bytes_freed`. VACUUM is atomic: if it fails or the process is killed, SQLite restores the previous database; leftover files in `DIR/tmp` are temporary. Large databases take time and the owner cannot start meanwhile. Only the conversation DB `shellboy.db` is vacuumed; the standalone RAG store is a separate file that this command does not touch.
+
+VACUUM rewrites the file in place, so its device/inode stays the same and history search references that bind the database file identity remain valid; if a platform changes the identity, those references are conservatively invalidated and a new search is needed. Nothing else is invalidated: VACUUM does not change node IDs, versions or content.
 
 RAM body/layout/history/Base64-image cache budgets differ from storage retention. Zero caches do not delete conversations or impose a whole-application RSS cap including in-flight working memory. See [configuration](configuration.md) for each budget.
 

@@ -347,7 +347,7 @@ shellの生出力と管理されたクリップボード画像は別に扱いま
 
 ownerの動作中にGCが自動で動き、処理後およそ1分で次の回収を始めます。
 生出力・履歴のDB処理は最大128件単位で進み、1分に128件という上限ではありません。
-回収で空いたSQLiteのページは再利用します。自動VACUUMでDBファイルを縮めることはありません。
+回収で空いたSQLiteのページは再利用します。自動VACUUMでDBファイルを縮めることはありません。縮めたいときは、Shellboyを終了してから `shellboy storage vacuum --dry-run` で縮む量と必要な空き容量を確認し、`shellboy storage vacuum` を実行します（明示したときだけ動きます）。
 容量を減らすには `shellboy storage status` → `shellboy storage collect` で確認・回収し、
 不要な会話を `shellboy thread delete-preview --thread THREAD_ID` で確かめてから
 `shellboy thread delete --thread THREAD_ID` で消します。回収は保護・共有を尊重し、

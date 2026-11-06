@@ -62,7 +62,7 @@ rawはretention witnessを含めて検証する。immutable=1は使わない。
 会話DBは永続DB UUIDを持たないため、履歴store識別子にcanonical pathのhashを使い、
 node ID・版・本文hash・raw witnessと安定したfilesystem identityを併せて束縛する。
 Unixはdevice/inode、他のOSは取得可能なfile identity/作成時刻を使う。mtime/長さは使わない。
-path自体は参照へ含めない。DBの置換・コピー・VACUUMによるfile identity変更は保守的に失効する。
+path自体は参照へ含めない。DBの置換・コピー・VACUUMによるfile identity変更は保守的に失効する。明示的な `storage vacuum` はその場の書換えでdev/inodeを変えないため通常は失効しない（[gc](gc.md#明示的なstorage-vacuum-238)）。
 履歴DBへの新UUID追加migrationは行わない。文書storeは永続UUIDを使う。
 scope内で順位を作り、RRF(k=60)で統合。距離はspaceと共に保持する。
 partial failureはscope別の失敗を返し、正常scopeの結果を保持する。

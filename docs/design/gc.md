@@ -12,7 +12,7 @@ rawは確定済みshellのpipe原文だけを、既定7日/合計1 GiBの両方�
 
 managed画像のdeleting→unlink→deletedとpin/active検査は共有AttachmentServiceへ委ねる。外部ファイルは対象にしない。期限/容量判定でpinned分を無理に削除せず、回収不能bytesを別に返す。
 
-容量は論理live bytesと物理DB/WAL/managed/log bytes、DB再利用可能page bytesを分離する。DELETE直後にOS空き容量が増えると説明せず、自動VACUUMを実行しない。物理属性の取得は有限file worker上で実施し、UI/main OS threadから同期stat/走査を呼ばない。logical limit超過は新しい副作用をstorage_limitで保留するための判定として公開し、停止/終端保存/GCは許す。保存済みspaceのsemantic閲覧はquery embeddingだけを生成して許可し、索引pauseを変更しない。索引用の新規embedding停止と閲覧を区別する（[G10](index.md#論理容量上限とsemantic閲覧g10)）。
+容量は論理live bytesと物理DB/WAL/managed/log bytes、DB再利用可能page bytesを分離する。DELETE直後にOS空き容量が増えると説明せず、自動VACUUMを実行しない（明示コマンドは[末尾の節](#明示的なstorage-vacuum-238)）。物理属性の取得は有限file worker上で実施し、UI/main OS threadから同期stat/走査を呼ばない。logical limit超過は新しい副作用をstorage_limitで保留するための判定として公開し、停止/終端保存/GCは許す。保存済みspaceのsemantic閲覧はquery embeddingだけを生成して許可し、索引pauseを変更しない。索引用の新規embedding停止と閲覧を区別する（[G10](index.md#論理容量上限とsemantic閲覧g10)）。
 
 logical bytesの採用定義は保存本文（nodeと監査outputの重複を含む）、snapshot/draft/attempt/event/receipt本文、pipe原文、managed raw_size、vec float32要素、`app_meta` の `index.*` 入力/preview/bootstrap/auto payloadの合計。SQLiteのB-tree/索引page overheadとは別の値とする。`reclaimable_bytes` はrawから確実に回収できる下限であり、会話GCやmanaged候補の未確定見積りを加算しない。詳細応答の `reclaimable_is_lower_bound` をtrueとし、quotaはこの見積りではなくlogical live合計で判定する。索引workerも同じ `require_capacity_tx` を利用する。
 
@@ -196,3 +196,13 @@ Tombstone and index deletion remain atomic: search filters deleted sources
 without a tombstone gate (`src/index/observations.rs`). Splitting physical index
 purge after tombstone would therefore expose stale job observations. A future
 change may split it only after all readers enforce the required visibility.
+
+## 明示的なstorage vacuum (#238)
+
+GCはDB内のpageを空けるだけでファイルは縮まない。縮める手段は `shellboy storage vacuum [--dry-run]` のみで、明示したときだけ実行する（自動・incremental・auto_vacuumは採用しない）。`storage check` と同じstandaloneコマンドで、owner.lockを `OwnerLock::acquire` で取得できないとき（owner動作中）は `invalid_state` で拒否する。dry-runも同様。対象は会話DB `shellboy.db` のみ。standalone RAG storeは別ファイル・別lockで、同時に対象にしない。
+
+報告値は推測しない。縮む量 = `freelist_count × page_size`（VACUUMが返す量の正確な値）、現在のDB/WALファイルサイズ、`live_bytes = (page_count − freelist_count) × page_size`、必要な空き = `2 × live_bytes`（SQLite VACUUMはlive pageの全コピーを一時ファイルに作り、WAL経由で書き戻すため、それぞれliveサイズ以下。一時ファイルは `temp_store_directory` でdata dir配下の `tmp` に置き、data dirのファイルシステム空きだけで判定できる）、`fs2::available_space`。空きが足りなければ実行を `storage_limit` で拒否し、DBに触れない（dry-runは `sufficient_space:false` で報告）。
+
+実行順: WAL checkpoint(TRUNCATE) → VACUUM → checkpoint(TRUNCATE) → quick_check。前後のファイルサイズを返す。VACUUMはSQLiteの保証によりatomicで、失敗・中断でも元のDBが残る。新しい表・設定・workerは追加しない。
+
+VACUUMはファイルをその場で書き換えるのでdev/inodeは変わらず、[docs-and-rag](docs-and-rag.md) のhistory参照が束縛するfile identityは保たれる。identityが変わる環境では従来どおり保守的に失効し、再検索が必要になる。node ID・版・本文は変わらない。
