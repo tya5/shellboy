@@ -1146,7 +1146,7 @@
   {
     "file": "tests/response_retries.rs",
     "rule": "raw-timeout",
-    "fingerprint": "461ed59cf70c67fe9855bd65d01324c90b4e3ecf4c9378a12644212daf9d9a2c",
+    "fingerprint": "887ce6a2d0ef24e271afb671cae2e6cf121c9f642e25146bf7fb1adf0ce569c4",
     "function": "manual_summary_revalidates_selection_after_connection_wait",
     "count": 1,
     "reason": "Synthetic stale-selection test: 250ms checks no send during a five-second floor; two seconds checks the Thread boundary remains responsive."

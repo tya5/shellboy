@@ -36,6 +36,8 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         cwd,
         effort: None,
         auto_compact_at: None,
+        segment_chars: None,
+        reduce_rounds: None,
     };
     // Exercise both the title-only fast path and full settings path through
     // external requests, never the frontend's local ThreadSet success shortcut.
@@ -43,7 +45,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         settings(Some("renamed"), None, None),
         settings(None, Some("next-model"), Some(cwd.to_string_lossy().into())),
     ] {
-        let request = frontend::operation(&control, Command::ThreadSet(args.clone()));
+        let request = frontend::operation(&control, Command::ThreadSet(Box::new(args.clone())));
         let response = control.request(request.clone()).await;
         assert!(response.ok, "{response:?}");
         assert!(
@@ -86,7 +88,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         control
             .request(frontend::operation(
                 &control,
-                Command::ThreadSet(settings(Some("renamed"), None, None))
+                Command::ThreadSet(Box::new(settings(Some("renamed"), None, None)))
             ))
             .await
             .ok
@@ -97,7 +99,10 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
     invalid.connection = Some("missing".into());
     assert!(
         !control
-            .request(frontend::operation(&control, Command::ThreadSet(invalid)))
+            .request(frontend::operation(
+                &control,
+                Command::ThreadSet(Box::new(invalid))
+            ))
             .await
             .ok
     );
@@ -120,7 +125,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         .execute(
             frontend::operation(
                 &control,
-                Command::ThreadSet(settings(Some("must not persist"), None, None)),
+                Command::ThreadSet(Box::new(settings(Some("must not persist"), None, None))),
             ),
             None,
         )

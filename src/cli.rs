@@ -378,6 +378,12 @@ pub struct CompactOptions {
     /// Override the summary limit as a percentage of the original range (0 < P <= 100).
     #[arg(long, requires = "summary")]
     pub max_percent: Option<f64>,
+    /// Override the summary segment size (characters of original conversation per map request) for this summary only.
+    #[arg(long, requires = "summary")]
+    pub segment_chars: Option<u64>,
+    /// Override the maximum number of reduce rounds for this summary only.
+    #[arg(long, requires = "summary")]
+    pub reduce_rounds: Option<u64>,
     /// Maximum API-free reduction outside protected work; no node IDs.
     #[arg(long)]
     pub maximal: bool,
@@ -475,6 +481,12 @@ pub struct ThreadSetOptions {
     /// Proactive compaction threshold in tokens for this Thread; 0 disables it, an empty string restores the connection value.
     #[arg(long, allow_hyphen_values = true)]
     pub auto_compact_at: Option<String>,
+    /// Summary segment size in characters for this Thread (2000..=1000000); an empty string restores the connection value.
+    #[arg(long, allow_hyphen_values = true)]
+    pub segment_chars: Option<String>,
+    /// Maximum summary reduce rounds for this Thread (1..=16); an empty string restores the connection value.
+    #[arg(long, allow_hyphen_values = true)]
+    pub reduce_rounds: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = false)]
@@ -879,7 +891,7 @@ impl Cli {
                     before_node_id: a.before_node_id,
                     dry_run: a.dry_run,
                 }),
-                ThreadCommand::Set(a) => C::ThreadSet(wire::ThreadSetArgs {
+                ThreadCommand::Set(a) => C::ThreadSet(Box::new(wire::ThreadSetArgs {
                     agents: path_option(a.agents)?,
                     title: a.title,
                     connection: a.connection,
@@ -888,7 +900,9 @@ impl Cli {
                     model: a.model,
                     effort: a.effort,
                     auto_compact_at: a.auto_compact_at,
-                }),
+                    segment_chars: a.segment_chars,
+                    reduce_rounds: a.reduce_rounds,
+                })),
             },
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
@@ -1028,6 +1042,8 @@ impl Cli {
                         || a.to_node_id.is_some()
                         || a.max_chars.is_some()
                         || a.max_percent.is_some()
+                        || a.segment_chars.is_some()
+                        || a.reduce_rounds.is_some()
                     {
                         return Err(wire::ApiError::new(
                             wire::ErrorCode::InvalidArgument,
@@ -1044,7 +1060,12 @@ impl Cli {
                     return Ok(Some(cmd));
                 }
 
-                if (a.max_chars.is_some() || a.max_percent.is_some()) && !a.summary {
+                if (a.max_chars.is_some()
+                    || a.max_percent.is_some()
+                    || a.segment_chars.is_some()
+                    || a.reduce_rounds.is_some())
+                    && !a.summary
+                {
                     return Err(invalid("summary limits require --summary"));
                 }
                 let action = if a.maximal {
@@ -1070,6 +1091,8 @@ impl Cli {
                         to_node_id: a.to_node_id,
                         max_chars: a.max_chars,
                         max_percent: a.max_percent,
+                        segment_chars: a.segment_chars,
+                        reduce_rounds: a.reduce_rounds,
                     }));
                     cmd.validate()?;
                     return Ok(Some(cmd));
@@ -1082,6 +1105,8 @@ impl Cli {
                         to_node_id: a.to_node_id,
                         max_chars: a.max_chars,
                         max_percent: a.max_percent,
+                        segment_chars: a.segment_chars,
+                        reduce_rounds: a.reduce_rounds,
                     }),
                     None => C::Compact(wire::ThreadTarget {
                         thread_id: a.thread_id,

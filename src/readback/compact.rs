@@ -22,6 +22,8 @@ fn metrics(root: &str) -> String {
         "reused_parts",
         "summary_characters",
         "summary_limit",
+        "segment_chars",
+        "reduce_rounds",
         "source_characters",
         "model_requests",
         "map_requests",

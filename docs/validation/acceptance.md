@@ -25,6 +25,21 @@ attempt performs no compaction read. Not verified: a real terminal, a live
 provider, live refresh of a marker when a compaction is adopted while the
 conversation is open (it appears on the next history read).
 
+## Summary part size and reduce rounds (#231)
+
+macOS ARM64 through `rust-slot`, disposable DBs and the loopback provider proxy. Config tests
+cover default, `[compaction]`, connection and Thread precedence and rejection at both range
+ends for both values at the `[compaction]` and connection levels. Store tests cover `thread set`
+precedence, clearing each value separately, rejection of out-of-range / negative / fractional /
+text values, child inheritance and `thread get` effective values. A unit test shows part keys
+follow the covered nodes (another size never reuses or overwrites a part with different
+sources; identical sources keep their key). Preview tests show the dry-run segment count, the
+echoed values and the cached/uncached counts follow each level and the per-call override. A
+readback test and an owner test show `compact list` records `segment_chars` / `reduce_rounds`
+with `summary_limit` for manual and automatic results. The release-upgrade checker tests cover
+schema 30 to 31. Not verified: Windows/Linux local runs (CI is recorded with the final SHA), a
+live provider, and any claim that a particular size is cheaper (only the method is documented).
+
 ## Per-Thread auto-compaction threshold (#229)
 
 macOS ARM64 through `rust-slot`, disposable DBs and the loopback provider proxy. Store tests

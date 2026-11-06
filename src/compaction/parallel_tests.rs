@@ -207,6 +207,8 @@ fn budget(
         reduce_requests: 0,
         map_limit,
         reduce_limit,
+        segment_chars: 64_000,
+        reduce_rounds: 4,
         usage: ledger,
     }
 }

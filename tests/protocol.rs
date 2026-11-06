@@ -21,6 +21,8 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
         let command = Command::ContextEdit(ContextEditArgs {
             max_chars: None,
             max_percent: None,
+            segment_chars: None,
+            reduce_rounds: None,
             thread_id: Some("t".into()),
             action,
             from_node_id: from.map(str::to_owned),
@@ -34,6 +36,8 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
                 thread_id: None,
                 action: ContextEditAction::Restore,
                 from_node_id: Some(id),
@@ -901,6 +905,8 @@ fn summary_limits_are_checked_at_the_owner_boundary() {
         to_node_id: Some("b".into()),
         max_chars: Some(1),
         max_percent: None,
+        segment_chars: None,
+        reduce_rounds: None,
     };
     assert!(a.validate().is_ok());
     a.max_chars = Some(0);

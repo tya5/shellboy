@@ -23,7 +23,7 @@ import time
 CARGO_VERSION = next(line.split('"')[1] for line in (Path(__file__).resolve().parents[1] / 'Cargo.toml').read_text(encoding='utf-8').splitlines() if line.startswith('version = '))
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30)}
+           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31)}
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29}
 
 
@@ -151,12 +151,17 @@ def check_migration(db, before, start, target):
         columns = {row[1]: row for row in db.execute('PRAGMA table_info(thread)')}
         assert 'auto_compact_at' in columns and columns['auto_compact_at'][2] == 'INTEGER' and not columns['auto_compact_at'][3], 'thread.auto_compact_at differs from migration 30'
         assert db.execute('SELECT count(*) FROM thread WHERE auto_compact_at IS NOT NULL').fetchone()[0] == 0, 'migration 30 must leave every Thread on the default threshold'
+    if target >= 31:
+        columns = {row[1]: row for row in db.execute('PRAGMA table_info(thread)')}
+        for name in ('segment_chars', 'reduce_rounds'):
+            assert name in columns and columns[name][2] == 'INTEGER' and not columns[name][3], f'thread.{name} differs from migration 31'
+            assert db.execute(f'SELECT count(*) FROM thread WHERE {name} IS NOT NULL').fetchone()[0] == 0, 'migration 31 must leave every Thread on the default summary parameters'
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30) and target in (14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31) and target in (14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
@@ -170,11 +175,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.8.3')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30), default=30,
-                        help='30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31), default=31,
+                        help='31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

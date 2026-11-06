@@ -66,7 +66,7 @@ pub(super) fn record_tx(
         "created_parts":result.created_parts,"reused_parts":result.reused_parts,
         "summary_node_id":result.summary_node_id,"removed_characters":measure.removed_characters,
         "source_characters":result.source_characters,"summary_characters":result.summary_characters,
-        "summary_limit":result.summary_limit,"model_requests":result.model_requests,
+        "summary_limit":result.summary_limit,"segment_chars":result.segment_chars,"reduce_rounds":result.reduce_rounds,"model_requests":result.model_requests,
         "summary_usage":result.summary_usage})
     .to_string();
     tx.execute(

@@ -507,5 +507,5 @@ The candidate checker defaults to public v0.8.0 (schema 27), expected v0.8.1 and
 
 ## Next-release synthetic upgrade check (schema 29)
 
-The checker defaults to public v0.8.3 (schema 29) and target schema 30; the expected version defaults to the Cargo.toml package version. Migration `0030_thread_auto_compact_at` adds one nullable integer column to `thread` (existing rows stay NULL). Run it on an owned disposable fixture; CI alone is not that check.
+The checker defaults to public v0.8.3 (schema 29) and target schema 31; the expected version defaults to the Cargo.toml package version. Migration `0030_thread_auto_compact_at` adds one nullable integer column to `thread`, and `0031_thread_summary_parameters` adds two (`segment_chars`, `reduce_rounds`); existing rows stay NULL. Run it on an owned disposable fixture; CI alone is not that check.
 

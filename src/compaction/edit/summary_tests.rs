@@ -91,6 +91,8 @@ fn summary_args(from: &str, to: &str) -> ContextEditArgs {
     ContextEditArgs {
         max_chars: None,
         max_percent: None,
+        segment_chars: None,
+        reduce_rounds: None,
         thread_id: Some("t".into()),
         action: ContextEditAction::Summary,
         from_node_id: Some(from.into()),
@@ -520,7 +522,7 @@ async fn context_trim_summary_projection_does_not_change_exact_restore_or_marker
                 .count()
                 < 4096
         );
-        assert!(segments(&snapshot.groups, snapshot.epoch).is_ok());
+        assert!(segments(&snapshot.groups, snapshot.epoch, SEGMENT_CHARS).is_ok());
         assert_eq!(saved_context_trim_marker(&fixture, &marker).await, original);
         fixture
             .compactor
@@ -533,6 +535,8 @@ async fn context_trim_summary_projection_does_not_change_exact_restore_or_marker
                     to_node_id: None,
                     max_chars: None,
                     max_percent: None,
+                    segment_chars: None,
+                    reduce_rounds: None,
                 },
                 CancellationToken::new(),
             )

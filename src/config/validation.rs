@@ -9,7 +9,7 @@ impl Config {
         if !self.compaction.valid() {
             return Err(invalid(
                 "compaction",
-                "set positive summary_max_chars and/or finite summary_max_percent in (0,100], and summary map/reduce request limits in 1..=4096",
+                "set positive summary_max_chars and/or finite summary_max_percent in (0,100], summary map/reduce request limits in 1..=4096, segment_chars in 2000..=1000000 and reduce_rounds in 1..=16",
             ));
         }
         self.retention.validate_positive()?;
@@ -121,6 +121,24 @@ impl Connection {
                 ));
             }
             _ => {}
+        }
+        if self
+            .segment_chars
+            .is_some_and(|v| !SEGMENT_CHARS_RANGE.contains(&v))
+        {
+            return Err(invalid(
+                format!("connections.{name}.segment_chars"),
+                "must be in 2000..=1000000",
+            ));
+        }
+        if self
+            .reduce_rounds
+            .is_some_and(|v| !REDUCE_ROUNDS_RANGE.contains(&v))
+        {
+            return Err(invalid(
+                format!("connections.{name}.reduce_rounds"),
+                "must be in 1..=16",
+            ));
         }
         api_root(&self.base_url).map_err(|_| invalid(format!("connections.{name}.base_url"), "provide an HTTP(S) API root, e.g. https://proxy.example/v1, not https://proxy.example/v1/responses; omit credentials/query/fragment and /responses, /embeddings, /models or /chat/completions suffix"))?;
         if self.response_header_timeout_ms == 0 {

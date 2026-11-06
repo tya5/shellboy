@@ -202,6 +202,8 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # response_retry_partial = true
 # auto_trim_on_disconnect = true
 # auto_at_tokens = 200000   # overrides [compaction] auto_at_tokens; 0 disables
+# segment_chars = 64000     # overrides [compaction] segment_chars (2000..1000000)
+# reduce_rounds = 4         # overrides [compaction] reduce_rounds (1..16)
 
 # Optional. Specify both fields if enabled.
 # [embedding]
@@ -569,6 +571,8 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `connections.<name>` | `prompt_caching=true` | Shellboy-placed cache markers (`anthropic_messages` only; nothing new for other dialects); `false` sends none |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
 | `connections.<name>` | `auto_at_tokens` = unset (uses `[compaction]`) | Per-connection proactive compaction threshold; 0 disables |
+| `connections.<name>` | `segment_chars`, `reduce_rounds` = unset (uses `[compaction]`) | Per-connection summary part size (2000..1000000 characters) and maximum reduce rounds (1..16) |
+| `compaction` | `segment_chars=64000`, `reduce_rounds=4` | Original characters per summary part (one map request each; also the reduce packing size) and maximum reduce rounds before a still-too-long summary is rejected |
 | `compaction` | `auto_at_tokens=200000` | Proactive compaction when the last reported input reaches this; 0 disables |
 | `connections.<name>` | `auto_trim_on_disconnect=true` | API-free maximum reduction from the second eligible consecutive failure; no preflight |
 | `connections.<name>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | Consecutive temporary conversation failure retries (0–20, 0 disables), backoff cap (1–300000ms), and retry after partial reception |
@@ -738,6 +742,33 @@ value wins over the configured ones, applies from the next request-boundary chec
 (never to a request already sent), stays when the Thread's connection changes and
 is inherited by child Threads; `thread get` shows it as `auto_compact_at` beside
 the value in use, `effective_auto_compact_at`.
+
+### Summary part size and reduce rounds
+
+```toml
+[compaction]
+segment_chars = 64000   # default; 2000..=1000000
+reduce_rounds = 4       # default; 1..=16
+
+[connections.proxy]
+segment_chars = 32000   # optional per-connection override
+reduce_rounds = 6       # optional per-connection override
+```
+
+`segment_chars` is how many characters of the original conversation go into one
+summary part (one model request) and the size reduce requests are packed to;
+`reduce_rounds` is the most reduce rounds before a summary that is still over its
+limit is rejected. The value in effect is the first one set of: the single summary's
+`compact --summary --segment-chars N --reduce-rounds N`, the Thread's
+`thread set --segment-chars N --reduce-rounds N` (`''` clears), the connection's,
+then `[compaction]`. Out-of-range values are rejected at every level. Parts made at
+one size are not reused at another size except where the covered nodes coincide. Each
+`compact list` item records the values it used (`metrics.segment_chars`,
+`metrics.reduce_rounds`, with `metrics.summary_limit`), so a change can be compared
+with the earlier results; see the Agent Guide for the method. Thread values are
+copied by child Threads and forks and survive connection changes; `thread get`
+shows `segment_chars` / `reduce_rounds` beside `effective_segment_chars` /
+`effective_reduce_rounds`.
 
 ### Unknown shell arguments
 

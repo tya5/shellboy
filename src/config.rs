@@ -185,6 +185,10 @@ pub struct Connection {
     pub auto_trim_on_disconnect: bool,
     /// Overrides `[compaction] auto_at_tokens` for this connection; 0 disables.
     pub auto_at_tokens: Option<u64>,
+    /// Overrides `[compaction] segment_chars` for this connection.
+    pub segment_chars: Option<usize>,
+    /// Overrides `[compaction] reduce_rounds` for this connection.
+    pub reduce_rounds: Option<usize>,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -216,6 +220,8 @@ impl Default for Connection {
             response_retry_partial: true,
             auto_trim_on_disconnect: true,
             auto_at_tokens: None,
+            segment_chars: None,
+            reduce_rounds: None,
         }
     }
 }
@@ -252,6 +258,8 @@ impl fmt::Debug for Connection {
             .field("response_retry_partial", &self.response_retry_partial)
             .field("auto_trim_on_disconnect", &self.auto_trim_on_disconnect)
             .field("auto_at_tokens", &self.auto_at_tokens)
+            .field("segment_chars", &self.segment_chars)
+            .field("reduce_rounds", &self.reduce_rounds)
             .finish()
     }
 }
@@ -881,6 +889,12 @@ pub struct Compaction {
     /// Proactive compaction threshold on the provider-reported input tokens of
     /// the last adopted attempt. 0 disables; connections may override it.
     pub auto_at_tokens: u64,
+    /// Characters of original conversation per map part (one model request
+    /// each) and the packing size of a reduce request. Connections and a
+    /// Thread may override it; a compaction may override it once.
+    pub segment_chars: usize,
+    /// Maximum reduce rounds before a still-too-long summary is rejected.
+    pub reduce_rounds: usize,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -890,6 +904,8 @@ struct CompactionFields {
     summary_map_max_requests: Option<usize>,
     summary_reduce_max_requests: Option<usize>,
     auto_at_tokens: Option<u64>,
+    segment_chars: Option<usize>,
+    reduce_rounds: Option<usize>,
 }
 impl From<CompactionFields> for Compaction {
     fn from(f: CompactionFields) -> Self {
@@ -897,7 +913,9 @@ impl From<CompactionFields> for Compaction {
             && f.summary_max_percent.is_none()
             && (f.summary_map_max_requests.is_some()
                 || f.summary_reduce_max_requests.is_some()
-                || f.auto_at_tokens.is_some());
+                || f.auto_at_tokens.is_some()
+                || f.segment_chars.is_some()
+                || f.reduce_rounds.is_some());
         Self {
             summary_max_chars: if request_only {
                 Some(20_000)
@@ -912,6 +930,8 @@ impl From<CompactionFields> for Compaction {
             summary_map_max_requests: f.summary_map_max_requests.unwrap_or(128),
             summary_reduce_max_requests: f.summary_reduce_max_requests.unwrap_or(16),
             auto_at_tokens: f.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),
+            segment_chars: f.segment_chars.unwrap_or(DEFAULT_SEGMENT_CHARS),
+            reduce_rounds: f.reduce_rounds.unwrap_or(DEFAULT_REDUCE_ROUNDS),
         }
     }
 }
@@ -923,10 +943,18 @@ impl Default for Compaction {
             summary_map_max_requests: 128,
             summary_reduce_max_requests: 16,
             auto_at_tokens: DEFAULT_AUTO_AT_TOKENS,
+            segment_chars: DEFAULT_SEGMENT_CHARS,
+            reduce_rounds: DEFAULT_REDUCE_ROUNDS,
         }
     }
 }
 pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
+pub const DEFAULT_SEGMENT_CHARS: usize = 64_000;
+pub const DEFAULT_REDUCE_ROUNDS: usize = 4;
+/// Accepted summary segment sizes (characters): the lower end is the minimum
+/// summary limit, the upper end bounds one request's source text.
+pub const SEGMENT_CHARS_RANGE: std::ops::RangeInclusive<usize> = 2_000..=1_000_000;
+pub const REDUCE_ROUNDS_RANGE: std::ops::RangeInclusive<usize> = 1..=16;
 impl Compaction {
     pub fn valid(&self) -> bool {
         (self.summary_max_chars.is_some() || self.summary_max_percent.is_some())
@@ -936,12 +964,34 @@ impl Compaction {
                 .is_none_or(|p| p.is_finite() && p > 0.0 && p <= 100.0)
             && (1..=4096).contains(&self.summary_map_max_requests)
             && (1..=4096).contains(&self.summary_reduce_max_requests)
+            && SEGMENT_CHARS_RANGE.contains(&self.segment_chars)
+            && REDUCE_ROUNDS_RANGE.contains(&self.reduce_rounds)
     }
     /// The Thread override wins, then the connection; 0 means proactive compaction is off.
     pub fn auto_at_tokens_for(&self, thread: Option<u64>, connection: Option<&Connection>) -> u64 {
         thread
             .or_else(|| connection.and_then(|c| c.auto_at_tokens))
             .unwrap_or(self.auto_at_tokens)
+    }
+    /// Per-invocation value (when given), then the Thread override, then the
+    /// connection, then `[compaction]`. Each level was range-checked on entry.
+    pub fn segment_chars_for(
+        &self,
+        thread: Option<usize>,
+        connection: Option<&Connection>,
+    ) -> usize {
+        thread
+            .or_else(|| connection.and_then(|c| c.segment_chars))
+            .unwrap_or(self.segment_chars)
+    }
+    pub fn reduce_rounds_for(
+        &self,
+        thread: Option<usize>,
+        connection: Option<&Connection>,
+    ) -> usize {
+        thread
+            .or_else(|| connection.and_then(|c| c.reduce_rounds))
+            .unwrap_or(self.reduce_rounds)
     }
     pub fn summary_limit(&self, source: u64) -> u64 {
         self.summary_max_chars

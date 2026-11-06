@@ -82,7 +82,7 @@ pub(super) fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
     let mut remaining = sizes.iter().sum::<usize>();
     let mut count = completed;
     if completed <= normal_prefix(s) && completed < safe {
-        // Explicit overflow still requires progress below 64K: provider limits
+        // Explicit overflow still requires progress below the segment size: provider limits
         // may be smaller. Do not count summarizing just the origin user as
         // progress when an older complete tool group (or its spill) is eligible.
         let first_tool = s.groups[completed..safe].iter().position(|g| {
@@ -94,7 +94,7 @@ pub(super) fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
         count += first_tool.map_or(1, |index| index + 1);
         remaining = remaining.saturating_sub(sizes[..count - completed].iter().sum());
     }
-    while count < safe && remaining > SEGMENT_CHARS {
+    while count < safe && remaining > s.segment_chars {
         remaining = remaining.saturating_sub(sizes[count - completed]);
         count += 1;
     }

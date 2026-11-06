@@ -114,11 +114,11 @@ impl Fixture {
     async fn changed(&self, title: &str) {
         let response = ipc::call(
             &self.data,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some("t".into()),
                 title: Some(title.into()),
                 ..Default::default()
-            }),
+            })),
             Some(format!(
                 "{}:{}",
                 self.control.store.instance_id,

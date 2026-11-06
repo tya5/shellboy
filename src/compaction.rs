@@ -47,7 +47,8 @@ pub(crate) use usage::{
     UsageRecord as SummaryUsageRecord,
 };
 
-const SEGMENT_CHARS: usize = 64_000;
+#[cfg(test)]
+const SEGMENT_CHARS: usize = crate::config::DEFAULT_SEGMENT_CHARS;
 // A graph-work bound, independent of provider context capacity.
 const TURN_BOUNDARY_IDS: usize = 65_536;
 // Assigned nodes carry their Turn directly. Held unassigned messages receive
@@ -111,6 +112,10 @@ struct Snapshot {
     turn_boundaries: HashMap<String, String>,
     turn_fence: Option<(String, i64)>,
     run_fence: Option<String>,
+    /// Summary segment size in effect for this Thread: its override, the
+    /// connection, then `[compaction]` (a single compaction may override it).
+    segment_chars: usize,
+    reduce_rounds: usize,
 }
 #[derive(Clone, Debug, Default, Serialize)]
 pub(crate) struct SpillCounts {
@@ -131,6 +136,11 @@ pub struct CompactResult {
     pub summary_characters: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_limit: Option<u64>,
+    /// Segment size and reduce-round limit this summary used (#231).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub segment_chars: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reduce_rounds: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_requests: Option<usize>,
     pub spilled_groups: usize,
@@ -389,7 +399,7 @@ impl Compactor {
     async fn snapshot(&self, thread: &str, for_summary: bool) -> Result<Snapshot, ApiError> {
         let thread = thread.to_owned();
         self.database.call(move |db| {
-            let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
+            let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<i64>>(6)?,r.get::<_,Option<i64>>(7)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
             let current_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
             let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
@@ -422,8 +432,13 @@ impl Compactor {
                     }
                 }
             }
-            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence})
-        }).await.map_err(storage_error)
+            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,segment_chars:0,reduce_rounds:0}).map(|snapshot|(snapshot,data.6,data.7))
+        }).await.map_err(storage_error).map(|(mut snapshot,segment,rounds)|{
+            let connection=self.config.connections.get(&snapshot.profile);
+            snapshot.segment_chars=self.config.compaction.segment_chars_for(segment.map(|v|v as usize),connection);
+            snapshot.reduce_rounds=self.config.compaction.reduce_rounds_for(rounds.map(|v|v as usize),connection);
+            snapshot
+        })
     }
 
     /// Spill whole completed groups, retaining the newest unless the second
@@ -715,7 +730,7 @@ impl Compactor {
             });
         };
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        let policy = self.config.compaction.clone();
+        let policy = self.policy_for(&snapshot);
         let range = plan.start..plan.latest;
         self.summarize_recorded(
             snapshot,
@@ -762,7 +777,7 @@ impl Compactor {
             ));
         };
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        let policy = self.config.compaction.clone();
+        let policy = self.policy_for(&snapshot);
         let result = self
             .summarize_recorded(
                 snapshot,
@@ -956,15 +971,17 @@ impl Compactor {
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_with_policy(
-            snapshot,
-            range,
-            cancel,
-            self.config.compaction.clone(),
-            boundary,
-            automatic,
-        )
-        .await
+        let policy = self.policy_for(&snapshot);
+        self.summarize_with_policy(snapshot, range, cancel, policy, boundary, automatic)
+            .await
+    }
+    /// `[compaction]` with this Thread's resolved segment size and reduce rounds.
+    fn policy_for(&self, snapshot: &Snapshot) -> crate::config::Compaction {
+        crate::config::Compaction {
+            segment_chars: snapshot.segment_chars,
+            reduce_rounds: snapshot.reduce_rounds,
+            ..self.config.compaction.clone()
+        }
     }
     async fn summarize_with_policy(
         &self,
@@ -1036,6 +1053,8 @@ impl Compactor {
             reduce_requests: 0,
             map_limit: policy.summary_map_max_requests,
             reduce_limit: policy.summary_reduce_max_requests,
+            segment_chars: policy.segment_chars,
+            reduce_rounds: policy.reduce_rounds,
             usage: ledger,
         };
         let budget = &mut budget;
@@ -1052,7 +1071,7 @@ impl Compactor {
             .clients
             .get(&snapshot.profile)
             .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
-        let segments = segments(groups, snapshot.epoch)?;
+        let segments = segments(groups, snapshot.epoch, policy.segment_chars)?;
         let mut uncached = 0usize;
         for (start, end, _) in &segments {
             let sources: Vec<Source> = groups[*start..*end]
@@ -1180,6 +1199,8 @@ impl Compactor {
                 source_characters: Some(budget.source_characters),
                 summary_characters: Some(budget.summary_characters),
                 summary_limit: Some(budget.limit),
+                segment_chars: Some(budget.segment_chars),
+                reduce_rounds: Some(budget.reduce_rounds),
                 model_requests: Some(budget.requests),
                 source_nodes: originals.len(),
                 created_parts: created,
@@ -1514,7 +1535,11 @@ fn source_groups(sources: Vec<Source>, completed: &HashSet<String>) -> Vec<Group
     }
     groups
 }
-fn segments(groups: &[Group], epoch: i64) -> Result<Vec<(usize, usize, u8)>, ApiError> {
+fn segments(
+    groups: &[Group],
+    epoch: i64,
+    segment_chars: usize,
+) -> Result<Vec<(usize, usize, u8)>, ApiError> {
     let mut result = Vec::new();
     let mut start = 0;
     let mut count = 0;
@@ -1524,12 +1549,12 @@ fn segments(groups: &[Group], epoch: i64) -> Result<Vec<(usize, usize, u8)>, Api
             .iter()
             .map(|n| render(n, epoch).chars().count())
             .sum::<usize>();
-        if size > SEGMENT_CHARS {
+        if size > segment_chars {
             return Err(invalid(
                 "An indivisible conversation group exceeds the summary segment baseline; inspect the original or narrow the whole-group range",
             ).hint("Spill tool results if they are not already spilled. Otherwise inspect the sources and consider explicit --omit or --maximal; these remove selected context, while originals remain available."));
         }
-        if count + size > SEGMENT_CHARS && i > start {
+        if count + size > segment_chars && i > start {
             result.push((start, i, 0));
             start = i;
             count = 0;
@@ -1641,7 +1666,49 @@ mod tests {
             turn_boundaries: HashMap::new(),
             turn_fence: None,
             run_fence: None,
+            segment_chars: SEGMENT_CHARS,
+            reduce_rounds: 4,
         }
+    }
+    #[test]
+    fn part_keys_follow_segment_boundaries_so_other_sizes_never_reuse_parts() {
+        let groups: Vec<Group> = ["g1", "g2", "g3"]
+            .into_iter()
+            .map(|id| Group {
+                sources: vec![source(
+                    id,
+                    None,
+                    json!({"role":"user","content":id.repeat(15_000)}),
+                )],
+                complete: true,
+                tool: false,
+            })
+            .collect();
+        let snapshot = fixture_snapshot(groups.clone());
+        let keys = |segment_chars: usize| -> Vec<String> {
+            segments(&groups, snapshot.epoch, segment_chars)
+                .unwrap()
+                .into_iter()
+                .map(|(start, end, _)| {
+                    let sources: Vec<Source> = groups[start..end]
+                        .iter()
+                        .flat_map(|g| g.sources.clone())
+                        .collect();
+                    CompactionKeys::summary_part(&summary_key(&snapshot, &sources))
+                })
+                .collect()
+        };
+        // Each group renders to a little over 30,000 characters.
+        let large = keys(64_000);
+        let small = keys(40_000);
+        assert_eq!((large.len(), small.len()), (2, 3));
+        // A part covering different sources has a different key, so a size
+        // change never reuses (or overwrites) another size's part...
+        assert!(large[0] != small[0] && large[0] != small[1]);
+        // ...while a part with identical sources keeps its key and is reused.
+        assert_eq!(large[1], small[2]);
+        // Same size, same keys.
+        assert_eq!(keys(64_000), large);
     }
     #[test]
     fn source_groups_preserve_interleaved_audit_without_assigning_group_ids() {
@@ -1927,7 +1994,8 @@ mod tests {
                         complete: true,
                         tool: false
                     }],
-                    0
+                    0,
+                    SEGMENT_CHARS
                 )
                 .unwrap(),
                 vec![(0, 1, 0)]
@@ -1948,6 +2016,7 @@ mod tests {
                 tool: false,
             }],
             0,
+            SEGMENT_CHARS,
         )
         .unwrap_err();
         let hint = error.hint.as_deref().unwrap();
@@ -2004,8 +2073,11 @@ mod tests {
             tool: false,
         };
         let groups = vec![group("a", 35_000), group("b", 35_000), group("c", 10)];
-        assert_eq!(segments(&groups, 0).unwrap(), vec![(0, 1, 0), (1, 3, 0)]);
-        assert!(segments(&[group("huge", 64_001)], 0).is_err());
+        assert_eq!(
+            segments(&groups, 0, SEGMENT_CHARS).unwrap(),
+            vec![(0, 1, 0), (1, 3, 0)]
+        );
+        assert!(segments(&[group("huge", 64_001)], 0, SEGMENT_CHARS).is_err());
     }
     #[test]
     fn spill_placeholder_avoids_repeated_arguments_and_reduces_synthetic_growth() {
@@ -2344,9 +2416,13 @@ mod tests {
             "synthetic total_nodes={} tool_result_projection_chars={tool_result_characters}",
             originals.len()
         );
-        let map_count = segments(&snapshot.groups[range.clone()], snapshot.epoch)
-            .unwrap()
-            .len();
+        let map_count = segments(
+            &snapshot.groups[range.clone()],
+            snapshot.epoch,
+            SEGMENT_CHARS,
+        )
+        .unwrap()
+        .len();
         let mut old_groups = snapshot.groups[range.clone()].to_vec();
         for source in old_groups.iter_mut().flat_map(|g| &mut g.sources) {
             if let Some(items) = source
@@ -2357,7 +2433,9 @@ mod tests {
                 items.retain(|item| item["type"] != "reasoning");
             }
         }
-        let old_map_count = segments(&old_groups, snapshot.epoch).unwrap().len();
+        let old_map_count = segments(&old_groups, snapshot.epoch, SEGMENT_CHARS)
+            .unwrap()
+            .len();
         let old_rendered: usize = old_groups
             .iter()
             .flat_map(|g| &g.sources)

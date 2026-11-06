@@ -20,7 +20,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         # The canonical schema has the version-18 index; model the old index.
         suffix = " OR key LIKE 'summary.usage.%'"
         self.assertEqual(base.count(suffix), 1)
-        column = ", auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0)"
+        column = (", auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0)"
+                  ", segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000)"
+                  ", reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16)")
         self.assertEqual(base.count(column), 1)
         db.executescript(base.replace(suffix, '').replace(column, ''))
         for ident, parent in [('parent', None), ('child', 'parent')]:
@@ -289,11 +291,21 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'default threshold'):
             checks.check_migration(db, before, 29, 30)
 
-    def test_arguments_default_to_public_v083_schema29_and_target30(self):
+    def test_schema30_to31_adds_summary_parameter_columns_and_preserves_rows(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 30)
+        before, records = self.upgrade(db, 30, 31)
+        self.assertEqual(checks.ledger(db), before + [(31, '0031_thread_summary_parameters')])
+        self.assertEqual(checks.snapshot(db), records)
+        db.execute("UPDATE thread SET segment_chars=2000")
+        with self.assertRaisesRegex(AssertionError, 'default summary parameters'):
+            checks.check_migration(db, before, 30, 31)
+
+    def test_arguments_default_to_public_v083_schema29_and_target31(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.8.3', 29, checks.CARGO_VERSION, 30))
+                         ('0.8.3', 29, checks.CARGO_VERSION, 31))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
@@ -304,9 +316,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 30))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 31))
         release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 30))
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 31))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])

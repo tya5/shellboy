@@ -15,6 +15,8 @@ fn args(to: &str) -> ContextEditArgs {
         to_node_id: Some(to.into()),
         max_chars: None,
         max_percent: None,
+        segment_chars: None,
+        reduce_rounds: None,
     }
 }
 fn lines(path: &Path) -> usize {

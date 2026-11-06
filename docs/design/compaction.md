@@ -20,7 +20,7 @@ fence, avoiding unnecessary discard of completed summary API work.
 
 完結tool groupはassistantの全callと全resultを一つの境界として扱う。spillは全callと各結果のplaceholderを一つのnodeへ保存する。placeholderはcall ID、コマンド引数、終了状態、execution IDと原文node IDを含む。通常は最新完結groupを保護し、明確なcontext超過の二段階目だけ保護を解除する。推論の扱いは [#182](#signed-reasoning-and-history-edits-182) の位置規則に従う（編集位置より前は保持、後ろは送らない）。
 
-通常の要約対象は現在Turnと直近完了Turnより前の連続prefix。未反映のユーザー指示と未完結groupは対象外。64,000 Unicode文字の初期segmentを完結group境界で分け、明確なcontext超過だけ深さ8まで二分する。opaque reasoningは除外し、現在epochの送信対象推論のみを入力へ含める。部分成功はDBへ保存するが、経路採用は全成功時だけ。最終統合APIは呼ばない。
+通常の要約対象は現在Turnと直近完了Turnより前の連続prefix。未反映のユーザー指示と未完結groupは対象外。64,000 Unicode文字（既定。#231で設定可）の初期segmentを完結group境界で分け、明確なcontext超過だけ深さ8まで二分する。opaque reasoningは除外し、現在epochの送信対象推論のみを入力へ含める。部分成功はDBへ保存するが、経路採用は全成功時だけ。最終統合APIは呼ばない。
 
 Summary instructions always use English headings: Goal, Constraints, Current state, Open issues and next steps, and Key references, regardless of UI language. Missing headings do not trigger another API call. Empty summaries are rejected to avoid losing original content. Shellboy supplies source IDs. Prompt version v2 separates new summary-cache entries from v1; saved summaries remain verbatim and are not migrated or translated.
 
@@ -50,7 +50,7 @@ assistant本文が空でもraw responseの監査recordは保存するが、そ�
 
 全段階で未完結group・未反映のaccepted/heldユーザーsource・最新完結tool groupを越えない。追加するgroupは分割せず、現在Turn側の最後のgroupを残す。最新toolの解放は既存の第二段階spillが担当し、その後のsnapshotを要約に使う。安全境界のため基準まで減らせなくても保護を越えない。
 
-64,000文字は既存のsegment sizing指標であり、providerのcontext容量や全modelへの適合保証ではない。64K未満でもprovider容量を超える可能性があるため、直近完了Turnを解放できない場合の最小進捗は文字数に依存させない。provider容量の推測、追加の通常request、新しいstage/stateは導入しない。候補prefixの生成と要約の一括採用は一回で、既存の最大二段階の通常retryを維持する。残る容量超過は既存のrecoveryへ返す。
+64,000文字（既定）は既存のsegment sizing指標であり、providerのcontext容量や全modelへの適合保証ではない。64K未満でもprovider容量を超える可能性があるため、直近完了Turnを解放できない場合の最小進捗は文字数に依存させない。provider容量の推測、追加の通常request、新しいstage/stateは導入しない。候補prefixの生成と要約の一括採用は一回で、既存の最大二段階の通常retryを維持する。残る容量超過は既存のrecoveryへ返す。
 
 summary.partは従来どおり入力・生成規則ごとのcacheであり、全attemptを恒久保持するledgerではない。空本文のrawも同じ入力への明示retryが成功した際には同じcache recordで置き換わる。採用済み成功片のrawと元sourceは追跡できるが、失敗attempt全件の不変監査を新たに保証しない。
 
@@ -219,8 +219,8 @@ usage observation is a manual read of existing records, not new telemetry.
 
 Explicit range summaries use map/reduce, not concatenated part summaries. Keep
 map inputs chronological and group-atomic; pack complete chronological map
-parts, including their source-ID lines, into reduce batches of at most 64,000
-characters, then consolidate again until one final summary remains. Never split
+parts, including their source-ID lines, into reduce batches of at most
+`segment_chars` (default 64,000) characters, then consolidate again until one final summary remains. Never split
 a part: an oversized part is sent alone and counted in the existing summary
 usage record as `oversized_reduce_parts` without storing its contents.
 
@@ -282,6 +282,40 @@ to the map budget because their necessity is learned only from the provider.
 The four-round reduce bound remains. Existing #50 rejection handling, cancellation,
 provenance and atomic adoption remain unchanged; an earlier spill may be saved.
 Omission notices do not hardcode size flags: ordinary summary uses user settings.
+
+### Segment size and reduce rounds (#231)
+
+`segment_chars` (default 64,000, accepted 2,000..=1,000,000 Unicode characters) is the
+map-part size and the reduce packing size, formerly the constant `SEGMENT_CHARS`.
+`reduce_rounds` (default 4, accepted 1..=16) is the former constant bound on reduce
+rounds. Both resolve like `auto_at_tokens`: `[compaction]` default, then
+`connections.<name>` override, then the per-Thread override
+(`thread.segment_chars` / `thread.reduce_rounds`, nullable integers, migration 31, set by
+`thread set --segment-chars N|''` / `--reduce-rounds N|''`, copied by child Threads and
+forks, kept across connection changes), then the per-invocation
+`compact --summary --segment-chars N --reduce-rounds N` (the call's own value, summary
+mode only; not accepted by the argument-free default compaction or its preview, which use
+the resolved values). The snapshot resolves the Thread/connection/default levels once
+(`Snapshot.segment_chars` / `reduce_rounds`), so the argument-free `compact`, the
+proactive path and `compact --dry-run` see the same values; the bound also sets the
+overflow-prefix baseline.
+
+Part identity: a map part's key is computed from the profile/model/effort/epoch and
+the covered nodes (their revisions and hashes), not from the size. A different size
+moves the part boundaries, so a part covering different nodes has a different key and
+the parts of another size are neither reused nor overwritten. A part covering the same
+nodes keeps its key and is reused. Reduce keys hash their input text and are unaffected
+by size except through that text. Unit test: `part_keys_follow_segment_boundaries...`.
+
+Recorded values: every compaction result and automatic stage record carries
+`segment_chars` and `reduce_rounds` (also in budget/limit failure details), next to the
+existing `summary_limit`; `compact list` copies them into `metrics` (unsigned integers
+only; missing in records before migration 31 means unknown). For an automatic event
+`trigger.auto_at_tokens` keeps the threshold that fired. Dry-run `summary` reports the
+values it used (`segment_chars`, `reduce_rounds`) with `segments` / `cached_segments` /
+`uncached_segments`. The agent can therefore compare results under their own values
+without a settings-history table (the values belong to the result, not the Thread).
+Numbers are limits, not guidance: no recommended value is shipped.
 
 ## Read-only compaction forecast (#113)
 
@@ -661,7 +695,7 @@ to be met or candidates are exhausted, before grouping or bundling. Then take a
 fresh snapshot, subtract the actual replay-character reduction from the
 calibrated removal need, and only if a need remains select the summary window.
 Groups already spilled enter it as placeholders, not original tool outputs.
-Bundle the selected window into existing 64,000-character segments only after
+Bundle the selected window into existing segments (`segment_chars`, default 64,000) only after
 this selection. Record whether spill, fresh measurement, selection and bundling
 ran. A summary may proceed with an unspilled candidate only when its anonymous
 skip reason is recorded. If spill alone reaches the target, do not summarize.

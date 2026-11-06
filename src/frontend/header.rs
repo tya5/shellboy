@@ -152,6 +152,10 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
     let details = ThreadDetails {
         auto_compact_at: row.get::<_, Option<i64>>(15)?.map(|v| v as u64),
         effective_auto_compact_at: None,
+        segment_chars: None,
+        effective_segment_chars: None,
+        reduce_rounds: None,
+        effective_reduce_rounds: None,
         awaiting_reply: Vec::new(),
         last_end_message: None,
         last_input: None,

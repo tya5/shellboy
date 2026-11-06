@@ -5002,6 +5002,8 @@ impl UiState {
             "/compact-max" => vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
                 thread_id: thread_id.clone(),
                 action: ContextEditAction::Maximal,
                 from_node_id: None,
@@ -5093,11 +5095,11 @@ impl UiState {
                     self.active_view_mut().effort = Some(effort);
                     vec![]
                 } else {
-                    vec![UiAction::Command(Command::ThreadSet(ThreadSetArgs {
+                    vec![UiAction::Command(Command::ThreadSet(Box::new(ThreadSetArgs {
                         thread_id,
                         effort: Some(effort),
                         ..Default::default()
-                    }))]
+                    })))]
                 }
             }
             "/agents" if argument.is_empty() => self.show_help(help::Page::info(
@@ -5107,11 +5109,11 @@ impl UiState {
             )),
             "/agents" => {
                 if let Some(thread_id) = thread_id {
-                    vec![UiAction::Command(Command::ThreadSet(ThreadSetArgs {
+                    vec![UiAction::Command(Command::ThreadSet(Box::new(ThreadSetArgs {
                         thread_id: Some(thread_id),
                         agents: Some(argument.into()),
                         ..Default::default()
-                    }))]
+                    })))]
                 } else {
                     let view = self.view();
                     let cwd = match crate::input_path::utf8(&view.cwd) {
@@ -5147,11 +5149,11 @@ impl UiState {
                     self.active_view_mut().cwd = path;
                     vec![]
                 } else {
-                    vec![UiAction::Command(Command::ThreadSet(ThreadSetArgs {
+                    vec![UiAction::Command(Command::ThreadSet(Box::new(ThreadSetArgs {
                         thread_id,
                         cwd: Some(wire_path),
                         ..Default::default()
-                    }))]
+                    })))]
                 }
             }
             "/attach" if !argument.is_empty() => {
@@ -5330,6 +5332,8 @@ impl UiState {
                 vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
                     max_chars: None,
                     max_percent: None,
+                    segment_chars: None,
+                    reduce_rounds: None,
                     thread_id: Some(thread_id),
                     action: ContextEditAction::Restore,
                     from_node_id: None,
@@ -8660,6 +8664,10 @@ mod tool_refresh_tests {
         ThreadDetails {
             auto_compact_at: None,
             effective_auto_compact_at: None,
+            segment_chars: None,
+            effective_segment_chars: None,
+            reduce_rounds: None,
+            effective_reduce_rounds: None,
             awaiting_reply: Vec::new(),
             last_end_message: None,
             last_input: None,

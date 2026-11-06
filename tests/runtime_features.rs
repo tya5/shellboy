@@ -1070,8 +1070,10 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     settled(&control, &thread).await;
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_at: None,
+            segment_chars: None,
+            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.clone()),
@@ -1079,7 +1081,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
             connection: None,
             model: Some("changed-model".into()),
             effort: Some("low".into()),
-        }),
+        })),
     )
     .await;
     assert!(
@@ -1135,8 +1137,10 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
         if previous_model != model {
             request(
                 &control,
-                Command::ThreadSet(ThreadSetArgs {
+                Command::ThreadSet(Box::new(ThreadSetArgs {
                     auto_compact_at: None,
+                    segment_chars: None,
+                    reduce_rounds: None,
                     agents: None,
                     title: None,
                     thread_id: Some(thread.clone()),
@@ -1144,7 +1148,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
                     model: Some(model.into()),
                     effort: None,
                     cwd: None,
-                }),
+                })),
             )
             .await;
             previous_model = model;
@@ -2204,22 +2208,22 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     );
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.clone()),
             agents: Some("middle.md".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     // Other settings still deliver at their normal boundary, not at a future Turn.
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.clone()),
             title: Some("changed".into()),
             effort: Some("brief".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     first.reply.send((200,json!({"id":"agents-tool","status":"completed","output":[{"type":"function_call","call_id":"agents-call","name":"shell","arguments":json!({"command":"echo synthetic","background":false}).to_string()}]}))).unwrap();
@@ -2272,11 +2276,11 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         .to_owned();
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.clone()),
             agents: Some("new.md".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     std::fs::remove_file(root.path().join("old.md")).unwrap();
@@ -2421,11 +2425,11 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
     std::fs::write(root.path().join("idle.md"), "IDLE_ROLE").unwrap();
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.clone()),
             agents: Some("idle.md".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     assert_eq!(
@@ -3835,6 +3839,10 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
     assert_eq!(events[0]["trigger"]["input_tokens"], 150);
     assert!(events[0]["metrics"]["summary_node_id"].is_string());
+    // #231: the values this summary used are recorded next to the threshold.
+    assert_eq!(events[0]["metrics"]["segment_chars"], 64_000);
+    assert_eq!(events[0]["metrics"]["reduce_rounds"], 4);
+    assert!(events[0]["metrics"]["summary_limit"].as_u64().unwrap() >= 2000);
     // #133: the summary request's reported usage, per event and in usage get.
     let usage = &events[0]["metrics"]["summary_usage"];
     assert_eq!(usage["requests"], 1, "{usage}");
@@ -3923,14 +3931,58 @@ async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn compact_list_records_the_summary_parameters_in_effect() {
+    // [compaction] 50,000 / 3 rounds; the Thread's own reduce_rounds=2 wins for
+    // that value only.
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(
+        root.path(),
+        &url,
+        "[compaction]\nauto_at_tokens=100\nsegment_chars=50000\nreduce_rounds=3\n",
+    )
+    .await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    request(
+        &control,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            reduce_rounds: Some("2".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    let summaries = proactive_third_turn(
+        &control,
+        &mut receive,
+        &thread,
+        150,
+        (200, answer("## 目的\nSummarized earlier turns")),
+    )
+    .await;
+    assert_eq!(summaries, 1);
+    let events = proactive_events(&control, &thread).await;
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
+    assert_eq!(events[0]["metrics"]["segment_chars"], 50_000);
+    assert_eq!(events[0]["metrics"]["reduce_rounds"], 2);
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
 async fn set_thread_auto_compact(control: &Arc<Control>, thread: &str, value: &str) {
     request(
         control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.into()),
             auto_compact_at: Some(value.into()),
+            segment_chars: None,
+            reduce_rounds: None,
             ..Default::default()
-        }),
+        })),
     )
     .await;
 }
@@ -4711,12 +4763,12 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     // cwd and effort change while the second request is in flight.
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.clone()),
             cwd: Some(moved.to_str().unwrap().into()),
             effort: Some("high".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     second
@@ -4744,11 +4796,11 @@ async fn turn_requests_strictly_append_and_mid_turn_changes_are_appended() {
     // A model change within the same Turn is also announced by appending.
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.clone()),
             model: Some("fixture-next".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     third
@@ -4822,6 +4874,8 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
             to_node_id: None,
             max_chars: None,
             max_percent: None,
+            segment_chars: None,
+            reduce_rounds: None,
         }),
     )
     .await;
@@ -5100,7 +5154,7 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert_eq!(adopted.2.len(), 4, "both complete call/result groups retain provenance");
         assert!(tokio::time::timeout(std::time::Duration::from_millis(250), receive.recv()).await.is_err(), "summary must wait without sending");
         crate::test_watchdog::watchdog("change model during proactive wait", request(&control,
-            Command::ThreadSet(ThreadSetArgs { thread_id: Some(target.clone()), model: Some("changed-model".into()), ..Default::default() })
+            Command::ThreadSet(Box::new(ThreadSetArgs { thread_id: Some(target.clone()), model: Some("changed-model".into()), ..Default::default() }))
         )).await.unwrap();
         let id = target.clone();
         let changed = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();

@@ -104,6 +104,8 @@ async fn trim_and_omit_match_actual_projection_and_leave_store_untouched() {
                     to_node_id: args.to_node_id,
                     max_chars: None,
                     max_percent: None,
+                    segment_chars: None,
+                    reduce_rounds: None,
                 },
                 CancellationToken::new(),
             )
@@ -138,6 +140,8 @@ async fn maximal_and_no_target_match_actual_projection() {
                     to_node_id: None,
                     max_chars: None,
                     max_percent: None,
+                    segment_chars: None,
+                    reduce_rounds: None,
                 },
                 CancellationToken::new(),
             )
@@ -174,6 +178,8 @@ async fn spill_matches_real_completed_tool_group_adoption() {
                 to_node_id: Some("g-old-result".into()),
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
             },
             CancellationToken::new(),
         )
@@ -538,6 +544,8 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
                 to_node_id: Some("b".into()),
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
             },
             CancellationToken::new(),
         )
@@ -601,6 +609,8 @@ async fn hidden_marker_after_multi_source_tool_groups_uses_group_not_node_ordina
                 to_node_id: Some("y".into()),
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
             },
             CancellationToken::new(),
         )
@@ -849,5 +859,79 @@ async fn automatic_candidates_notice_protection_release_without_path_revision_ch
         after.marks.iter().any(|mark| mark.starts_with("summary:")),
         "a released older source becomes a genuinely new summary candidate"
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn dry_run_reflects_the_segment_size_from_each_level() {
+    let f = Fixture::new().await;
+    f.text("a", &"a".repeat(5000)).await;
+    f.text("b", &"b".repeat(5000)).await;
+    f.text("tail", "current").await;
+    let summary = args(Some(ContextEditAction::Summary), Some("a"), Some("b"));
+    let p = forecast(&f, &summary);
+    assert_eq!(p["summary"]["segments"], 1);
+    assert_eq!(p["summary"]["uncached_segments"], 1);
+    assert_eq!(p["summary"]["segment_chars"], 64_000);
+    assert_eq!(p["summary"]["reduce_rounds"], 4);
+    // [compaction] level.
+    let mut c = config();
+    c.compaction.segment_chars = 6000;
+    let p = forecast_config(&f, &summary, &c).unwrap();
+    assert_eq!(
+        (
+            p["summary"]["segments"].clone(),
+            p["summary"]["segment_chars"].clone()
+        ),
+        (2.into(), 6000.into())
+    );
+    // The connection beats [compaction].
+    c.connections.get_mut("p").unwrap().segment_chars = Some(12_000);
+    c.connections.get_mut("p").unwrap().reduce_rounds = Some(2);
+    let p = forecast_config(&f, &summary, &c).unwrap();
+    assert_eq!(
+        (
+            p["summary"]["segments"].clone(),
+            p["summary"]["reduce_rounds"].clone()
+        ),
+        (1.into(), 2.into())
+    );
+    // The Thread beats the connection.
+    f.db.call(|db| {
+        db.execute(
+            "UPDATE thread SET segment_chars=6000, reduce_rounds=7 WHERE id='t'",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let p = forecast_config(&f, &summary, &c).unwrap();
+    assert_eq!(p["summary"]["segments"], 2);
+    assert_eq!(p["summary"]["uncached_segments"], 2);
+    assert_eq!(
+        (
+            p["summary"]["segment_chars"].clone(),
+            p["summary"]["reduce_rounds"].clone()
+        ),
+        (6000.into(), 7.into())
+    );
+    // This call beats the Thread.
+    let mut once = summary.clone();
+    once.segment_chars = Some(64_000);
+    once.reduce_rounds = Some(5);
+    let p = forecast_config(&f, &once, &c).unwrap();
+    assert_eq!(p["summary"]["segments"], 1);
+    assert_eq!(
+        (
+            p["summary"]["segment_chars"].clone(),
+            p["summary"]["reduce_rounds"].clone()
+        ),
+        (64_000.into(), 5.into())
+    );
+    // A default (no action) preview takes no per-call parameters.
+    let mut default = args(None, None, None);
+    default.segment_chars = Some(6000);
+    assert!(default.validate().is_err());
     f.close().await;
 }

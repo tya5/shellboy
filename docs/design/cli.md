@@ -14,7 +14,7 @@ shellboy thread fork --thread ID --node ID [--cwd PATH]
 shellboy thread delete-preview --thread ID [--descendants]
 shellboy thread delete --thread ID [--descendants]
 shellboy thread prune [--thread ID] --before NODE [--dry-run]
-shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|'']
+shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--segment-chars N|''] [--reduce-rounds N|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)
 shellboy message get --message ID
@@ -234,8 +234,10 @@ not an old-Core format shim or automatic answer/protocol downgrade.
 
 ## Bounded range-summary overrides (#73)
 
-Only `compact --summary` accepts `--max-chars N` / `--max-percent P`.
-They map to optional `ContextEditArgs.max_chars` / `max_percent`; owner-side
+Only `compact --summary` accepts `--max-chars N` / `--max-percent P` and (#231)
+`--segment-chars N` / `--reduce-rounds N`.
+They map to optional `ContextEditArgs.max_chars` / `max_percent` / `segment_chars` / `reduce_rounds`
+(the same fields on `CompactPreviewArgs`; the argument-free preview rejects them); owner-side
 validation rejects nonpositive characters, nonfinite/out-of-range percentages
 and limits on non-summary actions. Existing safety-boundary queue, operation
 receipts and immutable source adoption are unchanged. See the bounded-summary

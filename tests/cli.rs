@@ -183,6 +183,8 @@ async fn compact_edit_modes_keep_exact_range_and_reject_ambiguous_arguments() {
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
                 thread_id: Some("t".into()),
                 action,
                 from_node_id: from.map(str::to_owned),

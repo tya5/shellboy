@@ -3562,6 +3562,10 @@ above zero. Review follow-ups: the render stamp now covers the note and marker
 facts; a fork's inherited replacements omit the linkage keys (v3); a spill-only attempt
 shows a rejected summary and no later-input part.
 
+## D-231-1: Summary parameter bounds and migration 31 (2026-11-06)
+
+Decision: `segment_chars` accepts 2,000..=1,000,000 and `reduce_rounds` 1..=16, checked at every level (config, connection, `thread set`, `compact`) and by CHECK constraints on the two nullable `thread` columns (migration 31, registered `IndexOnly` for the same reason as D-229-1). Reason: 2,000 is the existing minimum summary limit, below which a reduced part cannot fit its own output; 1,000,000 keeps one request's source text far above any shipped provider context so it is not a practical limit while still bounded; 16 rounds is four times the old constant and each round already costs requests under the reduce request budget (default 16). These are bounds, not recommended values; defaults stay 64,000 and 4. Impact: values outside the range are rejected rather than clamped. Revisit if a provider needs a part larger than 1,000,000 characters or the rounds bound is seen to hide a loop.
+
 ## D-229-1: Migration 30 is IndexOnly (2026-11-06)
 
 Decision: the nullable `thread.auto_compact_at` column is registered as `IndexOnly`. Reason: it has no foreign key and every existing row is NULL, so the integrity scan has nothing to check. Impact: upgrade skips the full check, as for migrations 25-27. Revisit if a later column gets a foreign key or a non-NULL backfill.

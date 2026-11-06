@@ -1294,9 +1294,21 @@ impl Form {
                         String::new(),
                         Text,
                     ),
+                    f(
+                        "segment_chars",
+                        "要約の部分の大きさ（空=変更なし/none=接続の値へ）",
+                        String::new(),
+                        Text,
+                    ),
+                    f(
+                        "reduce_rounds",
+                        "要約の統合の最大段数（空=変更なし/none=接続の値へ）",
+                        String::new(),
+                        Text,
+                    ),
                 ],
                 |form, cwd| {
-                    Ok(Command::ThreadSet(ThreadSetArgs {
+                    Ok(Command::ThreadSet(Box::new(ThreadSetArgs {
                         agents: form.optional("agents")?,
                         title: match form.value("title_mode")? {
                             "set" => Some(form.owned("title")?),
@@ -1317,7 +1329,9 @@ impl Form {
                         model: form.optional("model")?,
                         effort: form.effort()?,
                         auto_compact_at: form.clearable("auto_compact_at")?,
-                    }))
+                        segment_chars: form.clearable("segment_chars")?,
+                        reduce_rounds: form.clearable("reduce_rounds")?,
+                    })))
                 },
             ),
             OpKind::MessageSend => (
@@ -1667,6 +1681,18 @@ impl Form {
                             String::new(),
                             Number,
                         ),
+                        f(
+                            "summary_segment_chars",
+                            "部分の大きさ（空=設定値）",
+                            String::new(),
+                            Number,
+                        ),
+                        f(
+                            "summary_reduce_rounds",
+                            "統合の最大段数（空=設定値）",
+                            String::new(),
+                            Number,
+                        ),
                     ],
                     |form, _| {
                         let action = match form.value("action")? {
@@ -1675,6 +1701,8 @@ impl Form {
                                     || form.optional("to_node")?.is_some()
                                     || form.optional("max_chars")?.is_some()
                                     || form.optional("max_percent")?.is_some()
+                                    || form.optional("summary_segment_chars")?.is_some()
+                                    || form.optional("summary_reduce_rounds")?.is_some()
                                 {
                                     return Err(
                                     local!(form.language, "範囲を指定するときは圧縮・編集方法を選択してください", "Select a compaction or editing method when specifying a range").into()
@@ -1704,6 +1732,8 @@ impl Form {
                             to_node_id: form.optional("to_node")?,
                             max_chars: form.optional_number("max_chars")?,
                             max_percent: form.optional_number("max_percent")?,
+                            segment_chars: form.optional_number("summary_segment_chars")?,
+                            reduce_rounds: form.optional_number("summary_reduce_rounds")?,
                         }))
                     },
                 )

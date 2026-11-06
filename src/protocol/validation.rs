@@ -78,6 +78,12 @@ impl ContextEditArgs {
                 ));
             }
         }
+        if self.segment_chars.is_some() || self.reduce_rounds.is_some() {
+            if self.action != ContextEditAction::Summary {
+                return Err(invalid("summary parameters require the summary action"));
+            }
+            check_summary_parameters(self.segment_chars, self.reduce_rounds)?;
+        }
         for (name, value) in [
             ("thread_id", &self.thread_id),
             ("from_node_id", &self.from_node_id),
@@ -133,6 +139,8 @@ impl CompactPreviewArgs {
                 to_node_id: self.to_node_id.clone(),
                 max_chars: self.max_chars,
                 max_percent: self.max_percent,
+                segment_chars: self.segment_chars,
+                reduce_rounds: self.reduce_rounds,
             }
             .validate()
         } else {
@@ -142,6 +150,8 @@ impl CompactPreviewArgs {
                 || self.to_node_id.is_some()
                 || self.max_chars.is_some()
                 || self.max_percent.is_some()
+                || self.segment_chars.is_some()
+                || self.reduce_rounds.is_some()
             {
                 return Err(invalid(
                     "default compact preview accepts only a Thread scope",
@@ -199,6 +209,48 @@ pub(crate) fn parse_auto_compact_at(value: &str) -> Result<Option<i64>, ApiError
         .map_err(|_| invalid("auto_compact_at is out of range"))
 }
 
+/// Digits set the value; `""` clears the Thread override. Both are bounded by `range`.
+pub(crate) fn parse_bounded_override(
+    value: &str,
+    name: &str,
+    range: &std::ops::RangeInclusive<usize>,
+) -> Result<Option<i64>, ApiError> {
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let message = || {
+        format!(
+            "{name} must be an integer in {}..={}, or an empty string to clear",
+            range.start(),
+            range.end()
+        )
+    };
+    if !value.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(invalid(message()));
+    }
+    value
+        .parse::<usize>()
+        .ok()
+        .filter(|v| range.contains(v))
+        .map(|v| Some(v as i64))
+        .ok_or_else(|| invalid(message()))
+}
+pub(crate) fn parse_segment_chars(value: &str) -> Result<Option<i64>, ApiError> {
+    parse_bounded_override(value, "segment_chars", &crate::config::SEGMENT_CHARS_RANGE)
+}
+pub(crate) fn parse_reduce_rounds(value: &str) -> Result<Option<i64>, ApiError> {
+    parse_bounded_override(value, "reduce_rounds", &crate::config::REDUCE_ROUNDS_RANGE)
+}
+fn check_summary_parameters(segment: Option<u64>, rounds: Option<u64>) -> Result<(), ApiError> {
+    if let Some(value) = segment {
+        parse_segment_chars(&value.to_string())?;
+    }
+    if let Some(value) = rounds {
+        parse_reduce_rounds(&value.to_string())?;
+    }
+    Ok(())
+}
+
 impl ThreadSetArgs {
     fn validate(&self) -> Result<(), ApiError> {
         optional_nonempty(self.connection.as_deref(), "connection")?;
@@ -220,6 +272,12 @@ impl ThreadSetArgs {
         if let Some(value) = &self.auto_compact_at {
             parse_auto_compact_at(value)?;
         }
+        if let Some(value) = &self.segment_chars {
+            parse_segment_chars(value)?;
+        }
+        if let Some(value) = &self.reduce_rounds {
+            parse_reduce_rounds(value)?;
+        }
         if self.connection.is_none()
             && self.cwd.is_none()
             && self.model.is_none()
@@ -227,6 +285,8 @@ impl ThreadSetArgs {
             && self.title.is_none()
             && self.agents.is_none()
             && self.auto_compact_at.is_none()
+            && self.segment_chars.is_none()
+            && self.reduce_rounds.is_none()
         {
             Err(invalid("thread.set requires a change"))
         } else {

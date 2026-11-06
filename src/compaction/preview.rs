@@ -67,6 +67,9 @@ struct Loaded {
     hidden: Option<(usize, Vec<Group>)>,
     kinds: HashMap<String, String>,
     stopping: bool,
+    /// The Thread's own overrides; the connection and `[compaction]` fill in the rest.
+    thread_segment_chars: Option<usize>,
+    thread_reduce_rounds: Option<usize>,
 }
 pub(crate) struct RawPreview {
     plan: Plan,
@@ -77,6 +80,8 @@ pub(crate) struct RawPreview {
 struct Summary {
     source_characters: u64,
     limit: u64,
+    segment_chars: usize,
+    reduce_rounds: usize,
     keys: Vec<Option<String>>,
     cached: usize,
 }
@@ -176,7 +181,7 @@ fn load(
     sql: &mut usize,
 ) -> Result<Loaded, StorageError> {
     *sql += 1;
-    let mut statement=db.prepare("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL")?;
+    let mut statement=db.prepare("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL")?;
     let mut rows = statement.query([thread])?;
     let row = rows.next()?.ok_or_else(|| {
         StorageError::from(ApiError::new(
@@ -192,6 +197,8 @@ fn load(
     let profile = required(row, 3, 4096, budget)?;
     let model = required(row, 4, 4096, budget)?;
     let effort = text(row, 5, 64, budget)?;
+    let thread_segment_chars = row.get::<_, Option<i64>>(6)?.map(|v| v as usize);
+    let thread_reduce_rounds = row.get::<_, Option<i64>>(7)?.map(|v| v as usize);
     drop(rows);
     drop(statement);
     *sql += 1;
@@ -385,6 +392,8 @@ fn load(
         turn_boundaries: HashMap::new(),
         turn_fence,
         run_fence: run,
+        segment_chars: 0,
+        reduce_rounds: 0,
     };
     // Derive the earliest selected replacement for each protected Turn by going
     // backward through indexed provenance, never scanning lifetime Turn seeds.
@@ -408,6 +417,8 @@ fn load(
         hidden,
         kinds,
         stopping,
+        thread_segment_chars,
+        thread_reduce_rounds,
     })
 }
 
@@ -699,8 +710,21 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
                 "Summary connection is not configured",
             ));
         }
-        let segments = segments(groups, snapshot.epoch)?;
+        let connection = config.connections.get(&snapshot.profile);
         let mut limits = config.compaction.clone();
+        limits.segment_chars = config
+            .compaction
+            .segment_chars_for(loaded.thread_segment_chars, connection);
+        limits.reduce_rounds = config
+            .compaction
+            .reduce_rounds_for(loaded.thread_reduce_rounds, connection);
+        if let Some(n) = args.segment_chars {
+            limits.segment_chars = n as usize;
+        }
+        if let Some(n) = args.reduce_rounds {
+            limits.reduce_rounds = n as usize;
+        }
+        let segments = segments(groups, snapshot.epoch, limits.segment_chars)?;
         if let Some(n) = args.max_chars {
             limits.summary_max_chars = Some(n);
         }
@@ -727,6 +751,8 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
         plan.summary = Some(Summary {
             source_characters,
             limit: limits.summary_limit(source_characters),
+            segment_chars: limits.segment_chars,
+            reduce_rounds: limits.reduce_rounds,
             keys,
             cached: 0,
         });
@@ -1001,7 +1027,7 @@ pub(crate) fn prepare(raw: RawPreview) -> Value {
     }
     let mut ids = plan.targets.iter().collect::<Vec<_>>();
     ids.sort();
-    let summary=plan.summary.as_ref().map(|s|json!({"source_characters":s.source_characters,"summary_character_limit":s.limit,
+    let summary=plan.summary.as_ref().map(|s|json!({"source_characters":s.source_characters,"summary_character_limit":s.limit,"segment_chars":s.segment_chars,"reduce_rounds":s.reduce_rounds,
         "segments":s.keys.len(),"cached_segments":s.cached,"uncached_segments":s.keys.len().saturating_sub(s.cached),
         "generated_characters":null,"provider_requests":0,"model_output_and_provider_errors_unknown":true}));
     json!({"dry_run":true,"thread_id":plan.original.thread,"mode":plan.mode,"coverage_complete":true,"observed_at":raw.at,

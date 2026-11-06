@@ -1301,6 +1301,8 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
                 thread_id: Some(thread.clone()),
                 action: ContextEditAction::Maximal,
                 from_node_id: None,
@@ -1343,11 +1345,11 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
         .control
         .request(Request::new(
             format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some(thread),
                 model: Some("changed-model".into()),
                 ..Default::default()
-            }),
+            })),
         ))
         .await;
     assert!(changed.ok, "{:?}", changed.error);
@@ -2233,11 +2235,11 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
     );
     request(
         &fixture.control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread),
             model: Some("changed-model".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     let sent = fixture.incoming().await;
@@ -2274,6 +2276,8 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
         to_node_id: Some("old-answer".into()),
         max_chars: None,
         max_percent: None,
+        segment_chars: None,
+        reduce_rounds: None,
     };
     let accepted = request(&fixture.control, Command::ContextEdit(edit)).await;
     assert!(accepted["operation_id"].is_string());
@@ -2329,11 +2333,11 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
     );
     let changed = request(
         &fixture.control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(fixture.accepted.thread_id.clone()),
             model: Some("changed-model".into()),
             ..Default::default()
-        }),
+        })),
     );
     tokio::time::timeout(std::time::Duration::from_secs(2), changed)
         .await
@@ -2372,6 +2376,8 @@ async fn manual_summary_revalidates_selection_after_connection_wait() {
             to_node_id: Some("old-answer".into()),
             max_chars: None,
             max_percent: None,
+            segment_chars: None,
+            reduce_rounds: None,
         }),
     )
     .await;
@@ -2412,11 +2418,11 @@ async fn manual_summary_revalidates_selection_after_connection_wait() {
         std::time::Duration::from_secs(2),
         request(
             &fixture.control,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some(target),
                 model: Some("changed-model".into()),
                 ..Default::default()
-            }),
+            })),
         ),
     )
     .await
@@ -2554,6 +2560,8 @@ async fn summary_connection_wait_is_recorded_in_existing_usage() {
             to_node_id: Some("old-answer".into()),
             max_chars: None,
             max_percent: None,
+            segment_chars: None,
+            reduce_rounds: None,
         }),
     )
     .await;

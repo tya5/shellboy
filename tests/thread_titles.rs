@@ -468,8 +468,10 @@ async fn pending_accepted_and_held_titles_do_not_leak_other_threads_or_unselecte
 }
 
 fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> Command {
-    Command::ThreadSet(ThreadSetArgs {
+    Command::ThreadSet(Box::new(ThreadSetArgs {
         auto_compact_at: None,
+        segment_chars: None,
+        reduce_rounds: None,
         agents: None,
         connection: None,
         thread_id: thread.map(Into::into),
@@ -477,7 +479,7 @@ fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> 
         model: model.map(Into::into),
         effort: None,
         title: title.map(Into::into),
-    })
+    }))
 }
 
 #[tokio::test]

@@ -2146,8 +2146,10 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     .await;
     command(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_at: None,
+            segment_chars: None,
+            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(accepted.thread_id.clone()),
@@ -2155,7 +2157,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
             connection: None,
             model: None,
             effort: Some("low".into()),
-        }),
+        })),
     )
     .await;
     assert!(

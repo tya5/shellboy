@@ -278,6 +278,8 @@ mod tests {
         ContextEditArgs {
             max_chars: None,
             max_percent: None,
+            segment_chars: None,
+            reduce_rounds: None,
             thread_id: Some("thread".into()),
             action: ContextEditAction::Spill,
             from_node_id: Some("first".into()),

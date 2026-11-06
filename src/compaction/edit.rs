@@ -68,13 +68,6 @@ impl Compactor {
         boundary: Option<&mut super::boundary::Boundary<'_>>,
     ) -> Result<ContextEditResult, ApiError> {
         args.validate()?;
-        let mut limits = self.config.compaction.clone();
-        if let Some(value) = args.max_chars {
-            limits.summary_max_chars = Some(value);
-        }
-        if let Some(value) = args.max_percent {
-            limits.summary_max_percent = Some(value);
-        }
         let snapshot = self
             .snapshot(
                 thread,
@@ -84,6 +77,20 @@ impl Compactor {
                 ),
             )
             .await?;
+        // [compaction] -> connection -> Thread (resolved in the snapshot) -> this call.
+        let mut limits = self.policy_for(&snapshot);
+        if let Some(value) = args.max_chars {
+            limits.summary_max_chars = Some(value);
+        }
+        if let Some(value) = args.max_percent {
+            limits.summary_max_percent = Some(value);
+        }
+        if let Some(value) = args.segment_chars {
+            limits.segment_chars = value as usize;
+        }
+        if let Some(value) = args.reduce_rounds {
+            limits.reduce_rounds = value as usize;
+        }
         let before = history_characters(&snapshot);
         match args.action {
             ContextEditAction::Maximal => {

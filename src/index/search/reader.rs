@@ -792,11 +792,11 @@ mod tests {
         let changed = control
             .request(Request::new(
                 format!("{}:later-mutation", owner.instance_id),
-                Command::ThreadSet(ThreadSetArgs {
+                Command::ThreadSet(Box::new(ThreadSetArgs {
                     thread_id: Some("thread".into()),
                     title: Some("owner remained available".into()),
                     ..Default::default()
-                }),
+                })),
             ))
             .await;
         assert!(

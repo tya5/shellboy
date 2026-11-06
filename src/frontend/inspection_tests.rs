@@ -229,11 +229,11 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
         &control,
         super::operation(
             &control,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("updated under oversized compaction".into()),
                 ..Default::default()
-            }),
+            })),
         ),
     )
     .await;
@@ -509,11 +509,11 @@ async fn f8_storage_separates_saved_metadata_from_physical_samples_and_refreshes
         &control,
         super::operation(
             &control,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("synthetic changed title".into()),
                 ..Default::default()
-            }),
+            })),
         ),
     )
     .await;
@@ -1690,11 +1690,11 @@ async fn f8_history_body_retains_original_detail_while_current_source_facts_chan
         &control,
         super::operation(
             &control,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("source observation fixture change".into()),
                 ..Default::default()
-            }),
+            })),
         ),
     )
     .await;
@@ -1803,11 +1803,11 @@ async fn f8_history_list_keeps_captured_foreign_page_when_selected_path_changes(
         &control,
         super::operation(
             &control,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some("independent".into()),
                 title: Some("changed path fixture".into()),
                 ..Default::default()
-            }),
+            })),
         ),
     )
     .await;

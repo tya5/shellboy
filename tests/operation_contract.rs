@@ -66,6 +66,8 @@ async fn explicit_context_edit_keeps_each_intent_in_the_protected_original_recei
         Command::ContextEdit(ContextEditArgs {
             max_chars: None,
             max_percent: None,
+            segment_chars: None,
+            reduce_rounds: None,
             thread_id: Some(thread.clone()),
             action,
             from_node_id: from.map(str::to_owned),
@@ -1100,6 +1102,8 @@ async fn queued_middle_omit_and_restore_apply_once_with_durable_downstream_resul
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
                 max_percent: None,
+                segment_chars: None,
+                reduce_rounds: None,
                 thread_id: Some(thread.clone()),
                 action,
                 from_node_id: omit.then(|| "omit-a".into()),

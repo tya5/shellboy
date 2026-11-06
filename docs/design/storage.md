@@ -745,5 +745,5 @@ quick_check is independent and unchanged. No new schema version or worker is add
 
 The reviewed registry initially marks only migrations25-27 as `IndexOnly` and
 migration14 as `Tables([turn, draft])` (turn-column addition and draft indexes).
-Migration30 (#229) is also `IndexOnly`: a nullable `ADD COLUMN` without a foreign key whose existing rows are all NULL changes no relation, so no scan is needed. Other historical entries remain unclassified/full. Ledger/version writes are
+Migration30 (#229) and migration31 (#231) are also `IndexOnly`: a nullable `ADD COLUMN` without a foreign key whose existing rows are all NULL changes no relation, so no scan is needed. Other historical entries remain unclassified/full. Ledger/version writes are
 inherent migration bookkeeping, not application-table changes requiring a scan.

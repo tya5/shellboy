@@ -475,12 +475,14 @@ impl UiState {
     }
     pub(super) fn change_model(&mut self, connection: String, model: String) -> Vec<UiAction> {
         if let Some(thread_id) = self.view().thread_id.clone() {
-            vec![UiAction::Command(Command::ThreadSet(ThreadSetArgs {
-                thread_id: Some(thread_id),
-                connection: Some(connection),
-                model: Some(model),
-                ..Default::default()
-            }))]
+            vec![UiAction::Command(Command::ThreadSet(Box::new(
+                ThreadSetArgs {
+                    thread_id: Some(thread_id),
+                    connection: Some(connection),
+                    model: Some(model),
+                    ..Default::default()
+                },
+            )))]
         } else {
             let view = self.active_view_mut();
             view.connection = Some(connection);

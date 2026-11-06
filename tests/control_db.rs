@@ -20,6 +20,8 @@ async fn store() -> (TempDir, Store) {
         default_effort="custom"
         [connections.other]
         base_url="http://127.0.0.1:2/v1"
+        segment_chars=40000
+        reduce_rounds=3
     "#,
     )
     .unwrap();
@@ -197,8 +199,10 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
     for model in ["another", "fixture"] {
         execute(
             &store,
-            Command::ThreadSet(ThreadSetArgs {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_at: None,
+                segment_chars: None,
+                reduce_rounds: None,
                 agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
@@ -206,7 +210,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
                 cwd: Some("nested/..".into()),
                 model: Some(model.into()),
                 effort: None,
-            }),
+            })),
         )
         .await;
     }
@@ -841,8 +845,10 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let thread = create(&store, None).await;
     let changed = execute(
         &store,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_at: None,
+            segment_chars: None,
+            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
@@ -850,14 +856,16 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: None,
             effort: Some("high".into()),
             cwd: None,
-        }),
+        })),
     )
     .await;
     assert_eq!(changed.result["effort"], "high");
     let changed = execute(
         &store,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_at: None,
+            segment_chars: None,
+            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
@@ -865,14 +873,16 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: Some("next-model".into()),
             effort: None,
             cwd: None,
-        }),
+        })),
     )
     .await;
     assert_eq!(changed.result["effort"], "high");
     let cleared = execute(
         &store,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_at: None,
+            segment_chars: None,
+            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id),
@@ -880,7 +890,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: None,
             effort: Some(String::new()),
             cwd: None,
-        }),
+        })),
     )
     .await;
     let details: ThreadDetails = serde_json::from_value(cleared.result).unwrap();
@@ -1937,11 +1947,11 @@ async fn fresh_observations_can_reuse_a_mutation_id_without_replacing_its_saved_
     let before = store.execute(read.clone(), None).await.unwrap().result;
     store
         .execute(
-            request(Command::ThreadSet(ThreadSetArgs {
+            request(Command::ThreadSet(Box::new(ThreadSetArgs {
                 thread_id: Some(thread),
                 title: Some("new title".into()),
                 ..Default::default()
-            })),
+            }))),
             None,
         )
         .await
@@ -2085,11 +2095,13 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
 }
 
 fn set_auto_compact(thread: &str, value: &str) -> Command {
-    Command::ThreadSet(ThreadSetArgs {
+    Command::ThreadSet(Box::new(ThreadSetArgs {
         thread_id: Some(thread.into()),
         auto_compact_at: Some(value.into()),
+        segment_chars: None,
+        reduce_rounds: None,
         ..Default::default()
-    })
+    }))
 }
 
 async fn get_thread(store: &Store, thread: &str) -> Value {
@@ -2152,11 +2164,11 @@ async fn thread_auto_compact_override_is_inherited_by_children_and_survives_conn
     );
     let switched = execute(
         &store,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(child.thread_id.clone()),
             connection: Some("other".into()),
             ..Default::default()
-        }),
+        })),
     )
     .await;
     assert_eq!(switched.result["connection"], "other");
@@ -2219,5 +2231,116 @@ async fn thread_auto_compact_override_is_copied_by_fork() {
     execute(&store, set_auto_compact(&thread, "")).await;
     let fork_id = fork.result["thread_id"].as_str().unwrap();
     assert_eq!(get_thread(&store, fork_id).await["auto_compact_at"], 4321);
+    store.database.shutdown().await.unwrap();
+}
+
+fn set_summary_parameters(
+    thread: &str,
+    segment_chars: Option<&str>,
+    reduce_rounds: Option<&str>,
+) -> Command {
+    Command::ThreadSet(Box::new(ThreadSetArgs {
+        thread_id: Some(thread.into()),
+        segment_chars: segment_chars.map(Into::into),
+        reduce_rounds: reduce_rounds.map(Into::into),
+        ..Default::default()
+    }))
+}
+
+#[tokio::test]
+async fn thread_summary_parameters_follow_default_connection_thread_precedence_and_clear() {
+    let (_root, store) = store().await;
+    let thread = create(&store, None).await.thread_id;
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(got["segment_chars"], Value::Null);
+    assert_eq!(got["effective_segment_chars"], 64_000);
+    assert_eq!(got["effective_reduce_rounds"], 4);
+    // The connection value replaces [compaction] for a Thread without its own value.
+    let moved = execute(
+        &store,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            connection: Some("other".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert_eq!(moved.result["effective_segment_chars"], 40_000);
+    assert_eq!(moved.result["effective_reduce_rounds"], 3);
+    // The Thread value replaces the connection value and reports both.
+    let set = execute(
+        &store,
+        set_summary_parameters(&thread, Some("8000"), Some("9")),
+    )
+    .await;
+    assert_eq!(set.result["segment_chars"], 8_000);
+    assert_eq!(set.result["effective_segment_chars"], 8_000);
+    assert_eq!(set.result["reduce_rounds"], 9);
+    assert_eq!(set.result["effective_reduce_rounds"], 9);
+    // Each value changes independently; an empty string clears only that one.
+    let cleared = execute(&store, set_summary_parameters(&thread, Some(""), None)).await;
+    assert_eq!(cleared.result["segment_chars"], Value::Null);
+    assert_eq!(cleared.result["effective_segment_chars"], 40_000);
+    assert_eq!(cleared.result["reduce_rounds"], 9);
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(got["effective_segment_chars"], 40_000);
+    assert_eq!(got["effective_reduce_rounds"], 9);
+    execute(&store, set_summary_parameters(&thread, None, Some(""))).await;
+    assert_eq!(
+        get_thread(&store, &thread).await["effective_reduce_rounds"],
+        3
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_summary_parameters_reject_out_of_range_values_and_are_inherited() {
+    let (_root, store) = store().await;
+    let thread = create(&store, None).await.thread_id;
+    execute(
+        &store,
+        set_summary_parameters(&thread, Some("2000"), Some("16")),
+    )
+    .await;
+    for (segment, rounds) in [
+        (Some("1999"), None),
+        (Some("1000001"), None),
+        (Some("-1"), None),
+        (Some("1.5"), None),
+        (Some(" 5000"), None),
+        (None, Some("0")),
+        (None, Some("17")),
+        (None, Some("x")),
+    ] {
+        let error = store
+            .execute(
+                request(set_summary_parameters(&thread, segment, rounds)),
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.code,
+            ErrorCode::InvalidArgument,
+            "{segment:?} {rounds:?}"
+        );
+    }
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(
+        (got["segment_chars"].clone(), got["reduce_rounds"].clone()),
+        (2_000.into(), 16.into())
+    );
+    // A child starts from its parent's values; later parent changes do not reach it.
+    let child = create(&store, Some(thread.clone())).await;
+    assert_eq!(
+        (child.segment_chars, child.reduce_rounds),
+        (Some(2_000), Some(16))
+    );
+    execute(&store, set_summary_parameters(&thread, Some(""), Some(""))).await;
+    let got = get_thread(&store, &child.thread_id).await;
+    assert_eq!(
+        (got["segment_chars"].clone(), got["reduce_rounds"].clone()),
+        (2_000.into(), 16.into())
+    );
     store.database.shutdown().await.unwrap();
 }

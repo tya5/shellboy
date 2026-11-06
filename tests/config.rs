@@ -856,6 +856,68 @@ fn proactive_compaction_threshold_defaults_on_and_connections_override_it() {
     }
 }
 
+#[test]
+fn summary_segment_and_reduce_rounds_resolve_default_connection_thread() {
+    let c = Config::default();
+    assert_eq!(c.compaction.segment_chars, 64_000);
+    assert_eq!(c.compaction.reduce_rounds, 4);
+    assert_eq!(c.compaction.segment_chars_for(None, None), 64_000);
+    assert_eq!(c.compaction.reduce_rounds_for(None, None), 4);
+    // Only these keys: the default summary limits stay.
+    let c = Config::parse("[compaction]\nsegment_chars=32000\nreduce_rounds=6").unwrap();
+    assert_eq!(
+        (c.compaction.segment_chars, c.compaction.reduce_rounds),
+        (32_000, 6)
+    );
+    assert_eq!(c.compaction.summary_max_chars, Some(20000));
+    // The connection beats [compaction]; the Thread beats the connection.
+    let c = connection_with("segment_chars=40000\nreduce_rounds=3").unwrap();
+    let connection = c.connections.get("proxy");
+    assert_eq!(c.compaction.segment_chars_for(None, connection), 40_000);
+    assert_eq!(c.compaction.reduce_rounds_for(None, connection), 3);
+    assert_eq!(
+        c.compaction.segment_chars_for(Some(8_000), connection),
+        8_000
+    );
+    assert_eq!(c.compaction.reduce_rounds_for(Some(9), connection), 9);
+    // A connection without its own value falls back to [compaction].
+    let c = connection_with("auto_at_tokens=1").unwrap();
+    assert_eq!(
+        c.compaction
+            .segment_chars_for(None, c.connections.get("proxy")),
+        64_000
+    );
+}
+
+#[test]
+fn summary_segment_and_reduce_rounds_reject_values_outside_their_ranges() {
+    for (key, good, bad) in [
+        ("segment_chars", ["2000", "1000000"], ["1999", "1000001"]),
+        ("reduce_rounds", ["1", "16"], ["0", "17"]),
+    ] {
+        for value in good {
+            assert!(
+                Config::parse(&format!("[compaction]\n{key}={value}")).is_ok(),
+                "{key}={value}"
+            );
+            assert!(
+                connection_with(&format!("{key}={value}")).is_ok(),
+                "{key}={value}"
+            );
+        }
+        for value in bad.into_iter().chain(["-1", "1.5", "'x'"]) {
+            assert!(
+                Config::parse(&format!("[compaction]\n{key}={value}")).is_err(),
+                "{key}={value}"
+            );
+            assert!(
+                connection_with(&format!("{key}={value}")).is_err(),
+                "{key}={value}"
+            );
+        }
+    }
+}
+
 fn connection_with(extra: &str) -> Result<Config, ConfigError> {
     Config::parse(&format!(
         "[connections.proxy]\nbase_url='https://example.com'\n{extra}"

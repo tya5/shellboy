@@ -471,8 +471,10 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
     finish(&control, &thread, next).await;
     request(
         &control,
-        Command::ThreadSet(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_at: None,
+            segment_chars: None,
+            reduce_rounds: None,
             agents: None,
             connection: None,
             thread_id: Some(thread.clone()),
@@ -480,7 +482,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
             model: Some("other-model".into()),
             effort: None,
             title: None,
-        }),
+        })),
     )
     .await;
     send(&control, &thread, "model changed").await;
