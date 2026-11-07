@@ -10532,8 +10532,8 @@ the sample content is tested); real user data sizes.
 ## Stored keys and connection test, stages A and B (#269)
 
 macOS ARM64 through `rust-slot`, with temporary directories, a local mock HTTP server and no real provider, real
-configuration or real data directory. `sh scripts/check.sh` was run on the final tree (result recorded in the commit
-and in the status note). `tests/credentials.rs` covers:
+configuration or real data directory. `sh scripts/check.sh` passed on the final code tree (exit 0: fmt, clippy -D warnings, lib 2386 passed, integration 1285 passed,
+the db-observation feature test). `tests/credentials.rs` covers:
 
 - **Precedence and lookup.** A variable with a value wins over a stored key; a blank variable falls to the stored key;
   neither gives the old error text; a connection without `api_key_env` uses a stored key; an explicit `Authorization`
