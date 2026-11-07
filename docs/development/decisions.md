@@ -3914,3 +3914,28 @@ The user decided the core gets `config.get` and `config.set`, for the Web settin
   guide.
 - **`config_changed` is a diagnostic as well as the receipt.** The receipt is retained for 24 hours or less, and
   the question of who changed a setting often comes later. Field names and Origin IDs only.
+
+## D-222-3: Tags and the cwd filter: wire shape, bounds and costs (2026-11-07)
+
+Decision: tags are a separate table `thread_tag(thread_id, tag)` (migration 34; 33 is #253), written by two
+new commands, `thread.tag` (explicit IDs, like archive) and `thread.tags` (distinct names, paged), not by a field of
+`thread.set`: one bulk write path with its own bound (200 IDs x (64 add + 64 remove) statements) and no coupling to
+the settings transaction. A tag is trimmed, one line, 1..=128 scalars, case sensitive; at most 64 per Thread, enforced
+after the writes inside the transaction so a refused call changes nothing. `thread.list` filters with `tags` (AND) and
+`cwd` (exact stored string). Tags are listed by one statement per page (`thread_id IN json_each`) and per `thread get`,
+not by a correlated subquery in the page statement, so the page plan and its archived-mode indexes are unchanged.
+The tag filter drives from the first tag's members and sorts them (top `limit + 1`), so its cost is that tag's membership
+and the CLI says to put the narrowest tag first; the alternative (scan the visible index and test `EXISTS`) costs the
+Thread count for a rare tag. `threads_cwd_updated` is added so `--cwd` is a seek in list order; it costs one index entry
+per live Thread and an index update when a Thread's cwd or `updated_at` changes. Tag names are paged by one seek per
+name rather than `SELECT DISTINCT`, so a page never reads the members of a tag; no member counts are offered. The cursor
+filter is a SHA-256 digest of the sorted tags and the cwd because 64 tags of 128 characters do not fit the 8 KiB cursor.
+Choices made without a user answer: no TUI browser filter (the palette forms are the whole TUI surface; the form
+takes comma-separated tags, so a tag containing a comma is set through the CLI or wire only); tags are not read on
+the browser/Watch row paths, only in `thread list` and `thread get`; the form and CLI do not suggest existing tags; no
+tag inheritance on fork/rewind/create; a tag change is a `changes_context` write like archive (admitted before shutdown
+capture) although it records no context entry. Impact: `ThreadSummary` and `ThreadDetails` gain an optional `tags`;
+`ThreadListArgs` gains optional `tags` and `cwd` (both skipped when empty, so existing operation fingerprints are
+unchanged). Recheck when: tag sets with hundreds of thousands of members appear (a count-bounded or covering
+`(tag, updated_at)` index may then be needed), a TUI filter is asked for, models create near-duplicate spellings
+(a suggestion or case-folding rule), or the Web UI needs `tags` on browser rows.

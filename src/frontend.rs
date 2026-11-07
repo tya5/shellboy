@@ -2433,7 +2433,7 @@ async fn run_with_delivery(
                                     if mode==BrowserMode::Watch {
                                         watch_page::read(&control,watch_page::Request {filter,cursor,descendant_root,seen_completions,seen_history_limited,limit:DEFAULT_LIST_LIMIT as usize},page_stop.clone(),progress_slots,diagnostics).await.map(ThreadPageResult::Watch)
                                     } else {
-                                        browser::page(&control,ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter),archived},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
+                                        browser::page(&control,ThreadListArgs {limit:DEFAULT_LIST_LIMIT,cursor,query:(!filter.is_empty()).then_some(filter),archived,..Default::default()},page_stop.clone(),progress_slots).await.map(|(page,times,sequence)|ThreadPageResult::List(page,times,sequence))
                                     }
                                 }=>value,
                             };
@@ -4586,6 +4586,7 @@ mod stream_tests {
         let rows = vec![
             ThreadSummary {
                 archived_at: None,
+                tags: Vec::new(),
                 last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
@@ -4601,6 +4602,7 @@ mod stream_tests {
             },
             ThreadSummary {
                 archived_at: None,
+                tags: Vec::new(),
                 last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,

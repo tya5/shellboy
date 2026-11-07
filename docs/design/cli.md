@@ -7,7 +7,7 @@
 基本形:
 
 ```text
-shellboy thread list [--limit 50] [--cursor TOKEN] [--query TEXT] [--archived exclude|include|only]
+shellboy thread list [--limit 50] [--cursor TOKEN] [--query TEXT] [--archived exclude|include|only] [--tag TAG]... [--cwd PATH]
 shellboy thread get [--thread ID]
 shellboy thread create [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--parent ID]
 shellboy thread fork --thread ID --node ID [--cwd PATH]
@@ -18,6 +18,8 @@ shellboy thread rewind [--thread ID] --node NODE
 shellboy thread branches [--thread ID] [--limit 50] [--cursor TOKEN]
 shellboy thread archive [--thread ID]... [--descendants]
 shellboy thread unarchive [--thread ID]... [--descendants]
+shellboy thread tag [--thread ID]... [--add TAG]... [--remove TAG]...
+shellboy thread tags [--limit 50] [--cursor TOKEN]
 shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--segment-chars N|''] [--reduce-rounds N|''] [--parent ID|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)

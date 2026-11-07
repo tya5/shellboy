@@ -3013,6 +3013,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
         threads: (0..30)
             .map(|i| shellboy::protocol::ThreadSummary {
                 archived_at: None,
+                tags: Vec::new(),
                 last_end_message: None,
                 last_input: None,
                 activity: shellboy::activity::ActivityPhase::Idle,

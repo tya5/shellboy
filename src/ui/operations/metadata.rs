@@ -78,6 +78,9 @@ impl Form {
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "archived" => FieldId::Archived,
+            "tags" => FieldId::Tags,
+            "add_tags" => FieldId::AddTags,
+            "remove_tags" => FieldId::RemoveTags,
             "sender_label" => FieldId::SenderLabel,
             "deliver" => FieldId::Deliver,
             "expect_reply" => FieldId::ExpectReply,
@@ -607,6 +610,10 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
             "会話 · アーカイブ解除",
             "Conversation · Unarchive"
         ),
+        OperationId::ThreadTag => local!(language, "会話 · タグ", "Conversation · Tags"),
+        OperationId::ThreadTags => {
+            local!(language, "会話 · タグ一覧", "Conversations · Tag names")
+        }
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
         OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
@@ -801,6 +808,16 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "指定Threadと選択した子孫のアーカイブを解除し、既定の一覧へ戻します。",
             "Unarchive the specified Thread and selected descendants and return them to the default list."
+        ),
+        OperationId::ThreadTag => local!(
+            language,
+            "指定Threadへタグを付け外しします。置き場所や切り口を表す自由なラベルで、履歴・検索・使用量・受信・一覧の順序は変わりません。",
+            "Add or remove tags on the specified Thread: free labels for placement and cross-cutting views. History, search, usage, receiving messages and list order are unchanged."
+        ),
+        OperationId::ThreadTags => local!(
+            language,
+            "使われているタグ名を重複なく、バイト順に表示します。件数は数えません。",
+            "Show the distinct tag names in use in byte order. Member counts are not computed."
         ),
         OperationId::ThreadSet => local!(
             language,
@@ -1108,6 +1125,9 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
+        FieldId::Tags => local!(language, "タグで絞り込み", "Filter by tags"),
+        FieldId::AddTags => local!(language, "付けるタグ", "Tags to add"),
+        FieldId::RemoveTags => local!(language, "外すタグ", "Tags to remove"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
         FieldId::ExpectReply => local!(language, "返信を依頼", "Expect a reply"),
         FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
@@ -1372,8 +1392,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Cwd => local!(
             language,
-            "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。",
-            "On creation, relative paths use the launch directory; on update, the target Thread's saved cwd. Omission follows the operation's defaults or inheritance."
+            "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。一覧では保存cwdと完全に一致するThreadだけに絞ります（相対パスは起動場所から解決）。",
+            "On creation, relative paths use the launch directory; on update, the target Thread's saved cwd. Omission follows the operation's defaults or inheritance. In a list it keeps only Threads whose saved cwd matches exactly (relative paths use the launch directory)."
         ),
         FieldId::Connection => local!(
             language,
@@ -1419,6 +1439,21 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "空は既定（アーカイブ済みを隠す）。includeは両方、onlyはアーカイブ済みだけを一覧します。",
             "Empty is the default (archived are hidden). include lists both; only lists archived conversations."
+        ),
+        FieldId::Tags => local!(
+            language,
+            "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。",
+            "List only Threads that carry every given tag (AND). The CLI repeats --tag; the form takes a comma-separated list (a tag containing a comma cannot be entered in the form)."
+        ),
+        FieldId::AddTags => local!(
+            language,
+            "対象Threadへ付けるタグです（最大64個、1つは128文字以内の1行）。CLIは--addを繰り返し、フォームはコンマ区切りです。",
+            "Tags to add to the target Thread (at most 64; each one line of at most 128 characters). The CLI repeats --add; the form takes a comma-separated list."
+        ),
+        FieldId::RemoveTags => local!(
+            language,
+            "対象Threadから外すタグです（最大64個）。付けるタグと同じ値は指定できません。CLIは--removeを繰り返し、フォームはコンマ区切りです。",
+            "Tags to remove from the target Thread (at most 64). A value cannot be in both lists. The CLI repeats --remove; the form takes a comma-separated list."
         ),
         FieldId::SenderLabel => local!(
             language,

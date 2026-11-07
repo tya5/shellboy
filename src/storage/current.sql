@@ -15,6 +15,12 @@ CREATE TABLE thread(
 CREATE INDEX threads_updated ON thread(deleted_at,updated_at DESC,id);
 CREATE INDEX threads_visible_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL;
 CREATE INDEX threads_archived_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NOT NULL;
+CREATE INDEX threads_cwd_updated ON thread(cwd,updated_at DESC,id DESC) WHERE deleted_at IS NULL;
+
+CREATE TABLE thread_tag(
+ thread_id TEXT NOT NULL REFERENCES thread(id), tag TEXT NOT NULL CHECK(length(tag) BETWEEN 1 AND 128),
+ PRIMARY KEY(thread_id,tag)) WITHOUT ROWID;
+CREATE INDEX thread_tag_by_tag ON thread_tag(tag,thread_id);
 
 CREATE TABLE thread_path(
  thread_id TEXT NOT NULL REFERENCES thread(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0),
@@ -709,4 +715,5 @@ INSERT INTO schema_migration(version,name) VALUES(30,'0030_thread_auto_compact_a
 INSERT INTO schema_migration(version,name) VALUES(31,'0031_thread_summary_parameters');
 INSERT INTO schema_migration(version,name) VALUES(32,'0032_thread_archive');
 INSERT INTO schema_migration(version,name) VALUES(33,'0033_index_int8_scale');
-PRAGMA user_version=33;
+INSERT INTO schema_migration(version,name) VALUES(34,'0034_thread_tags');
+PRAGMA user_version=34;

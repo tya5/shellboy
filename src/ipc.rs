@@ -754,6 +754,8 @@ mod frame_delivery_tests {
                 cursor: None,
                 query: None,
                 archived: Default::default(),
+                tags: Vec::new(),
+                cwd: None,
             }),
             None,
             None,

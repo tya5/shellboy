@@ -582,6 +582,8 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
             cursor: None,
             query: None,
             archived: Default::default(),
+            tags: Vec::new(),
+            cwd: None,
         }),
     )
     .await;
@@ -595,6 +597,8 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
             cursor: first.next_cursor.clone(),
             query: None,
             archived: Default::default(),
+            tags: Vec::new(),
+            cwd: None,
         }),
     )
     .await;
@@ -611,6 +615,8 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
                 cursor: first.next_cursor,
                 query: Some("changed".into()),
                 archived: Default::default(),
+                tags: Vec::new(),
+                cwd: None,
             })),
             None,
         )

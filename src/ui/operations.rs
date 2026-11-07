@@ -56,6 +56,8 @@ ThreadList,
     ThreadRewind,
     ThreadArchive,
     ThreadUnarchive,
+    ThreadTag,
+    ThreadTags,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -1051,6 +1053,17 @@ fn english_field_label(label: &str) -> &str {
     }
 }
 
+/// Comma-separated tags typed in one line; CLI and wire accept any tag text.
+fn comma_list(form: &Form, name: &str) -> Result<Vec<String>, String> {
+    Ok(form
+        .value(name)?
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
 impl Form {
     fn field_label_for<'a>(&self, field: &'a Field) -> &'a str {
         if self.language == UiLanguage::Ja {
@@ -1141,9 +1154,16 @@ impl Form {
                         String::new(),
                         Choice(&["", "include", "only"]),
                     ));
+                    v.push(f(
+                        "tags",
+                        "タグ（コンマ区切り・すべてを持つ）",
+                        String::new(),
+                        Text,
+                    ));
+                    v.push(f("cwd", "作業場所（空=絞らない）", String::new(), Text));
                     v
                 },
-                |form, _cwd| {
+                |form, cwd| {
                     Ok(Command::ThreadList(ThreadListArgs {
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
@@ -1152,6 +1172,8 @@ impl Form {
                             .optional("archived")?
                             .and_then(|value| ArchivedFilter::parse(&value))
                             .unwrap_or_default(),
+                        tags: comma_list(form, "tags")?,
+                        cwd: form.path("cwd", cwd)?,
                     }))
                 },
             ),
@@ -1350,6 +1372,36 @@ impl Form {
                     })
                 },
             ),
+            OpKind::ThreadTag => (
+                vec![
+                    thread(),
+                    f(
+                        "add_tags",
+                        "付けるタグ（コンマ区切り）",
+                        String::new(),
+                        Text,
+                    ),
+                    f(
+                        "remove_tags",
+                        "外すタグ（コンマ区切り）",
+                        String::new(),
+                        Text,
+                    ),
+                ],
+                |form, _cwd| {
+                    Ok(Command::ThreadTag(ThreadTagArgs {
+                        thread_ids: vec![form.owned("thread")?],
+                        add: comma_list(form, "add_tags")?,
+                        remove: comma_list(form, "remove_tags")?,
+                    }))
+                },
+            ),
+            OpKind::ThreadTags => (list(), |form, _cwd| {
+                Ok(Command::ThreadTags(ThreadTagsArgs {
+                    limit: form.number("limit")?,
+                    cursor: form.optional("cursor")?,
+                }))
+            }),
             OpKind::ThreadDelete => (
                 vec![
                     thread(),
@@ -2500,6 +2552,12 @@ mod tests {
                 json!({"thread_ids":[id(1)]}),
             ),
             (
+                OpKind::ThreadTag,
+                "thread.tag",
+                json!({"thread_ids":[id(1)],"add":["a"]}),
+            ),
+            (OpKind::ThreadTags, "thread.tags", json!({"limit":20})),
+            (
                 OpKind::ThreadSet,
                 "thread.set",
                 json!({"thread_id":id(1),"model":"model"}),
@@ -2673,6 +2731,7 @@ mod tests {
             "thread.rewind",
             "thread.archive",
             "thread.unarchive",
+            "thread.tag",
             "thread.set",
             "message.send",
             "message.reply",
@@ -2714,6 +2773,7 @@ mod tests {
                         "attachment" => id(9),
                         "messages" => id(3),
                         "model" => "model".into(),
+                        "add_tags" => "a".into(),
                         _ => String::new(),
                     };
                 }
@@ -2795,6 +2855,7 @@ mod tests {
                         | "thread.rewind"
                         | "thread.archive"
                         | "thread.unarchive"
+                        | "thread.tag"
                         | "thread.delete"
                         | "thread.set"
                         | "message.send"
@@ -2816,6 +2877,7 @@ mod tests {
                         | "thread.list"
                         | "thread.get"
                         | "thread.branches"
+                        | "thread.tags"
                         | "usage.get"
                         | "shell.list"
                         | "compact.list"
@@ -3407,10 +3469,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 66);
+        assert_eq!(rows.len(), 68);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            66
+            68
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3422,7 +3484,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 66);
+        assert_eq!(operations.rows().len(), 68);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));
