@@ -5853,6 +5853,22 @@ impl UiState {
             Command::ThreadDelete(args) => {
                 return self.begin_thread_deletion_scope(args.thread_id.clone(), args.descendants);
             }
+            Command::IndexRemove(args) if !args.dry_run => {
+                self.set_confirmation(Confirmation::Operation {
+                    command: command.clone(),
+                    detail: match self.config.ui.language {
+                        crate::config::UiLanguage::En => format!(
+                            "Deleting index {} for good. Recreating it means paid embedding.",
+                            args.space_id
+                        ),
+                        crate::config::UiLanguage::Ja => format!(
+                            "索引 {} を完全に削除します。作り直すには埋め込みの費用がかかります。",
+                            args.space_id
+                        ),
+                    },
+                });
+                return vec![];
+            }
             Command::StorageCollect(args) => {
                 self.set_confirmation(Confirmation::Operation {
                     command: command.clone(),

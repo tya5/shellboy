@@ -1074,7 +1074,7 @@ pub(crate) fn require_capacity_below_tx(db: &Connection, limit: u64) -> Result<(
             ErrorCode::StorageLimit,
             "Logical data limit reached; new work is held",
         )
-        .hint("Collect eligible raw/managed data or free capacity, then explicitly retry")
+        .hint("Collect eligible raw/managed data or free capacity, then explicitly retry. `index status` lists retained indexes; deleting one is a person's decision")
         .details(json!({"logical_live_bytes":used.total(),"limit_bytes":limit})));
     }
     Ok(())

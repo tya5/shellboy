@@ -1,6 +1,6 @@
 //! Collection of index spaces. Automatic maintenance and `storage collect` take
-//! only what holds no paid work: discarded partial candidates and inactive spaces
-//! without vectors. A retained space goes only through `index remove`.
+//! only what holds no paid work: discarded int8 candidates (free copies) and
+//! inactive spaces without vectors. A retained space goes only through `index remove`.
 use super::*;
 use crate::protocol::IndexRemoveArgs;
 
@@ -9,6 +9,7 @@ const SPACE_SELECT: &str = "SELECT s.id,s.vec_table_name FROM index_space s
          AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key='index.active_space' AND value=s.id)
          AND NOT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=s.id AND state='running')
          AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key='index.shrink.'||s.id)
+         AND NOT EXISTS(SELECT 1 FROM app_meta WHERE key>='index.shrink.' AND key<'index.shrink/' AND json_extract(value,'$.target')=s.id)
          AND NOT EXISTS(SELECT 1 FROM app_meta g JOIN app_meta r
              ON g.key='index.group.'||substr(r.key,length('index.rebuild.')+1)||'.'||r.value
              WHERE r.key GLOB 'index.rebuild.*' AND g.value=s.id)
@@ -37,11 +38,12 @@ fn remove_space(tx: &Transaction<'_>, space: &str, table: &str) -> Result<(), St
     tx.execute("DELETE FROM app_meta WHERE key IN (SELECT 'index.input.'||id FROM embedding_job WHERE space_id=?1)", [space])?;
     tx.execute("DELETE FROM embedding_job WHERE space_id=?1", [space])?;
     tx.execute(
-        "DELETE FROM app_meta WHERE key IN (?1,?2,?3) OR (key GLOB 'index.group.*' AND value=?4)",
+        "DELETE FROM app_meta WHERE key IN (?1,?2,?3,?4) OR (key GLOB 'index.group.*' AND value=?5)",
         params![
             IndexKeys::query_profile(space),
             dimensions::space_key(space),
             IndexKeys::converted_from(space),
+            IndexKeys::partial(space),
             space
         ],
     )?;
@@ -56,6 +58,11 @@ fn removal_preview(db: &Connection, id: &str) -> Result<Value, StorageError> {
     })?;
     let segments: i64 = db.query_row(
         "SELECT count(*) FROM embedding_chunk WHERE space_id=?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    let unfinished: i64 = db.query_row(
+        "SELECT count(*) FROM embedding_job WHERE space_id=?1 AND state IN ('pending','failed','split')",
         [id],
         |row| row.get(0),
     )?;
@@ -84,11 +91,13 @@ fn removal_preview(db: &Connection, id: &str) -> Result<Value, StorageError> {
         "dimension":space.dimension,
         "element_type":if space.int8_scale.is_some() {"int8"} else {"float32"},
         "state":space.state,
+        "partial":meta(db, &IndexKeys::partial(id))?.is_some(),
         "segments":segments,
+        "unfinished_jobs_deleted":unfinished,
         "vector_payload_bytes_freed":segments as u64 * space.dimension as u64 * space.element_bytes(),
         "removable":blocked_by.is_none(),
         "blocked_by":blocked_by,
-        "effects":"Deletes this index and its vectors for good; conversation history is not touched. Recreating it means paid embedding of every segment. Freed pages are reused; the database file shrinks only with `storage vacuum`.",
+        "effects":"Deletes this index, its vectors and its unfinished jobs with their saved inputs for good; conversation history is not touched. Recreating it means paid embedding of every segment. Freed pages are reused; the database file shrinks only with `storage vacuum`.",
     }))
 }
 

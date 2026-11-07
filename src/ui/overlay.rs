@@ -1645,6 +1645,29 @@ mod confirmation_language_tests {
     }
 
     #[test]
+    fn deleting_an_index_asks_for_confirmation_and_its_dry_run_does_not() {
+        let mut ui = UiState::new(
+            &crate::config::Config::default(),
+            std::path::PathBuf::from("/"),
+        );
+        let mut remove = crate::protocol::IndexRemoveArgs {
+            space_id: "old".into(),
+            dry_run: true,
+        };
+        ui.execute_operation(Command::IndexRemove(remove.clone()));
+        assert!(ui.confirmation.is_none());
+        remove.dry_run = false;
+        assert!(
+            ui.execute_operation(Command::IndexRemove(remove))
+                .is_empty()
+        );
+        assert!(matches!(
+            &ui.confirmation,
+            Some(Confirmation::Operation { command: Command::IndexRemove(_), detail }) if detail.contains("old")
+        ));
+    }
+
+    #[test]
     fn storage_confirmation_screen_keeps_category_and_requires_explicit_y() {
         fn configure(ui: &mut UiState) {
             let args = crate::protocol::StorageArgs {

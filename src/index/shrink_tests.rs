@@ -889,7 +889,11 @@ async fn reaching_the_logical_cap_fails_only_the_conversion() {
     let limited = Arc::new(limited);
     let service = IndexService::new(f.db.clone(), limited.clone());
     service.shrink(Default::default()).await.unwrap();
-    while service.shrink_unit().await.unwrap() {}
+    while service.shrink_unit().await.unwrap() {
+        // Every committed unit stays under the limit, not only the final state.
+        let total = logical_total(&f.db).await;
+        assert!(total < limited.limits.data_max_bytes, "{total}");
+    }
     let failed = f.record().await.unwrap();
     assert_eq!(failed.error.as_ref().unwrap()["code"], "storage_limit");
     assert_eq!(failed.target, None, "the partial candidate was given back");
@@ -929,6 +933,18 @@ async fn reaching_the_logical_cap_fails_only_the_conversion() {
         .await,
         1
     );
+    // A resume checks the room too: with too little it changes nothing.
+    let mut tighter = (*f.config).clone();
+    tighter.limits.data_warning_bytes = before + 100;
+    let resumed = IndexService::new(f.db.clone(), Arc::new(tighter))
+        .shrink(Default::default())
+        .await
+        .unwrap_err();
+    assert!(
+        resumed.message.contains("data_warning_bytes"),
+        "{resumed:?}"
+    );
+    assert!(f.record().await.unwrap().error.is_some());
     // With room again, an explicit run starts over and completes.
     assert_eq!(
         f.service.shrink(Default::default()).await.unwrap()["state"],
@@ -1273,6 +1289,8 @@ async fn shrink_never_removes_a_space_and_remove_does_only_what_it_previews() {
     assert_eq!(preview["dimension"], 8);
     assert_eq!(preview["element_type"], "float32");
     assert_eq!(preview["segments"], 40);
+    assert_eq!(preview["partial"], false);
+    assert_eq!(preview["unfinished_jobs_deleted"], 0);
     assert_eq!(preview["vector_payload_bytes_freed"], 40 * 8 * 4);
     assert!(
         preview["effects"]
@@ -1331,6 +1349,12 @@ async fn low_room_refuses_before_any_change() {
     };
     let preview = service.shrink(dry).await.unwrap();
     assert_eq!(preview["state"], "low_room");
+    assert!(
+        preview["low_room"]
+            .as_str()
+            .unwrap()
+            .contains("data_warning_bytes")
+    );
     assert_eq!(preview["added_vector_payload_bytes"], 40 * 8);
     assert!(service.shrink(Default::default()).await.is_err());
     assert!(f.record().await.is_none());
@@ -1454,6 +1478,7 @@ async fn revert_switches_back_requeues_what_is_missing_and_removes_nothing() {
     let started = f.service.shrink(revert.clone()).await.unwrap();
     assert_eq!(started["state"], "reverting");
     assert_eq!(started["missing_segments"], 1);
+    assert_eq!(started["requeue"], "automatic");
     f.drain().await;
     assert!(f.record().await.is_none());
     let active = f.active().await;
@@ -1500,6 +1525,234 @@ async fn revert_switches_back_requeues_what_is_missing_and_removes_nothing() {
     assert_ne!(f.active().await.id, int8.id);
     assert!(f.space(&int8.id).await.is_some());
     assert!(f.space(&float).await.is_some());
+    f.db.shutdown().await.unwrap();
+}
+
+/// A superseded rebuild candidate holds paid vectors: kept, marked partial, never
+/// selectable. One without vectors holds nothing and goes.
+#[tokio::test]
+async fn a_second_rebuild_keeps_the_paid_vectors_of_the_replaced_candidate() {
+    let f = fixture(clustered(6, 4), vec![1.0; 4]).await;
+    let config = f.config.clone();
+    let vectors = clustered(5, 4);
+    let candidate =
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            let profile = identity::profile_key(&config).unwrap();
+            set_meta(&tx, &IndexKeys::new(&profile).rebuild(), "rebuild-first")?;
+            let identity = identity::EmbeddingIdentity::configured(&config, profile.clone());
+            let space = store::ensure_space(&tx, &identity, "rebuild-first", 4)?;
+            seed_rows(&tx, &space, 1000, &vectors);
+            tx.commit()?;
+            Ok(space.id)
+        })
+        .await
+        .unwrap();
+    f.service
+        .rebuild(IndexArgs {
+            scope: Some(IndexScope::All),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let replaced = f.space(&candidate).await.unwrap();
+    assert_eq!(replaced.state, "inactive");
+    assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 0);
+    assert_eq!(f.count(CHUNKS, &candidate).await, 5, "paid vectors stay");
+    assert!(
+        f.service
+            .select_space(&candidate)
+            .await
+            .unwrap_err()
+            .message
+            .contains("Incomplete")
+    );
+    let status = f.service.status(Default::default()).await.unwrap();
+    let listed = status
+        .spaces
+        .iter()
+        .find(|s| s.space_id == candidate)
+        .unwrap();
+    assert_eq!(listed.partial, Some(true));
+    assert!(listed.retained_remove_with.is_some());
+    let remove = |dry_run| IndexRemoveArgs {
+        space_id: candidate.clone(),
+        dry_run,
+    };
+    let preview = f.service.remove_space(remove(true)).await.unwrap();
+    assert_eq!(preview["partial"], true);
+    f.service.remove_space(remove(false)).await.unwrap();
+    let marker = IndexKeys::partial(&candidate);
+    assert!(
+        f.db.call(move |db| meta(db, &marker))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // Now the running rebuild is replaced before it has any vector.
+    let empty =
+        f.db.call(|db| {
+            let mut q = db.prepare("SELECT id FROM index_space WHERE state='candidate'")?;
+            Ok(q.query_map([], |r| r.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+        .unwrap();
+    assert!(empty.is_empty(), "no candidate exists until a first vector");
+    let config = f.config.clone();
+    let first =
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            let profile = identity::profile_key(&config).unwrap();
+            let group = meta(&tx, &IndexKeys::new(&profile).rebuild())?.unwrap();
+            let identity = identity::EmbeddingIdentity::configured(&config, profile);
+            let space = store::ensure_space(&tx, &identity, &group, 4)?;
+            tx.commit()?;
+            Ok(space.id)
+        })
+        .await
+        .unwrap();
+    f.service
+        .rebuild(IndexArgs {
+            scope: Some(IndexScope::All),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 1);
+    assert!(f.space(&first).await.is_none());
+    f.db.shutdown().await.unwrap();
+}
+
+/// A revert with automatic indexing off or paused queues nothing: pending
+/// admissions would block a later rebuild and spend when the switch is turned on.
+#[tokio::test]
+async fn revert_queues_nothing_when_automatic_indexing_is_off_or_paused() {
+    for paused in [false, true] {
+        let f = fixture(clustered(4, 4), vec![1.0; 4]).await;
+        f.start().await;
+        f.drain().await;
+        let int8 = f.active().await;
+        let space = int8.clone();
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('late','user','2026-11-07T00:00:00Z','{}','body')", [])?;
+            let work = Work::pending(
+                Witness { node_id: "late".into(), revision: 0, body_hash: Some("body".into()), raw: None },
+                "user".into(),
+                Segment { start: 0, end: 1, text: "x".into() },
+                "active",
+                "explicit",
+            );
+            queue_job(&tx, &space, &work)?;
+            let job = job_id_for(&tx, &space, &work)?.unwrap();
+            store::adopt_vector_tx(&tx, &space, &job, &work, &[0.5, 0.5, 0.5, 0.5])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let mut changed = (*f.config).clone();
+        let expected = if paused {
+            let profile = identity::profile_key(&f.config).unwrap();
+            f.db.call(move |db| {
+                db.execute(
+                    "INSERT INTO app_meta(key,value)VALUES(?1,'{}')",
+                    [IndexKeys::new(&profile).pause()],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+            "paused"
+        } else {
+            changed.indexing.auto_history = false;
+            "auto_history_off"
+        };
+        let service = IndexService::new(f.db.clone(), Arc::new(changed));
+        let dry = IndexShrinkArgs {
+            revert: true,
+            dry_run: true,
+            ..Default::default()
+        };
+        let preview = service.shrink(dry).await.unwrap();
+        assert_eq!(preview["requeue"], expected);
+        assert_eq!(preview["missing_sources"], 1);
+        assert!(
+            preview["effects"]
+                .as_str()
+                .unwrap()
+                .contains("index backfill")
+        );
+        let started = service
+            .shrink(IndexShrinkArgs {
+                revert: true,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(started["requeue"], expected);
+        while service.shrink_unit().await.unwrap() {}
+        assert_eq!(f.active().await.id, f.source.id);
+        let admissions =
+            f.db.call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key>='index.auto.' AND key<'index.auto/'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(admissions, 0);
+        assert_eq!(f.requests.load(Ordering::SeqCst), 0);
+        f.db.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_revert_target_is_protected_and_a_switch_needs_its_target() {
+    let f = fixture(clustered(2, 4), vec![1.0; 4]).await;
+    let table = "shellboy_vec_00000000000000000000000000000253";
+    f.db.call(move |db| {
+        db.execute_batch(&format!("CREATE VIRTUAL TABLE {table} USING vec0(embedding float[4]);"))?;
+        db.execute("INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name)VALUES('empty','p','m',4,'v','inactive',?1)", [table])?;
+        Ok(())
+    }).await.unwrap();
+    let source = f.source.id.clone();
+    let record = json!({"source":source,"target":"empty","phase":REVERT,"cursor":0,"max_abs":0.0,"started_at":"now","error":null}).to_string();
+    let key = IndexKeys::shrink(&source);
+    let (saved, value) = (key.clone(), record);
+    f.db.call(move |db| {
+        db.execute(
+            "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
+            [saved, value],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        f.db.call(collect_inactive_spaces).await.unwrap(),
+        0,
+        "the empty target stays"
+    );
+    f.db.call(move |db| {
+        db.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 1);
+    let source = f.source.clone();
+    let active =
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            assert!(switch(&tx, &source, "missing").is_err());
+            drop(tx);
+            meta(db, IndexKeys::ACTIVE_SPACE)
+        })
+        .await
+        .unwrap();
+    assert_eq!(active.as_deref(), Some(f.source.id.as_str()), "rolled back");
     f.db.shutdown().await.unwrap();
 }
 

@@ -392,11 +392,11 @@ For a requested dimension change, inspect status first and explain possible qual
 
 To make searches lighter without any charge, `shellboy index shrink` converts the active index to int8 from its saved vectors: no embedding API call, same dimension, about a quarter of the vector bytes read per search. It differs from `index rebuild`, which re-embeds text and costs money. Never start it unasked: run `shellboy index shrink --dry-run`, explain its facts (bytes added, the old index stays and still counts toward the data limit, rank order changes slightly, `distance` values become hundreds and only order results within one search) and get explicit consent. Then run it and follow `shrink` in `shellboy index status`. It resumes after a restart; on `shrink.error`, fix the cause and run it again, or `--cancel`. `index shrink` only converts and never deletes.
 
-Retained indexes hold paid vectors. Nothing deletes them automatically, after a conversion or a rebuild, and neither may you on your own:
+Retained indexes hold paid vectors, including a partial one (`partial`) left by a replaced rebuild candidate. Nothing deletes them automatically, after a conversion or a rebuild, and neither may you on your own:
 
 1. After a conversion or rebuild succeeds, tell the user the old index is retained and its size (`retained_vector_payload_bytes` and `retained_remove_with` in `index status`).
-2. Suggest checking real searches first. `shellboy index shrink --revert --dry-run` shows the way back to the float32 index and how many segments would need indexing again.
-3. Explain that deleting frees that disk and that recreating the index afterwards needs a paid rebuild. Ask.
+2. Suggest checking real searches first. `shellboy index shrink --revert --dry-run` shows the way back to the float32 index and how many segments would need indexing again. A revert can lead to charges for those segments: explain that and get consent, as for shrink.
+3. Explain that deleting frees that space for reuse inside the database (the file itself shrinks only with `storage vacuum`) and that recreating the index afterwards needs a paid rebuild. Ask.
 4. Only on the user's explicit yes, show `shellboy index remove --space SPACE_ID --dry-run`, then run it without `--dry-run`.
 
 Never delete an index to relieve a low-disk or storage-limit hold on your own: tell the user it is an option and let them decide.

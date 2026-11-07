@@ -141,7 +141,7 @@ impl IndexService {
                 .database
                 .call(move |db| {
                     Ok(if args.revert {
-                        revert_preview(db)?.0
+                        revert_preview(db, &config)?.0
                     } else {
                         preview(db, &config)?.0
                     })
@@ -156,7 +156,7 @@ impl IndexService {
                 let value = if args.cancel {
                     cancel(&tx)?
                 } else if args.revert {
-                    start_revert(&tx)?
+                    start_revert(&tx, &config)?
                 } else {
                     start(&tx, &config)?
                 };
@@ -264,7 +264,9 @@ fn step(
             return Ok(Step::Wait);
         }
         switch(tx, &source, target)?;
-        record.phase = REQUEUE.into();
+        // Pending admissions would block a later rebuild and spend later on their own.
+        let automatic = requeue_policy(tx, config, target)? == "automatic";
+        record.phase = if automatic { REQUEUE } else { SWEEP }.into();
         record.cursor = 0;
         return Ok(Step::Progress(record));
     }
@@ -355,16 +357,47 @@ fn switch(tx: &Transaction<'_>, source: &Space, target: &str) -> Result<(), Stor
         "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
         [],
     )?;
-    tx.execute(
+    let moved = tx.execute(
         "UPDATE index_space SET state=?2 WHERE id=?1",
         params![target, source.state],
     )?;
+    // Never leave the active pointer dangling; the whole unit rolls back.
+    if moved != 1 {
+        return Err(StorageError::from(err(
+            ErrorCode::InvalidState,
+            "The index to switch to no longer exists",
+        )));
+    }
     set_meta(tx, IndexKeys::ACTIVE_SPACE, target)
 }
 
+/// Whether a revert may hand missing sources to automatic admission now.
+fn requeue_policy(
+    db: &Connection,
+    config: &Config,
+    target: &str,
+) -> Result<&'static str, StorageError> {
+    if !config.indexing.auto_history {
+        return Ok("auto_history_off");
+    }
+    let splitter = load_space(db, target)?.ok_or_else(serde_error)?.splitter;
+    let Some(key) =
+        identity::profile_key(config).filter(|key| splitter == IndexKeys::new(key).splitter())
+    else {
+        return Ok("other_configuration");
+    };
+    let family = identity::endpoint_family_key(config);
+    for scope in std::iter::once(key.as_str()).chain(family.as_deref()) {
+        if meta(db, &IndexKeys::new(scope).pause())?.is_some() {
+            return Ok("paused");
+        }
+    }
+    Ok("automatic")
+}
+
 /// After a revert: sources indexed only in the int8 space go through the existing
-/// automatic admission. It spends only as `auto_history` allows, and existing jobs
-/// of the float space dedupe every segment that is already there.
+/// automatic admission, entered only when it is on and not paused. Existing jobs of
+/// the float space dedupe every segment that is already there.
 fn requeue_page(
     tx: &Transaction<'_>,
     mut record: Record,
@@ -639,10 +672,18 @@ fn preview(db: &Connection, config: &Config) -> Result<(Value, &'static str), St
         "unfinished_jobs_moved":unfinished,
         "embedding_requests":0,
         "retained_source":retained,
+        "low_room":(state == "low_room").then(|| low_room_message(logical, logical + bytes, config)),
         "conversion":record.map(|record| json!({"phase":record.phase,"error":record.error})),
         "effects":"Adds an int8 copy of this index without any API call and switches search to it, which then reads about a quarter of the vector bytes. It deletes nothing: the old index stays, inactive, counts toward the logical data limit and frees no disk until a person removes it with `index remove`. `index shrink --revert` switches back. Rank order changes slightly and distance values change scale.",
     });
     Ok((value, state))
+}
+
+fn low_room_message(logical: u64, after: u64, config: &Config) -> String {
+    format!(
+        "Converting would take logical data from {logical} to {after} bytes, reaching the limit of {} bytes for optional growth, so nothing was changed. Free data, or raise `limits.data_warning_bytes` in the configuration if you accept less margin. Any retained indexes in `index status` are an option for the user to remove",
+        room_limit(config)
+    )
 }
 
 fn count_chunks(db: &Connection, space: &str) -> Result<i64, StorageError> {
@@ -670,7 +711,7 @@ fn retained_source(db: &Connection, active: &Space) -> Result<Option<Value>, Sto
     })))
 }
 
-fn revert_preview(db: &Connection) -> Result<(Value, &'static str), StorageError> {
+fn revert_preview(db: &Connection, config: &Config) -> Result<(Value, &'static str), StorageError> {
     let active = meta(db, IndexKeys::ACTIVE_SPACE)?
         .map(|id| load_space(db, &id))
         .transpose()?
@@ -695,22 +736,27 @@ fn revert_preview(db: &Connection) -> Result<(Value, &'static str), StorageError
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
     }
+    let requeue = match target.as_ref().and_then(|t| t["space_id"].as_str()) {
+        Some(id) => requeue_policy(db, config, id)?,
+        None => "none",
+    };
     let value = json!({
         "dry_run":true,
         "revert":true,
+        "requeue":requeue,
         "state":state,
         "active_space":active.as_ref().map(|space| &space.id),
         "target":target,
         "missing_segments":missing_segments,
         "missing_sources":missing_sources,
         "embedding_requests":0,
-        "effects":"Switches search back to the retained float32 index. Segments indexed since the conversion are not in it: their sources go back through normal automatic indexing, which may charge for them if automatic history indexing is on and holds them if it is off. While indexing is paused, they are dropped like other new work; use `index preview` and `index backfill` then. The int8 index stays, inactive, until a person removes it.",
+        "effects":"Switches search back to the retained float32 index. Segments indexed since the conversion are not in it. With `requeue` = automatic, their sources go back through normal automatic indexing, which charges for them, and only kinds in `indexing.auto_kinds` are taken. Otherwise (automatic indexing off, paused, or another configuration) nothing is queued: find them with `index preview` and add them with `index backfill`, which charges for them. The int8 index stays, inactive, until a person removes it.",
     });
     Ok((value, state))
 }
 
-fn start_revert(tx: &Transaction<'_>) -> Result<Value, StorageError> {
-    let (preview, state) = revert_preview(tx)?;
+fn start_revert(tx: &Transaction<'_>, config: &Config) -> Result<Value, StorageError> {
+    let (preview, state) = revert_preview(tx, config)?;
     let invalid = |message: &str| Err(StorageError::from(err(ErrorCode::InvalidState, message)));
     match state {
         "ready" => {
@@ -737,6 +783,7 @@ fn start_revert(tx: &Transaction<'_>) -> Result<Value, StorageError> {
                 "target_space":target,
                 "missing_segments":preview["missing_segments"],
                 "missing_sources":preview["missing_sources"],
+                "requeue":preview["requeue"],
             }))
         }
         "running" => invalid("A conversion is running; let it finish or cancel it first"),
@@ -774,6 +821,20 @@ fn start(tx: &Transaction<'_>, config: &Config) -> Result<Value, StorageError> {
         }
         "failed" => {
             let mut record = read_record(tx)?.ok_or_else(serde_error)?;
+            if matches!(record.phase.as_str(), SCALE | COPY) {
+                // Only what is still to be copied; after the limit that is everything.
+                let copied = match &record.target {
+                    Some(target) => count_chunks(tx, target)? as u64,
+                    None => 0,
+                };
+                let dimension = preview["dimension"].as_u64().ok_or_else(serde_error)?;
+                let segments = preview["segments"].as_u64().ok_or_else(serde_error)?;
+                let logical = preview["logical_bytes"].as_u64().ok_or_else(serde_error)?;
+                let after = logical + segments.saturating_sub(copied) * dimension;
+                if after >= room_limit(config) {
+                    return invalid(&low_room_message(logical, after, config));
+                }
+            }
             record.error = None;
             set_json_meta(tx, &IndexKeys::shrink(&record.source), &record)?;
             Ok(
@@ -783,9 +844,7 @@ fn start(tx: &Transaction<'_>, config: &Config) -> Result<Value, StorageError> {
         "running" => Ok(json!({"accepted":true,"state":"running","embedding_requests":0})),
         "already_int8" => invalid("The active index is already int8"),
         "empty" => invalid("The active index has no vectors to convert"),
-        "low_room" => invalid(
-            "Converting would reach the logical data warning level. Retained indexes in `index status` are an option for the user to remove; nothing was changed",
-        ),
+        "low_room" => invalid(preview["low_room"].as_str().unwrap_or("Not enough room")),
         _ => invalid("There is no active index to convert"),
     }
 }

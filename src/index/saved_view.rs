@@ -66,6 +66,7 @@ struct SpaceRow {
     requested_present: bool,
     scalar_limited: bool,
     int8_scale: Option<f64>,
+    partial: bool,
 }
 #[derive(Debug)]
 struct JobRow {
@@ -165,7 +166,7 @@ fn read_prefix(
     Ok((rows, more))
 }
 fn read_space(db: &Connection, id: &str) -> Result<Option<SpaceRow>, StorageError> {
-    db.query_row("SELECT CASE WHEN octet_length(s.id)<=512 THEN s.id ELSE '' END,CASE WHEN octet_length(s.profile_id)<=512 THEN s.profile_id END,CASE WHEN octet_length(s.model_id)<=512 THEN s.model_id END,s.dimension,CASE WHEN octet_length(s.state)<=64 THEN s.state ELSE '' END,CASE WHEN octet_length(d.value)<=64 THEN d.value END,d.key IS NOT NULL,octet_length(s.id)>512 OR octet_length(s.state)>64,s.int8_scale FROM index_space s LEFT JOIN app_meta d ON d.key='index.space_dimensions.'||s.id WHERE s.id=?1 AND octet_length(s.id)<=512",[id],space_row).optional().map_err(StorageError::from)
+    db.query_row("SELECT CASE WHEN octet_length(s.id)<=512 THEN s.id ELSE '' END,CASE WHEN octet_length(s.profile_id)<=512 THEN s.profile_id END,CASE WHEN octet_length(s.model_id)<=512 THEN s.model_id END,s.dimension,CASE WHEN octet_length(s.state)<=64 THEN s.state ELSE '' END,CASE WHEN octet_length(d.value)<=64 THEN d.value END,d.key IS NOT NULL,octet_length(s.id)>512 OR octet_length(s.state)>64,s.int8_scale,EXISTS(SELECT 1 FROM app_meta p WHERE p.key='index.partial.'||s.id) FROM index_space s LEFT JOIN app_meta d ON d.key='index.space_dimensions.'||s.id WHERE s.id=?1 AND octet_length(s.id)<=512",[id],space_row).optional().map_err(StorageError::from)
 }
 fn space_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SpaceRow> {
     Ok(SpaceRow {
@@ -178,6 +179,7 @@ fn space_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<SpaceRow> {
         requested_present: r.get(6)?,
         scalar_limited: r.get(7)?,
         int8_scale: r.get(8)?,
+        partial: r.get(9)?,
     })
 }
 impl IndexService {
@@ -246,7 +248,7 @@ impl IndexService {
             }
         }
         let capacity = limits.spaces.saturating_sub(spaces.len());
-        let mut q=db.prepare("SELECT CASE WHEN octet_length(s.id)<=512 THEN s.id ELSE '' END,CASE WHEN octet_length(s.profile_id)<=512 THEN s.profile_id END,CASE WHEN octet_length(s.model_id)<=512 THEN s.model_id END,s.dimension,CASE WHEN octet_length(s.state)<=64 THEN s.state ELSE '' END,CASE WHEN octet_length(d.value)<=64 THEN d.value END,d.key IS NOT NULL,octet_length(s.id)>512 OR octet_length(s.state)>64,s.int8_scale FROM index_space s LEFT JOIN app_meta d ON d.key='index.space_dimensions.'||s.id WHERE (?1 IS NULL OR s.id<>?1) ORDER BY s.rowid DESC LIMIT ?2")?;
+        let mut q=db.prepare("SELECT CASE WHEN octet_length(s.id)<=512 THEN s.id ELSE '' END,CASE WHEN octet_length(s.profile_id)<=512 THEN s.profile_id END,CASE WHEN octet_length(s.model_id)<=512 THEN s.model_id END,s.dimension,CASE WHEN octet_length(s.state)<=64 THEN s.state ELSE '' END,CASE WHEN octet_length(d.value)<=64 THEN d.value END,d.key IS NOT NULL,octet_length(s.id)>512 OR octet_length(s.state)>64,s.int8_scale,EXISTS(SELECT 1 FROM app_meta p WHERE p.key='index.partial.'||s.id) FROM index_space s LEFT JOIN app_meta d ON d.key='index.space_dimensions.'||s.id WHERE (?1 IS NULL OR s.id<>?1) ORDER BY s.rowid DESC LIMIT ?2")?;
         let mut others = q
             .query_map(params![selected, (capacity + 1) as i64], space_row)?
             .collect::<Result<Vec<_>, _>>()?;
@@ -565,7 +567,7 @@ pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
         .into_iter()
         .map(|(k, v)| (k, count(v, complete)))
         .collect::<BTreeMap<_, _>>();
-    let spaces=raw.spaces.iter().map(|s|{let segments=raw.chunks.iter().filter(|id|*id==&s.id).count()as u64;json!({"id":if s.scalar_limited{None}else{Some(&s.id)},"identity_known":!s.scalar_limited,"profile":s.profile,"model":s.model,"dimension":if (1..=8192).contains(&s.dimension){Some(s.dimension)}else{None},"saved_dimension":s.dimension,"dimension_known":(1..=8192).contains(&s.dimension),"state":s.state,"requested_dimensions":s.requested.as_ref().and_then(|v|serde_json::from_str::<usize>(v).ok().filter(|n|(1..=8192).contains(n))),"selected":Some(&s.id)==raw.selected.as_ref(),"segments":count(segments,!raw.chunks_more&&!s.scalar_limited),"int8_scale":s.int8_scale,"retained":s.state=="inactive"&&segments>0,"vector_payload_bytes":vector_bytes(segments,s.dimension,if s.int8_scale.is_some(){1}else{4},!raw.chunks_more&&!s.scalar_limited),"requested_known":!s.requested_present||s.requested.as_ref().is_some_and(|v|serde_json::from_str::<usize>(v).is_ok_and(|n|(1..=8192).contains(&n))),"metadata_limited":s.scalar_limited||!(1..=8192).contains(&s.dimension)||s.profile.is_none()||s.model.is_none()||(s.requested_present&&s.requested.as_ref().is_none_or(|v|!serde_json::from_str::<usize>(v).is_ok_and(|n|(1..=8192).contains(&n))))})}).collect::<Vec<_>>();
+    let spaces=raw.spaces.iter().map(|s|{let segments=raw.chunks.iter().filter(|id|*id==&s.id).count()as u64;json!({"id":if s.scalar_limited{None}else{Some(&s.id)},"identity_known":!s.scalar_limited,"profile":s.profile,"model":s.model,"dimension":if (1..=8192).contains(&s.dimension){Some(s.dimension)}else{None},"saved_dimension":s.dimension,"dimension_known":(1..=8192).contains(&s.dimension),"state":s.state,"requested_dimensions":s.requested.as_ref().and_then(|v|serde_json::from_str::<usize>(v).ok().filter(|n|(1..=8192).contains(n))),"selected":Some(&s.id)==raw.selected.as_ref(),"segments":count(segments,!raw.chunks_more&&!s.scalar_limited),"int8_scale":s.int8_scale,"retained":s.state=="inactive"&&segments>0,"partial":s.partial,"vector_payload_bytes":vector_bytes(segments,s.dimension,if s.int8_scale.is_some(){1}else{4},!raw.chunks_more&&!s.scalar_limited),"requested_known":!s.requested_present||s.requested.as_ref().is_some_and(|v|serde_json::from_str::<usize>(v).is_ok_and(|n|(1..=8192).contains(&n))),"metadata_limited":s.scalar_limited||!(1..=8192).contains(&s.dimension)||s.profile.is_none()||s.model.is_none()||(s.requested_present&&s.requested.as_ref().is_none_or(|v|!serde_json::from_str::<usize>(v).is_ok_and(|n|(1..=8192).contains(&n))))})}).collect::<Vec<_>>();
     let mut probe_rows=raw.probes.iter().map(|row|{
         let probe=if row.scalar_limited{None}else{row.body.as_ref().and_then(|body|serde_json::from_str::<crate::protocol::IndexProbeObservation>(body).ok())};
         (&row.key,probe.map(|probe|json!(probe)).unwrap_or_else(||json!({"unavailable":"saved probe type or copy budget is unverified","complete":false,"record_key":if row.scalar_limited{None}else{Some(&row.key)},"full_cli":"shellboy index status"})))

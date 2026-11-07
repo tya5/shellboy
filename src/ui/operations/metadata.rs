@@ -538,6 +538,7 @@ impl Form {
         lines.push(Line::from(match spec.confirmation {
             Confirmation::None => local!(language, "Enterで指定した操作を要求します。", "Enter requests the selected operation."),
             Confirmation::ThreadDeletePreview => local!(language, "削除対象と実行状態を確認してから削除します。", "Review deletion targets and running work before deleting."),
+            Confirmation::IndexRemove => local!(language, "削除する索引と解放される量をdry-runで確認してから確定します。作り直すには埋め込みの費用がかかります。", "Review the dry run, then confirm. Recreating the index means paid embedding."),
             Confirmation::IndexCostPreview => local!(language, "対象件数と費用previewを確認してから索引を開始します。", "Review target counts and estimated cost before starting indexing."),
             Confirmation::PaidRequest => local!(language, "モデルAPIの利用や追加処理の費用が発生する場合があります。", "Model API use and additional processing may incur costs."),
             Confirmation::StorageCollect => local!(language, "指定した保存データの種類について回収を要求します。保護された参照は既存の回収規則に従います。", "Request collection of the specified saved data. Existing rules protect referenced data."),

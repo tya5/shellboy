@@ -88,6 +88,7 @@ fn field_name(key: &str) -> &str {
         "dimension" => "実測次元数",
         "int8_scale" => "8ビット化の倍率",
         "retained" => "削除せず保持",
+        "partial" => "未完成の索引",
         "retained_remove_with" => "保持中の索引を削除する操作",
         "retained_vector_payload_bytes" => "保持中のベクトル本体（bytes）",
         "vector_payload_bytes" => "ベクトル本体（bytes）",

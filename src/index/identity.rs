@@ -422,6 +422,12 @@ fn select_space_tx(tx: &Transaction<'_>, id: &str, keys: &[String]) -> Result<bo
             "Incomplete candidate cannot become active",
         )));
     }
+    if meta(tx, &IndexKeys::partial(id))?.is_some() {
+        return Err(StorageError::from(err(
+            ErrorCode::InvalidState,
+            "Incomplete candidate cannot become active",
+        )));
+    }
     let mut changed = tx.execute(
         "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused') AND id<>?1",
         [id],

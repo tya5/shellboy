@@ -48,6 +48,7 @@ pub(super) fn enrich(
             retained_bytes += bytes;
         }
         status.spaces.push(IndexSpaceStatus {
+            partial: meta(db, &IndexKeys::partial(&id))?.map(|_| true),
             retained_remove_with: retained
                 .then(|| format!("shellboy index remove --space {id} --dry-run")),
             space_id: id.clone(),

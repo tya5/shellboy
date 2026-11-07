@@ -264,7 +264,7 @@ What to expect:
 - The order of results changes slightly. On one real index of 32,779 distinct segments, 98.8% of a search's top 10 stayed the same when segments themselves stood in for queries; real queries were not measured. Check searches you care about.
 - New text and search queries are converted with the same fixed factor, chosen from your vectors when the conversion ran and shown as `int8_scale` in `index status`. An element beyond that range is clipped to ±127 (saturation) rather than failing. On that same index none was clipped when the factor came from the oldest half of the vectors and was applied to the newer half.
 - `distance` is the L2 distance between the stored integers, so values are around hundreds instead of around 1. As before, it only orders results within one space. Do not compare it across spaces or with a threshold.
-- `index shrink --revert` switches back to the retained float32 index with the same atomic switch. Segments indexed since the conversion are not in it, and the preview gives the count. Their sources go back through normal automatic indexing, which charges for them if `auto_history` is on and holds them if it is off; while indexing is paused they are dropped like other new work, so use `index preview` and `index backfill` then. The int8 index stays too.
+- `index shrink --revert` switches back to the retained float32 index with the same atomic switch. Segments indexed since the conversion are not in it, and the preview gives the count. With automatic indexing on, their sources go back through it, which charges for them and takes only `auto_kinds`. With it off or paused nothing is queued (`requeue` in the preview says which), so use `index preview` and `index backfill`, which also charge. The int8 index stays too.
 - A later `index rebuild` builds a float32 index again; shrink it again if you want.
 
 `vector_payload_bytes` in `index status` is `segments × dimension × 1` for an int8 space.
@@ -278,7 +278,7 @@ shellboy index remove --space SPACE_ID --dry-run   # space, model, dimension, el
 shellboy index remove --space SPACE_ID
 ```
 
-Recreating a deleted index means paid embedding of every segment. Check real searches first. Freed pages are reused; the file shrinks only with `storage vacuum`. `storage collect --category index` does not delete these: it only takes partial candidates replaced by a newer rebuild or conversion attempt, and inactive spaces with no vectors. At the storage limit, deleting a retained index is one option; a model tells you about it and does not do it on its own.
+Recreating a deleted index means paid embedding of every segment. Check real searches first. Freed pages are reused; the file shrinks only with `storage vacuum`. `storage collect --category index` does not delete these: it only takes free int8 copies left by a cancelled or stopped conversion, and inactive spaces with no vectors. A rebuild candidate replaced by a newer rebuild is retained too because its vectors were paid for; it shows `partial` and cannot be selected. At the storage limit, deleting a retained index is one option; a model tells you about it and does not do it on its own.
 
 IndexSpaces are separated by connection, embedding model, observed dimensions, and related settings. Configuration changes do not silently delete old spaces; failed rebuild candidates preserve the old active space. Historical content needs explicit backfill/rebuild to enter the new space. Automatically detecting a changed model behind an alias is not guaranteed.
 
@@ -377,6 +377,6 @@ newer nodes may be absent and searches only retained indexed sources, even if
 available for retained originals; existing coverage is never a completeness claim.
 `scope_status` also lists `auto_kinds` and `kinds_not_auto_indexed`: kinds that
 semantic search finds only after an explicit backfill.
-For storage cleanup, `storage collect --category index` removes discarded partial
-candidates and inactive spaces with no vectors, and `index remove` deletes one named
+For storage cleanup, `storage collect --category index` removes free int8 copies left by
+a stopped conversion and inactive spaces with no vectors, and `index remove` deletes one named
 retained index; no existing CLI removes the active index alone while keeping all history.

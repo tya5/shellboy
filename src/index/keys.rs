@@ -73,6 +73,10 @@ impl<'a> IndexKeys<'a> {
     pub(super) fn converted_from(space: &str) -> String {
         format!("index.converted_from.{space}")
     }
+    /// A rebuild candidate replaced before it was complete: kept, never selectable.
+    pub(super) fn partial(space: &str) -> String {
+        format!("index.partial.{space}")
+    }
     pub(super) fn input(job: &str) -> String {
         format!("{}{job}", Self::INPUT_PREFIX)
     }
@@ -116,6 +120,7 @@ mod tests {
             (keys.bootstrap_range().1, "index.bootstrap.profile:日本/"),
             (keys.splitter(), "unicode-paragraph-v1:profile:日本"),
             (IndexKeys::shrink("space:1"), "index.shrink.space:1"),
+            (IndexKeys::partial("space:1"), "index.partial.space:1"),
             (
                 IndexKeys::converted_from("space:1"),
                 "index.converted_from.space:1",
