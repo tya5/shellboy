@@ -4125,3 +4125,10 @@ unacceptable cached final answer without creating an unbounded retry. Revisit if
 provider measurements show repeated oversized results or a stricter shared
 cache invalidation policy is adopted. No production frequency is inferred from
 synthetic fixtures.
+
+The oversized-cache regeneration is limited to one durable reservation per
+reduce cache witness and character limit. The reservation is written before
+admission, so cancellation, crashes and concurrent operations fail closed rather
+than repeating a potentially paid request. A changed cache witness or limit gets
+its own reservation. Revisit if a safe explicit reset and retention policy is
+approved; a failed reserved retry is not automatically retried.

@@ -306,6 +306,34 @@ async fn bounded_summary_retries_oversize_cache_then_adopts_valid_result() {
     finish(f, server).await;
 }
 
+#[tokio::test]
+async fn oversized_retry_is_bounded_across_operations() {
+    let root = tempfile::tempdir().unwrap();
+    let log = root.path().join("requests.jsonl");
+    let mut replies = vec!["あ".repeat(2001); 9];
+    replies.extend(vec!["short changed selection".into(); 8]);
+    let (f, server) = setup(replies, &log).await;
+    f.text("n0", &"source".repeat(5000)).await;
+    let before = f.path().await;
+    let mut a = args("n0");
+    a.max_chars = Some(1);
+    assert!(edit(&f, &a).await.is_err());
+    assert!(edit(&f, &a).await.is_err());
+    let count = lines(&log);
+    assert_eq!(count, 9);
+    let error = edit(&f, &a).await.unwrap_err();
+    assert!(error.message.contains("retry already used"));
+    assert_eq!(lines(&log), count);
+    assert_eq!(f.path().await, before);
+    f.text("n1", &"changed source".repeat(500)).await;
+    a.to_node_id = Some("n1".into());
+    let result = edit(&f, &a).await.unwrap();
+    assert!(result.compact.summary_node_id.is_some());
+    assert_ne!(f.path().await, before);
+    server.abort();
+    f.close().await;
+}
+
 async fn cache_group(f: &Fixture, index: usize, text: &str) {
     let snapshot = f.compactor.snapshot("t", true).await.unwrap();
     let sources = snapshot.groups[index].sources.clone();
