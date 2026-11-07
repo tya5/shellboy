@@ -611,7 +611,6 @@ impl Control {
         operation_id: String,
         thread: String,
         node: String,
-        confirmed_run: Option<String>,
         text: String,
         files: Vec<crate::attachments::AttachmentInput>,
     ) -> Result<Value, ApiError> {
@@ -619,7 +618,6 @@ impl Control {
             operation_id,
             thread,
             node,
-            confirmed_run,
             text,
             files,
             ThreadCreateArgs {
@@ -639,7 +637,6 @@ impl Control {
         operation_id: String,
         thread: String,
         node: String,
-        confirmed_run: Option<String>,
         text: String,
         files: Vec<crate::attachments::AttachmentInput>,
         args: ThreadCreateArgs,
@@ -649,7 +646,6 @@ impl Control {
             operation_id,
             thread,
             node,
-            confirmed_run,
             content,
             files,
             args,
@@ -663,7 +659,6 @@ impl Control {
         operation_id: String,
         thread: String,
         node: String,
-        confirmed_run: Option<String>,
         content: crate::attachments::DraftContent,
         files: Vec<crate::attachments::AttachmentInput>,
         args: ThreadCreateArgs,
@@ -675,7 +670,7 @@ impl Control {
         let outcome=tokio::spawn(async move{
             let _guard=control.admit(true)?;
             let references:Vec<Value>=files.iter().map(|file|json!({"path":file.path,"kind":file.kind})).collect();
-            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"confirmed_run_id":confirmed_run,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"submission":options.submission});
+            let mut intent=json!({"kind":"edit_request","thread_id":thread,"node_id":node,"text":content.text,"files":references,"args":args,"deliver":options.deliver,"submission":options.submission});
             content.fingerprint_positions(&mut intent);
             let reservation=control.store.reserve_internal(operation_id.clone(),intent).await?;
             match reservation{db::RuntimeReservation::Saved(result)=>return result,db::RuntimeReservation::Pending=>return Err(ApiError::new(ErrorCode::InvalidState,"This edit was accepted but its result is uncertain; inspect its operation receipt")),db::RuntimeReservation::New=>{control.changed.notify_waiters();}}
@@ -683,22 +678,9 @@ impl Control {
                 if let Some(submission)=&options.submission {
                     control.store.prepare_draft_submission(&operation_id,Some(&thread),submission).await?;
                 }
-                let mut effects=control.store.stop_for_edit(thread.clone(),confirmed_run).await?;
-                // This in-process edit has no shell caller awaiting a stop
-                // receipt. Apply its stop immediately; the accepted edit still
-                // owns its guard until the terminal boundary and durable fork.
-                let runs=std::mem::take(&mut effects.stop_runs);
-                control.apply_effects(Some(effects)).await;
-                for run in &runs { control.stop_run(run).await; }
-                for run in runs{
-                    let deadline=tokio::time::Instant::now()+std::time::Duration::from_millis(30_000);
-                    loop{
-                        let run=run.clone();let notified=control.changed.notified();tokio::pin!(notified);notified.as_mut().enable();
-                        let terminal=control.store.database.call(move|db|Ok(db.query_row("SELECT state NOT IN ('live','stopping') FROM run WHERE id=?1",[run],|r|r.get::<_,bool>(0))?)).await.map_err(storage_error)?;
-                        if terminal{break;}
-                        tokio::select!{biased;_=control.stop.cancelled()=>return Err(ApiError::new(ErrorCode::InvalidState,"Edit cancelled by shutdown; the original request remains")),_=tokio::time::sleep_until(deadline)=>return Err(ApiError::new(ErrorCode::InvalidState,"The old Run is still stopping; inspect it and retry the retained draft")),_=notified=>{}}
-                    }
-                }
+                let check=thread.clone();
+                let active=control.store.database.call(move|db|{use rusqlite::OptionalExtension;db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[check],|r|r.get::<_,String>(0)).optional().map_err(Into::into)}).await.map_err(storage_error)?;
+                if let Some(run)=active{return Err(ApiError::new(ErrorCode::InvalidState,"A Run is active; stop it or wait until it finishes before editing").details(json!({"run_id":run})));}
                 let target=thread.clone();let inherited_cwd=control.store.database.call(move|db|{use rusqlite::OptionalExtension;Ok(db.query_row("SELECT cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",[target],|r|r.get::<_,String>(0)).optional()?)}).await.map_err(storage_error)?.ok_or_else(||ApiError::new(ErrorCode::ThreadNotFound,"Edited Thread was not found or was deleted"))?;
                 let base=PathBuf::from(inherited_cwd);let cwd=args.cwd.as_ref().map(PathBuf::from).map(|path|if path.is_absolute(){path}else{base.join(path)}).unwrap_or(base);
                 let file_limit=control.store.config.limits.attachment_file_bytes;let request_limit=control.store.config.limits.attachment_request_bytes;

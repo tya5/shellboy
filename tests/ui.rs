@@ -632,27 +632,18 @@ fn edit_request_stages_separate_draft_and_requires_specific_run_stop_consent() {
         "old-thread"
     );
     ui.insert(" edited", false);
-    assert!(enter(&mut ui).is_empty());
-    let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
-    terminal.draw(|frame| draw(frame, &mut ui)).unwrap();
-    assert!(screen_text(&terminal).contains("old-run"));
-    assert!(ui.event(key(KeyCode::Char('n'))).is_empty());
-    assert!(ui.view().pending.is_empty());
-    assert!(enter(&mut ui).is_empty());
-    let actions = ui.event(key(KeyCode::Char('y')));
+    let actions = enter(&mut ui);
     let (draft_id, revision) = match &actions[0] {
         UiAction::SendEdited {
             draft_id,
             revision,
             source_thread_id,
             source_node_id,
-            confirmed_run_id,
             text,
             ..
         } => {
             assert_eq!(source_thread_id, "old-thread");
             assert_eq!(source_node_id, "original-user");
-            assert_eq!(confirmed_run_id.as_deref(), Some("old-run"));
             assert_eq!(text, "original request 日本語 edited");
             (draft_id.clone(), *revision)
         }
@@ -698,24 +689,7 @@ fn stale_original_load_and_new_run_confirmation_preserve_revision_boundaries() {
         run_id: None,
     });
     let actions = enter(&mut ui);
-    let (draft_id, revision) = match &actions[0] {
-        UiAction::SendEdited {
-            draft_id,
-            revision,
-            confirmed_run_id: None,
-            ..
-        } => (draft_id.clone(), *revision),
-        _ => panic!("expected send without stop"),
-    };
-    ui.apply(UiUpdate::EditConfirmationRequired {
-        draft_id,
-        revision,
-        run_id: "new-run".into(),
-    });
-    let actions = ui.event(key(KeyCode::Char('y')));
-    assert!(
-        matches!(&actions[0],UiAction::SendEdited{revision:new_revision,confirmed_run_id:Some(id),..}if *new_revision>revision && id=="new-run")
-    );
+    assert!(matches!(&actions[0], UiAction::SendEdited { .. }));
 }
 
 #[test]

@@ -53,7 +53,7 @@ UiNodeは本文windowのbase_char_offsetと原文total_charsを持つ。anchor�
 
 `/edit [user-node-id]` は原依頼取得をLoadEditRequestとしてworkerへ渡す。省略時はanchor又は最後のuser nodeを使うが、実際のuser種別・選択経路・原文保持はbackendが照合する。結果のThread/generation/draft revisionが一致する場合だけ、別のローカル下書きに原文と添付指定を展開する。元の下書き、旧Thread、過去の原依頼は変更しない。原文が下書き上限を超えたら切り詰めず中止する。取得した本文はliteral扱いで、slashから始まる元依頼もコマンドへ変換しない。
 
-編集下書きはsource Thread/nodeと取得時のRun IDをDraftSnapshot.editへ保持する。Runがあれば送信前に対象Runを示す停止確認を表示し、YだけがSendEditedを発行する。Enterは肯定とせず、N/Escは下書きを保持して戻る。backendへconfirmed_run_idを送り、取得後に新Runが始まった場合はEditConfirmationRequiredで再確認する。backendの責務は、対象Run停止のterminal確定後、元依頼の直前まで分岐し、編集本文を新規送信すること。初回依頼の編集は空prefixで新Threadを作る。受付後の下書きからedit指定を外し、その後の通常依頼を再びforkしない。失敗snapshotは元のedit指定を含めて復元可能とする。
+Editing preserves the source Thread/node in the draft. If the source has a live or stopping Run, submission is refused without stopping it; the draft is retained so the user can stop or wait and retry. The backend rechecks atomically at fork adoption. Older saved edit drafts with a run ID remain readable; that ID is not consent to stop a Run. A successful edit forks before the original request and sends a new request without changing the source.
 
 `/index` / `/index status` は索引管理を表示する。`/index all`、`/index thread`（現在の保存済みThread）、`/index threads ID...` で費用対象を明示する。`/index space SPACE-ID [all|thread|threads ID...]` は空間別管理で、IDだけなら状態照会だけ。管理画面はpending/running/done/failed/paused、未索引数、空間情報、preview、操作結果を同じoverlayに表示する。データ取得はfrontend/IndexServiceの責務で、UIは結果を推測しない。非アクティブ空間への追加や切替は既存のサービス契約に従い、UIで暗黙に有効化しない。
 

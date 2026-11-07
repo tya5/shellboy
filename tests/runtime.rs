@@ -2293,7 +2293,6 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
             format!("{}:deleted-edit-target", control.store.instance_id),
             target,
             "old-node".into(),
-            None,
             "retained edit".into(),
             vec![],
         )

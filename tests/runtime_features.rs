@@ -925,7 +925,6 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
             operation.clone(),
             thread.clone(),
             node.clone(),
-            None,
             "edited replacement request".into(),
             vec![],
             args.clone(),
@@ -946,7 +945,6 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
             operation,
             thread.clone(),
             node.clone(),
-            None,
             "edited replacement request".into(),
             vec![],
             args,
@@ -981,7 +979,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop() {
+async fn edited_request_refuses_active_run_without_stopping_it() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = owner(root.path(), &url).await;
@@ -1002,13 +1000,12 @@ async fn edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop
     let old = incoming(&control, &mut receive).await;
     let node = accepted["message_id"].as_str().unwrap().to_owned();
     let run = accepted["run_id"].as_str().unwrap().to_owned();
-    for consent in [None, Some("stale-other-run".into())] {
+    for _ in 0..2 {
         let error = control
             .edit_request(
                 format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
                 thread.clone(),
                 node.clone(),
-                consent,
                 "replacement".into(),
                 vec![],
             )
@@ -1016,17 +1013,6 @@ async fn edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop
             .unwrap_err();
         assert_eq!(error.details.unwrap()["run_id"], run);
     }
-    let edited = control
-        .edit_request(
-            format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
-            thread,
-            node,
-            Some(run.clone()),
-            "replacement".into(),
-            vec![],
-        )
-        .await
-        .unwrap();
     let state = control
         .store
         .database
@@ -1039,11 +1025,8 @@ async fn edited_request_requires_exact_run_consent_and_waits_for_old_run_to_stop
         })
         .await
         .unwrap();
-    assert_eq!(state, "stopped");
-    let _ = old.reply.send((200, answer("too late")));
-    let new = incoming(&control, &mut receive).await;
-    new.reply.send((200, answer("new run answer"))).unwrap();
-    settled(&control, edited["thread_id"].as_str().unwrap()).await;
+    assert_eq!(state, "live");
+    let _ = old.reply.send((200, answer("original answer")));
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();

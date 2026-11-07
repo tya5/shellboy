@@ -303,7 +303,7 @@ Replace `ID` and connection names below with real values. `/attach` and `/cwd`, 
 | `/background` | Background the foreground shell |
 | `/quit` | Normal shutdown |
 
-Omitting the node in `/fork` suggests the anchor or tail; `/edit` and `/rewind` suggest the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active, confirm stopping it with Y before proceeding.
+Omitting the node in `/fork` suggests the anchor or tail; `/edit` and `/rewind` suggest the anchor or latest user node. Invalid node kinds/boundaries are errors. Specify IDs for reproducible actions. `/edit` never overwrites the old node: sending branches immediately before the original request. If a Run is active or stopping, sending is refused; stop it or wait for it to finish, then retry the retained draft.
 
 ## Branches
 

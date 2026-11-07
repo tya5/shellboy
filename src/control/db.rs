@@ -946,42 +946,6 @@ impl Store {
             .map_err(storage_error)?
     }
 
-    pub async fn stop_for_edit(
-        &self,
-        thread: String,
-        confirmed: Option<String>,
-    ) -> Result<MutationResult> {
-        self.database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let live: Option<String> = tx
-                    .query_row(
-                        "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
-                        [&thread],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-                if let Some(run) = live {
-                    if confirmed.as_deref() != Some(&run) {
-                        return Ok(Err(error(
-                            ErrorCode::InvalidState,
-                            "Confirm stopping the current Run before editing this request",
-                        )
-                        .details(json!({"confirmation_required":true,"run_id":run}))));
-                    }
-                    let effects = stop_run(&tx, &run, &chrono::Utc::now().to_rfc3339());
-                    if effects.is_ok() {
-                        tx.commit()?;
-                    }
-                    Ok(effects)
-                } else {
-                    Ok(Ok(MutationResult::default()))
-                }
-            })
-            .await
-            .map_err(storage_error)?
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub async fn accept_edit(
         &self,
@@ -1024,7 +988,7 @@ impl Store {
             tx.execute_batch("SAVEPOINT edit_accept")?;
             let result=(||{
                 let live:Option<String>=tx.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[&thread],|r|r.get(0)).optional().map_err(sql_error)?;
-                if let Some(run)=live{return Err(error(ErrorCode::InvalidState,"A new live Run appeared; confirmation is required again").details(json!({"confirmation_required":true,"run_id":run})));}
+                if let Some(run)=live{return Err(error(ErrorCode::InvalidState,"A Run is active; stop it or wait until it finishes before editing").details(json!({"run_id":run})));}
                 let user:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN thread_path p ON p.node_id=n.id WHERE p.thread_id=?1 AND n.id=?2 AND n.deleted_reason IS NULL AND json_extract(n.payload_json,'$.role')='user')",params![thread,node],|r|r.get(0)).map_err(sql_error)?;
                 if !user{return Err(error(ErrorCode::InvalidArgument,"Edit target must be an original user request on this Thread's selected path"));}
                 let fork=uuid::Uuid::new_v4().to_string();let now=chrono::Utc::now().to_rfc3339();
