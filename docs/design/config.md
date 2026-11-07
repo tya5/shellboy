@@ -262,7 +262,8 @@ result over the 1 MiB read bound is refused before the replace, since it could n
 because those fields hold them today; they then appear only as `sensitive` entries.
 
 **Restart and live connections (#269 stage C).** `default_connection`, `default_model` and connection definitions
-apply to the next request without restarting. The connection named by the running `embedding.connection` stays at
+apply to the next request without restarting. Defaults govern newly created root Threads and default catalog selection;
+existing Threads retain their selected connection/model IDs. The connection named by the running `embedding.connection` stays at
 its startup definition until restart, preserving the index profile key. All other settings, including `embedding.*`,
 `compaction.*` and `retention.*`, retain restart semantics. Standalone commands that load the file themselves see
 changes on their next invocation. Direct file edits do not reload the owner; use `config.set` for live application.
