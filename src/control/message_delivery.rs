@@ -48,7 +48,7 @@ pub(crate) fn append_admitted_tx(
     }
     let mut has_notice = false;
     for node in nodes {
-        has_notice |= tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE message_node_id=?1 AND (json_extract(result_json,'$.expect_reply')=1 OR json_extract(result_json,'$.reply_to') IS NOT NULL))", [node], |r| r.get::<_, bool>(0))?;
+        has_notice |= tx.query_row("SELECT EXISTS(SELECT 1 FROM receipt WHERE message_node_id=?1 AND (json_extract(result_json,'$.expect_reply')=1 OR json_extract(result_json,'$.reply_to') IS NOT NULL OR (COALESCE(json_extract(sender_json,'$.label'),'')<>'' AND COALESCE(json_extract(sender_json,'$.kind'),'')<>'human')))", [node], |r| r.get::<_, bool>(0))?;
     }
     if has_notice {
         for node in nodes {

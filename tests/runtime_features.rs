@@ -5305,3 +5305,73 @@ fn proactive_wait_witness(
     let sources = db.prepare("SELECT s.source_node_id FROM thread_path p JOIN replacement r ON r.output_node_id=p.node_id JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE p.thread_id=?1 AND r.format_version='spill-v1' AND n.payload_json IS NOT NULL ORDER BY p.ordinal,s.ordinal")?.query_map([thread], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
     Ok((ids, epoch, sources))
 }
+
+#[tokio::test]
+async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
+    fn events(body: &Value) -> Vec<String> {
+        body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["role"] == "developer")
+            .flat_map(|v| v["content"].as_array().into_iter().flatten())
+            .filter_map(|v| v["text"].as_str())
+            .filter(|t| t.contains("\"sender_label\""))
+            .map(str::to_owned)
+            .collect()
+    }
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = owner(root.path(), &url).await;
+    let control = Control::new(&owner, root.path().into());
+    let mut texts = Vec::new();
+    for (label, human, text) in [
+        (Some("app:todo"), false, "labelled"),
+        (None, false, "plain"),
+        (Some("typed"), true, "human"),
+    ] {
+        let created = request(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                cwd: None,
+                parent_id: None,
+                connection: None,
+                model: None,
+                effort: None,
+            }),
+        )
+        .await;
+        let thread = created["thread_id"].as_str().unwrap().to_owned();
+        request(
+            &control,
+            Command::MessageSend(MessageSendArgs {
+                human,
+                expect_reply: false,
+                sender_label: label.map(str::to_owned),
+                deliver: Deliver::Next,
+                thread_id: Some(thread),
+                text: text.into(),
+            }),
+        )
+        .await;
+        let sent = incoming(&control, &mut receive).await;
+        texts.push((text, events(&sent.body)));
+        let input = sent.body["input"].as_array().unwrap();
+        let position = input
+            .iter()
+            .position(|v| v["content"][0]["text"] == text)
+            .expect("message text is unchanged");
+        if label.is_some() && !human {
+            let notice = input[position + 1]["content"][0]["text"].as_str().unwrap();
+            assert!(notice.starts_with("Shellboy event v1: "), "{notice}");
+        }
+    }
+    assert_eq!(texts[0].1.len(), 1, "{:?}", texts[0]);
+    assert!(texts[0].1[0].contains("app:todo") && texts[0].1[0].contains("not verified"));
+    assert!(texts[1].1.is_empty(), "no label, no notice");
+    assert!(texts[2].1.is_empty(), "human sender, no notice");
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
