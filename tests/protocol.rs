@@ -1023,9 +1023,11 @@ fn attempt_usage_wire_validation_rejects_aggregate_options_and_blank_ids() {
 
 #[test]
 fn exported_schema_matches_committed_protocol_schema() {
+    let generated = shellboy::protocol::schema_json();
+    let committed = include_str!("../docs/reference/protocol.schema.json");
     assert_eq!(
-        shellboy::protocol::schema_json().trim(),
-        include_str!("../docs/reference/protocol.schema.json").trim(),
+        generated.replace("\r\n", "\n").trim(),
+        committed.replace("\r\n", "\n").trim(),
         "run `shellboy protocol schema > docs/reference/protocol.schema.json`",
     );
 }
