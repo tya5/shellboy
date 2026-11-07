@@ -96,6 +96,7 @@ impl Fixture {
             number,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,

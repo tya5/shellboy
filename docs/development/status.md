@@ -5219,3 +5219,8 @@ key, a real provider, shellboy-web/Studio use.
 History execution links expose an optional TUI-formatted shell description to
 `history list` and `history window`; existing command and execution fields are
 unchanged.
+
+
+## #262 — human decision requests
+
+Implementation is being developed against schema 34. It reuses the pending reply receipt, with `to_human=true` in `message.ask` acceptance and the saved receipt. There is no new table, migration, worker or queue. The client wire read is `thread.get` → `awaiting_replies` (per Thread, bounded at 128), with `recipient_kind`, `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status` and `reminded`; answer via `message.reply`. `events.wait --thread` is the change hint. Focused verification: frontend inbox 10 tests; summary 5; reply lifecycle 9; localized detail 1. The archived-question regression was added and reply tests pass. The final reply suite (including archived Thread ask), `cargo check --tests`, and TUI region test pass. Remaining: final acceptance sweep, rebase, and CI.

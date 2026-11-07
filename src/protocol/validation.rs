@@ -826,6 +826,10 @@ impl Command {
                 optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
                 validate_sender_label(a.sender_label.as_deref())
             }
+            Self::MessageAsk(a) => {
+                optional_nonempty(a.thread_id.as_deref(), "thread_id")?;
+                nonempty(&a.text, "text")
+            }
             Self::MessageReply(a) => {
                 nonempty(&a.message_id, "message_id")?;
                 validate_sender_label(a.sender_label.as_deref())

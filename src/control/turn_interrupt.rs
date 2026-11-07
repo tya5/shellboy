@@ -272,6 +272,7 @@ mod tests {
                     format!("{}:send", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
                         human: false,
+                        to_human: false,
                         expect_reply: false,
                         sender_label: None,
                         thread_id: Some(thread.clone()),

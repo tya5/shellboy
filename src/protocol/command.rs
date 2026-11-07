@@ -42,6 +42,7 @@ impl Command {
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
             Self::MessageReply(_) => ("message.reply", CommandRoute::Database),
             Self::MessageSend(_) => ("message.send", CommandRoute::Database),
+            Self::MessageAsk(_) => ("message.ask", CommandRoute::Database),
             Self::MessageCancel(_) => ("message.cancel", CommandRoute::Database),
             Self::MessageGet(_) => ("message.get", CommandRoute::Database),
             Self::OperationGet(_) => ("operation.get", CommandRoute::Database),
@@ -137,6 +138,7 @@ impl Command {
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)
+            | Self::MessageAsk(_)
             | Self::MessageCancel(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
@@ -191,6 +193,7 @@ impl Command {
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)
+            | Self::MessageAsk(_)
             | Self::MessageCancel(_)
             | Self::MessageGet(_)
             | Self::OperationGet(_)
@@ -239,6 +242,7 @@ impl Command {
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)
+            | Self::MessageAsk(_)
             | Self::MessageCancel(_)
             | Self::RunRetry(_)
             | Self::RunStop(_)
@@ -343,6 +347,7 @@ impl Command {
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
             | Self::MessageSend(_)
+            | Self::MessageAsk(_)
             | Self::MessageCancel(_)
             | Self::RunRetry(_)
             | Self::RunStop(_)

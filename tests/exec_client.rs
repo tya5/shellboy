@@ -283,6 +283,7 @@ impl Fixture {
                 format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
                 Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -888,6 +889,7 @@ async fn run_end_selects_last_turn_after_processing_turn() {
             format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "later turn".into(),

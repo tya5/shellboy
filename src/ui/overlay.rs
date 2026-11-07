@@ -252,7 +252,8 @@ impl UiState {
                     && self.top_overlay().is_none()
                     && mouse.kind == MouseEventKind::Down(event::MouseButton::Left)
                     && (self.live_work_click(mouse.column, mouse.row)
-                        || self.held_input_click(mouse.column, mouse.row)) =>
+                        || self.held_input_click(mouse.column, mouse.row)
+                        || self.awaiting_human_click(mouse.column, mouse.row)) =>
             {
                 vec![]
             }

@@ -60,6 +60,7 @@ async fn send(store: &Store, thread: &str, text: &str) -> (MessageAccepted, Muta
         store,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -90,6 +91,7 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     let thread = create(&store, None).await;
     let req = request(Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -346,6 +348,7 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     assert_eq!(detail.delivery_status, DeliveryStatus::Cancelled);
     let sending = request(Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -396,6 +399,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
             .execute(
                 request(Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -415,6 +419,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -470,6 +475,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -501,6 +507,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -536,6 +543,7 @@ async fn receipt_failure_rolls_back_message_run_turn_and_caches_error_without_ef
     store.database.call(|connection| {connection.execute_batch("CREATE TRIGGER fixture_reject_receipt BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'fixture save failure'); END;")?;Ok(())}).await.unwrap();
     let req = request(Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -654,6 +662,7 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         .unwrap();
     let restart_request = request(Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -977,6 +986,7 @@ async fn any_caller_may_stop_any_run_and_ownership_only_drives_cascade_and_notic
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -1025,6 +1035,7 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
     );
     let req = request(Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -1773,6 +1784,7 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
             } else {
                 Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -2375,6 +2387,7 @@ async fn owned_send(store: &Store, origin: &Origin, thread: &str) -> MessageAcce
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,

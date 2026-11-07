@@ -4113,3 +4113,9 @@ Revisit when the owner explicitly authorizes a bounded, privacy-reviewed
 measurement and supplies representative evidence; until then the observed
 production rate is unknown. This decision is not evidence that rejections are
 rare or that the current behavior is optimal.
+
+## D-262-1: Human decision requests reuse reply duties (2026-11-07)
+
+Decision: models use `message ask` for a human decision, one question per message. The default `ui.awaiting_human_rows` is 1. Human questions share the per-Thread pending-reply receipt cap and `thread.get.awaiting_replies` projection, but carry a durable recipient-kind discriminator: they do not wake a model while pending and do not become Run-end reminders or `ignored` outcomes. The answer is a human message in the asking Thread and resumes ordinary admission. Existing thread-scoped replies retain their recipient and lifecycle rules. The visible inbox is scoped to the displayed Thread; there is no cross-Thread inbox endpoint. `events.wait --thread` is a change hint and clients reread that Thread. No new table, migration, worker or queue is introduced.
+
+Recheck when: the receipt query plan changes, either recipient kind starts sharing notification behavior, or the UI adds a cross-Thread inbox.

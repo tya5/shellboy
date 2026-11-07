@@ -79,6 +79,7 @@ async fn send(store: &Store, id: &str, text: &str) -> MessageAccepted {
             store,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,

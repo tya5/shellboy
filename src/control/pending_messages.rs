@@ -32,7 +32,7 @@ pub(crate) fn cancel_tx(
     let mut items = Vec::with_capacity(args.message_ids.len());
     let mut changed = Vec::new();
     for message in &args.message_ids {
-        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?))).optional()?;
+        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at,COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?,r.get::<_,bool>(10)?))).optional()?;
         let mut item = MessageCancelItem {
             message_id: message.clone(),
             outcome: NotFound,
@@ -50,6 +50,7 @@ pub(crate) fn cancel_tx(
             live,
             body,
             created,
+            to_human,
         )) = row
         else {
             items.push(item);
@@ -74,7 +75,7 @@ pub(crate) fn cancel_tx(
             continue;
         }
         if admission == "admitted" || selected || state == "applied" {
-            if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, true)? {
+            if super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, !to_human)? {
                 item.outcome = ReplyCancelled;
                 if !changed.contains(&thread) {
                     changed.push(thread);

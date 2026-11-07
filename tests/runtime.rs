@@ -144,6 +144,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
             control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -531,7 +532,8 @@ async fn foreground_additional_input_is_accepted_while_shell_lives_and_stop_reap
     let additional = crate::test_watchdog::watchdog("tests/runtime.rs: foreground_additional_input_is_accepted_while_shell_lives_and_stop_reaps_before_terminal",
         command(
             &control,
-            Command::MessageSend(MessageSendArgs { human: false, expect_reply: false,
+            Command::MessageSend(MessageSendArgs { human: false,
+ to_human: false, expect_reply: false,
                 sender_label: None,
                 thread_id: Some(accepted.thread_id.clone()),
                 text: "while foreground waits".into(),
@@ -802,6 +804,7 @@ async fn input_accepted_during_model_request_still_interrupts_the_next_foregroun
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(accepted.thread_id.clone()),
@@ -935,6 +938,7 @@ async fn incomplete_attempt_is_preserved_retry_reuses_turn_instruction_snapshot_
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -2464,6 +2468,7 @@ async fn graceful_shutdown_captures_real_shell_wait_once_and_replays_context_aft
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -2560,6 +2565,7 @@ async fn graceful_context_revision_does_not_adopt_a_late_model_response() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,

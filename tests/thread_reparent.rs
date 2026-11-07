@@ -92,6 +92,7 @@ async fn revision(store: &Store, id: &str) -> i64 {
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -467,6 +468,7 @@ async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() 
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: true,
                 sender_label: None,
                 deliver: Deliver::Next,

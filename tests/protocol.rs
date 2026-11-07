@@ -155,6 +155,7 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 #[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
+        to_human: false,
         expect_reply: false,
         deliver: Deliver::Next,
         message_id: "m".into(),
@@ -197,6 +198,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
     ] {
         assert!(
             MessageAccepted {
+                to_human: false,
                 expect_reply: false,
                 deliver: Deliver::Next,
                 message_id: "m".into(),
@@ -831,6 +833,7 @@ fn message_delivery_timing_is_one_optional_wire_field() {
     let command = |deliver| {
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: None,

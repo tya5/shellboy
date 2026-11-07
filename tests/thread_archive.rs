@@ -437,6 +437,7 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -562,6 +563,7 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
             &store,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver,
@@ -590,6 +592,7 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
         &store,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Complete,
@@ -631,6 +634,7 @@ async fn a_reply_that_starts_a_run_on_an_archived_sender_unarchives_it() {
         .execute(
             request(Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: true,
                 sender_label: None,
                 deliver: Deliver::Next,

@@ -64,7 +64,7 @@ fn saved(
     admitted: bool,
 ) {
     let pending = PendingMessages {
-        awaiting_reply: Vec::new(),
+        awaiting_replies: Vec::new(),
         items: if admitted {
             vec![]
         } else {
@@ -737,6 +737,9 @@ fn reply_target(id: &str) -> ReplyTarget {
         created_at: "now".into(),
         excerpt: "original request".into(),
         applied: true,
+        to_human: false,
+        recipient_thread_id: "thread".into(),
+        elapsed_ms: 1000,
     }
 }
 fn reply_action(ui: &mut UiState, text: &str) -> CommandSubmission {
@@ -799,13 +802,13 @@ fn replies_popup_selects_only_applied_requests_and_draws_both_languages() {
         target.applied = false;
         ui.active_view_mut()
             .pending_messages
-            .awaiting_reply
+            .awaiting_replies
             .push(target);
         ui.queue_popup.replies = true;
         ui.queue_popup.visible = true;
         ui.queue_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert!(ui.view().composer.reply.is_none());
-        ui.active_view_mut().pending_messages.awaiting_reply[0].applied = true;
+        ui.active_view_mut().pending_messages.awaiting_replies[0].applied = true;
         for width in [24, 80] {
             let mut terminal = Terminal::new(TestBackend::new(width, 20)).unwrap();
             terminal

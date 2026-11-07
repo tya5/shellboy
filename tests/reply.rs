@@ -22,6 +22,7 @@ fn request(command: Command) -> Request {
 fn send(expected: bool) -> Command {
     Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: expected,
         sender_label: None,
         thread_id: Some("recipient".into()),
@@ -112,6 +113,143 @@ async fn reply_requires_applied_pending_and_is_idempotent() {
 }
 
 #[tokio::test]
+async fn human_ask_is_visible_and_answered_without_waking_a_model() {
+    let (_root, store) = fixture().await;
+    let origin = Origin {
+        instance_id: "fixture".into(),
+        thread_id: "sender".into(),
+        run_id: "run".into(),
+        turn_id: "turn".into(),
+        execution_id: "shell".into(),
+        token: "synthetic".into(),
+    };
+    store
+        .execute(
+            request(Command::ThreadArchive(ThreadArchiveArgs {
+                thread_ids: vec!["sender".into()],
+                descendants: false,
+            })),
+            None,
+        )
+        .await
+        .unwrap();
+    let ask_outcome = store
+        .execute(
+            request(Command::MessageAsk(MessageAskArgs {
+                thread_id: None,
+                text: "Choose A or B".into(),
+            })),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ask_outcome.wake_threads, Vec::<String>::new());
+    assert_eq!(ask_outcome.quiet_wake_threads, Vec::<String>::new());
+    assert_eq!(ask_outcome.changed_threads, ["sender"]);
+    assert_eq!(ask_outcome.result["run_id"], serde_json::Value::Null);
+    assert_eq!(ask_outcome.result["turn_id"], serde_json::Value::Null);
+    let accepted = ask_outcome.result;
+    assert_eq!(accepted["to_human"], true);
+    assert_eq!(accepted["assignment"], "pending");
+    let id = accepted["message_id"].as_str().unwrap().to_owned();
+    let details = store
+        .execute(
+            request(Command::ThreadGet(ThreadTarget {
+                thread_id: Some("sender".into()),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    let duties = details["awaiting_replies"].as_array().unwrap();
+    assert_eq!(duties.len(), 1);
+    assert_eq!(duties[0]["recipient_kind"], "human");
+    assert_eq!(duties[0]["recipient_thread_id"], "sender");
+    assert_eq!(duties[0]["excerpt"], "Choose A or B");
+    assert!(duties[0]["elapsed_ms"].as_i64().unwrap() >= 0);
+    assert!(details["archived_at"].is_null());
+    let unarchive_reason: String = store.database.call(|db| {
+        Ok(db.query_row(
+            "SELECT json_extract(payload_ref_json,'$.change.reason') FROM event WHERE target_thread_id='sender' AND kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='thread_unarchived' ORDER BY rowid DESC LIMIT 1",
+            [],
+            |row| row.get(0),
+        )?)
+    }).await.unwrap();
+    assert_eq!(unarchive_reason, "question_asked");
+    let answered = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: id.clone(),
+                text: "A".into(),
+                sender_label: None,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(answered["reply_to"], id);
+    let details = store
+        .execute(
+            request(Command::ThreadGet(ThreadTarget {
+                thread_id: Some("sender".into()),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert!(details["awaiting_replies"].as_array().unwrap().is_empty());
+    let cancelled = store
+        .execute(
+            request(Command::MessageAsk(MessageAskArgs {
+                thread_id: None,
+                text: "Cancel this".into(),
+            })),
+            Some(origin),
+        )
+        .await
+        .unwrap()
+        .result;
+    let cancelled_id = cancelled["message_id"].as_str().unwrap().to_owned();
+    let result = store
+        .execute(
+            request(Command::MessageCancel(MessageCancelArgs {
+                message_ids: vec![cancelled_id.clone()],
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(result["items"][0]["outcome"], "reply_cancelled");
+    let details = store
+        .execute(
+            request(Command::ThreadGet(ThreadTarget {
+                thread_id: Some("sender".into()),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert!(details["awaiting_replies"].as_array().unwrap().is_empty());
+    let message = store
+        .execute(
+            request(Command::MessageGet(MessageTarget {
+                message_id: cancelled_id,
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(message["reply"]["state"], "cancelled");
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
     for admitted in [false, true] {
         let (_root, store) = fixture().await;
@@ -131,7 +269,7 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert_eq!(details["awaiting_reply"].as_array().unwrap().len(), 1);
+        assert_eq!(details["awaiting_replies"].as_array().unwrap().len(), 1);
         if admitted {
             let node = id.clone();
             store.database.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1",[node])?;Ok(()) }).await.unwrap();
@@ -190,7 +328,7 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
+        assert!(details["awaiting_replies"].as_array().unwrap().is_empty());
         let error = store
             .execute(
                 request(Command::MessageReply(MessageReplyArgs {

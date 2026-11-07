@@ -28,7 +28,8 @@ fn columns_from() -> String {
         "SELECT t.id,t.title,t.cwd,t.parent_thread_id,t.updated_at,
     COALESCE(u.state,latest.state), latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
     {revisit_pending},{revisit_delivered},
-    u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at
+    u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
+    (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending')
 FROM thread t {activity_joins}
 "
     )
@@ -97,6 +98,7 @@ pub(crate) struct RawSummary {
     revisit_pending: bool,
     revisit_delivered: u64,
     pub(crate) archived_at: Option<String>,
+    pub(crate) awaiting_replies: u64,
 }
 
 /// Saved identities/times, never an invented timestamp for a phase transition.
@@ -205,10 +207,12 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         revisit_pending: row.get(14)?,
         revisit_delivered: row.get::<_, i64>(15)?.unsigned_abs(),
         archived_at: row.get(21)?,
+        awaiting_replies: row.get::<_, i64>(22)?.max(0) as u64,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
     ThreadSummary {
+        awaiting_replies: raw.awaiting_replies,
         last_end_message: None,
         last_input: None,
         activity: prepare_activity(&raw.activity),
@@ -310,6 +314,35 @@ mod tests {
                 .is_none()
         );
     }
+    #[test]
+    fn awaiting_reply_count_uses_the_pending_receipt_index() {
+        let db = fixture();
+        let query = "SELECT count(*) FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'";
+        let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap();
+        let details = plan
+            .query_map(["t"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("receipt_reply_pending")),
+            "{details:?}"
+        );
+    }
+
+    #[test]
+    fn summary_counts_human_pending_reply_duties() {
+        let db = fixture();
+        db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json) VALUES('question','assistant','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('r','o','{}','t','question','applied','0','{\"to_human\":true,\"reply\":{\"state\":\"pending\"}}');").unwrap();
+        let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
+        assert_eq!(
+            prepare(raw, "title".into(), String::new()).awaiting_replies,
+            1
+        );
+    }
+
     #[test]
     fn requested_summary_plan_does_not_scale_with_unrelated_threads() {
         let mut db = fixture();
