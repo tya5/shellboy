@@ -401,15 +401,17 @@ impl ModelPicker {
 }
 impl UiState {
     pub(super) fn open_models(&mut self, argument: &str) -> Vec<UiAction> {
+        self.refresh_connection_defaults();
+        let config = self.config.current();
         let connection = if argument.is_empty() {
             self.view()
                 .connection
                 .clone()
-                .or_else(|| self.config.default_connection.clone())
+                .or_else(|| config.default_connection.clone())
         } else {
             Some(argument.to_owned())
         };
-        let Some(connection) = connection.filter(|name| self.config.connections.contains_key(name))
+        let Some(connection) = connection.filter(|name| config.connections.contains_key(name))
         else {
             let message = local!(
                 self.config.ui.language,
@@ -487,6 +489,7 @@ impl UiState {
             let view = self.active_view_mut();
             view.connection = Some(connection);
             view.model = Some(model);
+            view.explicit_model = true;
             vec![]
         }
     }
@@ -608,6 +611,37 @@ mod wheel_tests {
 mod language_rendering_tests {
     use super::*;
     use crate::config::UiLanguage;
+
+    #[tokio::test]
+    async fn live_connections_tui_reads_the_registry_without_recreating_its_state() {
+        let mut config = crate::config::Config::parse("default_connection='old'\ndefault_model='synthetic'\n[connections.old]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let clients = config.live_connections.clients(&config);
+        let mut ui = UiState::new(&config, std::env::temp_dir());
+        config.connections.clear();
+        config.connections.insert(
+            "new".into(),
+            crate::config::Connection {
+                base_url: "http://127.0.0.1:2/v1".into(),
+                ..Default::default()
+            },
+        );
+        config.default_connection = Some("new".into());
+        clients.adopt(&config, None);
+        ui.open_models("");
+        assert_eq!(ui.models.as_ref().unwrap().connection, "new");
+        assert_eq!(ui.view().connection.as_deref(), Some("new"));
+        ui.models = None;
+        ui.open_models("old");
+        assert!(ui.models.is_none());
+        // A fresh tab resolves the new default, without reconstructing UiState.
+        let view = super::super::view::ThreadView::new(&ui.config, std::env::temp_dir());
+        assert_eq!(view.connection.as_deref(), Some("new"));
+        ui.change_model("new".into(), "chosen".into());
+        config.default_model = Some("later-default".into());
+        clients.adopt(&config, None);
+        ui.refresh_connection_defaults();
+        assert_eq!(ui.view().model.as_deref(), Some("chosen"));
+    }
 
     #[test]
     fn current_marker_follows_width_without_rewriting_model_id() {

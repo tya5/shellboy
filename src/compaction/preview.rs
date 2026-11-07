@@ -959,6 +959,7 @@ pub(crate) fn read_tx(
     args: &CompactPreviewArgs,
     config: &Config,
 ) -> Result<RawPreview, StorageError> {
+    let config = &config.current();
     args.validate().map_err(StorageError::from)?;
     if thread.is_empty() || thread.len() > ID {
         return Err(limit());

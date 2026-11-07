@@ -261,22 +261,23 @@ Removing such a key stays allowed, as the way to clean one up. A value or field 
 result over the 1 MiB read bound is refused before the replace, since it could not be read back. Values may be written to `headers`, `extra_headers`, `extra_body` and `shell.env`,
 because those fields hold them today; they then appear only as `sensitive` entries.
 
-**Restart.** Nothing is hot-applied. `Control` shares one immutable `Arc<Config>`, and swapping it would need a
-decision for each reader. So every field reports `restart_required: true` for the running owner. Standalone
-commands that load the file themselves, such as `rag` (`src/rag/search.rs`) and `storage vacuum`
-(`src/storage/vacuum.rs`), see a change on their next run. Candidates for applying live later, read when next
-used rather than captured at startup, are `default_connection`, `default_model`, `compaction.*` and
-`retention.*`. That is a note from reading those call sites and isn't on the wire, since nothing applies live.
+**Restart and live connections (#269 stage C).** `default_connection`, `default_model` and connection definitions
+apply to the next request without restarting. The connection named by the running `embedding.connection` stays at
+its startup definition until restart, preserving the index profile key. All other settings, including `embedding.*`,
+`compaction.*` and `retention.*`, retain restart semantics. Standalone commands that load the file themselves see
+changes on their next invocation. Direct file edits do not reload the owner; use `config.set` for live application.
 
-**Removing a connection a Thread uses.** `config.set` doesn't consult the database, and validation only checks
-references inside the file. After the restart, a new message to such a Thread leaves its Run in `recovery_wait`
-with `config_invalid`. `thread set --model` alone fails too, and `thread set --connection Q --model M` moves it.
+**Removing a connection a Thread uses.** Removing the running default or embedding connection is refused before
+writing (`config_invalid`, `written: false`). Change the default in a separate successful operation before removing
+its former connection. Other connections can be removed, including ones used by existing Threads. An already
+started request finishes with its cloned client; a subsequent request enters the existing `config_invalid`
+`recovery_wait` path, without a panic. `thread set --connection Q --model M` explicitly moves the Thread.
 
 **Who changed what.** The operation receipt holds the caller's identity and the result, with no sensitive
 value, for its 24-hour retention. `operation get` reads it, and `result.changed_by` repeats the identity. A
 `config_changed` diagnostic records the Origin IDs and field names, never values, in the rotating log, for
 after the receipt is gone. A change hint isn't sent: `events.wait` reports Threads, and no existing signal
-fits a change that doesn't affect the running owner.
+fits a global connection change. TUI readers use the shared registry directly, without an event or file I/O.
 
 **No owner.** `config get` and `config set` fail with `app_not_running`, and the hint names the alternative.
 There is no standalone edit path, since it would have no receipt or record. `--config` is refused on both,
@@ -353,5 +354,17 @@ is kept nowhere; a candidate never reads `credentials.toml`. The call is dropped
 disconnects or the owner shuts down (`runtime_observation`), so it has no cancel path of its own. The credential read is
 part of the response-header wait, so it obeys cancellation and the deadline.
 
-**Not here (stage C).** `connections` changes still need an owner restart; see the stage C plan in the issue and the
-decision record.
+**Live adoption (stage C).** The existing shared `HttpClients` holds one `RwLock<Arc<...>>` generation containing
+connection definitions, defaults and clients. A short read lock only clones the generation. Changed definitions build
+new clients; unchanged clients retain connection pools, rate gates and usage observations. Existing requests retain
+their old client. The bounded control-file closure validates and durably replaces `config.toml`, then adopts the new
+generation before releasing the existing `config_write` guard shared with credential writes. A timed-out caller does
+not release that guard early. There is no new worker, table, queue, event, migration or dependency.
+
+`config.get.loaded.values` includes live definitions/defaults; `differing_fields` compares those with the file.
+`differs` and `loaded.content_hash` still describe startup file bytes (comments included), not restart necessity.
+`restart.all_fields_require_restart` is now false. Each `config.set.changes` entry has `restart_required` and
+`applied_to_running_owner`; the result-level flags are ORs of the corresponding entry flags, so a mixed live/restart
+edit may return both true. No effective changes means both false. Embedding connection changes report restart=true,
+applied=false and remain visible as differing fields. Direct file-only `config_edit::apply` has no running owner and
+does not hot-apply. Credentials retain their existing next-request lookup and secret-redaction contract.

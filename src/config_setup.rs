@@ -49,6 +49,7 @@ pub fn report(
     model: Option<&str>,
     env: impl Fn(&str) -> bool,
 ) -> SetupReport {
+    let config = &config.current();
     let mut missing = Vec::new();
     let connection_name = connection;
     let connection = connection.and_then(|name| config.connections.get(name));

@@ -452,7 +452,7 @@ impl Compactor {
             actions.push("/restore");
         }
         // /model opens the existing selection screen, not a Core recommendation.
-        if self.config.connections.len() > 1 {
+        if self.clients.snapshot().connections.len() > 1 {
             actions.push("/model");
         }
         Ok(

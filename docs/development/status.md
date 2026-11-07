@@ -5219,3 +5219,10 @@ key, a real provider, shellboy-web/Studio use.
 History execution links expose an optional TUI-formatted shell description to
 `history list` and `history window`; existing command and execution fields are
 unchanged.
+## #269 stage C: live connections (in progress, 2026-11-07)
+
+Adds atomic generations to the existing shared HTTP registry, retains in-flight clients and startup embedding
+identity, and adopts ordinary connections/defaults under `config_write` after durable file replacement. TUI uses
+registry snapshots; missing Run connections use `config_invalid` recovery. No worker/table/queue additions.
+Tests and final-tip CI are pending; this entry supersedes the historical A+B-only stage-C-not-implemented status
+only after validation reported in acceptance. Studio response changes are specified in the protocol design.

@@ -4113,3 +4113,15 @@ Revisit when the owner explicitly authorizes a bounded, privacy-reviewed
 measurement and supplies representative evidence; until then the observed
 production rate is unknown. This decision is not evidence that rejections are
 rare or that the current behavior is optimal.
+### D-269 stage C: live connection generations (2026-11-07)
+
+The owner resolved the original open decisions: keep the running embedding connection restart-only; refuse removal
+of the running default or embedding connection; make `default_connection` and `default_model` live; let the TUI read
+the shared registry directly. A request retains its start-time client. Missing connections at retry, summary and
+catalog boundaries use `get` and the existing `config_invalid` recovery, not indexing/panic. The existing
+`config_write` guard covers file replacement and generation adoption and is shared with credentials writes.
+No new workers, tables, queues, events or dependencies. See [configuration](../design/config.md) for wire details.
+
+Implementation is validated separately in acceptance; the earlier stage C paragraph records investigation, not a
+claim that stage C was part of A+B. Direct hand edits still require restart. Updating an embedding connection's
+file definition does not change the running registry entry or index identity until restart.
