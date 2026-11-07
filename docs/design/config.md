@@ -313,7 +313,10 @@ only when the environment supplies nothing, with `tokio::fs` and a 64 KiB bound,
 the next request with no restart. The key goes in the same header as before (`api_key_header` or `Authorization:
 Bearer`). A connection without `api_key_env` can use a stored key too, unless `headers` already defines
 `Authorization`: the explicit header wins and `credentials.set` refuses (`stored_key_allowed`). `api_key_header`
-still requires `api_key_env`, as validation says, so a preset that needs `x-api-key` sets both.
+no longer requires `api_key_env` (D-269): a header-only connection takes a stored key in that header, and a request
+with neither source fails with `ConfigError::MissingKey` (kind `config_missing`) rather than sending nothing. The
+"defined once" checks (`headers`, `extra_headers`, session header names) apply to the credential header whenever
+either setting exists.
 
 **What leaves the owner.** `credentials.set` takes the value, and no operation returns it. `ConnectionTestArgs`,
 `CredentialsSetArgs` and `HttpModelClient` have hand-written `Debug`; `Connection` carries only the file's path. Errors

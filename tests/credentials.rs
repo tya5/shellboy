@@ -35,6 +35,7 @@ struct Seen {
     method: String,
     path: String,
     authorization: Option<String>,
+    x_api_key: Option<String>,
 }
 struct Mock {
     url: String,
@@ -105,10 +106,16 @@ async fn mock() -> Mock {
                     name.eq_ignore_ascii_case("authorization")
                         .then(|| value.trim().to_owned())
                 });
+                let x_api_key = head.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("x-api-key")
+                        .then(|| value.trim().to_owned())
+                });
                 log.lock().unwrap().push(Seen {
                     method: method.clone(),
                     path: path.clone(),
                     authorization: authorization.clone(),
+                    x_api_key,
                 });
                 let wanted = rule.lock().unwrap().clone();
                 let (status, body) = if wanted.as_ref().is_some_and(|key| {
@@ -306,6 +313,66 @@ fn environment_wins_then_the_stored_key_and_neither_is_the_old_error() {
     );
     // A key with a line break is refused whichever source it came from.
     assert!(auth(&with("UNSET_VAR", None), Some("a\nb")).is_err());
+}
+
+#[test]
+fn a_key_header_without_a_variable_takes_a_stored_key_and_never_sends_nothing() {
+    let connection = Connection {
+        api_key_header: Some("x-api-key".into()),
+        ..Connection::default()
+    };
+    let no_env = |_: &str| None;
+    let sent = connection.credentials_with(no_env, Some("stored")).unwrap();
+    assert_eq!(sent.headers()["x-api-key"], "stored");
+    assert!(!sent.headers().contains_key("Authorization"));
+    // Neither source: an error at the request, not a connection that loads and sends nothing.
+    let error = connection.credentials_with(no_env, None).unwrap_err();
+    assert!(error.to_string().contains("api_key_header"), "{error}");
+    // An unrelated variable in the environment cannot override the typed key: none is named.
+    let env = |_: &str| Some("unrelated".to_owned());
+    assert_eq!(
+        connection
+            .credentials_with(env, Some("stored"))
+            .unwrap()
+            .headers()["x-api-key"],
+        "stored"
+    );
+    assert_eq!(connection.key_source(env, true), KeySource::Stored);
+    assert_eq!(connection.key_source(env, false), KeySource::None);
+    // The file parses without a variable; the header is not allowed twice.
+    let config = shellboy::config::Config::parse(
+        "[connections.a]\nbase_url='https://example.test/v1'\napi_key_header='x-api-key'\n",
+    )
+    .unwrap();
+    assert!(config.connections["a"].stored_key_allowed());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_header_only_connection_sends_its_stored_key_in_that_header_and_fails_without_one() {
+    crate::test_watchdog::watchdog("header only", async {
+        let root = tempfile::tempdir().unwrap();
+        let mock = mock().await;
+        let file = root.path().join("credentials.toml");
+        let connection = Connection {
+            base_url: mock.url.clone(),
+            api_key_header: Some("x-api-key".into()),
+            credentials_file: Some(file.clone()),
+            ..Connection::default()
+        };
+        let client = HttpModelClient::for_connection("proxy", connection).unwrap();
+        // Loads fine; the request fails before sending, with a missing-credential error.
+        let error = client.models(CancellationToken::new()).await.unwrap_err();
+        assert_eq!(error.kind, "config_missing");
+        assert!(mock.seen().is_empty());
+        credential_store::set(&file, "proxy", KEY).unwrap();
+        client.models(CancellationToken::new()).await.unwrap();
+        let seen = mock.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].x_api_key.as_deref(), Some(KEY));
+        assert_eq!(seen[0].authorization, None);
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
