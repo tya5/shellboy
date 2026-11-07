@@ -4824,8 +4824,12 @@ impl UiState {
         let config = self.config.current();
         view.thread_id.as_ref().map(|_| chrome::ContextBar {
             usage: view.context_usage,
-            auto_at: config.compaction.auto_at_tokens_for(view.auto_compact_at,
-                view.connection.as_deref().and_then(|name| config.connections.get(name))),
+            auto_at: config.compaction.auto_at_tokens_for(
+                view.auto_compact_at,
+                view.connection
+                    .as_deref()
+                    .and_then(|name| config.connections.get(name)),
+            ),
         })
     }
     fn refresh_connection_defaults(&mut self) {
