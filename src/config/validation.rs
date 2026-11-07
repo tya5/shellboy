@@ -171,8 +171,7 @@ impl Connection {
             nonempty(&format!("connections.{name}.default_effort"), effort)?;
         }
         if let Some(header) = &self.api_key_header
-            && (self.api_key_env.is_none()
-                || header.is_empty()
+            && (header.is_empty()
                 || header.len() > 256
                 || !header.bytes().all(header_name_byte)
                 || matches!(
@@ -189,16 +188,19 @@ impl Connection {
         {
             return Err(invalid(
                 format!("connections.{name}.api_key_header"),
-                "requires api_key_env and a valid non-transport-owned HTTP header name of at most 256 bytes",
+                "must be a valid non-transport-owned HTTP header name of at most 256 bytes",
             ));
         }
-        if let Some(env) = &self.api_key_env {
-            if !valid_env_name(env) {
-                return Err(invalid(
-                    format!("connections.{name}.api_key_env"),
-                    "must be an environment variable name",
-                ));
-            }
+        if let Some(env) = &self.api_key_env
+            && !valid_env_name(env)
+        {
+            return Err(invalid(
+                format!("connections.{name}.api_key_env"),
+                "must be an environment variable name",
+            ));
+        }
+        // The credential header (from the variable or a stored key) is defined once.
+        if self.api_key_env.is_some() || self.api_key_header.is_some() {
             if self.headers.keys().any(|key| {
                 key.eq_ignore_ascii_case(self.api_key_header.as_deref().unwrap_or("authorization"))
             }) {
@@ -242,7 +244,7 @@ impl Connection {
         if self.session_header_names.len() > 8 {
             return Err(invalid(key, "at most 8 names are allowed"));
         }
-        let credential = self.api_key_env.is_some().then(|| {
+        let credential = (self.api_key_env.is_some() || self.api_key_header.is_some()).then(|| {
             self.api_key_header
                 .as_deref()
                 .unwrap_or("authorization")
@@ -328,7 +330,7 @@ impl Connection {
             .keys()
             .map(|key| key.to_ascii_lowercase())
             .collect();
-        if self.api_key_env.is_some() {
+        if self.api_key_env.is_some() || self.api_key_header.is_some() {
             seen.insert(
                 self.api_key_header
                     .as_deref()
