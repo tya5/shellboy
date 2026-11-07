@@ -54,9 +54,11 @@ async fn completed_run(control: &Arc<Control>, thread: &str) {
         let complete = control.store.database.call(move |db| Ok(db.query_row(
             "SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",
             [target], |r|r.get::<_,bool>(0))?)).await.unwrap();
-        if complete { return; }
+        if complete {
+            return;
+        }
         match events.recv().await {
-            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
             Err(error) => panic!("Run completion stream closed: {error}"),
         }
     }
