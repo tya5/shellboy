@@ -252,3 +252,49 @@ async fn live_connections_default_deletion_is_rejected_before_writing() {
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_connections_catalog_removal_keeps_its_start_generation() {
+    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::oneshot};
+    crate::test_watchdog::watchdog("live catalog generation", async {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let (started, admitted) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                head.push(socket.read_u8().await.unwrap());
+                assert!(head.len() < 16 * 1024);
+            }
+            assert!(String::from_utf8(head).unwrap().starts_with("GET /v1/models "));
+            started.send(()).unwrap();
+            released.await.unwrap();
+            let body = r#"{"data":[{"id":"catalog-model"}]}"#;
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+        });
+        let owner = owner(root.path(), "http://127.0.0.1:1/v1").await;
+        let control = Control::new(&owner, root.path().into());
+        edit(&control, vec![change("connections.catalog", json!({"base_url":url,"api":"chat_completions"}))]).await;
+        let pending_control = control.clone();
+        let pending = tokio::spawn(async move {
+            request(&pending_control, Command::ModelList(shellboy::protocol::ModelListArgs {
+                connection:Some("catalog".into()), thread_id:None,
+            })).await
+        });
+        admitted.await.unwrap();
+        edit(&control,vec![ConfigChange {field:"connections.catalog".into(),value:None}]).await;
+        release.send(()).unwrap();
+        let result = pending.await.unwrap();
+        assert_eq!(result["connection"],"catalog");
+        assert_eq!(result["api"],"chat_completions");
+        assert_eq!(result["models"],json!(["catalog-model"]));
+        let missing=control.request(Request::new(format!("{}:{}",control.store.instance_id,uuid::Uuid::new_v4()),
+            Command::ModelList(shellboy::protocol::ModelListArgs {connection:Some("catalog".into()),thread_id:None}))).await;
+        assert_eq!(missing.error.unwrap().code,ErrorCode::ConfigInvalid);
+        server.await.unwrap();
+        control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
