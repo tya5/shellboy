@@ -142,15 +142,21 @@ async fn pump_until(
 async fn foreign_thread_latest_message_limits_keep_source_available_and_read_while_writer_is_held()
 {
     let (root, owner, control, server) = super::control_tests::fixture_with_language("ja").await;
-    owner.db.call(|db| {
+    // Relative times: a fixed date aged out of the 7-day receipt window.
+    let created = (chrono::Utc::now() - chrono::Duration::minutes(10))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let ended = (chrono::Utc::now() - chrono::Duration::minutes(8))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let (created_sql, ended_sql) = (created.clone(), ended.clone());
+    owner.db.call(move |db| {
         db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('bounded-answer','independent-run','assistant_response','now',?1)",
             [serde_json::json!({"content":"retained answer","opaque":"x".repeat(2*1024*1024)}).to_string()])?;
         db.execute("UPDATE turn SET answer_node_id='bounded-answer',state='completed' WHERE id='independent-run'",[])?;
         db.execute("UPDATE run SET state='completed' WHERE id='independent-run'",[])?;
-        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('foreign-restore','fixture','{}','hash','completed',?1,'2026-10-31T00:00:00Z')",
-            [serde_json::json!({"result":{"thread_id":"independent","status":"queued","context_edit":{"action":"restore"}}}).to_string()])?;
+        db.execute("INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('foreign-restore','fixture','{}','hash','completed',?1,?2)",
+            rusqlite::params![serde_json::json!({"result":{"thread_id":"independent","status":"queued","context_edit":{"action":"restore"}}}).to_string(),created_sql])?;
         db.execute("INSERT INTO app_meta(key,value)VALUES('compact.result.foreign-restore',?1)",
-            [serde_json::json!({"state":"completed","ended_at":"2026-10-31T00:02:00Z","outcome":{"result":{"marker_node_id":"bounded-answer","omitted_nodes":0}}}).to_string()])?;
+            [serde_json::json!({"state":"completed","ended_at":ended_sql,"outcome":{"result":{"marker_node_id":"bounded-answer","omitted_nodes":0}}}).to_string()])?;
         Ok(())
     }).await.unwrap();
     let path = control.store.database.path().to_path_buf();
@@ -221,8 +227,8 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
         .unwrap();
     assert_eq!(canonical["excerpt"], "retained answer");
     assert_eq!(canonical["body_available"], true);
-    control.store.database.call(|db| {
-        db.execute("UPDATE app_meta SET value=?1 WHERE key='compact.result.foreign-restore'",[serde_json::json!({"state":"completed","ended_at":"2026-10-31T00:02:00Z","outcome":{"result":{"omitted_nodes":0,"opaque":"x".repeat(1024*1024)}}}).to_string()])?;
+    control.store.database.call(move |db| {
+        db.execute("UPDATE app_meta SET value=?1 WHERE key='compact.result.foreign-restore'",[serde_json::json!({"state":"completed","ended_at":ended,"outcome":{"result":{"omitted_nodes":0,"opaque":"x".repeat(1024*1024)}}}).to_string()])?;
         Ok(())
     }).await.unwrap();
     let changed = external_request(
