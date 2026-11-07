@@ -4917,907 +4917,907 @@
   "src/presentation/fields.rs:f2e48761917e7023:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:0c8b667104f23ad1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:63826ef0a65930b5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:20881b745724925d:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b76a39f7fe83fcb9:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:646b3689ce91b96d:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:cc1c76c47816b0c4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:1db1acebb9bb5f50:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c93deca3d5ec00f4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:3bf009db98573961:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:5855c0e025ec143e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:562a8a2ab24cdb1f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d17d3e9dc426a870:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:54a3d312516dbcc8:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:70085181be727047:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ba8b1e951e37c524:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:cdc3995e48851dd1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:248e17cdf4d69369:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9424816609d53cd5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:bec859ca86764567:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:1f0112342d7dce6f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e89e5f1fcdc207a2:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a2c81db1260e00e5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f2d90a0be0cb1b6e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:fd2739dc4a583600:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b79385f22361b83b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:4862d75be34d3cf1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:2d2e73e9f02f9f2c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:90b78d4729480a96:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:aa39951819dd0749:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9f58457919d09def:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c6dbbb846b76fe40:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:3f57a5304b1a89bd:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ebb6d2cca5be4846:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d0e9931686df8ada:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:5746166ed7d74793:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:249e4d18c479100e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d71c4bafc5bb91e9:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9efff6215690485f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f1db95bc507e6470:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:5bd32228272813a9:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7e00123570fc8fce:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:71b90a13a01ac8f7:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c27aedc867c2d6a7:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:94926b3181c06016:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:96fa4d70e525a684:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:63826ef0a65930b5:2": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:0c8b667104f23ad1:2": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b738a633a129d9e5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:cdd21c710cc0a47f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:5376d004b83c451a:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ed7345a895a315a4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:3a5d82df35cd3f48:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:23dbd60f7f24925b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9c9705f7af257cc3:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:eeb50312ed3239a7:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c007a2bcec87a3e2:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:999ddd998ab511fd:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:19c396fb5b1c787c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:bd68cc44533e764a:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:54b4443efeb605d4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:65169d0e1508831c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7e4802eaf749ff64:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7a9b969e46ce5bac:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9d0518dbe7e7b83c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:86b86ee263bb3e7c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:8b6d3d98447a59cd:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c1c3c8a468ab357e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f653ae9e9973c41c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:03cc2f4e8e91bddc:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:20c4630b686e2505:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f001c9ecacee45df:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9ba69951071baa6a:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:0c982427db6edcfd:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f830689fd6fbd9b0:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a6363997a91dcf77:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:dede454b5dd457f6:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b21a12f61b88fbfb:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a83e16a72e0cf347:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:048f3e97d4c4d749:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:8a0d519952896e33:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:29ddbeb024b3a191:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:85c06a57506cd82b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ee15f007701c5b52:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c2dab90be365ce61:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:8300731477a9df92:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:dd1202f63a0185de:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:00b7fc39a4edabc4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:6f6a0206e2246a7f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:040f010ca2a5ca4c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:2e2c25507541b652:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:cbc1b03962091270:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a7613dded759b89a:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7977e8dd1e8c5373:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:bbd5f06a6af8e4a8:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f840257e906e1c0f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:656b654693fab7b1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ae03db281f9f2094:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:68d7ba83a96829a4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:256a08a4c639d286:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:07fbfcc6a9ebc88b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:2d5c3f93a06be9a4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:9a1399d2aee3e356:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e7177bf16c023727:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e2427671bd769c2a:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:86a79b9a748a4094:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:53cd3860a63ca5be:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:6868821cbeb1ac07:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:14bdaa62686961b1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b89f34180a924e47:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b881c844b751d6f2:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:1b5a62f29ce3f844:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:62c47e8cf86515f2:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f1367a4aa83bfaaa:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:aeb423fc5e56517b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:5397abcee0284c81:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ea45011b9ba75fdd:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:84b42e7da4222891:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:894c1eec6c5fb9ac:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:07f8364802fc6d65:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7e1bdaa7d63f439d:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:8ea0151d54da2858:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:005a8a488237aad3:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a2838eb2104194f7:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ec90abe6d58ddfdc:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:aafe6502b8aa542b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:aded5906dfcb3ee1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:5fbeb21df34c5c75:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d51bef9f690e23ed:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:25563f42c3c8cf12:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:cf6616595820b148:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d7663e9af4401cd0:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:4ae0bdebaee8d893:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:15175da2a39cb4b8:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:6ec0b4ae5ee6fd48:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:05aef55dbcb3dc20:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:74632de16bb8ef01:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e6a7692d90cc02b8:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b4bc29e48af60440:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:351513d3f94ec79e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:616acc13e5583281:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:6c359903b188210d:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e9e5e86a81006116:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:3439a7c756c4ecd3:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c61e1d2be63604f6:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:22889c949b0b1c77:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e1e7c355c1d9e6d8:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ebf17c8fdf1e4ee5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:6444f07bc3ccd189:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:95307c492b6f83bf:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7e7d1bb053992867:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b0f3fd8a320bc3f5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:f0aaea4612f6a051:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:bfb040452b37b051:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:bb323519a85425af:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:fccf97ce74e9cb9f:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:03e24987d53ff954:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:2f0937e955b587a4:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:e36f4f0fe2dc2df7:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:75235bb40dee8d11:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:8149c6fe466bd331:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d9ac3fc621893d73:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:270bd5915e7f315c:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:1cdceb4da639c5c5:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:33663022094a971d:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:3a1139aa82c62e80:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:7a4586b70770949e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d128ead5d1a47955:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:02d03a1f79124b67:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:979bae643f47fc80:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ad110f359aad6dc1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:ec69b0ed7a4c2d45:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:63f1718e7d3c9cd6:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a7fd4d66bb7c1886:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:b2bf0477ec3f90b1:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:0515a35c19502bc6:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:cb2c562d30f1658b:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c2d7b0e41a0f3f26:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:a29b576da3c20d07:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:77befcc26b7f86af:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:322ed9ff88871ec7:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:8fc09b991d5f62f4:1": {
     "category": "a",
@@ -6590,42 +6590,42 @@
   "src/presentation/fields.rs:35d4e4f84a270612:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:316861a2463ec17b:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:91e9447dd745de19:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:c04b29931be59665:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:49854e524bc9f40b:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:d0e3d80b94f0f31f:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:48a976c26382e17d:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:0de07e1e18b15ae9:1": {
     "category": "a",
     "reason": "Added grouped-usage Japanese presentation label; field_name() renders the key only in the Japanese UI, while english_key() supplies the corresponding English label. The canonical JSON field key and value remain unchanged.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/presentation/fields.rs:316861a2463ec17b:2": {
     "category": "a",
@@ -6805,7 +6805,7 @@
   "src/presentation/fields.rs:7436eeafe86f5a4e:1": {
     "category": "a",
     "reason": "Japanese source field labels/items are retained for Ja; English details and management report rows render display_label from the exact canonical field key, producing ASCII labels. Regression tests assert English Thread ID/Run ID and preserve original pointer/value. Production render sites: src/ui/details.rs and src/ui/management.rs.",
-    "source_tokens_sha256": "69f964e518e4ba7732ed428d81e964f96fb29fc913d98149a14256b389003337"
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   },
   "src/ui/operations.rs:d64458c280168e4b:1": {
     "category": "a",
@@ -7116,5 +7116,45 @@
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged.",
     "source_tokens_sha256": "99d5685fbad7e8605bfc193bd94bbec8bef75772d73f13a8e2921ffb4c59a892"
+  },
+  "src/presentation/fields.rs:7ce7eca74fd87153:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:1bd5a8e7e024f8fd:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:08d49ef2b60e445c:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:8ecf4404f7d5100a:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:44bea791d2b7bab7:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:22a868c48fc82d4e:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:c0521b83dadd1215:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
+  },
+  "src/presentation/fields.rs:6b684454aa9be8f1:1": {
+    "category": "a",
+    "reason": "Japanese source field labels retained for Ja; English details render display_label from the canonical field key (#261 adds disk_free_min_bytes, disk_free_state, disk_guard labels).",
+    "source_tokens_sha256": "d85804d7a516839686631544ea325d4131bd8dd62727e71c34ea129b754329af"
   }
 }

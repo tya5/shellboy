@@ -628,7 +628,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `limits` | `attachment_file_bytes=20971520`, `attachment_request_bytes=41943040` | 20MiB per attachment, 40MiB per request |
 | `limits` | `shell_raw_bytes=67108864`, `tool_excerpt_bytes=16384` | Shell raw 64MiB, result excerpt 16KiB; history body pages have a fixed 64KiB maximum, not a configuration key |
 | `limits` | `shell_stdin_bytes=1048576`, `draft_bytes=1048576` | Stdin and draft, 1MiB each |
-| `limits` | `data_warning_bytes=8589934592`, `data_max_bytes=10737418240` | Logical usage warning at 8GiB, stop new work at 10GiB |
+| `limits` | `data_warning_bytes=42949672960`, `data_max_bytes=53687091200`, `disk_free_min_bytes=5368709120` | Logical usage warning at 40GiB, stop new work at 50GiB; also stop new work when the data directory's volume has less than 5GiB free (warn below 10GiB) |
 | `cache` | `body_bytes=33554432`, `layout_bytes=16777216`, `history_bytes=33554432`, `attachment_base64_bytes=67108864` | Body 32MiB, layout 16MiB, send history 32MiB, attachment conversion 64MiB |
 | `io` | `file_prepare_timeout_ms=30000`, `shell_write_timeout_ms=10000` | File preparation and stdin-write deadlines |
 | `io` | `term_grace_ms=2000`, `drain_timeout_ms=1000`, `self_reply_grace_ms=250`, `shutdown_grace_ms=5000` | Termination grace, pipe drain, self-stop reply, shutdown UI grace |
@@ -642,7 +642,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 
 Other numeric settings generally require positive integers. Exceptions include all four `cache.*` byte budgets (`body_bytes`, `layout_bytes`, `history_bytes`, `attachment_base64_bytes`), `connections.<name>.stream_idle_timeout_ms=0`, `connections.<name>.response_max_retries=0`, `indexing.retries=0`, and matching `retry_delays_ms=[]`. A zero cache budget disables retained caching; it does not select the default budget. These exceptions do not permit zero for `io.*` or the indexing chunk size `indexing.split_chars`. Retry delays must contain as many positive integers as retries. `wait --timeout-ms 0` is immediate CLI observation, not a configuration setting. Worker counts also have runtime-supported upper bounds.
 
-Additional constraints: attachment_file ≤ attachment_request, data_warning < data_max, output_batch ≤ output_buffer. `shell.env` maps valid environment names to values without NUL. `copy_backend` is `auto|os|osc52`. Send/newline keys combine supported names such as Enter with Ctrl/Alt/Shift; the newline list cannot be empty or overlap the send key. `shell.kind` accepts only `bash|powershell`.
+Additional constraints: attachment_file ≤ attachment_request, data_warning < data_max (`disk_free_min_bytes` has no relation to them; it only needs to be positive, so a small disk can lower it), output_batch ≤ output_buffer. `shell.env` maps valid environment names to values without NUL. `copy_backend` is `auto|os|osc52`. Send/newline keys combine supported names such as Enter with Ctrl/Alt/Shift; the newline list cannot be empty or overlap the send key. `shell.kind` accepts only `bash|powershell`.
 
 `ui.language` accepts `en` (default) or `ja` for the staged UI translation. It
 is independent of the OS locale; restart the TUI after changing it. See the

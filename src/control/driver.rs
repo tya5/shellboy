@@ -1,4 +1,4 @@
-//! Per-Thread model/tool loop. Long waits never occupy operation admission.
+//! Per-Thread model/tool loop. A long wait keeps its IPC slot for the whole wait.
 mod adoption;
 mod overflow;
 mod proactive;
