@@ -203,7 +203,7 @@ store the tail it cuts exactly. There are two candidates:
 ```text
 shellboy thread rewind --thread T --node NODE
 ```
-1. **Refusal.** If T has a live or stopping Run, the command refuses. It uses the same query as `stop_for_edit`, but simpler: no stop with confirmation. Held shells or child Runs keep the Run live, so the refusal covers them (`control/driver.rs` ~559, *unverified for every held-work kind*).
+1. **Refusal.** If T has a live or stopping Run, the command refuses. It uses the same live/stopping check as `/edit`, with no automatic stop. Held shells or child Runs keep the Run live, so the refusal covers them (`control/driver.rs` ~559, *unverified for every held-work kind*).
 2. **`NODE` on T's path.** `validate_group_boundary` runs on the prefix. The tail after `NODE` is saved as a branch anchored at `NODE`. Then `select_path(T, path[..=NODE])` runs; truncation causes no reasoning restart. All of this happens in one transaction with a CAS on `selection_revision`.
 3. **`NODE` in a live branch B's tail (forward or switch).**
    - The command resolves B's full path: the anchor's position on the current path, or recursively in its parent branch (bounded depth 64).
@@ -238,7 +238,7 @@ replacements.
 | Forward and switch | Same command, same tables. Only the reasoning flag and the attachment reactivation are new. | Keep, with one verb: "move head to NODE", wherever NODE is. |
 | `--dry-run` | A second code path | **Drop.** Rewind is reversible, so the result itself is the preview, with an undo line. |
 | Shell and child listing | Two bounded queries | Keep as counts plus up to 20 rows. It is transparency, not a gate. |
-| Live-work refusal | One existing query | Keep. No auto-stop with confirmation as in `/edit`. |
+| Live-work refusal | One existing query | Keep. Neither `/rewind` nor `/edit` stops a Run automatically. |
 | A separate `/edit` in place | — | Not in v1. Rewind followed by a normal send is equivalent. Whether `/edit` should switch is a question for the user. |
 
 Is rewind just `/edit` machinery? Yes. It is `/edit` minus `fork_thread`, minus

@@ -1157,24 +1157,9 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         connection: None,
         model: None,
         effort: None,
-        confirmed_run_id: None,
     })
     .await
     .unwrap();
-    next_state_update(&mut incoming, |u| match u {
-        UiUpdate::EditConfirmationRequired {
-            draft_id,
-            revision,
-            run_id,
-        } => {
-            assert_eq!(draft_id, "edited");
-            assert_eq!(revision, 4);
-            assert_eq!(run_id, "late-run");
-            Some(())
-        }
-        _ => None,
-    })
-    .await;
     next_state_update(&mut incoming, |u| {
         matches!(
             u,
@@ -1207,6 +1192,15 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         })
         .await
         .unwrap();
+    observer
+        .store
+        .database
+        .call(|db| {
+            db.execute("UPDATE run SET state='completed' WHERE id='late-run'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     send.send(UiAction::SendEdited {
         generation: 0,
         now: false,
@@ -1221,7 +1215,6 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
         connection: None,
         model: None,
         effort: None,
-        confirmed_run_id: Some("late-run".into()),
     })
     .await
     .unwrap();
@@ -3038,7 +3031,6 @@ async fn send_and_edited_send_keep_cwd_and_attachment_validation_order() {
                 revision: 0,
                 source_thread_id: "absent".into(),
                 source_node_id: "absent".into(),
-                confirmed_run_id: None,
                 text: "text\u{fffc}".into(),
                 attachments,
                 cwd,

@@ -110,7 +110,7 @@ This creates a new Thread sharing a prefix that includes the specified node. Use
 
 TUI `/fork NODE_ID` performs the same branch operation. Forking within an unfinished tool call/result group may be rejected. Follow the error guidance to select a safe group boundary.
 
-To replace a request, use `/edit USER_NODE_ID` in the TUI. It reads the full original request and attachment references into a separate edit draft. Sending forks a Thread with a prefix ending immediately before the original request, then saves the new request there. It does not directly UPDATE the original user node. If the original Thread's Run is active, stopping it requires explicit confirmation. Check the edit and stop target, then press Y; cancel with N/Esc. There is no independent `shellboy edit` CLI.
+To replace a request, use `/edit USER_NODE_ID` in the TUI. It reads the full original request and attachment references into a separate edit draft. Sending forks a Thread with a prefix ending immediately before the original request, then saves the new request there. It does not directly UPDATE the original user node. If the original Thread has a live or stopping Run, the edit is refused without stopping it. Stop it or wait for completion, then retry the retained draft. There is no independent `shellboy edit` CLI.
 
 ## Proactive compaction during a long Turn
 

@@ -2231,7 +2231,6 @@ async fn run_with_delivery(
                         revision,
                         source_thread_id,
                         source_node_id,
-                        confirmed_run_id,
                         text,
                         attachments,
                         cwd,
@@ -2316,7 +2315,6 @@ async fn run_with_delivery(
                                         trace.operation_id.clone(),
                                         source_thread_id,
                                         source_node_id,
-                                        confirmed_run_id,
                                         content,
                                         files,
                                         ThreadCreateArgs { agents: None,
@@ -3525,28 +3523,6 @@ async fn run_with_delivery(
                         }
                     }
                     Err(error) => {
-                        if error
-                            .details
-                            .as_ref()
-                            .and_then(|v| v.get("confirmation_required"))
-                            .and_then(Value::as_bool)
-                            == Some(true)
-                            && let Some(run_id) = error
-                                .details
-                                .as_ref()
-                                .and_then(|v| v.get("run_id"))
-                                .and_then(Value::as_str)
-                        {
-                            update(
-                                &updates,
-                                UiUpdate::EditConfirmationRequired {
-                                    draft_id: draft_id.clone(),
-                                    revision,
-                                    run_id: run_id.into(),
-                                },
-                            )
-                            .await;
-                        }
                         update(
                             &updates,
                             UiUpdate::Receipt {

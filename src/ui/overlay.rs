@@ -743,14 +743,6 @@ pub(super) fn confirmation_text(
                 target.thread_id, target.run_id
             ),
         }),
-        Confirmation::EditStop { run_id, .. } => Some(match language {
-            UiLanguage::Ja => format!(
-                "旧作業 {run_id} を停止しますか？\n停止の終了状態の確定を待ってから元依頼の直前まで新しい会話を分岐し、編集本文を新規送信します。元依頼・旧会話履歴は変更しません。"
-            ),
-            UiLanguage::En => format!(
-                "Stop prior work {run_id}?\nAfter its final state is confirmed, a new conversation is forked just before the original request and the edited text is sent as a new request. The original request and old history are unchanged."
-            ),
-        }),
         Confirmation::Index {
             command, detail, ..
         } => {
@@ -835,34 +827,6 @@ mod tests {
                 text.push('\n');
             }
             assert!(text.contains(expected), "{language:?}: {text}");
-        }
-    }
-
-    #[test]
-    fn changed_edit_confirmation_is_cancelled_in_both_languages() {
-        for (language, expected) in [
-            (
-                crate::config::UiLanguage::Ja,
-                "下書きが変更されたため確認を取り消しました。再送してください",
-            ),
-            (
-                crate::config::UiLanguage::En,
-                "The draft changed, so confirmation was cancelled. Send again",
-            ),
-        ] {
-            let mut ui = state();
-            ui.config.ui.language = language;
-            ui.confirmation = Some(Confirmation::EditStop {
-                draft_id: ui.view().draft.draft_id.clone(),
-                revision: ui.view().draft.revision.wrapping_add(1),
-                run_id: "run-fixture".into(),
-            });
-            assert!(
-                ui.confirmation_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
-                    .is_empty()
-            );
-            assert!(ui.confirmation.is_none());
-            assert_eq!(ui.view().status, expected);
         }
     }
 

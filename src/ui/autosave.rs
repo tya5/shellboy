@@ -151,7 +151,6 @@ impl UiState {
             | UiUpdate::SavedMessagePending { draft_id, .. }
             | UiUpdate::AgentsSelected { draft_id, .. }
             | UiUpdate::Receipt { draft_id, .. }
-            | UiUpdate::EditConfirmationRequired { draft_id, .. }
             | UiUpdate::ClipboardAttachment { draft_id, .. }
             | UiUpdate::RestoredSnapshot { draft_id, .. } => Some(draft_id.as_str()),
             UiUpdate::DraftRecovery { target, .. } => Some(target.draft_id.as_str()),

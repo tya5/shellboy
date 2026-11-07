@@ -671,7 +671,7 @@ mod tests {
         let mut ui = fixture(UiLanguage::En);
         offer_undo(&mut ui, real_result());
         assert!(ui.rewind_undo_available());
-        ui.send_current(None);
+        ui.send_current();
         assert!(ui.rewind_undo.is_none() && !ui.rewind_undo_available());
         // The selected path changes (a newer selection revision is read).
         let mut ui = fixture(UiLanguage::En);

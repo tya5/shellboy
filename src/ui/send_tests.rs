@@ -697,34 +697,39 @@ fn autosave_and_thread_switch_own_next_draft_not_the_pending_request() {
 }
 
 #[test]
-fn delayed_edit_confirmation_restores_only_the_untouched_composer() {
+fn refused_edit_restores_only_untouched_draft() {
     for edited in [false, true] {
         let mut ui = ui();
         ui.insert("edited original", false);
         ui.view_mut().draft.edit = Some(EditRequestTarget {
             thread_id: "old".into(),
             node_id: "original".into(),
-            run_id: None,
+            run_id: Some("old-run".into()),
         });
+        let serialized = serde_json::to_value(&ui.view().draft).unwrap();
+        let restored: DraftSnapshot = serde_json::from_value(serialized).unwrap();
+        assert_eq!(
+            restored.edit.as_ref().unwrap().run_id.as_deref(),
+            Some("old-run")
+        );
         let draft_id = ui.view().draft.draft_id.clone();
         let revision = ui.view().draft.revision;
-        let _ = ui.submit();
+        assert!(matches!(&ui.submit()[0], UiAction::SendEdited { .. }));
         if edited {
             ui.insert("next input", false);
         }
-        ui.apply(UiUpdate::EditConfirmationRequired {
+        ui.apply(UiUpdate::Receipt {
             draft_id,
             revision,
-            run_id: "new-run".into(),
+            thread_id: None,
+            status: ReceiptStatus::Failed,
+            message: Some("Run is active".into()),
         });
         if edited {
             assert_eq!(ui.view().draft.text, "next input");
-            assert!(ui.confirmation.is_none());
         } else {
             assert_eq!(ui.view().draft.text, "edited original");
-            assert!(
-                matches!(&ui.confirmation, Some(Confirmation::EditStop { revision: restored, .. }) if *restored == ui.view().draft.revision && *restored > revision)
-            );
+            assert!(ui.view().draft.edit.is_some());
         }
         assert_eq!(ui.view().pending[&revision].status, ReceiptStatus::Failed);
     }

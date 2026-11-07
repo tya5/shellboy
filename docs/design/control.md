@@ -20,7 +20,7 @@ Thread削除は生存Runなしを確認し、Thread tombstone・root revision・
 
 フォーク・依頼差替え、索引管理、停止・アプリ終了の採用契約を具体化する。保存済みのuser nodeを編集する時は、DB/file処理をUIスレッドで行わず、adapter workerで原文全文とその依頼に由来するactive添付参照を取得する。世代・元下書きrevisionを返信へ付け、遅い読込みで現在の入力を置き換えない。編集用には別の未送信下書きを作り、元下書きと元nodeを維持する。
 
-送信は特定Run IDへの人間の停止同意を渡す。読込み後に別Runが始まった場合も無断で停止せず、`confirmation_required` と現在Run IDをUIへ返し、編集本文を保持する。Controlは旧Runの実停止を待ってから、対象依頼直前のprefixをforkし、編集本文と新しい添付refを一括commitする。最初の依頼の編集は空prefixを扱う。外部添付は新要求の準備時に現在のファイルを読み直し、古いsend manifestや旧nodeを変えず、binaryを履歴用にコピーしない。新forkのcwd/model/effort変更も同じ受付transactionで適用する。
+Edited requests are refused while the source Thread has a live or stopping Run; the backend checks again inside the fork transaction. It never stops the Run. The original draft and node remain unchanged on refusal. After completion, the edit forks the prefix before the source request and atomically sends the new request with its attachments and settings.
 
 通常Commandの成功結果を無言で捨てず、管理overlayへ対象操作とJSONを返す。Indexのpreviewは正確なscopeをtyped返信へ付け、API呼出し前の対象数・文字数・segment数と料金注意を確認できるようにする。別scopeの遅いpreviewで現在scopeへの実行同意を成立させない。backfill/retry/rebuildは明示scopeと人間の確認を経て既存の公開操作へ渡す。 IndexStatusのUI結果には独立したreadonly管理snapshotを補い、旧space一覧、選択space、scope別の未索引／部分索引／索引済み／coverage未検証を表示する。管理表示のall既定を過去分の実行許可へ転用せず、full rawの終端を確認していない対象を索引完了と推定しない。CLIの既存IndexStatus型は変更しない。
 
@@ -153,12 +153,7 @@ mutationの保存失敗は既存SaveFailed診断・停止責務を保ち、captu
 別atomicのRelease/Acquireだけで双方が古い値を読むstore-buffering順序を許さない。
 
 
-UI内の依頼編集では、旧Run停止は返却を待つshellプロセスからの自己停止ではないため、
-self_reply_grace_msを挟まず直ちに適用する（PR1-4）。確認済み停止、旧Run terminal確認、
-編集のfile準備・fork/message保存の順序と既受付guardは維持する。旧Runのterminal待ちは既存30秒上限を持ち、
-保存前の編集をadmission freezeだけで破棄しない。通常終了はこの有限な保全待ちも既存grace/Forceの対象とし、
-新しい編集状態・永続表・取消しworkerを追加しない。元依頼は残るが、未確定のローカル編集本文の永続化を
-operation fingerprintや停止成功だけで保証しない。失敗/Forceで未保存データが残り得る既存境界を維持する。
+UI edits never stop the source Run; an active Run causes a retryable refusal. The existing admission guard and draft retention boundaries still apply.
 
 ## B06 状態遷移整理の順序（R1-2〜R1-6）
 
