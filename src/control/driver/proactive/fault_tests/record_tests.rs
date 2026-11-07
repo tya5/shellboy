@@ -558,6 +558,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     let mut committed = Vec::new();
     let work = summarize_once(
         &control,
+        &control.compactor,
         &thread_id,
         &slot,
         order,

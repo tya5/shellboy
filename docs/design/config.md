@@ -262,7 +262,8 @@ result over the 1 MiB read bound is refused before the replace, since it could n
 because those fields hold them today; they then appear only as `sensitive` entries.
 
 **Restart and live connections (#269 stage C).** `default_connection`, `default_model` and connection definitions
-apply to the next request without restarting. Defaults govern newly created root Threads and default catalog selection;
+apply to the next Run without restarting. Each Run retains one immutable connection generation through idle/tool
+continuations, admission refresh, retry policy and automatic summaries. Defaults govern newly created root Threads and default catalog selection;
 existing Threads retain their selected connection/model IDs. The connection named by the running `embedding.connection` stays at
 its startup definition until restart, preserving the index profile key. All other settings, including `embedding.*`,
 `compaction.*` and `retention.*`, retain restart semantics. Standalone commands that load the file themselves see
@@ -271,7 +272,7 @@ changes on their next invocation. Direct file edits do not reload the owner; use
 **Removing a connection a Thread uses.** Removing the running default or embedding connection is refused before
 writing (`config_invalid`, `written: false`). Change the default in a separate successful operation before removing
 its former connection. Other connections can be removed, including ones used by existing Threads. An already
-started request finishes with its cloned client; a subsequent request enters the existing `config_invalid`
+started Run finishes with its retained generation, including automatic retries; a subsequent Run enters the existing `config_invalid`
 `recovery_wait` path, without a panic. `thread set --connection Q --model M` explicitly moves the Thread.
 
 **Who changed what.** The operation receipt holds the caller's identity and the result, with no sensitive

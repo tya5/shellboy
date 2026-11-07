@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 
 #[derive(Clone)]
 struct Snapshot {
+    clients: Arc<model::http::ClientSnapshot>,
     thread: String,
     run: String,
     turn: String,
@@ -138,6 +139,8 @@ pub(super) async fn drive(
     thread: String,
     slot: DriverSlot,
 ) -> Result<(), ApiError> {
+    // Keep one connection generation across this Run, including waits and tool loops.
+    let clients = control.store.clients.snapshot();
     let boundary = control.boundary(&thread).await;
     let mut overflow = OverflowBudget::default();
     let mut retry_budget = retry::RetryBudget::default();
@@ -150,17 +153,18 @@ pub(super) async fn drive(
         let _ = slot.nudge.notified().now_or_never();
         let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
         super::turn_interrupt::acknowledge(&control, &thread, &slot.run_id).await?;
-        let snapshot = match next(&control, &thread, &slot.run_id).await? {
-            Next::Recheck => continue,
-            Next::Done => return Ok(()),
-            Next::Idle => {
-                instructions.clear();
-                drop(boundary_guard);
-                tokio::select! {_=slot.stop.cancelled()=>{},_=slot.nudge.notified()=>{}};
-                continue;
-            }
-            Next::Ready(snapshot) => snapshot,
-        };
+        let snapshot =
+            match next_with_clients(&control, &thread, &slot.run_id, clients.clone()).await? {
+                Next::Recheck => continue,
+                Next::Done => return Ok(()),
+                Next::Idle => {
+                    instructions.clear();
+                    drop(boundary_guard);
+                    tokio::select! {_=slot.stop.cancelled()=>{},_=slot.nudge.notified()=>{}};
+                    continue;
+                }
+                Next::Ready(snapshot) => snapshot,
+            };
         let turn_binding = slot.bind_turn(&control, &snapshot.turn).await?;
         if turn_binding.cancel.is_cancelled() {
             continue;
@@ -255,7 +259,9 @@ pub(super) async fn drive(
                     _ = turn_binding.cancel.cancelled() => continue,
                     guard = boundary.lock() => guard,
                 };
-                let Next::Ready(refreshed) = next(&control, &thread, &slot.run_id).await? else {
+                let Next::Ready(refreshed) =
+                    next_with_clients(&control, &thread, &slot.run_id, clients.clone()).await?
+                else {
                     continue;
                 };
                 if (
@@ -549,14 +555,24 @@ async fn turn_instructions(
     Ok(body)
 }
 
+#[cfg(test)]
 async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next, ApiError> {
+    next_with_clients(control, thread, run_id, control.store.clients.snapshot()).await
+}
+async fn next_with_clients(
+    control: &Arc<Control>,
+    thread: &str,
+    run_id: &str,
+    clients: Arc<model::http::ClientSnapshot>,
+) -> Result<Next, ApiError> {
     let thread_id = thread.to_owned();
     let run_target = run_id.to_owned();
     let thread = thread_id.clone();
     let run_id = run_target.clone();
     let index = control.index.clone();
     let replay = control.replay.clone();
-    let config = control.store.config.current();
+    let mut config = (*control.store.config).clone();
+    config.connections = clients.connections.clone();
     let shutting_down = control.shell.start_gate();
     let wakes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let committed_wakes = wakes.clone();
@@ -605,7 +621,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
         // already runnable: settings never wake background/recovery waits.
         tx.execute("INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) SELECT e.id,?2,'pending' FROM event e WHERE e.target_thread_id=?1 AND e.kind='context_changed' AND e.target_run_id IS NULL AND (json_extract(e.payload_ref_json,'$.kind') IS NOT 'agents_reference' OR json_extract(e.payload_ref_json,'$.change.excluded_turn_id') IS NOT ?3) AND NOT EXISTS(SELECT 1 FROM delivery d WHERE d.event_id=e.id AND d.state='processed')",params![thread,run,turn])?;
         let events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND (json_extract(e.payload_ref_json,'$.kind') IS NOT 'agents_reference' OR json_extract(e.payload_ref_json,'$.change.excluded_turn_id') IS NOT ?2) AND (e.kind<>'context_changed' OR NOT EXISTS(SELECT 1 FROM delivery done WHERE done.event_id=e.id AND done.state='processed')) ORDER BY e.created_at,e.id")?.query_map(params![run,turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
-        let mut snapshot=tx.query_row("SELECT u.generation,t.selection_revision,t.profile_revision,t.profile_id,t.model_id,t.effort,t.reasoning_epoch,t.cwd,COALESCE((SELECT s.source_path FROM instruction_snapshot s WHERE s.id=u.instruction_snapshot_id),t.agents_path) FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[&turn],|r|Ok(Snapshot{thread:thread.clone(),run:run.clone(),turn:turn.clone(),generation:r.get(0)?,selection:r.get(1)?,profile_revision:r.get(2)?,profile:r.get(3)?,model:r.get(4)?,effort:r.get(5)?,epoch:r.get(6)?,cwd:PathBuf::from(r.get::<_,String>(7)?),agents:PathBuf::from(r.get::<_,String>(8)?),cache_comparison_response_id:None,cache_diagnostics_enabled:false,input_bytes:None,input:None,receipts:vec![],events:events.iter().map(|v|v.0.clone()).collect()}))?;
+        let mut snapshot=tx.query_row("SELECT u.generation,t.selection_revision,t.profile_revision,t.profile_id,t.model_id,t.effort,t.reasoning_epoch,t.cwd,COALESCE((SELECT s.source_path FROM instruction_snapshot s WHERE s.id=u.instruction_snapshot_id),t.agents_path) FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[&turn],|r|Ok(Snapshot{clients:clients.clone(),thread:thread.clone(),run:run.clone(),turn:turn.clone(),generation:r.get(0)?,selection:r.get(1)?,profile_revision:r.get(2)?,profile:r.get(3)?,model:r.get(4)?,effort:r.get(5)?,epoch:r.get(6)?,cwd:PathBuf::from(r.get::<_,String>(7)?),agents:PathBuf::from(r.get::<_,String>(8)?),cache_comparison_response_id:None,cache_diagnostics_enabled:false,input_bytes:None,input:None,receipts:vec![],events:events.iter().map(|v|v.0.clone()).collect()}))?;
         if config.connections.get(&snapshot.profile).is_some_and(|c| c.prompt_cache_diagnostics) {
             snapshot.cache_comparison_response_id = model::cache_diagnostics::last_response_id(&tx, &thread)?;
         }

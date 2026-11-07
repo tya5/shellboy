@@ -595,8 +595,10 @@ clients), and adoption finishes before the guard is released. A disconnected/tim
 that guard while the existing bounded file closure is still writing. The normal operation receipt records the
 result; no new worker, table, queue, event or persisted state is introduced.
 
-Requests retain their cloned HTTP client from rate admission through completion and manifest-digest creation.
-Definition replacement does not cancel an in-flight request. The next lookup sees the adopted generation. Missing
+Runs retain their start-time connection registry generation through idle/tool continuations, rate admission refresh,
+HTTP body/digest creation, retry policy and automatic summaries. A pinned Compactor view shares the same clients
+without rebuilding pools; its Config view cannot re-read the live registry. Definition replacement does not cancel
+an in-flight Run. A new Run sees the adopted generation. Missing
 Thread connections enter the existing `config_invalid` recovery path; changing configuration never retries or
 resumes a recovery-waiting Run automatically. Explicit Thread model selection and retry retain their existing
 ownership and generation checks. The startup embedding connection stays pinned until restart so query/index
