@@ -518,7 +518,8 @@ async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() 
     )
     .await
     .unwrap();
-    assert_eq!(reply["thread_id"], json!(sender), "{reply}");
+    assert_eq!(reply["delivery"]["thread_id"], json!(sender), "{reply}");
+    assert_eq!(reply["delivery"]["assignment"], json!("new_run"));
     let answered = run(
         &store,
         Command::MessageGet(MessageTarget {
