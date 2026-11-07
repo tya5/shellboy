@@ -1087,9 +1087,17 @@ fn environment_credential_headers_validate_names_and_require_a_variable() {
         );
         assert!(config.validate().is_err(), "accepted header {header:?}");
     }
+    // A header without a variable is valid (#269): a stored key can use it.
     assert!(
         Config::parse(
             "[connections.test]\nbase_url='https://example.test/v1'\napi_key_header='x-api-key'\n"
+        )
+        .is_ok()
+    );
+    // It is still defined once.
+    assert!(
+        Config::parse(
+            "[connections.test]\nbase_url='https://example.test/v1'\napi_key_header='x-api-key'\nheaders={'X-Api-Key'='dup'}\n"
         )
         .is_err()
     );

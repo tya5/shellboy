@@ -25,6 +25,10 @@ pub enum ConfigError {
     MissingPath(&'static str),
     #[error("connection credential environment variable {0} is missing or empty")]
     MissingCredential(String),
+    #[error(
+        "connection sends its key in api_key_header, and neither an api_key_env variable nor a stored key supplies one"
+    )]
+    MissingKey,
 }
 fn invalid(key: impl Into<String>, message: impl Into<String>) -> ConfigError {
     ConfigError::Invalid {
@@ -346,6 +350,8 @@ impl Connection {
                 headers.insert(header, value);
             }
             (None, Some(name)) => return Err(ConfigError::MissingCredential(name.clone())),
+            // A named header promises a key; sending the request without it would only fail upstream.
+            (None, None) if self.api_key_header.is_some() => return Err(ConfigError::MissingKey),
             (None, None) => {}
         }
         Ok(ConnectionCredentials { headers })
@@ -355,6 +361,7 @@ impl Connection {
     /// explicit header wins and no key is stored.
     pub fn stored_key_allowed(&self) -> bool {
         self.api_key_env.is_some()
+            || self.api_key_header.is_some()
             || !self
                 .headers
                 .keys()

@@ -104,8 +104,10 @@ shellboy credentials clear --connection proxy
   otherwise the stored key of that connection name, otherwise the usual "variable is missing or empty" error. A key
   stored or cleared now applies to the **next request**, with no restart. `credentials set` reports `key_source:
   "env"` when the variable still wins. A connection that defines its own `Authorization` entry under `headers` and
-  has no `api_key_env` keeps that header and refuses a stored key. `api_key_header` (for example `x-api-key`) needs
-  `api_key_env` set as well; the stored key then goes in that header.
+  has no `api_key_env` keeps that header and refuses a stored key. `api_key_header` (for example `x-api-key`) may be
+  used without `api_key_env`: the stored key then goes in that header, and no environment variable can override a key
+  you typed. With the header but neither a variable nor a stored key, a request fails with a missing-key error
+  (the file still loads).
 - **The value is write-only.** No command, error, log, `config get` field or saved receipt contains it or its length (the
   receipt keeps only a digest salted with a random value that exists while the owner runs), and the key is never accepted as a command-line argument: it comes from standard input (a terminal
   is refused so it is not echoed). A pasted key does not appear in `config.toml`, so its `content_hash` is unchanged.
@@ -306,7 +308,7 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 
 Set the process environment with `export SHELLBOY_PROXY_API_KEY='…'` in Bash or `$env:SHELLBOY_PROXY_API_KEY = '…'` in PowerShell. Choose a method appropriate to your environment that avoids leaving secrets in history or shared configuration. The binary does not automatically read `credentials.env`.
 
-`base_url` is the HTTP(S) API root; Shellboy appends the selected conversation path (`/responses`, `/chat/completions`, or `/messages`), `/models`, or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request. By default it is sent as `Authorization: Bearer ...`. Optional `api_key_header` sends that value **unchanged**, without a Bearer prefix, in the named header instead (for example `x-api-key`, Azure's `api-key`, or a gateway-specific name). This setting works for every dialect and requires `api_key_env`. Unset, empty, or newline-containing credential values are errors. Header names must be valid HTTP tokens, at most 256 bytes, and cannot be transport-owned names.
+`base_url` is the HTTP(S) API root; Shellboy appends the selected conversation path (`/responses`, `/chat/completions`, or `/messages`), `/models`, or `/embeddings`. URLs containing username/password, query, fragment, or an already appended endpoint suffix are rejected. `api_key_env` is the **name** of an environment variable; its value is read immediately before sending a request. By default it is sent as `Authorization: Bearer ...`. Optional `api_key_header` sends that value **unchanged**, without a Bearer prefix, in the named header instead (for example `x-api-key`, Azure's `api-key`, or a gateway-specific name). This setting works for every dialect; without `api_key_env` it carries a key stored with `credentials set`. Unset, empty, or newline-containing credential values are errors. Header names must be valid HTTP tokens, at most 256 bytes, and cannot be transport-owned names.
 
 `connections.<name>.headers` is an optional HTTP header dictionary. Names must be unique ignoring case, and invalid control characters in values are rejected. The header selected by `api_key_env`/`api_key_header` cannot also appear in `headers` or `extra_headers`, even under different capitalization. Prefer environment-variable references to writing secrets directly in headers. `default_effort` is an optional nonempty string accepted by the endpoint. There is no built-in catalog of model capacity or effort support.
 
