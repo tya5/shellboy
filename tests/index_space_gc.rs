@@ -146,29 +146,21 @@ async fn inactive_space_failure_rolls_back_vector_ddl_chunks_jobs_and_metadata()
             .is_err()
     );
     f.db.call(|db| {
-        for table in ["index_space", "embedding_chunk", "embedding_job"] {
-            let count: i64 =
-                db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;
-            assert_eq!(count, 2);
-        }
-        for n in 0..2 {
-            let table = format!("shellboy_vec_{n:032x}");
-            let count: i64 =
-                db.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))?;
-            assert_eq!(count, 1);
-        }
-        let count: i64 = db.query_row(
-            "SELECT count(*) FROM app_meta WHERE key='index.input.space-000'",
-            [],
-            |r| r.get(0),
-        )?;
-        assert_eq!(count, 1);
+        // Earlier units remain committed. The failed final DROP/delete unit rolls back.
+        let left: String = db.query_row("SELECT id FROM index_space",[],|r|r.get(0))?;
+        assert_eq!(left,"space-001");
+        let state:String=db.query_row("SELECT state FROM index_space",[],|r|r.get(0))?;
+        assert_eq!(state,"removing");
+        let tables:i64=db.query_row("SELECT count(*) FROM sqlite_master WHERE name='shellboy_vec_00000000000000000000000000000001'",[],|r|r.get(0))?;
+        assert_eq!(tables,1);
+        let chunks:i64=db.query_row("SELECT count(*) FROM embedding_chunk",[],|r|r.get(0))?;
+        assert_eq!(chunks,0);
         db.execute_batch("DROP TRIGGER fail_space_gc;")?;
         Ok(())
     })
     .await
     .unwrap();
-    assert_eq!(f.collect().await.inactive_index_spaces_collected, 2);
+    assert_eq!(f.collect().await.inactive_index_spaces_collected, 1);
     f.db.shutdown().await.unwrap();
 }
 

@@ -4167,3 +4167,17 @@ receipt-scope checks remain the authority for what can be resumed. This avoids
 automatic scheduler/CLI restart while allowing deliberate automation. Revisit if
 callers need a narrower authority boundary or if external CLI callers use the flag
 without treating recovery as an explicit decision.
+
+### D-267: short removal decision and resumable bounded reclaim
+
+The #267 takeover retains W2's bounded chunk/job/vector cleanup approach but not its epoch/protection-proof table.
+Use `index_space.state='removing'` for the durable decision, distinct from historical `discarded` conversion copies
+that may still have protection references. Check guards once when entering `removing`; never re-read them for an
+already committed decision. The existing maintenance lane drains one row-budget unit per transaction, then drops
+an empty vector table and fixed metadata. Original discarded and empty inactive candidates are visited by keyset
+and promoted only after the original guards pass. New schema lookup indexes cover state/id and group value/key;
+no new persisted cursor, worker, queue or paid provider work is introduced.
+
+`removed` means the decision committed, not reclamation finished; return `reclaim_pending` and pending quantities.
+Exact dry-run/count diagnostics remain read-only and may scale with the target space; they are not repeated inside
+the decision transaction. Per-unit row budgets do not promise a fixed wall-clock duration or full-disk tolerance.

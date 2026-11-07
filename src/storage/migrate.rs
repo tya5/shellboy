@@ -174,6 +174,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0034_thread_tags.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 35,
+        sql: include_str!("../../migrations/0035_index_reclaim_lookup.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

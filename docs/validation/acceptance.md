@@ -10695,3 +10695,11 @@ Planned synthetic coverage: any model can cancel another sender's queued input; 
 
 - Verified configured `limits.data_warning_bytes` and `limits.data_max_bytes` are serialized by `storage.status` as `warning_bytes` and `limit_bytes`; existing measured totals, booleans and disk-free fields remain distinct. `tests/gc.rs::logical_capacity_and_physical_database_space_are_reported_separately` asserts threshold values and serialized response.
 - Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Studio UI meter rendering, external consumers and non-macOS platforms remain unverified.
+### #267 bounded index reclamation (validation pending)
+
+The takeover reuses W2's bounded reclamation idea while reducing synchronization to a durable non-selectable
+`removing` state. Tests cover removal flags and delayed float/int8 accounting, legacy protected candidates,
+per-unit rollback versus prior committed progress, seven-row chunk/vector bounds, restart/reopen with no cursor,
+post-decision metadata changes, quota oracle and EXPLAIN lookup plans. These are planned/implemented assertions,
+not passing evidence yet. No real provider API or user database is used. Natural disk failures, maximum-dimension
+large-space DROP latency and exhaustive concurrent schedules remain unverified.

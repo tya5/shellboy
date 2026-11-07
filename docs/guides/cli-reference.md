@@ -1060,3 +1060,8 @@ does not cancel the duty. `thread get` includes `awaiting_reply` (up to 128,
 oldest first). Cancelling a queued request cancels both input and duty;
 cancelling an admitted duty returns `reply_cancelled`, retains history, and
 notifies the recipient without waking it.
+
+A successful `index remove` reports `removed: true` when the space is no longer
+searchable and `reclaim_pending: true` while background reclamation remains.
+Use `index status` to inspect discarded spaces and remaining segments, and
+storage status for logical index bytes. Reclamation resumes after restart.

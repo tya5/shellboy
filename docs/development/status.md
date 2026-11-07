@@ -5271,3 +5271,8 @@ files (the fail-on-pending gate remains red). Full test type-check and default/a
 CI are pending. Per-Thread storage and usage-by-model remain outside this bounded
 change. Studio's pinned v0.10.0 copy still labels config reads unsupported;
 current Shellboy main has `config.get`.
+### #267 bounded index reclamation takeover
+
+W2's uncommitted reclaim work was inspected and selectively reused in a new owned task worktree. The revised design
+separates the durable `removing` decision from existing maintenance reclamation and avoids an epoch table. Bounded
+float/int8, reopen/resume, rollback and indexed-lookup regressions are being validated. No passing CI is claimed yet.
