@@ -285,15 +285,17 @@ changes. A `more` reply returns text only up to its cursor, so nothing repeats o
 
 State record (AGENTS.md). Need: Web M1 shows text as it is written (user decision), and only the
 owner has it. Owner: `ChangeClock`, in `Control`, dropped with it, same mutex; no new worker, queue,
-table or dependency, and no per-client buffer. Bound, constants: `MAX_ATTEMPT_TEXT_BYTES` 64 KiB per
-attempt (the TUI's window size), charged text bytes plus the 40-byte record per delta, and
-`MAX_LIVE_TEXT_ATTEMPTS` 16, so at most 1 MiB charged. Oldest deltas go first and raise that attempt's
+table or dependency, and no per-client buffer. Limits, constants: `MAX_ATTEMPT_TEXT_BYTES` 64 KiB per
+attempt (the TUI's window size), which counts text bytes plus a 40-byte record per delta, and
+`MAX_LIVE_TEXT_ATTEMPTS` 16, so at most 1 MiB counted. These limit retained text; they are not a memory
+bound. The count leaves out deque capacity, IDs, map storage and allocator overhead: requested heap reached
+1,489,848 bytes for 16 attempts when measured (acceptance.md). Oldest deltas go first and raise that attempt's
 `floor`; past 16 attempts the least recently written loses its entry and re-enters with a gap on its
 next delta. Concurrent attempts have no other limit today, so this bound can bite. A compile-time
 assertion keeps 16 x 64 KiB x 6 (the JSON worst case, control characters) plus 1 MiB inside the 8 MiB
 frame, so all retained text fits one reply and text needs no paging. Termination: an RAII guard in
 `stream_response` frees the entry on every exit (return, cancel, dropped future), before the outcome
-is saved. Memory measurements are in acceptance.md.
+is saved.
 
 Write path: `Control::stream_delta` appends under the lock, publishes the existing event and
 `notify_waiters` on a separate `text_changed` Notify. No DB work and no await. The lock is held for memory

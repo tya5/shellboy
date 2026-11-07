@@ -3947,17 +3947,17 @@ Why this shape, smallest first:
 - Whether an attempt is live is level-triggered: absent from `live_text` means no text held. There are no
   tombstones, no "ended" event to retain, and the same rule covers ended and dropped attempts.
 
-State record (need, bound, owner, termination): events-and-external-protocol.md 2.5. Bounds are constants:
-64 KiB charged per attempt, including 40 bytes per delta so one-byte deltas cannot escape the bound, and 16
-attempts. Measured heap is above the charged figure, 1.49 MiB at most for 16 attempts (see acceptance.md): deque
-capacity is uncharged, and only the charged figure is a stated bound.
+State record (need, limits, owner, termination): events-and-external-protocol.md 2.5. Limits are constants:
+64 KiB per attempt, counting 40 bytes per delta so one-byte deltas cannot escape it, and 16 attempts. They limit
+retained text and are not a memory bound: deque capacity and the rest are not counted, and requested heap reached
+1,489,848 bytes for 16 attempts when measured (see acceptance.md).
 
 Weaker judgments, with their recheck conditions:
 
 - 16 attempts is a choice, not derived from a limit: concurrent attempts have no other cap. Past it the least
   recently written attempt loses its entry and re-enters with `gap:true`, and under sustained overload they
   take turns. Recheck if Web users stream more than 16 Threads at once.
-- 64 KiB charged holds about 1500 small deltas. A client that loops one poll stays ahead in the mock
+- 64 KiB counted holds about 1500 small deltas. A client that loops one poll stays ahead in the mock
   measurement; recheck if real clients report gaps.
 - Reasoning text is included because `EngineEvent::Stream` already carries it, marked per delta. A client
   showing only answer text filters on the flag. Recheck if it should be withheld from external clients.
@@ -3966,3 +3966,19 @@ Weaker judgments, with their recheck conditions:
 - `status --memory` does not report this buffer; add it if the bound ever needs watching in the field.
 
 Recheck plan B when: poll round trips or connection cost visibly limit smoothness in the Web client.
+
+## D-243-3: Two landed #243 tests fixed; the product code was not the cause (2026-11-07)
+
+Both tests failed intermittently on main without E3, and neither failure was a product defect that was found.
+
+- `stopping_run_is_announced` looked for `state='stopping'`, which can already have become `stopped` when the client
+  reads after the hint. It then waited 30 s and failed. It now accepts either saved state. That left open whether the final
+  `stopped` commit has its own hint, so `stopped_transition_has_its_own_hint` holds the database worker while the Run is `stopping`,
+  takes a cursor past every earlier hint, and releases: only a later hint can end the poll. Removing the
+  `changed` call in `retire_driver` makes that test fail, so the hint comes from there.
+- `chat_resync_required_rereads_and_follows_to_the_end` set the synthetic resync after the first provider request and
+  answered the second at once, so the Turn could end before chat waited again. The test now holds the second reply until the
+  resync is served. The Turn cannot end first.
+
+Recheck when: either test fails again; the hold relies on `events.wait` needing no database access, so a change there would
+show up as a watchdog failure in the new test. Other failures seen under load (acceptance.md) were not investigated here.

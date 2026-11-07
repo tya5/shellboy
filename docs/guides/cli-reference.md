@@ -350,7 +350,7 @@ Example: `{"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,
 
 A Thread you were showing that is missing from `live_text` holds no text: its attempt ended, or it was
 dropped because more than 16 attempts were streaming. Discard the preview and read saved facts. Each
-attempt keeps at most 64 KiB; text unread when an attempt ends is gone. When you add a Thread to
+attempt keeps at most 64 KiB of text; text unread when an attempt ends is gone. When you add a Thread to
 `--thread`, take a new baseline.
 
 ## Cursors
