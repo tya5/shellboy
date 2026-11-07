@@ -205,10 +205,17 @@ async fn foreign_thread_latest_message_limits_keep_source_available_and_read_whi
         field(result, "/last_end_message/node_id"),
         Some("bounded-answer")
     );
-    assert_eq!(field(result, "/last_compaction/kind"), Some("restore"));
     assert_eq!(
-        field(result, "/last_compaction/event_id"),
+        field(result, "/last_compaction/bounded_candidate/kind"),
+        Some("restore")
+    );
+    assert_eq!(
+        field(result, "/last_compaction/bounded_candidate/event_id"),
         Some("operation:foreign-restore")
+    );
+    assert_eq!(
+        field(result, "/last_compaction/notice"),
+        Some("Retained facts only; expired receipts can hide restores, so latest is not certified")
     );
     assert_eq!(ui.view().thread_id.as_deref(), Some("thread"));
     writer.execute_batch("ROLLBACK").unwrap();

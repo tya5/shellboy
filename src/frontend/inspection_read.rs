@@ -250,7 +250,7 @@ pub(super) fn prepare_in(
                     details.last_compaction = Some(serde_json::json!({
                         "bounded_candidate":candidate,
                         "coverage":compactions["coverage"],
-                        "notice":"Finite retained prefixes; canonical latest compaction is not certified"
+                        "notice":"Retained facts only; expired receipts can hide restores, so latest is not certified"
                     }));
                 } else {
                     details.last_compaction = candidate;

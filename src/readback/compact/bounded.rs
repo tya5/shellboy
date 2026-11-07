@@ -135,17 +135,8 @@ pub(in crate::readback) fn read_display(
     }
     // Spill provenance matching can itself inspect lifetime-sized source sets.
     // Keep bounded display records separate rather than inventing associations.
-    let display_latest_complete = Some(
-        !saturated
-            && receipts.len() < 5
-            && automatic.len() < 5
-            && replacements.len() < 5
-            && !receipts.iter().any(|row| {
-                serde_json::from_str::<Value>(&row.raw)
-                    .ok()
-                    .is_some_and(|v| v["spilled_groups"].as_u64().is_some_and(|n| n > 0))
-            }),
-    );
+    // Expired receipts can hide a later restore even when every prefix fits.
+    let display_latest_complete = Some(false);
     let post_input = post_inputs(db, thread, &replacements, 1)?;
     Ok(RawCompactions {
         thread: thread.into(),
@@ -212,6 +203,21 @@ mod tests {
                 )
             })
             .collect()
+    }
+    #[test]
+    fn expired_restore_cannot_certify_an_older_replacement_as_latest() {
+        let db = fixture();
+        grow(&db, 0, 1);
+        let before = prepare(read_display(&db, "t").unwrap()).unwrap();
+        assert_eq!(before["items"][0]["kind"], "restore");
+        db.execute(
+            "DELETE FROM operation_receipt WHERE operation_id=?1",
+            ["op000000"],
+        )
+        .unwrap();
+        let after = prepare(read_display(&db, "t").unwrap()).unwrap();
+        assert_ne!(after["items"][0]["kind"], "restore");
+        assert_eq!(after["coverage"]["latest_complete"], false);
     }
     #[test]
     fn owned_receipt_history_tenfold_growth_is_bounded_and_completion_order_is_not_invented() {
