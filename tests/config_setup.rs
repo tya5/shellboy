@@ -411,6 +411,7 @@ async fn first_send_failure_has_source_and_missing_details_and_localized_next_ac
         source: Some(ConfigSource {
             path: path.clone(),
             present: false,
+            content_hash: None,
         }),
         ..Config::default()
     };

@@ -131,6 +131,7 @@ distinct operations.
 
 ## Standalone configuration commands (#69)
 
+`config get` and `config set` are owner RPCs (#266, [config](config.md#reading-and-changing-through-the-owner-266)).
 `config init` and `config check` are dispatched before owner RPC conversion and
 reject `--operation-id`, like other standalone command families. Init uses
 exclusive file creation of the bundled full template and returns `created=false`

@@ -485,3 +485,10 @@ directly to existing recovery wait; if shorter, keep ordinary retries.
 Missing/invalid facts do not change current retry behavior. Recovery uses the
 existing reason/message and symbols. No guessed reset, new setting, or automatic
 provider switch. See [model HTTP](model-http.md).
+
+## Configuration read and write (#266, 2026-11-07)
+
+`config.get` and `config.set` are adopted owner operations; `config init` and `config check` stay standalone.
+Credential values never leave the owner, every field needs a restart and there is no standalone edit path. See
+[config](config.md#reading-and-changing-through-the-owner-266) and
+[protocol](protocol.md#reading-and-changing-the-configuration-file-configget-configset-266).

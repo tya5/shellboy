@@ -72,7 +72,7 @@ named_jobs! {
     Compact => compact, ContextEdit => context_edit, IndexStatus => index_status,
     IndexPreview => index_preview, IndexBackfill => index_backfill, IndexRetry => index_retry,
     IndexRebuild => index_rebuild, IndexProbe => index_probe, IndexShrink => index_shrink, IndexRemove => index_remove, StorageStatus => storage_status,
-    StorageCollect => storage_collect,
+    StorageCollect => storage_collect, ConfigGet => config_get, ConfigSet => config_set,
 }
 
 // Existing mutations awaiting the bounds audit in #200. This list must only shrink.
@@ -161,7 +161,9 @@ impl Kind {
             | Kind::IndexShrink
             | Kind::IndexRemove
             | Kind::StorageStatus
-            | Kind::StorageCollect => Runtime,
+            | Kind::StorageCollect
+            | Kind::ConfigGet
+            | Kind::ConfigSet => Runtime,
         }
     }
     pub(super) fn read_lane(self) -> bool {

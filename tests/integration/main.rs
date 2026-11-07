@@ -27,6 +27,8 @@ mod compact_preview;
 mod composer;
 #[path = "../config.rs"]
 mod config;
+#[path = "../config_edit.rs"]
+mod config_edit;
 #[path = "../config_setup.rs"]
 mod config_setup;
 #[path = "../context.rs"]

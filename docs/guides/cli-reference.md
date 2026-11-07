@@ -85,6 +85,17 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | `status [--thread THREAD] [--run RUN] [--since RFC3339] [--state STATE]... [--all] [--limit N] [--cursor C]` | `items`, `filters`, `observed_at`, `scope`, `consistency`, `fingerprint`, `next_cursor`; default 50, maximum 200. Saved state from one DB read transaction; no new execution, API request, or operation receipt |
 | `status --memory` | Owner-wide cache retained/limit/entry accounting and native process memory; unknown values have reasons. Exclusive with activity filters; on-demand and no provider request |
 
+### Configuration through the owner (2 commands)
+
+| Command | Behavior |
+|---|---|
+| `config get` | Read what the running owner loaded and the current file: `loaded`, `file` (`content_hash`, `valid`, `error`, `values`, `redacted_fields`), `differs`, `differing_fields`. No credential value is returned, only names. No receipt |
+| `config set --expected-hash HASH [--set FIELD=VALUE]... [--unset FIELD]...` | Change named fields. Refused with `operation_conflict` if the file changed since the read, `config_invalid` if the whole result fails validation, and `invalid_argument` if a name field is given what looks like a credential; each leaves the file untouched. Result: `written`, `content_hash`, `restart_required`, and `changes[]` with `field`, `previous`, `value`, `sensitive`, `restart_required`, `hot_candidate` per field. Same `--operation-id` replays the saved outcome |
+
+Both need a running owner of the selected `--data-dir`, act on the file it loaded and refuse `--config`. With no
+owner they fail with `app_not_running`. Every field takes effect after an owner restart. See
+[configuration](configuration.md#read-and-change-settings-through-the-owner).
+
 ### Standalone configuration (2 commands)
 
 | Command | Behavior |

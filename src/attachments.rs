@@ -278,6 +278,10 @@ pub struct AttachmentService {
     requester: Arc<tokio::sync::Mutex<crate::storage::BackgroundRequester>>,
 }
 impl AttachmentService {
+    /// The owner's small pool for control-path files; shutdown already waits for it.
+    pub(crate) fn control_files(&self) -> BlockingFiles {
+        self.control_workers.clone()
+    }
     pub fn new(
         database: DbWorker,
         config: &Config,

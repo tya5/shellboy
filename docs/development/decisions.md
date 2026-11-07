@@ -3873,3 +3873,36 @@ single-transaction story. Impact: `parent_change` is an optional additional fiel
 `ThreadDetails`. Recheck when: users need to move many Threads at once (a bulk form), a TUI
 move key is asked for, models re-parent Threads they do not own in practice (a caller rule would
 then be reconsidered), or trees deeper than 1,024 appear.
+## D-266: Configuration read and write in the owner (2026-11-07)
+
+The user decided the core gets `config.get` and `config.set`, for the Web settings screen (shellboy-web
+`docs/design/analytics-settings.md`, option A).
+
+- **New dependency `toml_edit =0.25.19`.** Needed to change a value while keeping comments, order and untouched
+  bytes; `toml` parses and serializes without them, and hand-editing by byte spans would duplicate a TOML parser
+  for dotted keys, inline tables and quoting. It is from the same project as `toml`, with default features
+  (`parse`, `display`) and only `indexmap`, `winnow` and the `toml_*` parts as dependencies, all already in the
+  lock. The lock moves `toml_datetime` 1.1.2 to 1.1.3 and `toml_writer` 1.1.3 to 1.2.0, which `toml` also uses.
+  Used only on a bounded file worker and in request validation. Recheck if `toml` regains a preserving API.
+- **Every field reports restart required; nothing is hot-applied.** Swapping `Arc<Config>` needs a decision per
+  reader. `hot_candidate` is a note from reading call sites, not a promise. Recheck when a real need for a live
+  value appears.
+- **No standalone edit path.** It would write with no receipt or record, and the user's request was for the
+  owner. Uncertain: a first-time user with no owner must edit by hand, as today. Recheck if the Web UI needs to
+  edit before an owner exists.
+- **`extra_body` shows top-level names only.** Provider options are opaque by design, so no leaf is known to be
+  safe; useful ones like `thinking.type` are hidden too. Recheck if the settings screen needs them, and then by
+  a user-visible choice, not by guessing at names.
+- **The credential check is a heuristic, with two strengths.** Name fields use known prefixes and long opaque
+  tokens; other plain strings use known prefixes only, because model IDs can be long and mixed-case. It can miss
+  a key and it can catch a real name, whose refusal says to edit by hand. No value is guessed or stored by it.
+- **`data_dir` is refused.** After a restart it would silently open another, possibly empty, directory. Recheck
+  if data moving becomes a feature.
+- **A plain whole-file hash, not salted.** Simple and stable across restarts, so a client can compare it with
+  what it read before. It could confirm a guess of the entire file for anyone able to read `config.get`, which
+  needs a guess of every byte including comments. Recorded in the design. Recheck if `config.get` is ever
+  exposed beyond local callers without another layer.
+- **The race with another program is narrowed, not closed.** A file lock wouldn't bind editors. Recorded in the
+  guide.
+- **`config_changed` is a diagnostic as well as the receipt.** The receipt is retained for 24 hours or less, and
+  the question of who changed a setting often comes later. Field names and Origin IDs only.

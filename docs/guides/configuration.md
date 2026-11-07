@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [User Guide](user-guide.md) · [CLI reference](cli-reference.md)
 
-Configuration is TOML read when the owner (`shellboy` without a subcommand) starts, or when `config check` runs. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner.
+Configuration is TOML read when the owner (`shellboy` without a subcommand) starts, or when `config check` runs. This reference follows the keys and defaults in `src/config.rs`. Omitted sections and keys receive defaults; unknown keys, wrong types, and invalid combinations are rejected with `config_invalid`. Editing the file does not hot reload a running owner. [`config get` and `config set`](#read-and-change-settings-through-the-owner) read and change it through a running owner.
 
 ## Migrating terminal width configuration
 
@@ -80,6 +80,42 @@ Check the actual server port and advertised model ID. Keyless GET behavior is
 verified with a loopback mock, not a particular Ollama/LM Studio release; their
 Responses compatibility is not established here. Do not weaken authentication
 on a remotely exposed endpoint to copy this local-only example.
+
+## Read and change settings through the owner
+
+`shellboy config get` shows what the running owner loaded and what the file holds now, and whether they
+differ. `shellboy config set` changes named fields in that file. Both need a running owner of the selected
+`--data-dir` and act on the file that owner loaded; `--config` is refused. With no owner they fail with
+`app_not_running` and change nothing: edit the file by hand and use `config check`.
+
+```sh
+shellboy config get    # note result.file.content_hash
+shellboy config set --expected-hash HASH --set default_model=my-model --set ui.bell=false --unset ui.language
+# Restart the owner for the change to take effect.
+```
+
+- **Every change needs an owner restart.** Nothing is applied to the running owner. Until then `config get`
+  reports `differs: true` and names the fields in `differing_fields`.
+- **Credentials stay in the environment.** `config get` never returns the value of `headers`, `extra_headers`,
+  `extra_body` or `shell.env`, only names, and hides any credential-looking `base_url` path part or name. Each
+  hidden field is listed in `redacted_fields`. `api_key_env` takes a variable name; a value that looks like a
+  key is refused and isn't shown. The heuristic can catch a real name, in which case edit the file by hand.
+- **The whole file is validated first** with the rules of `config check`, except its model catalog request. A
+  refused change leaves the file as it was.
+- **Another edit is detected.** If the file changed after your read, the change is refused with
+  `operation_conflict`. Read again and repeat. An edit by another program in the instant of the replace itself
+  can still be lost.
+- **Comments and order stay.** Comment lines above a removed key stay too; a comment at the end of the removed
+  line goes with it.
+- `FIELD` is a TOML dotted key, such as `connections.proxy.request_timeout_ms` or
+  `connections."my.proxy".base_url`. `VALUE` is JSON when it parses as JSON and a plain string otherwise, so
+  write `'"123"'` for the string `123`. Command-line values can be visible to other local processes.
+- `data_dir` can't be changed here, because a restart would then open another, possibly empty, directory.
+- Add a connection with an object, `--set 'connections.new={"base_url":"https://x.example/v1","api_key_env":"X_KEY"}'`,
+  and remove one with `--unset connections.new`. Other tables are changed one field at a time.
+
+The file's owner on Unix becomes the user running the owner, if that differs. A crash during a write can leave
+a `.config.toml.*.tmp` file beside it, which is safe to delete and may hold the same values as the file.
 
 ## Starting on each platform
 

@@ -194,3 +194,70 @@ Adopt [cache diagnostics](cache-diagnostics.md):
 Responses-only and requires `prompt_caching`. The owned dynamic
 `prompt_cache_options` field is reserved against `extra_body`. No sticky headers
 or provider-specific settings are introduced.
+
+## Reading and changing through the owner (#266)
+
+`src/config_edit.rs` owns the file work and `src/control/config_ops.rs` runs it on
+`AttachmentService::control_files()`, the existing bounded control-file pool that owner shutdown already
+waits for. No new worker, table, event or queue. `config_write` (a Tokio mutex on `Control`) admits one change
+at a time; the worker closure owns its guard, so a caller that timed out does not let the next change start
+while the first is still running. The UI thread and the DB worker do no file I/O for either operation.
+
+**What leaves the owner.** `fields()` is the single list, for both reading and diffs. `Config`, `Connection`
+and `Shell` are destructured without `..`, so a new field does not compile until it is classified. The other
+sections are serialized whole, and the macro that declares them says so.
+
+| Class | Fields | Returned |
+|---|---|---|
+| Secret | `connections.*.headers`, `extra_headers`, `shell.env` (each entry), `extra_body` (each top-level key, whatever is below it) | The name, value `[redacted]` |
+| Url | `connections.*.base_url` | Userinfo, query and fragment removed (validation already refuses them); a path segment that looks like a credential becomes `[redacted]` |
+| Name | `connections.*.api_key_env`, `api_key_header` | The name; `[redacted]` if it looks like a credential (a valid variable name can be `ghp_...`) |
+| Plain | Everything else | The value; a string with a known credential prefix becomes `[redacted]` |
+
+Everything hidden is listed in `redacted_fields`. Names of headers, variables and `extra_body` keys are
+returned. `credential_env_set` is presence in the owner's environment only. `content_hash` is a SHA-256 of
+the whole file, secrets and comments included: it identifies a version and is not a salted digest, so a
+reader could confirm a guess of the entire file. An invalid file returns its validation message, which is
+built not to quote values, and no values.
+
+**Writing.** Read and hash; compare with `expected_hash`; edit with `toml_edit`; parse the whole result with
+`Config::parse` (the same rules `config check` applies when loading; the catalog GET and the setup report are
+not repeated); build and bound the result; write a temporary file in the target's directory, keep the mode on
+Unix, `sync_all`; hash the file again; replace. The temporary file is created `0600`. A failure removes it and
+leaves the file as it was; a crash can leave a `.config.toml.<uuid>.tmp` beside the file.
+
+- A symlink resolves to its target, so a linked dotfile stays linked. A read-only file is refused.
+- Unix replaces with `rename`. Windows uses `ReplaceFileW` for an existing file, which keeps its ACL and
+  attributes, and a sharing violation fails with both files intact.
+- The last hash shrinks the race with another program's edit to the single replace step. It does not remove
+  it: an edit landing between that read and the replace is lost. Owner-side changes are serialized fully.
+- The owner's Unix user becomes the file's owner if it differs; ownership is not restored.
+
+**Comments.** Untouched text is preserved byte for byte, and a consistently CRLF file stays CRLF. A file mixing line endings comes back with LF, because the parser normalizes them. A replaced value keeps its trailing
+comment. A removed key's comment lines above it move to the next key, or before the next table, or to the end
+of the file: they often describe more than that key. A trailing comment on the removed line goes with it, and
+so does anything in a replaced multi-line array. Removing a connection removes its table, its subtables and
+the comments attached to them.
+
+**What can be changed.** Any key `Config::parse` accepts, plus these rules: `data_dir` is refused because after
+a restart the owner would open another, possibly empty, directory; a whole table cannot be replaced or removed
+except adding a new `connections.<name>` from an object and removing one. A credential-looking string in
+`api_key_env`, `api_key_header`, `session_header_names` or a `shell.env` name is refused without echoing it.
+That check is a heuristic (known prefixes, long opaque tokens), so its error says how to proceed by hand when
+a real name is caught. Values may be written to `headers`, `extra_headers`, `extra_body` and `shell.env`,
+because those fields hold them today; they then appear only as `sensitive` entries.
+
+**Restart.** Nothing is hot-applied. `Control` shares one immutable `Arc<Config>`, and swapping it would need a
+decision for each reader. So every field reports `restart_required: true`. `hot_candidate` marks what is read
+when next used instead of being captured at startup (`default_connection`, `default_model`, `compaction.*`,
+`retention.*`). It is a note for later work, based on reading those call sites, not a tested promise.
+
+**Who changed what.** The operation receipt holds the caller's identity and the result, with no sensitive
+value, for its 24-hour retention. `operation get` reads it, and `result.changed_by` repeats the identity. A
+`config_changed` diagnostic records the Origin IDs and field names, never values, in the rotating log, for
+after the receipt is gone. A change hint isn't sent: `events.wait` reports Threads, and no existing signal
+fits a change that doesn't affect the running owner.
+
+**No owner.** `config get` and `config set` fail with `app_not_running`, and the hint names the alternative.
+There is no standalone edit path, since it would have no receipt or record. `--config` is refused on both,
+because the file is the one the owner loaded. `config init` and `config check` remain standalone.

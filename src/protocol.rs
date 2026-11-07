@@ -738,6 +738,26 @@ impl Default for StatusArgs {
     }
 }
 // Receipt-free long-poll over the owner's in-memory change clock (#243).
+args!(ConfigGetArgs {});
+args!(ConfigSetArgs { expected_hash: String, changes: Vec<ConfigChange> });
+/// One named change to the configuration file. `field` is a TOML dotted key;
+/// a missing or null `value` removes the key so its default applies again.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConfigChange {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+/// A value may be a header or environment value, so Debug shows only its name.
+impl std::fmt::Debug for ConfigChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConfigChange")
+            .field("field", &self.field)
+            .field("value", &self.value.as_ref().map(|_| "[redacted]"))
+            .finish()
+    }
+}
 args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64 });
 args!(EventChange {
     thread_id: String,
@@ -913,6 +933,10 @@ pub enum Command {
     StorageStatus(StorageArgs),
     #[serde(rename = "storage.collect")]
     StorageCollect(StorageArgs),
+    #[serde(rename = "config.get")]
+    ConfigGet(ConfigGetArgs),
+    #[serde(rename = "config.set")]
+    ConfigSet(ConfigSetArgs),
 }
 mod command;
 pub(crate) use command::CommandRoute;

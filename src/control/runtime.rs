@@ -264,6 +264,8 @@ impl Control {
                 ErrorCode::InvalidState,
                 "Cannot encode collection result",
             ),
+            Command::ConfigGet(_) => self.config_get(disconnected).await,
+            Command::ConfigSet(args) => self.config_set(args, caller.as_ref()).await,
             Command::HistorySearch(args) => encode_result(
                 self.index.search_report(&args, disconnected).await?,
                 ErrorCode::InvalidState,

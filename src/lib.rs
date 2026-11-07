@@ -8,6 +8,7 @@ pub mod cli;
 pub mod client_operation;
 pub mod compaction;
 pub mod config;
+pub mod config_edit;
 pub mod config_setup;
 pub mod context;
 pub mod control;

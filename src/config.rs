@@ -373,7 +373,7 @@ fn api_root(value: &str) -> Result<Url, ConfigError> {
     Ok(url)
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Embedding {
     pub connection: Option<String>,
@@ -455,8 +455,10 @@ macro_rules! section {
             }
         }
     };
+    // `config.get` serializes these sections whole. A value that could hold a
+    // secret belongs in `Connection` or `Shell`, whose fields it lists one by one.
     ($name:ident { $($field:ident : $ty:ty = $default:expr),* $(,)? }) => {
-        #[derive(Clone, Debug, Deserialize)]
+        #[derive(Clone, Debug, Serialize, Deserialize)]
         #[serde(default, deny_unknown_fields)]
         pub struct $name { $(pub $field: $ty,)* }
         impl Default for $name { fn default() -> Self { Self { $($field: $default,)* } } }
@@ -528,21 +530,23 @@ impl Indexing {
         self.auto_kinds.iter().any(|k| k == kind)
     }
 }
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CopyBackend {
     Auto,
     Os,
     Osc52,
 }
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PaletteMode {
     #[default]
     Dark,
     Light,
 }
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProgramStatus {
     #[default]
@@ -550,7 +554,7 @@ pub enum ProgramStatus {
     Off,
 }
 /// UI language is chosen once from configuration and never from the OS locale.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum UiLanguage {
     #[default]
@@ -558,7 +562,7 @@ pub enum UiLanguage {
     Ja,
 }
 /// Display motion only: `off` keeps every decoration on its static mark.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MotionMode {
     #[default]
@@ -625,10 +629,14 @@ impl Config {
             return Err(invalid("startup_cwd", "must be absolute"));
         }
         let path = resolve_config_path(config_path, startup_cwd, env)?;
-        let (mut config, actual_path) = match std::fs::read_to_string(&path) {
-            Ok(source) => (Self::parse(&source)?, Some(path.clone())),
+        let (mut config, actual_path, content_hash) = match std::fs::read_to_string(&path) {
+            Ok(source) => (
+                Self::parse(&source)?,
+                Some(path.clone()),
+                Some(crate::digest::sha256_hex(&source)),
+            ),
             Err(error) if config_path.is_none() && error.kind() == std::io::ErrorKind::NotFound => {
-                (Self::default(), None)
+                (Self::default(), None, None)
             }
             Err(source) => return Err(ConfigError::Read { path, source }),
         };
@@ -647,6 +655,7 @@ impl Config {
         config.source = Some(ConfigSource {
             path,
             present: actual_path.is_some(),
+            content_hash,
         });
         Ok(LoadedConfig {
             config,
@@ -694,7 +703,7 @@ fn nonempty(key: &str, value: &str) -> Result<(), ConfigError> {
         Ok(())
     }
 }
-fn valid_env_name(name: &str) -> bool {
+pub(crate) fn valid_env_name(name: &str) -> bool {
     let mut bytes = name.bytes();
     bytes
         .next()
@@ -747,6 +756,8 @@ fn valid_key(key: &str) -> bool {
 pub struct ConfigSource {
     pub path: PathBuf,
     pub present: bool,
+    /// SHA-256 of the bytes this configuration was parsed from.
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug)]
@@ -849,7 +860,7 @@ fn require_absolute_default(path: PathBuf) -> Result<PathBuf, ConfigError> {
         ))
     }
 }
-fn absolute(path: &Path, base: &Path) -> PathBuf {
+pub(crate) fn absolute(path: &Path, base: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_owned()
     } else {

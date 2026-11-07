@@ -191,7 +191,9 @@ fn main() -> ExitCode {
                             | shellboy::cli::StorageCommand::Vacuum(_)
                     }
                     | CliCommand::Rag(_)
-                    | CliCommand::Config { .. }
+                    | CliCommand::Config {
+                        command: shellboy::cli::ConfigCliCommand::Setup(_)
+                    }
                     | CliCommand::Thread {
                         command: shellboy::cli::ThreadCommand::Request(_)
                     }
@@ -201,7 +203,7 @@ fn main() -> ExitCode {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs, startup, rag, config and thread request are standalone commands",
+                "--operation-id applies to owner RPCs; docs, startup, rag, config init, config check and thread request are standalone commands",
             ),
             cli.operation_id,
         );
@@ -324,7 +326,9 @@ fn main() -> ExitCode {
             runtime.shutdown_background();
             ExitCode::from(code)
         }
-        Some(CliCommand::Config { command }) => {
+        Some(CliCommand::Config {
+            command: shellboy::cli::ConfigCliCommand::Setup(command),
+        }) => {
             match runtime.block_on(shellboy::config_setup::execute(
                 command,
                 cli.config,
@@ -444,6 +448,7 @@ fn standalone_response(response: serde_json::Value) -> ExitCode {
     }
 }
 async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
+    let settings = matches!(cli.command, Some(CliCommand::Config { .. }));
     let result = async {
         let command = cli
             .clone()
@@ -476,6 +481,11 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
             );
             code
         }
+        // No standalone edit path: without an owner there is no receipt or record.
+        Err(error) if settings && error.code == ErrorCode::AppNotRunning => print_error(
+            error.hint("config get and config set need a running owner of this --data-dir, and nothing was changed. Start it, or edit the file by hand and run shellboy config check"),
+            cli.operation_id,
+        ),
         Err(error) => print_error(error, cli.operation_id),
     }
 }

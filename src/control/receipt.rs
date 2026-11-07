@@ -367,6 +367,7 @@ pub(super) fn runtime_preflight(request: &Request) -> Result<()> {
             | Command::IndexShrink(_)
             | Command::IndexRemove(_)
             | Command::StorageCollect(_)
+            | Command::ConfigSet(_)
     ) {
         let base = serde_json::to_vec(&Response::success(&request.operation_id, Value::Null))
             .expect("JSON response")

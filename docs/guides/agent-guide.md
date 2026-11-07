@@ -364,6 +364,16 @@ Listing does not change settings. Do not infer capabilities from model names; em
 
 Once the conversation's purpose is clear, edit your own title with `shellboy thread set --title 'Investigation and fixes'`. Supply `--thread THREAD` for another Thread. `--title ''` clears a manual title and restores the automatic conversation-derived display. Omitting it preserves the title. Use a single line of at most 512 characters; this does not change message text or model settings.
 
+## Change settings only when asked
+
+Read settings with `shellboy config get`; it never returns a credential value. Change them with
+`shellboy config set` only when the user asked for that change, not to work around a problem you met. Before
+writing, show the current and new values of each field. Pass `result.file.content_hash` as `--expected-hash`.
+Afterwards, show the returned `changes` and say that the owner must be restarted for them to take effect; none
+reaches the running owner, including the one running you. Never write a credential value into the file: set
+`api_key_env` to a variable's name and leave the value to the user's environment. On `operation_conflict`, read
+again and show the user what changed before repeating. Your identity is recorded with the change.
+
 ## Operation tracking, saved context, and deletion preview
 
 Query a lost operation result with `shellboy operation get --operation OPERATION_ID`. Distinguish its receipt state/outcome from downstream completion, and follow targets to their get commands. Check downstream for message and compact. Repeating compact with the same ID returns its original queued acceptance even after downstream completion. pending/result_uncertain do not prove that side effects never occurred or that retrying with a new ID is safe. The query itself creates no receipt; its operation ID does not guarantee replay of the observation. Repeating attachment.add with the same ID returns the original result before mutable preflight, while preserving authentication and request-equality checks.

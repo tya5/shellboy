@@ -10370,3 +10370,24 @@ macOS ARM64 through `rust-slot`, temporary databases, local counting mock for em
 Real-vector measurements (read with `mode=ro` from the user's database into a temporary copy, deleted afterwards): [search and relations](../design/search-and-relations.md#int8-conversion-253). Those used the manual test `measure_conversion_on_a_vector_file` and a throwaway rank script that is not in the repository; rank agreement used exact in-memory L2 in NumPy, with the same quantization formula, not sqlite-vec. Reported through the `mode=ro` read: 44,038 chunks, all jobs done, active space state `paused`.
 
 Not verified: the user's real database (not converted, by instruction); real query vectors (chunks stood in for queries, so query saturation and real-query rank quality are unknown); cold-cache search time; the operation against a running owner on real data; Windows and Linux beyond CI (recorded with the final SHA); a real terminal for the operations screen entry.
+## Configuration read and write (#266)
+
+macOS ARM64 through `rust-slot`, with temporary files, config and data directories and no provider request.
+`sh scripts/check.sh` was run on this change. `tests/config_edit.rs` covers: redaction of headers, extra headers,
+`extra_body`, `shell.env`, a credential-like `base_url` path segment and name, in both the loaded and file views;
+an invalid file with a URL password or a syntax error, with no value quoted; comments, order and only the changed
+lines differing, including the bundled template and a CRLF file; comments above a removed key kept in all three
+positions; adding and removing a connection; invalid values refused with the file untouched; hash conflict, and an
+edit arriving during the write; failure before the replace leaving the file and no temporary file; creating a
+missing file with mode 0600; mode 0640 and a symlink kept on Unix; a read-only file refused; restart flags per
+field; sensitive values absent from results and saved receipts; a credential refused in a name field with no echo;
+replay with the same operation ID returning the saved result with no second edit, and other arguments conflicting;
+concurrent changes with one hash leaving one winner; no owner (`app_not_running`, file untouched); `--config`
+refused; and the real CLI against a `serve` owner with a temporary HOME.
+
+Not verified: the Windows branch is exercised only by CI on this change (`ReplaceFileW` replacing the file, and a
+held file refused), and keeping a Windows ACL has no test because the test sets none. File ownership on Unix when
+the owner runs as another user. The race with another program in the replace step itself is narrowed and not
+tested as closed. A timed-out file worker is not exercised. The `config_changed` diagnostic line has no dedicated
+test. Hot-candidate labels come from reading call sites, and no value was applied live. Not tried with a real
+provider, a real user configuration, the Web settings screen or a real terminal.

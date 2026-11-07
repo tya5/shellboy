@@ -360,6 +360,51 @@ impl WaitArgs {
     }
 }
 
+/// Bounds the file edit and its result, whose size is checked again before writing.
+const MAX_CONFIG_CHANGES: usize = 64;
+const MAX_CONFIG_FIELD_BYTES: usize = 512;
+const MAX_CONFIG_VALUE_BYTES: usize = 128 * 1024;
+impl ConfigSetArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        if self.expected_hash.len() != 64
+            || !self
+                .expected_hash
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err(invalid(
+                "expected_hash must be file.content_hash from config.get",
+            ));
+        }
+        if self.changes.is_empty() || self.changes.len() > MAX_CONFIG_CHANGES {
+            return Err(invalid(format!(
+                "config.set takes 1 to {MAX_CONFIG_CHANGES} changes"
+            )));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for change in &self.changes {
+            if change.field.len() > MAX_CONFIG_FIELD_BYTES
+                || toml_edit::Key::parse(&change.field).is_err()
+            {
+                return Err(invalid("field must be a TOML dotted key"));
+            }
+            if !seen.insert(change.field.as_str()) {
+                return Err(invalid("each field may be changed once per config.set"));
+            }
+            let bytes = change
+                .value
+                .as_ref()
+                .map_or(0, |value| value.to_string().len());
+            if bytes > MAX_CONFIG_VALUE_BYTES {
+                return Err(ApiError::new(
+                    ErrorCode::InputLimit,
+                    format!("a config.set value must be at most {MAX_CONFIG_VALUE_BYTES} bytes"),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
 impl EventsWaitArgs {
     fn validate(&self) -> Result<(), ApiError> {
         if let Some(after) = &self.after {
@@ -683,7 +728,8 @@ impl Command {
                 }
                 Ok(())
             }
-            Self::StorageStatus(_) | Self::StorageCollect(_) => Ok(()),
+            Self::StorageStatus(_) | Self::StorageCollect(_) | Self::ConfigGet(_) => Ok(()),
+            Self::ConfigSet(a) => a.validate(),
             Self::EventsWait(a) => a.validate(),
         }
     }

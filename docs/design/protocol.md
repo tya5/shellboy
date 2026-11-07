@@ -571,3 +571,73 @@ cancellable by the shared runtime-observation wrapper. Models may call it.
 The cursor moves past changes to Threads excluded by `thread_ids`; a client that adds a Thread to the
 filter reads it once. A pending call at owner shutdown or caller disconnect ends with an error
 (`read_only`, not applied); after an owner restart the next call returns `resync_required`.
+
+## Reading and changing the configuration file: `config.get`, `config.set` (#266)
+
+Both are `CommandRoute::Runtime`. `config.get` is a read with no receipt. `config.set` is a mutation:
+`reserve_runtime` saves the intent first, the same ID and arguments return the saved outcome without
+touching the file, the same ID with other arguments is `operation_conflict`. It is not cancellable: a
+started write finishes and is reported. There is no authority check (#256). Neither is in the TUI catalogue
+(`OperationId::for_command` returns `None`, like `events.wait`), since a form would not be generated.
+
+```jsonc
+// config.get: args {}
+{
+  "config_path": "/home/me/.config/shellboy/config.toml",
+  "loaded": {                       // what this owner parsed at startup
+    "present": true,
+    "content_hash": "<sha256 of the bytes it parsed>",
+    "values": {"default_model": "model-a",
+               "connections": {"proxy": {"base_url": "https://proxy.example/v1",
+                                         "api_key_env": "PROXY_KEY",
+                                         "headers": {"X-Org": "[redacted]"},
+                                         "extra_body": {"metadata": "[redacted]"} /* every field */ }},
+               "shell": {"env": {"MY_VAR": "[redacted]"} /* ... */} /* every section, defaults filled */},
+    "redacted_fields": ["connections.proxy.extra_body.metadata", "connections.proxy.headers.X-Org", "shell.env.MY_VAR"],
+    "credential_env_set": {"PROXY_KEY": true}   // in the owner's environment; never the value
+  },
+  "file": {                         // the file now
+    "present": true,
+    "content_hash": "<sha256 of the bytes; of no bytes when absent>",   // pass as expected_hash
+    "valid": true,
+    "error": null,                  // the validation message when valid is false; values are then null
+    "values": { /* same shape */ },
+    "redacted_fields": [ /* ... */ ]
+  },
+  "differs": true,                  // file bytes differ from what was loaded, comments included
+  "differing_fields": ["default_model"],  // effective values; null when the file is invalid
+  "restart": {"all_fields_require_restart": true,
+              "hot_candidates": ["default_connection", "default_model", "compaction.*", "retention.*"]}
+}
+
+// config.set: args. field is a TOML dotted key; a missing or null value removes the key.
+{"expected_hash": "<file.content_hash>",
+ "changes": [{"field": "default_model", "value": "model-b"},
+             {"field": "connections.\"my.proxy\".request_timeout_ms", "value": 90000},
+             {"field": "shell.env.MY_VAR", "value": "x"},
+             {"field": "ui.bell"}]}
+
+// config.set: result
+{"config_path": "...", "written": true,
+ "previous_hash": "...", "content_hash": "...",    // the new hash, usable for the next change
+ "restart_required": true, "applied_to_running_owner": false,
+ "changed_by": null,                               // Origin identity of a model shell; null for a terminal
+ "changes": [
+   {"field": "default_model", "previous": "model-a", "value": "model-b",
+    "sensitive": false, "restart_required": true, "hot_candidate": true},
+   {"field": "shell.env.MY_VAR", "sensitive": true, "restart_required": true, "hot_candidate": false}
+ ]}
+```
+
+`changes` lists effective values that differ, not the request: removing a key shows the default that now
+applies, adding a connection lists its fields, and a sensitive entry has no `previous` or `value`.
+
+Errors: `invalid_argument` for a malformed or refused change (`details.change_index`; `details.reason =
+"credential_value_refused"` for a credential in a name field), `config_invalid` when the whole result fails
+`Config::parse`, `operation_conflict` with `details.reason = "config_changed"` and `current_hash` for a stale
+hash, `io_failed` or `input_limit` otherwise. All carry `details.written = false` when nothing was written,
+and none quotes a value from the file or the request. Bounds: 64 changes, 512-byte field, 128 KiB value
+(request validation), 1 MiB file, 512 KiB result (checked before the replace, so a saved outcome never hides
+a finished write).
+
+The design is in [config.md](config.md#reading-and-changing-through-the-owner-266).

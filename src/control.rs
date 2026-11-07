@@ -1,6 +1,7 @@
 //! Independent operation admission and per-Thread drivers on one async runtime.
 mod change_clock;
 mod compact;
+mod config_ops;
 mod foreground;
 pub(crate) mod interruption;
 mod live;
@@ -150,6 +151,8 @@ pub struct Control {
     admission_closed: AtomicBool,
     waits: wait::WaitRegistry,
     runtime_operations: Mutex<HashMap<String, RuntimeOperation>>,
+    /// One `config.set` at a time; held until its file work has truly ended.
+    config_write: Arc<Mutex<()>>,
 }
 struct RequestGuard {
     control: Arc<Control>,
@@ -319,6 +322,7 @@ impl Control {
             admission_closed: AtomicBool::new(false),
             waits: wait::WaitRegistry::default(),
             runtime_operations: Mutex::new(HashMap::new()),
+            config_write: Arc::new(Mutex::new(())),
         })
     }
     fn admit(self: &Arc<Self>, changes_context: bool) -> Result<RequestGuard, ApiError> {

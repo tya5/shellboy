@@ -72,6 +72,8 @@ impl Command {
             Self::IndexRemove(_) => ("index.remove", CommandRoute::Runtime),
             Self::StorageStatus(_) => ("storage.status", CommandRoute::Runtime),
             Self::StorageCollect(_) => ("storage.collect", CommandRoute::Runtime),
+            Self::ConfigGet(_) => ("config.get", CommandRoute::Runtime),
+            Self::ConfigSet(_) => ("config.set", CommandRoute::Runtime),
         }
     }
     /// Canonical protocol name, independent from translated UI titles.
@@ -103,7 +105,8 @@ impl Command {
             | Self::IndexShrink(_)
             | Self::IndexRemove(_)
             | Self::StorageStatus(_)
-            | Self::StorageCollect(_) => true,
+            | Self::StorageCollect(_)
+            | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
@@ -142,7 +145,8 @@ impl Command {
             | Self::AttachmentRemove(_)
             | Self::Compact(_)
             | Self::ContextEdit(_)
-            | Self::IndexStatus(_) => false,
+            | Self::IndexStatus(_)
+            | Self::ConfigSet(_) => false,
         }
     }
     /// Late runtime cleanup allowed after cancellation; not the IPC reserved lane.
@@ -200,7 +204,9 @@ impl Command {
             | Self::IndexShrink(_)
             | Self::IndexRemove(_)
             | Self::StorageStatus(_)
-            | Self::StorageCollect(_) => false,
+            | Self::StorageCollect(_)
+            | Self::ConfigGet(_)
+            | Self::ConfigSet(_) => false,
         }
     }
     /// Must finish admission before the graceful-shutdown context capture?
@@ -259,7 +265,9 @@ impl Command {
             | Self::IndexShrink(_)
             | Self::IndexRemove(_)
             | Self::StorageStatus(_)
-            | Self::StorageCollect(_) => false,
+            | Self::StorageCollect(_)
+            | Self::ConfigGet(_)
+            | Self::ConfigSet(_) => false,
         }
     }
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
@@ -289,7 +297,8 @@ impl Command {
             | Self::EventsWait(_)
             | Self::IndexStatus(_)
             | Self::IndexPreview(_)
-            | Self::StorageStatus(_) => true,
+            | Self::StorageStatus(_)
+            | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
             | Self::ThreadCreate(_)
             | Self::ThreadFork(_)
@@ -318,7 +327,8 @@ impl Command {
             | Self::IndexProbe(_)
             | Self::IndexShrink(_)
             | Self::IndexRemove(_)
-            | Self::StorageCollect(_) => false,
+            | Self::StorageCollect(_)
+            | Self::ConfigSet(_) => false,
         }
     }
 }

@@ -1297,6 +1297,7 @@ mod tests {
         config.source = Some(crate::config::ConfigSource {
             path: PathBuf::from("/synthetic/config.toml"),
             present: true,
+            content_hash: None,
         });
         let mut ui = UiState::new(&config, PathBuf::from("/synthetic/work"));
         ui.view_mut().model = Some("fixture-model".into());
@@ -1500,6 +1501,7 @@ mod tests {
         config.source = Some(crate::config::ConfigSource {
             path: path.clone(),
             present: false,
+            content_hash: None,
         });
         let mut ui = UiState::new(&config, root.path().into());
         let shown = frame_text(&mut ui, 150, 32);

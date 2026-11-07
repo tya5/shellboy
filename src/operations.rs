@@ -1989,7 +1989,10 @@ impl OperationId {
     pub(crate) fn from_owner_command(command: &crate::protocol::Command) -> Option<Self> {
         use crate::protocol::Command;
         Some(match command {
-            Command::OwnerShutdown(_) | Command::EventsWait(_) => return None,
+            Command::OwnerShutdown(_)
+            | Command::EventsWait(_)
+            | Command::ConfigGet(_)
+            | Command::ConfigSet(_) => return None,
             Command::Status(_) => Self::Status,
             Command::ModelList(_) => Self::ModelList,
             Command::ThreadList(_) => Self::ThreadList,

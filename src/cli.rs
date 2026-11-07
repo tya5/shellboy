@@ -39,10 +39,10 @@ pub enum CliCommand {
     Exec(crate::exec_client::ExecOptions),
     /// Inspect recorded work; no model call or persistent job engine.
     Status(StatusOptions),
-    /// Create a configuration template or check it without an owner.
+    /// Create or check a configuration without an owner; read or change it through one.
     Config {
         #[command(subcommand)]
-        command: crate::config_setup::ConfigCommand,
+        command: ConfigCliCommand,
     },
     /// Read saved model usage and separate timing totals; no model call.
     Usage {
@@ -124,6 +124,63 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: StorageCommand,
     },
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum ConfigCliCommand {
+    #[command(flatten)]
+    Setup(crate::config_setup::ConfigCommand),
+    /// Read what the running owner loaded and the current file; credential values are never returned.
+    #[command(
+        after_help = "Needs a running owner; --config does not select the file. Use the returned file.content_hash as --expected-hash for config set."
+    )]
+    Get,
+    /// Change named fields in the owner's configuration file; takes effect after an owner restart.
+    #[command(
+        after_help = "Needs a running owner; --config does not select the file.\n  shellboy config set --expected-hash HASH --set default_model=my-model --set ui.bell=false --unset compaction.segment_chars\n\nFIELD is a TOML dotted key, e.g. connections.proxy.base_url or connections.\"my.proxy\".base_url. VALUE is JSON when it parses as JSON and a plain string otherwise; write '\"123\"' for the string 123. Credentials stay in the environment: api_key_env takes a variable name."
+    )]
+    Set(ConfigSetOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct ConfigSetOptions {
+    /// file.content_hash from config get; refused if the file has changed since.
+    #[arg(long)]
+    pub expected_hash: String,
+    /// FIELD=VALUE; repeatable.
+    #[arg(long = "set", value_name = "FIELD=VALUE")]
+    pub set: Vec<String>,
+    /// Remove FIELD so its default applies; repeatable.
+    #[arg(long = "unset", value_name = "FIELD")]
+    pub unset: Vec<String>,
+}
+impl ConfigSetOptions {
+    fn into_args(self) -> Result<wire::ConfigSetArgs, ApiError> {
+        let mut changes = Vec::with_capacity(self.set.len() + self.unset.len());
+        for item in self.set {
+            let (field, text) = item
+                .split_once('=')
+                .ok_or_else(|| invalid("--set takes FIELD=VALUE"))?;
+            let value = serde_json::from_str(text)
+                .unwrap_or_else(|_| serde_json::Value::String(text.to_owned()));
+            if value.is_null() {
+                return Err(invalid(
+                    "--set takes a value; use --unset FIELD to remove one",
+                ));
+            }
+            changes.push(wire::ConfigChange {
+                field: field.to_owned(),
+                value: Some(value),
+            });
+        }
+        changes.extend(
+            self.unset
+                .into_iter()
+                .map(|field| wire::ConfigChange { field, value: None }),
+        );
+        Ok(wire::ConfigSetArgs {
+            expected_hash: self.expected_hash,
+            changes,
+        })
+    }
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum EventsCommand {
@@ -1000,9 +1057,22 @@ impl Cli {
             | CliCommand::Docs { .. }
             | CliCommand::Startup(_)
             | CliCommand::Rag(_)
-            | CliCommand::Config { .. } => {
+            | CliCommand::Config {
+                command: ConfigCliCommand::Setup(_),
+            } => {
                 return Ok(None);
             }
+            CliCommand::Config { .. } if self.config.is_some() => {
+                return Err(invalid(
+                    "config get and config set act on the file the running owner loaded; --config cannot select another file. Choose the owner with --data-dir",
+                ));
+            }
+            CliCommand::Config {
+                command: ConfigCliCommand::Get,
+            } => C::ConfigGet(wire::ConfigGetArgs {}),
+            CliCommand::Config {
+                command: ConfigCliCommand::Set(a),
+            } => C::ConfigSet(a.into_args()?),
             CliCommand::Model {
                 command: ModelCommand::List(a),
             } => C::ModelList(wire::ModelListArgs {

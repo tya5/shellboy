@@ -41,6 +41,8 @@ pub enum DiagnosticEvent {
     ShellFailure,
     ShellUnknownArgumentsIgnored,
     ShellUnknownArgumentsRejected,
+    /// `config.set` replaced the file; records field names, never values.
+    ConfigChanged,
     StorageLimit,
     IndexPaused,
     UsageTotalsSlow,
@@ -340,6 +342,8 @@ struct Entry {
     #[serde(skip_serializing_if = "Option::is_none")]
     shell_unknown_parameter: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    config_fields: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     rate_limit: Option<RateLimitTrace>,
 }
 #[derive(Clone, Serialize)]
@@ -432,6 +436,7 @@ struct Record {
     automatic_compaction_counts: Option<AutomaticCompactionCounts>,
     startup_stage: Option<StartupStageTrace>,
     shell_unknown_parameter: Option<String>,
+    config_fields: Option<Vec<String>>,
     rate_limit: Option<RateLimitTrace>,
 }
 struct Health {
@@ -477,6 +482,7 @@ impl Diagnostics {
                     automatic_compaction_counts,
                     startup_stage,
                     shell_unknown_parameter,
+                    config_fields,
                     rate_limit,
                 }) = receiver.recv()
                 {
@@ -505,6 +511,7 @@ impl Diagnostics {
                         automatic_compaction_counts,
                         startup_stage,
                         shell_unknown_parameter,
+                        config_fields,
                         rate_limit,
                     };
                     let mut line = match serde_json::to_vec(&entry) {
@@ -601,6 +608,7 @@ impl Diagnostics {
             }),
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -632,6 +640,36 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: Some(name),
+            config_fields: None,
+            rate_limit: None,
+        });
+    }
+    /// Who replaced the configuration file and which fields changed; never a value.
+    pub(crate) fn record_config_change(&self, ids: DiagnosticIds, fields: Vec<String>) {
+        const MAX_FIELDS: usize = 64;
+        const MAX_NAME_CHARS: usize = 256;
+        let fields = fields
+            .into_iter()
+            .take(MAX_FIELDS)
+            .map(|name| name.chars().take(MAX_NAME_CHARS).collect())
+            .collect();
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::ConfigChanged,
+            ids,
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: None,
+            index_discard: None,
+            automatic_compaction_counts: None,
+            startup_stage: None,
+            shell_unknown_parameter: None,
+            config_fields: Some(fields),
             rate_limit: None,
         });
     }
@@ -656,6 +694,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: Some(RateLimitTrace {
                 connection: sanitize_id(connection),
                 status: 429,
@@ -773,6 +812,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -798,6 +838,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -827,6 +868,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -877,6 +919,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -914,6 +957,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -964,6 +1008,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -988,6 +1033,7 @@ impl Diagnostics {
             index_discard: None,
             automatic_compaction_counts: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
             startup_stage: Some(StartupStageTrace {
                 stage,
@@ -1030,6 +1076,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -1114,6 +1161,7 @@ impl Diagnostics {
             automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
+            config_fields: None,
             rate_limit: None,
         });
     }
@@ -1134,6 +1182,7 @@ impl Diagnostics {
             automatic_compaction_counts,
             startup_stage,
             shell_unknown_parameter,
+            config_fields,
             rate_limit,
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
@@ -1170,6 +1219,7 @@ impl Diagnostics {
                     automatic_compaction_counts,
                     startup_stage,
                     shell_unknown_parameter,
+                    config_fields,
                     rate_limit,
                 })
                 .is_err()
