@@ -329,6 +329,16 @@ fn step(
                     "The conversion stopped before reaching the logical data warning level; it paused nothing and held no work",
                 ))
             })?;
+            // The volume too: a conversion adds bytes, so it stops at the free-space
+            // minimum like new work does, and the unit rolls back with it.
+            crate::gc::require_disk_free(config, crate::gc::database_free_bytes(tx), 0).map_err(
+                |_| {
+                    StorageError::from(err(
+                        ErrorCode::StorageLimit,
+                        "The conversion stopped because free disk space is below limits.disk_free_min_bytes; it paused nothing and held no work. Free space and run `index shrink` again",
+                    ))
+                },
+            )?;
             Ok(Step::Progress(record))
         }
         _ => Err(serde_error()),
@@ -650,6 +660,7 @@ fn preview(db: &Connection, config: &Config) -> Result<(Value, &'static str), St
         None if space.int8_scale.is_some() => "already_int8",
         None if segments == 0 => "empty",
         None if logical + bytes >= room_limit(config) => "low_room",
+        None if low_disk(db, config, bytes).is_some() => "low_disk",
         None => "ready",
     };
     let retained = retained_source(db, &space)?;
@@ -672,11 +683,29 @@ fn preview(db: &Connection, config: &Config) -> Result<(Value, &'static str), St
         "unfinished_jobs_moved":unfinished,
         "embedding_requests":0,
         "retained_source":retained,
+        "low_disk":(state == "low_disk").then(|| low_disk_message(db, config, bytes)),
+        "filesystem_free_bytes":crate::gc::database_free_bytes(db),
         "low_room":(state == "low_room").then(|| low_room_message(logical, logical + bytes, config)),
         "conversion":record.map(|record| json!({"phase":record.phase,"error":record.error})),
         "effects":"Adds an int8 copy of this index without any API call and switches search to it, which then reads about a quarter of the vector bytes. It deletes nothing: the old index stays, inactive, counts toward the logical data limit and frees no disk until a person removes it with `index remove`. `index shrink --revert` switches back. Rank order changes slightly and distance values change scale.",
     });
     Ok((value, state))
+}
+
+/// `Some(free)` when the added bytes would leave less than the free-space minimum.
+fn low_disk(db: &Connection, config: &Config, adding: u64) -> Option<u64> {
+    let free = crate::gc::database_free_bytes(db);
+    crate::gc::require_disk_free(config, free, adding)
+        .is_err()
+        .then_some(free.unwrap_or(0))
+}
+
+fn low_disk_message(db: &Connection, config: &Config, adding: u64) -> String {
+    format!(
+        "Converting adds about {adding} bytes and the volume has {} bytes free; that would leave less than limits.disk_free_min_bytes ({}), so nothing was changed. Free space on the data directory's volume, or lower limits.disk_free_min_bytes if you accept less margin. Removing a retained index (`index remove`) frees space for reuse inside the database file and only `storage vacuum` shrinks the file; that is a person's decision",
+        crate::gc::database_free_bytes(db).unwrap_or(0),
+        config.limits.disk_free_min_bytes
+    )
 }
 
 fn low_room_message(logical: u64, after: u64, config: &Config) -> String {
@@ -834,6 +863,10 @@ fn start(tx: &Transaction<'_>, config: &Config) -> Result<Value, StorageError> {
                 if after >= room_limit(config) {
                     return invalid(&low_room_message(logical, after, config));
                 }
+                let added = segments.saturating_sub(copied) * dimension;
+                if low_disk(tx, config, added).is_some() {
+                    return invalid(&low_disk_message(tx, config, added));
+                }
             }
             record.error = None;
             set_json_meta(tx, &IndexKeys::shrink(&record.source), &record)?;
@@ -845,6 +878,11 @@ fn start(tx: &Transaction<'_>, config: &Config) -> Result<Value, StorageError> {
         "already_int8" => invalid("The active index is already int8"),
         "empty" => invalid("The active index has no vectors to convert"),
         "low_room" => invalid(preview["low_room"].as_str().unwrap_or("Not enough room")),
+        "low_disk" => invalid(
+            preview["low_disk"]
+                .as_str()
+                .unwrap_or("Not enough free disk space"),
+        ),
         _ => invalid("There is no active index to convert"),
     }
 }
