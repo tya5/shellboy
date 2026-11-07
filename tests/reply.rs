@@ -65,7 +65,15 @@ async fn expected_reply_cap_is_128_and_replay_is_not_a_new_duty() {
 async fn human_questions_share_the_128_pending_reply_cap() {
     let (_root, store) = fixture().await;
     for _ in 0..127 {
-        store.execute(request(send(true)), None).await.unwrap();
+        let mut duty = match send(true) {
+            Command::MessageSend(args) => args,
+            _ => unreachable!(),
+        };
+        duty.thread_id = Some("sender".into());
+        store
+            .execute(request(Command::MessageSend(duty)), None)
+            .await
+            .unwrap();
     }
     let origin = Origin {
         instance_id: "fixture".into(),
