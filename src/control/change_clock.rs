@@ -17,7 +17,7 @@ use std::{
 };
 
 pub(crate) const MAX_CHANGE_THREADS: usize = 4096;
-/// Streaming attempts holding text at once; the least recently written is dropped.
+/// Streaming attempts holding text at once; further attempts are refused until one ends.
 pub(crate) const MAX_LIVE_TEXT_ATTEMPTS: usize = 16;
 /// Retained text per attempt, each delta also charged its record size. Same size as
 /// the TUI's per-attempt preview window (tui-presentation.md).
@@ -151,6 +151,11 @@ impl ChangeClock {
             return;
         }
         let mut inner = self.lock();
+        // While full, a newcomer is refused and the attempts holding text keep their previews.
+        // Evicting instead would make every entry lose text once more than the cap streams.
+        if !inner.text.contains_key(thread) && inner.text.len() >= MAX_LIVE_TEXT_ATTEMPTS {
+            return;
+        }
         inner.seq += 1;
         let seq = inner.seq;
         if inner
@@ -158,23 +163,13 @@ impl ChangeClock {
             .get(thread)
             .is_none_or(|current| current.attempt != attempt)
         {
-            if !inner.text.contains_key(thread) && inner.text.len() >= MAX_LIVE_TEXT_ATTEMPTS {
-                let oldest = inner
-                    .text
-                    .iter()
-                    .min_by_key(|(_, text)| text.deltas.back().map_or(0, |delta| delta.seq))
-                    .map(|(thread, _)| thread.clone());
-                if let Some(oldest) = oldest {
-                    inner.text.remove(&oldest);
-                }
-            }
             inner.text.insert(
                 thread.to_owned(),
                 AttemptText {
                     attempt: attempt.to_owned(),
                     deltas: VecDeque::new(),
                     charged: 0,
-                    // Entered mid-attempt after being dropped: earlier text is gone.
+                    // Entered mid-attempt after being refused: earlier text is gone.
                     floor: if offset == 0 { 0 } else { seq },
                 },
             );
@@ -495,23 +490,30 @@ mod tests {
     }
 
     #[test]
-    fn past_the_attempt_cap_the_least_recent_is_dropped_and_reenters_with_a_gap() {
+    fn past_the_attempt_cap_newcomers_wait_and_incumbents_keep_their_previews() {
         let clock = ChangeClock::new();
-        for i in 0..MAX_LIVE_TEXT_ATTEMPTS {
-            clock.record_text(&format!("t{i}"), "a", 0, "x", false);
+        let threads = MAX_LIVE_TEXT_ATTEMPTS + 1;
+        let mut at = 0;
+        for round in 0..200u64 {
+            for i in 0..threads {
+                clock.record_text(&format!("t{i:02}"), "a", round, "x", false);
+            }
+            let (attempts, cursor) = text_poll(&clock, at, &[]);
+            at = cursor;
+            assert_eq!(attempts.len(), MAX_LIVE_TEXT_ATTEMPTS);
+            let late = format!("t{MAX_LIVE_TEXT_ATTEMPTS:02}");
+            assert!(!attempts.iter().any(|a| a.thread_id == late));
+            // The first read joins at offset 0; every later one is continuous.
+            assert!(attempts.iter().all(|a| !a.gap && a.deltas[0].offset == round));
         }
-        clock.record_text("t0", "a", 1, "y", false);
-        clock.record_text("extra", "a", 0, "x", false);
-        let (attempts, cursor) = text_poll(&clock, 0, &[]);
-        assert_eq!(attempts.len(), MAX_LIVE_TEXT_ATTEMPTS);
-        // t1 was written least recently; its absence says no text is held for it.
-        assert!(!attempts.iter().any(|a| a.thread_id == "t1"));
-        assert!(attempts.iter().any(|a| a.thread_id == "t0"));
-        clock.record_text("t1", "a", 1, "more", false);
-        let (attempts, _) = text_poll(&clock, cursor, &[]);
-        let back = attempts.iter().find(|a| a.thread_id == "t1").unwrap();
-        assert!(back.gap);
-        assert_eq!(back.deltas[0].offset, 1);
+        // An ending attempt makes room: the refused one enters with an explicit gap.
+        drop(clock.live_text_guard("t00", "a"));
+        let late = format!("t{MAX_LIVE_TEXT_ATTEMPTS:02}");
+        clock.record_text(&late, "a", 200, "y", false);
+        let (attempts, _) = text_poll(&clock, at, &[]);
+        let entered = attempts.iter().find(|a| a.thread_id == late).unwrap();
+        assert!(entered.gap);
+        assert_eq!(entered.deltas[0].offset, 200);
         assert_eq!(clock.lock().text.len(), MAX_LIVE_TEXT_ATTEMPTS);
     }
 
