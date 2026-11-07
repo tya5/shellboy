@@ -5,14 +5,30 @@ use super::*;
 use crate::protocol::IndexRemoveArgs;
 
 /// All guards are checked only when committing removal, never while reclaiming.
-fn removal_blocker(db: &Connection, id: &str) -> Result<Option<&'static str>,StorageError> {
-    let state: String = db.query_row("SELECT state FROM index_space WHERE id=?1",[id],|r|r.get(0))?;
-    if state == "removing" { return Ok(None); }
-    if meta(db,IndexKeys::ACTIVE_SPACE)?.as_deref()==Some(id) { return Ok(Some("it is the active index")); }
-    if !matches!(state.as_str(),"inactive"|"discarded") { return Ok(Some("it is not inactive")); }
-    let running: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state='running')",[id],|r|r.get(0))?;
-    if running { return Ok(Some("an embedding request for it is running")); }
-    if shrink::involves(db,id)? { return Ok(Some("a conversion is using it")); }
+fn removal_blocker(db: &Connection, id: &str) -> Result<Option<&'static str>, StorageError> {
+    let state: String = db.query_row("SELECT state FROM index_space WHERE id=?1", [id], |r| {
+        r.get(0)
+    })?;
+    if state == "removing" {
+        return Ok(None);
+    }
+    if meta(db, IndexKeys::ACTIVE_SPACE)?.as_deref() == Some(id) {
+        return Ok(Some("it is the active index"));
+    }
+    if !matches!(state.as_str(), "inactive" | "discarded") {
+        return Ok(Some("it is not inactive"));
+    }
+    let running: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state='running')",
+        [id],
+        |r| r.get(0),
+    )?;
+    if running {
+        return Ok(Some("an embedding request for it is running"));
+    }
+    if shrink::involves(db, id)? {
+        return Ok(Some("a conversion is using it"));
+    }
     let rebuilding: bool = db.query_row(
         "SELECT EXISTS(SELECT 1 FROM app_meta g JOIN app_meta r ON r.key='index.rebuild.'||substr(g.key,length('index.group.')+1,instr(substr(g.key,length('index.group.')+1),'.')-1) WHERE g.value=?1 AND g.key>='index.group.' AND g.key<'index.group/' AND g.key='index.group.'||substr(r.key,length('index.rebuild.')+1)||'.'||r.value)",
         [id],|r|r.get(0))?;
@@ -21,19 +37,32 @@ fn removal_blocker(db: &Connection, id: &str) -> Result<Option<&'static str>,Sto
 
 /// Compatibility for callers collecting one bounded unit. Production maintenance owns the cursor.
 #[cfg(test)]
-pub(crate) fn collect_inactive_spaces(db: &mut Connection) -> Result<u64,StorageError> {
-    let mut after=String::new();
-    let mut removed=0;
-    loop { let (n,more)=reclaim_step(db,32,&mut after)?; removed+=n; if !more { return Ok(removed); } }
+pub(crate) fn collect_inactive_spaces(db: &mut Connection) -> Result<u64, StorageError> {
+    let mut after = String::new();
+    let mut removed = 0;
+    loop {
+        let (n, more) = reclaim_step(db, 32, &mut after)?;
+        removed += n;
+        if !more {
+            return Ok(removed);
+        }
+    }
 }
 
-pub(crate) fn reclaim_step(db: &mut Connection, limit: i64, after: &mut String) -> Result<(u64, bool), StorageError> {
+pub(crate) fn reclaim_step(
+    db: &mut Connection,
+    limit: i64,
+    after: &mut String,
+) -> Result<(u64, bool), StorageError> {
     use rusqlite::OptionalExtension;
     let tx = db.transaction()?;
-    let candidate = tx.query_row(
-        "SELECT id,vec_table_name FROM index_space WHERE state='removing' ORDER BY id LIMIT 1",
-        [], |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)),
-    ).optional()?;
+    let candidate = tx
+        .query_row(
+            "SELECT id,vec_table_name FROM index_space WHERE state='removing' ORDER BY id LIMIT 1",
+            [],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
     let Some((space, table)) = candidate else {
         // Legacy discarded conversion copies and empty inactive spaces still need a decision.
         // Keyset paging prevents one protected space from starving later candidates.
@@ -41,18 +70,20 @@ pub(crate) fn reclaim_step(db: &mut Connection, limit: i64, after: &mut String) 
             "SELECT min(id) FROM (SELECT id FROM (SELECT id FROM index_space WHERE state='discarded' AND id>?1 ORDER BY id LIMIT 1) UNION ALL SELECT id FROM (SELECT id FROM index_space WHERE state='inactive' AND id>?1 ORDER BY id LIMIT 1)) HAVING min(id) IS NOT NULL",
             [&*after], |row| row.get::<_,String>(0),
         ).optional()?;
-        let Some(id) = row else { return Ok((0,false)); };
+        let Some(id) = row else {
+            return Ok((0, false));
+        };
         *after = id.clone();
-        if removal_blocker(&tx,&id)?.is_none() {
+        if removal_blocker(&tx, &id)?.is_none() {
             let empty_or_discarded: bool = tx.query_row(
                 "SELECT state='discarded' OR NOT EXISTS(SELECT 1 FROM embedding_chunk WHERE space_id=?1) FROM index_space WHERE id=?1",
                 [&id], |r|r.get(0))?;
             if empty_or_discarded {
-                tx.execute("UPDATE index_space SET state='removing' WHERE id=?1",[&id])?;
+                tx.execute("UPDATE index_space SET state='removing' WHERE id=?1", [&id])?;
             }
         }
         tx.commit()?;
-        return Ok((0,true));
+        return Ok((0, true));
     };
     valid_table(&table)?;
     // An empty retained index must become non-selectable before any cleanup.
@@ -139,7 +170,7 @@ fn removal_preview(db: &Connection, id: &str) -> Result<Value, StorageError> {
         [id],
         |row| row.get(0),
     )?;
-    let blocked_by = removal_blocker(db,id)?;
+    let blocked_by = removal_blocker(db, id)?;
     Ok(json!({
         "space_id":space.id,
         "connection":space.profile,
@@ -244,7 +275,7 @@ mod tests {
             Ok(())
         }).await.unwrap();
         db.shutdown().await.unwrap();
-        let db=crate::storage::DbWorker::open(path).await.unwrap();
+        let db = crate::storage::DbWorker::open(path).await.unwrap();
         db.call(|db| {
             let mut finished=0;
             let mut steps=0;
@@ -254,7 +285,8 @@ mod tests {
                 finished+=n; steps+=1;
                 let chunks:i64=db.query_row("SELECT count(*) FROM embedding_chunk",[],|r|r.get(0))?;
                 let charged:i64=db.query_row("SELECT logical_bytes FROM quota_counter WHERE category='logical.index'",[],|r|r.get(0))?;
-                assert_eq!(charged,chunks*8);
+                let metadata:i64=db.query_row("SELECT COALESCE(sum(octet_length(value)),0) FROM app_meta WHERE key LIKE 'index.%'",[],|r|r.get(0))?;
+                assert_eq!(charged,chunks*8+metadata);
                 if !more {break;}
                 assert!(steps<200);
             }
@@ -271,8 +303,10 @@ mod tests {
 
     #[tokio::test]
     async fn bounded_reclaim_chunk_failure_rolls_back_one_unit_and_lookup_uses_indexes() {
-        let temp=tempfile::tempdir().unwrap();
-        let db=crate::storage::DbWorker::open(temp.path().join("failure.db")).await.unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("failure.db"))
+            .await
+            .unwrap();
         db.call(|db| {
             db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('s','message','now','{}',2);
                 CREATE VIRTUAL TABLE shellboy_vec_1123456789abcdef0123456789abcdef USING vec0(embedding int8[2]);
