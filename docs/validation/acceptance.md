@@ -178,10 +178,28 @@ Measured facts on that machine, no bound asserted:
   connection per poll) p50 713 and 691 us, p95 1090 and 1235 us, max 2.0 and 11.2 ms. One poll per delta at this rate. No real
   provider, browser or bridge is involved. Command: `cargo test --test integration events_text::measure -- --ignored --nocapture`.
 - Memory, requested heap bytes from a counting allocator (allocator overhead excluded), optimized build of
-  `change_clock.rs` in a throwaway harness, not committed. Stated bound charged: 1 MiB. Live heap for one attempt after far more than the
-  bound was written: 84055 (1-byte deltas), 93377 (8), 81817 (64), 62617 (4 KiB). For 16 attempts: 1340696, 1489848, 1304888, 997688.
-  This exceeds the charged bound because deque capacity is not charged. After all attempts ended: 460 (one attempt) and 3176 (16),
+  `change_clock.rs` in a throwaway harness, not committed. The limit counts text bytes plus 40 bytes per delta, at most 1 MiB in total,
+  and is not a memory bound. Live heap for one attempt after far more than the limit was written: 84055 (1-byte deltas), 93377 (8), 81817 (64),
+  62617 (4 KiB). For 16 attempts: 1340696, 1489848, 1304888, 997688. This exceeds 1 MiB because deque capacity is not counted. After all attempts ended: 460 (one attempt) and 3176 (16),
   with no text held; the rest is map capacity. `record_text` averaged 74 to 191 ns uncontended.
+
+Flaky landed tests, found while validating this change (macOS arm64, this machine, loaded by other agents):
+
+- `chat_resync_required_rereads_and_follows_to_the_end`: 5 failures in 10 full-suite runs on main and 5 in 10 with E3, both built in
+  clean target directories and alternated. Cause: a race in the test (see D-243-3). After the fix, on the fixes branch without E3: 0 failures in 8
+  full-suite runs. That is 8 runs, not a proof; it was not repeated with E3.
+- `stopping_run_is_announced`: 5 failures in 64 runs under 32 parallel copies before the fix, each with the Run saved `stopped` and the poll timing
+  out at 30 s. After the fix, with `stopped_transition_has_its_own_hint`, same load, same branch: 0 failures in 128 runs of each. With the `changed` call in
+  `retire_driver` removed, on this branch, the new test failed: 3 of 3 runs.
+
+Both fixes shipped in v0.10.0.
+
+Not fixed and not investigated, seen in full-suite runs under this load, left to be filed: on main only,
+`response_retries::overflow_trim_keeps_every_user_input_of_the_active_turn`, `gc::history_gc_budget_measurement_with_concurrent_writes`; with E3 only,
+`runtime::background_read_keeps_target_raw_separate_from_message_send_and_observer_output`,
+`runtime::slow_database_batches_binary_shell_output_without_losing_natural_exit_tail`, two `turn_interrupt` tests (the three read show a shell ending `failed`
+rather than `exited`); on both, `tui_recovery::multiple_calls_keep_source_order_numbers_commands_background_and_cancel_reasons`,
+`runtime_features::headless_background_parent_stop_reaps_nested_owner_and_tool_without_reexecution`.
 
 Not verified: Windows and Linux beyond CI passing these tests, Windows named-pipe latency, a blocked reply write on
 Windows (the real-socket stalled reader is Unix only), real providers, many concurrent text polls, lock contention under them, smoothness in a browser.

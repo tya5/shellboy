@@ -67,14 +67,16 @@ Ctrl+C channel no longer spins the loop. Tests: `chat_idle_follow_holds_one_even
 are in docs/validation/acceptance.md. Agent Guide: only the chat sentence changed (models do not
 use chat). Resume: exact-tip default and all-OS CI.
 
-## Live model text on `events.wait` (#243 E3 plan A; on branch issue-243/text-deltas, CI pending)
+## Live model text on `events.wait` (#243 E3 plan A; on branch issue-243/text-deltas-2, CI pending)
 
 `events.wait` / `shellboy events wait --text` can return unsaved model text in `live_text` with the same
-cursor as change hints. In-memory and lossy, with explicit `gap`; held in `ChangeClock`, at most 64 KiB charged per
-attempt and 16 attempts, freed by a guard when the attempt's stream ends. No worker, queue, table or
+cursor as change hints. In-memory and lossy, with explicit `gap`; held in `ChangeClock`, limited to 64 KiB counted per
+attempt and 16 attempts (not a memory bound; see acceptance.md), freed by a guard when the attempt's stream ends. No worker, queue, table or
 dependency. Deltas use a separate `text_changed` Notify, so `wait` loops and plain polls are not woken. Design:
 events-and-external-protocol.md 2.5; decisions D-243-2; facts in acceptance.md. Not done: plan B, `status --memory`
-reporting, and the Web client itself. Resume point: CI on the branch tip, then owner review.
+reporting, and the Web client itself. The two flawed landed tests found while validating this (`stopping_run_is_announced`,
+`chat_resync_required_rereads_and_follows_to_the_end`) were fixed and shipped separately in v0.10.0; see D-243-3. Other load failures listed in
+acceptance.md are out of scope and left to be filed. Resume point: CI on the branch tip, then owner review.
 
 ## Unit-length embeddings (#250; on branch issue-250/normalize-embeddings, CI pending)
 

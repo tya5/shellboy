@@ -567,5 +567,6 @@ Absent unless asked. `status` gains `text`, returned when text is new and no cha
 that attempt, reasoning and refusal included; it restarts with each attempt, and a retry has a new
 `attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
 `live_text` holds no text. The text is never saved, not a position in saved output and not part of any
-receipt; bounds are 64 KiB charged per attempt and 16 attempts, and all of it fits one frame. Client rule
+receipt; retained text is limited to 64 KiB per attempt, counting 40 bytes per delta, and 16 attempts, and all of it
+fits one frame. Those limits are not a memory bound; the measured heap is in the validation record. Client rule
 and state record: [events-and-external-protocol](events-and-external-protocol.md) 2.5.
