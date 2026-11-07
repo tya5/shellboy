@@ -565,7 +565,8 @@ impl GcService {
                 let unit = requester
                     .unit(limit, move |db, limit| {
                         let mut cursor = cursor;
-                        let (removed, more) = crate::index::reclaim_step(db, limit.get(), &mut cursor)?;
+                        let (removed, more) =
+                            crate::index::reclaim_step(db, limit.get(), &mut cursor)?;
                         Ok((removed, more, cursor))
                     })
                     .await

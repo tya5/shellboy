@@ -10703,3 +10703,12 @@ per-unit rollback versus prior committed progress, seven-row chunk/vector bounds
 post-decision metadata changes, quota oracle and EXPLAIN lookup plans. These are planned/implemented assertions,
 not passing evidence yet. No real provider API or user database is used. Natural disk failures, maximum-dimension
 large-space DROP latency and exhaustive concurrent schedules remain unverified.
+
+### #267 focused validation evidence
+
+On macOS arm64, `cargo check --locked --tests`, integration `index_space_gc::` (4 passed), lib `bounded_reclaim`
+(2 passed), lib `index::shrink::tests::` (28 passed, 1 ignored) and strict all-target clippy passed through the shared
+Rust slot. Python 206 tests passed after advancing strict schema readers to version 35. Layout/watchdog, language
+classification and append-only record checks passed. The initial quota fixture omitted index metadata bytes; the
+corrected oracle includes them and passed after reopen. Incorrect zero-match storage/shrink filters are not counted
+as validation. Exact-tip CI remains the full-suite and migration handoff gate.
