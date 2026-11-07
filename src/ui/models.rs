@@ -656,31 +656,47 @@ mod language_rendering_tests {
         let mut config = crate::config::Config::parse("default_connection='old'\ndefault_model='synthetic'\n[connections.old]\nbase_url='http://127.0.0.1:1/v1'\nauto_at_tokens=100\n").unwrap();
         let clients = config.live_connections.clients(&config);
         let mut ui = UiState::new(&config, std::env::temp_dir());
-        config.connections.insert("added".into(), crate::config::Connection {
-            base_url:"http://127.0.0.1:2/v1".into(), auto_at_tokens:Some(100), ..Default::default()
-        });
+        config.connections.insert(
+            "added".into(),
+            crate::config::Connection {
+                base_url: "http://127.0.0.1:2/v1".into(),
+                auto_at_tokens: Some(100),
+                ..Default::default()
+            },
+        );
         clients.adopt(&config, None);
         ui.insert("/model added synthetic", false);
-        assert!(ui.event(crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Enter,crossterm::event::KeyModifiers::NONE))).is_empty());
-        assert_eq!(ui.view().connection.as_deref(),Some("added"));
+        assert!(
+            ui.event(crossterm::event::Event::Key(
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Enter,
+                    crossterm::event::KeyModifiers::NONE
+                )
+            ))
+            .is_empty()
+        );
+        assert_eq!(ui.view().connection.as_deref(), Some("added"));
         ui.view_mut().thread_id = Some("synthetic-saved".into());
         ui.view_mut().context_usage.input_tokens = Some(90);
         assert!(ui.live_context_bar().unwrap().warn());
         config.connections.get_mut("added").unwrap().auto_at_tokens = Some(1000);
         clients.adopt(&config, None);
         let bar = ui.live_context_bar().unwrap();
-        assert_eq!(bar.auto_at,1000);
+        assert_eq!(bar.auto_at, 1000);
         assert!(!bar.warn());
         config.connections.remove("added");
         clients.adopt(&config, None);
-        assert_ne!(ui.live_context_bar().unwrap().auto_at,1000);
+        assert_ne!(ui.live_context_bar().unwrap().auto_at, 1000);
         ui.models = None;
         ui.open_models("added");
         assert!(ui.models.is_none());
         ui.insert("/model added synthetic", false);
-        let action = ui.event(crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::Enter,crossterm::event::KeyModifiers::NONE)));
+        let action = ui.event(crossterm::event::Event::Key(
+            crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            ),
+        ));
         assert!(action.is_empty());
     }
 
