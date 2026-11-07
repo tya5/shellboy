@@ -2109,9 +2109,7 @@ fn actor(caller: Option<&Origin>) -> Value {
 }
 
 fn recovery_resume_actor(caller: Option<&Origin>, human: bool, explicit: bool) -> Value {
-    if caller.is_some() || human {
-        actor(caller)
-    } else if explicit {
+    if caller.is_none() && !human && explicit {
         json!({"kind":"external_cli"})
     } else {
         actor(caller)
