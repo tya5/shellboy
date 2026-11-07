@@ -92,8 +92,28 @@ pub struct HttpModelClient {
     usage_limit: Arc<std::sync::Mutex<Option<TimedUsageLimit>>>,
     rate_gate: rate_gate::RateGate,
     diagnostics: Arc<std::sync::OnceLock<crate::diagnostics::Diagnostics>>,
+    /// A key given for one connection test (#269). It replaces every other source and
+    /// is never part of `Connection`, which is cloned into logs and snapshots.
+    inline_key: Option<Arc<str>>,
+}
+impl std::fmt::Debug for HttpModelClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpModelClient")
+            .field("connection_name", &self.connection_name)
+            .field(
+                "inline_key",
+                &self.inline_key.as_ref().map(|_| "[redacted]"),
+            )
+            .finish_non_exhaustive()
+    }
 }
 impl HttpModelClient {
+    /// Use this key for every request of this client instead of the environment and the
+    /// stored key. For `connection.test` with a candidate that is not saved yet.
+    pub(crate) fn with_inline_key(mut self, key: &str) -> Self {
+        self.inline_key = Some(key.into());
+        self
+    }
     /// Count the actual dialect input, not discarded Responses-only replay items.
     pub(crate) fn input_characters(&self, request: &Value) -> Result<u64, ModelError> {
         if self.connection.api == crate::config::Api::Responses {
@@ -133,6 +153,7 @@ impl HttpModelClient {
             usage_limit: Arc::new(std::sync::Mutex::new(None)),
             rate_gate,
             diagnostics: Arc::new(std::sync::OnceLock::new()),
+            inline_key: None,
         })
     }
     fn blocking_usage_limit(
@@ -297,11 +318,34 @@ impl HttpModelClient {
             || (error.kind == "incomplete" && !terminal_received)
             || matches!(error.status, Some(500..=599))
     }
-    fn headers(&self) -> Result<(HeaderMap, Vec<String>), ModelError> {
-        let credentials = self
+    /// The stored key (#269), read when a request starts so a new key applies to the
+    /// next request. The environment wins, and then the file is not opened.
+    async fn stored_key(&self) -> Result<Option<String>, ModelError> {
+        let env_supplies = self
             .connection
-            .credentials(|name| std::env::var(name).ok())
-            .map_err(|e| ModelError::new("config_missing", e.to_string()))?;
+            .api_key_env
+            .as_deref()
+            .and_then(|name| std::env::var(name).ok())
+            .is_some_and(|value| !value.trim().is_empty());
+        let Some(path) = self.connection.credentials_file.as_deref() else {
+            return Ok(None);
+        };
+        if env_supplies || !self.connection.stored_key_allowed() {
+            return Ok(None);
+        }
+        crate::credential_store::read_key(path, &self.connection_name)
+            .await
+            .map_err(|error| ModelError::new("config_invalid", error.to_string()))
+    }
+    async fn headers(&self) -> Result<(HeaderMap, Vec<String>), ModelError> {
+        let credentials = if let Some(key) = &self.inline_key {
+            self.connection.credentials_with(|_| None, Some(key))
+        } else {
+            let stored = self.stored_key().await?;
+            self.connection
+                .credentials_with(|name| std::env::var(name).ok(), stored.as_deref())
+        }
+        .map_err(|e| ModelError::new("config_missing", e.to_string()))?;
         let mut headers = HeaderMap::new();
         let mut secrets = Vec::new();
         for (name, value) in credentials.headers() {
@@ -334,7 +378,7 @@ impl HttpModelClient {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
-        let (mut headers, mut secrets) = self.headers()?;
+        let (mut headers, mut secrets) = self.headers().await?;
         if matches!(endpoint, ApiEndpoint::Responses)
             && self.connection.api == crate::config::Api::AnthropicMessages
         {
@@ -467,6 +511,15 @@ impl HttpModelClient {
     /// Fetch the configured proxy's catalog without embedding a product-specific model list.
     /// The deadline includes both response headers and the complete bounded body.
     pub async fn models(&self, cancel: CancellationToken) -> Result<Vec<String>, ModelError> {
+        self.models_with_status(cancel)
+            .await
+            .map(|(_, models)| models)
+    }
+    /// The catalog with the HTTP status that carried it (`connection.test`).
+    pub async fn models_with_status(
+        &self,
+        cancel: CancellationToken,
+    ) -> Result<(u16, Vec<String>), ModelError> {
         let lease = self.rate_gate.acquire(&cancel).await?;
         let mut deadline =
             Deadline::new(ApiEndpoint::Models, &self.connection, &self.connection_name)?;
@@ -477,7 +530,7 @@ impl HttpModelClient {
         cancel: &CancellationToken,
         deadline: &mut Deadline,
         lease: &rate_gate::Lease,
-    ) -> Result<Vec<String>, ModelError> {
+    ) -> Result<(u16, Vec<String>), ModelError> {
         let (response, secrets, _observation) = self
             .send(
                 ApiEndpoint::Models,
@@ -550,7 +603,7 @@ impl HttpModelClient {
         }
         models.sort_unstable();
         models.dedup();
-        Ok(models)
+        Ok((status, models))
     }
     pub async fn embeddings(
         &self,

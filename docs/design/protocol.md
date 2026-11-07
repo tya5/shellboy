@@ -657,3 +657,70 @@ A looping client can get "work capacity is busy" at once when ordinary slots are
 receipt; retained text is limited to 64 KiB per attempt, counting 40 bytes per delta, and 16 attempts, and all of it
 fits one frame. Those limits are not a memory bound; the measured heap is in the validation record. Client rule
 and state record: [events-and-external-protocol](events-and-external-protocol.md) 2.5.
+
+## Stored keys and connection test: `credentials.set`, `credentials.clear`, `connection.test` (#269)
+
+All three are `CommandRoute::Runtime`, outside the TUI catalogue (`OperationId::for_command` returns `None`), and
+require a running owner; there is no standalone path. `credentials.set` and `credentials.clear` are mutations like
+`config.set`: `reserve_runtime` saves the intent, the same ID and arguments return the saved outcome without touching the
+file, other arguments are `operation_conflict`, and a started write is not cancelled. `connection.test` is a read: no
+receipt, cancelled when the caller disconnects. No value is returned by any of them. Design:
+[config](config.md#stored-api-keys-and-connection-test-269).
+
+```jsonc
+// credentials.set: args. value is write-only; 1..4096 bytes, no control characters or line breaks,
+// no leading or trailing whitespace. connection must be in the configuration file (or loaded by this owner).
+{"connection": "proxy", "value": "<key>"}
+// result
+{"connection": "proxy", "stored": true,
+ "replaced": false,                  // an entry existed before
+ "key_source": "stored",             // "env" when the variable also has a value: the variable wins
+ "credentials_path": "/home/me/.config/shellboy/credentials.toml",
+ "permissions_tightened": false,     // Unix: the file was group/world accessible and is now 0600; always false elsewhere
+ "changed_by": null,                 // Origin identity of a model shell; null for a terminal
+ "warning": "..."}                   // only for an interrupted Windows replace that was finished
+
+// credentials.clear: args
+{"connection": "proxy"}
+// result. Idempotent: no entry, or no file, is cleared:false and writes nothing. The connection need not exist.
+{"connection": "proxy", "cleared": true, "key_source": "none",   // "env" if the variable has a value
+ "credentials_path": "...", "changed_by": null}
+
+// connection.test: args. Exactly one of connection (saved) and base_url (candidate).
+{"connection": "proxy"}
+{"base_url": "https://api.example/v1",
+ "api": "responses",                 // optional: responses (default), chat_completions, anthropic_messages
+ "api_key": "<key>",                 // optional, write-only; or
+ "api_key_env": "EXAMPLE_API_KEY",   // optional, a variable name in the owner's environment (not both)
+ "api_key_header": "x-api-key",      // optional
+ "ssl_verify": false}                // optional, default true
+// result
+{"request": "GET model catalog only",
+ "connection": "proxy",              // null for a candidate
+ "candidate": false,
+ "api": "responses",
+ "sent": true,                       // false when nothing was sent (credential_missing, invalid_configuration, a URL that fails validation)
+ "ok": true,                         // a catalog came back; not a statement that the key is valid
+ "http_status": 200,                 // null when no HTTP response arrived
+ "failure": null,                    // auth | url | rate_limited | server | http_status | timeout | unreachable |
+                                     // credential_missing | invalid_configuration | cancelled | response
+ "models": ["model-a", "model-b"],   // sorted; at most 1000 ids and 256 KiB
+ "model_count": 2, "models_truncated": false,
+ "credential": {"source": "stored",  // env | stored | inline | none
+                "api_key_env": "EXAMPLE_API_KEY",   // null if unset; a credential-looking name is refused, so it is never echoed
+                "env_set": true,                    // presence in the owner's environment; null without api_key_env
+                "credentials_file_error": null}}    // why credentials.toml could not be read, without content
+
+// config.get additions
+{"loaded": {"credential_source": {"proxy": "stored"} /* env | stored | none, per connection */, ...},
+ "file":   {"credential_source": {"proxy": "stored"} /* null when the file is invalid */, ...},
+ "credentials_file": {"path": "...", "present": true, "valid": true, "error": null}}
+```
+
+Errors: `invalid_argument` for a bad value or connection, an unknown connection (`details.field = "connection"`), a
+connection that defines its own `Authorization` header, both or neither of `connection` and `base_url`, both `api_key`
+and `api_key_env`, or a credential-looking `api_key_env`/`api_key_header` (`details.reason =
+"credential_value_refused"`); `input_limit` for a key over 4096 bytes or a result over the bound; `config_invalid` when
+`credentials.toml` is invalid (unchanged, `details.credentials_path`); `io_failed` otherwise. `details.written = false`
+when nothing was written. A refused value is never echoed. Rejected unknown argument names as for every command. No
+protocol version change: the commands are additive, as `config.get` was.
