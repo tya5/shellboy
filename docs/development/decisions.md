@@ -4101,3 +4101,15 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   confusion it removes. (7) The credential read runs inside `wait_headers`, so cancel and the header deadline apply to it.
   (8) A header-only connection with no key is reported by the setup hints. (9) The `credentials.set` replay limit across an
   owner restart is documented and the conflict hint explains it.
+
+### D-252: Do not infer rejection frequency from synthetic data
+
+Issue #252 asks whether an optional character reduction policy is justified by
+measured non-shrinking summaries. Existing proactive guards already suppress
+repeated attempts for an unchanged witness, but a synthetic fixture cannot
+establish the frequency or privacy characteristics of real rejections. Do not
+change summary content, add an automatic retry, or read user data to decide.
+Revisit when the owner explicitly authorizes a bounded, privacy-reviewed
+measurement and supplies representative evidence; until then the observed
+production rate is unknown. This decision is not evidence that rejections are
+rare or that the current behavior is optimal.
