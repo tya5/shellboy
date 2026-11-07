@@ -618,6 +618,13 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::ThreadTags => {
             local!(language, "会話 · タグ一覧", "Conversations · Tag names")
         }
+        OperationId::ThreadCwds => {
+            local!(
+                language,
+                "会話 · 作業場所一覧",
+                "Conversations · Working folders"
+            )
+        }
         OperationId::ThreadSet => local!(language, "会話 · 設定", "Conversation · Settings"),
         OperationId::MessageReply => local!(language, "依頼 · 返信", "Message · Reply"),
         OperationId::MessageSend => local!(language, "依頼 · 送信", "Message · Send"),
@@ -823,6 +830,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             language,
             "使われているタグ名を重複なく、バイト順に表示します。件数は数えません。",
             "Show the distinct tag names in use in byte order. Member counts are not computed."
+        ),
+        OperationId::ThreadCwds => local!(
+            language,
+            "削除されていない会話（アーカイブ済みを含む）の保存cwdを重複なく、バイト順に表示します。件数は数えません。",
+            "Show the distinct saved working folders of non-deleted conversations (archived included) in byte order. Counts are not computed."
         ),
         OperationId::ThreadSet => local!(
             language,

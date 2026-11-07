@@ -64,7 +64,7 @@ walk (1,024 steps) in the write transaction; live Runs keep their owner (no owne
 tui, thread-browser, protocol, delegation (ownership wording), agent-guide, thread-organization
 "Stage 2 as implemented"; decision D-222-2. Stage 2 is on main (0352bdb3e6). Pin was dropped by the user.
 
-## Thread tags and cwd filter (#222 stage 3, partial; on branch issue-222/tags-3, CI on the branch tip)
+## Thread tags and cwd filter (#222 stage 3; on branch issue-222/tags-4, CI on the branch tip)
 
 Migration 34 (`0034_thread_tags`; 33 is #253) adds `thread_tag(thread_id, tag)` with the `(tag, thread_id)` index and the partial
 index `threads_cwd_updated`. New operations `thread.tag` / `shellboy thread tag --thread ID... --add TAG... --remove TAG...`
@@ -73,8 +73,8 @@ and `--cwd PATH` (lexically cleaned, absolute), and `tags` in `thread list` / `t
 (`updated_at` untouched), are not inherited and end with their Thread. TUI: operation palette forms only; no browser filter, no new
 glyph. Docs: cli-reference, protocol, cli, effective-spec, agent-guide, thread-browser, thread-organization "Stage 3 as
 implemented", decision D-222-3, acceptance, publication (checker defaults to schema 34). Not done: tag rename/merge, OR filter,
-counts, tags on browser/Watch rows. Stage 3 is NOT complete: the user asked for automatic grouping by cwd, and this
-delivers only a filter (no listing of distinct cwds, no TUI filter or grouping); both are open and await the user's decision. Resume point: all-OS CI on the final SHA, then owner review; the
+counts, tags on browser/Watch rows. `thread cwds` lists the distinct saved cwds (archived Threads included, deleted not). The user chose to
+leave the TUI browser filter for later; stage 3 is done. Resume point: all-OS CI on the final SHA, then owner review; the
 release draft (`release-v0.10.0-draft.md`) does not list migrations 33-34 or stages 2-3 yet.
 ## Int8 index conversion (#253; on branch issue-253/int8-index-2, CI pending)
 ## Int8 index conversion (#253; on branch issue-253/int8-index-4, CI pending)

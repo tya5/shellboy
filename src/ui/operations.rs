@@ -58,6 +58,7 @@ ThreadList,
     ThreadUnarchive,
     ThreadTag,
     ThreadTags,
+    ThreadCwds,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -1403,6 +1404,12 @@ impl Form {
                     cursor: form.optional("cursor")?,
                 }))
             }),
+            OpKind::ThreadCwds => (list(), |form, _cwd| {
+                Ok(Command::ThreadCwds(ThreadCwdsArgs {
+                    limit: form.number("limit")?,
+                    cursor: form.optional("cursor")?,
+                }))
+            }),
             OpKind::ThreadDelete => (
                 vec![
                     thread(),
@@ -2590,6 +2597,7 @@ mod tests {
                 json!({"thread_ids":[id(1)],"add":["a"]}),
             ),
             (OpKind::ThreadTags, "thread.tags", json!({"limit":20})),
+            (OpKind::ThreadCwds, "thread.cwds", json!({"limit":20})),
             (
                 OpKind::ThreadSet,
                 "thread.set",
@@ -2916,6 +2924,7 @@ mod tests {
                         | "thread.get"
                         | "thread.branches"
                         | "thread.tags"
+                        | "thread.cwds"
                         | "usage.get"
                         | "shell.list"
                         | "compact.list"

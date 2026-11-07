@@ -62,7 +62,7 @@ named_jobs! {
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
-    ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadSet => thread_set,
+    ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
     MessageSend => message_send, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
@@ -108,6 +108,7 @@ impl Kind {
             Kind::Status
             | Kind::ThreadList
             | Kind::ThreadTags
+            | Kind::ThreadCwds
             | Kind::ThreadGet
             | Kind::ThreadBranches
             | Kind::UsageGet

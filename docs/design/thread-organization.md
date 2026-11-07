@@ -1,8 +1,7 @@
 # Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
 Status: **study; stage 1 (archive, migration 32), stage 2 (re-parent, no schema
-change) adopted and implemented; stage 3 (tags and a cwd filter, migration 34) implemented but not
-complete (automatic cwd grouping and a TUI filter are open)**
+change) adopted and implemented; stage 3 (tags, a cwd filter and a cwd listing, migration 34) implemented**
 (2026-11-06/07, issue #222). Stage 4 (pin) was dropped by the user. Code references are to
 `origin/main` at `cbd4c76edf`.
 
@@ -351,10 +350,9 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
    re-parent with a live owned Run (old owner keeps notices and the stop cascade, new parent
    refused until the Run ends, then owns the next Run), branch view divergence
    after a move, usage and delete following the current tree, preview_stale.
-3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above): tags and an
-   exact cwd filter are implemented, see "Stage 3 as implemented" (migration 34). **Not complete:** the user
-   asked for automatic grouping by cwd; there is no listing of distinct cwds and no TUI filter or grouping.
-   Both remain open and await the user's decision.
+3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above): tags, a cwd
+   filter and a cwd listing are implemented, see "Stage 3 as implemented" (migration 34). Done. The user chose to
+   leave the TUI browser filter for later; tag rename, merge and OR filters are not built.
 4. Done (#256): no stop/retry authority check at all.
 
 Not recommended: ownership transfer of live Runs; folder Threads;
@@ -447,7 +445,11 @@ belongs to #253, so this is `0034_thread_tags`.
   byte order, one index seek per name, no counts. `thread.list` gains `tags` (0..=64, AND) and `cwd` (the saved
   cwd compared after the same lexical cleanup as saved cwds; the CLI resolves a relative path against the current
   directory, a wire client must send an absolute path, a relative one is `invalid_argument`). `ThreadSummary`
-  and `ThreadDetails` gain `tags` (sorted, omitted when empty). Two commands, not a field of `thread.set`:
+  and `ThreadDetails` gain `tags` (sorted, omitted when empty). `thread.cwds {limit 1..=200, cursor}` returns the
+  distinct saved cwds of non-deleted Threads in byte order, one seek of `threads_cwd_updated` per name, no counts, no
+  new table. **Archived Threads count:** the index has no archive column, so excluding them would walk every archived
+  entry of a directory to find the next name; a directory holding only archived Threads is therefore listed (use
+  `thread list --cwd PATH --archived only|include` to see them). Deleted Threads do not count. Two commands, not a field of `thread.set`:
   one explicit-ID bulk write path like archive, no filter-driven write.
 - Effects: only `thread_tag` rows and `thread.revision` change; `updated_at` does not (list order stays).
   A call that would give a Thread a 65th tag fails with `input_limit` and rolls back the whole call.
@@ -468,8 +470,8 @@ belongs to #253, so this is `0034_thread_tags`.
 - TUI: none beyond the operation palette forms (no browser filter, no new glyph); see
   [thread browser](thread-browser.md). The browser's rows do not carry `tags`.
 - Not done: tag rename or merge, OR filters, member counts, tag-filtered bulk writes, tag inheritance, tags
-  on other summary paths (browser, Watch). **Open, awaiting the user's decision:** automatic grouping by cwd
-  (a listing of distinct cwds, grouping headings in the TUI or Web UI) and a TUI browser filter.
+  on other summary paths (browser, Watch). Left for later by the user: a TUI browser filter.
+  Grouping headings stay with the clients: core offers `thread cwds` and `thread list --cwd`, no grouping.
 
 ## Risks
 

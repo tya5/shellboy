@@ -78,6 +78,13 @@ impl ThreadTagsArgs {
     }
 }
 
+impl ThreadCwdsArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        limit(self.limit, MAX_LIST_LIMIT)?;
+        optional_nonempty(self.cursor.as_deref(), "cursor")
+    }
+}
+
 /// Most tags one Thread may carry, and the most tags one call may add, remove or filter by.
 pub(crate) const MAX_THREAD_TAGS: usize = 64;
 /// Longest tag in Unicode scalar values.
@@ -740,6 +747,7 @@ impl Command {
             Self::ThreadArchive(a) | Self::ThreadUnarchive(a) => a.validate(),
             Self::ThreadTag(a) => a.validate(),
             Self::ThreadTags(a) => a.validate(),
+            Self::ThreadCwds(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;

@@ -698,3 +698,88 @@ async fn tag_names_are_distinct_ordered_by_bytes_and_paged() {
     assert!(page.next_cursor.is_some());
     store.database.shutdown().await.unwrap();
 }
+
+async fn cwds(store: &Store, limit: u32, cursor: Option<String>) -> Result<Page<String>, ApiError> {
+    run(store, Command::ThreadCwds(ThreadCwdsArgs { limit, cursor }))
+        .await
+        .map(|value| serde_json::from_value(value).unwrap())
+}
+
+#[tokio::test]
+async fn cwd_names_are_distinct_ordered_paged_and_include_archived_but_not_deleted() {
+    let (dir, store) = store().await;
+    let at = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
+    assert!(cwds(&store, 50, None).await.unwrap().items.is_empty());
+    let (b1, b2) = (
+        create_in(&store, None, Some(&at("b"))).await,
+        create_in(&store, None, Some(&at("b"))).await,
+    );
+    let a = create_in(&store, None, Some(&at("a"))).await;
+    let c = create_in(&store, None, Some(&at("c"))).await;
+    assert_eq!(
+        cwds(&store, 50, None).await.unwrap().items,
+        [at("a"), at("b"), at("c")]
+    );
+    // Paging by one does not skip or repeat.
+    let mut seen = Vec::new();
+    let mut cursor = None;
+    loop {
+        let page = cwds(&store, 1, cursor).await.unwrap();
+        seen.extend(page.items);
+        cursor = page.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(seen, [at("a"), at("b"), at("c")]);
+    // A directory holding only archived Threads is still listed.
+    run(
+        &store,
+        Command::ThreadArchive(ThreadArchiveArgs {
+            thread_ids: vec![a.clone()],
+            descendants: false,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        cwds(&store, 50, None).await.unwrap().items,
+        [at("a"), at("b"), at("c")]
+    );
+    // A directory disappears with its last non-deleted Thread.
+    let delete = |id: &str| {
+        run(
+            &store,
+            Command::ThreadDelete(ThreadDeleteArgs {
+                preview_marker: None,
+                thread_id: id.to_owned(),
+                descendants: false,
+            }),
+        )
+    };
+    delete(&c).await.unwrap();
+    delete(&b1).await.unwrap();
+    assert_eq!(
+        cwds(&store, 50, None).await.unwrap().items,
+        [at("a"), at("b")]
+    );
+    delete(&b2).await.unwrap();
+    assert_eq!(cwds(&store, 50, None).await.unwrap().items, [at("a")]);
+    // Bounds and cursor scope.
+    for limit in [0, 201] {
+        assert_eq!(
+            cwds(&store, limit, None).await.unwrap_err().code,
+            ErrorCode::InvalidArgument
+        );
+    }
+    tag(&store, &[&a], &["x", "y"], &[]).await.unwrap();
+    let tag_page = names(&store, 1, None).await;
+    assert_eq!(
+        cwds(&store, 1, tag_page.next_cursor)
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::CursorExpired
+    );
+    store.database.shutdown().await.unwrap();
+}

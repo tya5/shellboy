@@ -203,6 +203,12 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::ThreadCwds,
+        &["thread", "cwds"],
+        &[("limit", FieldId::Limit), ("cursor", FieldId::Cursor)],
+        None,
+    ),
+    (
         OperationId::ThreadSet,
         &["thread", "set"],
         &[

@@ -20,6 +20,7 @@ pub(crate) enum OperationId {
     ThreadUnarchive,
     ThreadTag,
     ThreadTags,
+    ThreadCwds,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -1407,6 +1408,15 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         fields: &[FieldId::Limit, FieldId::Cursor],
     },
     OperationSpec {
+        id: OperationId::ThreadCwds,
+        label: "会話 · 作業場所一覧",
+        meaning: "削除されていない会話（アーカイブ済みを含む）の保存cwdを重複なく、バイト順に表示します。件数は数えません。",
+        effect: Effect::Inspect,
+        confirmation: Confirmation::None,
+        route: Route::Owner,
+        fields: &[FieldId::Limit, FieldId::Cursor],
+    },
+    OperationSpec {
         id: OperationId::ThreadSet,
         label: "会話 · 設定",
         meaning: "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイル、親Threadを変更します。",
@@ -2038,6 +2048,7 @@ impl OperationId {
         Self::ThreadUnarchive,
         Self::ThreadTag,
         Self::ThreadTags,
+        Self::ThreadCwds,
         Self::ThreadSet,
         Self::MessageSend,
         Self::MessageReply,
@@ -2117,6 +2128,7 @@ impl OperationId {
             Command::ThreadUnarchive(_) => Self::ThreadUnarchive,
             Command::ThreadTag(_) => Self::ThreadTag,
             Command::ThreadTags(_) => Self::ThreadTags,
+            Command::ThreadCwds(_) => Self::ThreadCwds,
             Command::ThreadSet(_) => Self::ThreadSet,
             Command::MessageReply(_) => Self::MessageReply,
             Command::MessageSend(_) => Self::MessageSend,
@@ -2220,7 +2232,10 @@ impl OperationSpec {
         } else if id == FieldId::Limit
             && matches!(
                 self.id,
-                OperationId::ThreadList | OperationId::ThreadTags | OperationId::HistoryList
+                OperationId::ThreadList
+                    | OperationId::ThreadTags
+                    | OperationId::ThreadCwds
+                    | OperationId::HistoryList
             )
         {
             Some("20")
