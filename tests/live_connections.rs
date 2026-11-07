@@ -316,10 +316,13 @@ async fn live_connections_run_keeps_endpoint_body_and_retry_policy_across_tool_l
         let control = Control::new(&owner, root.path().into());
         edit(
             &control,
-            vec![change("connections.fixture.response_max_retries",json!(1)), change(
-                "connections.fixture.extra_body",
-                json!({"synthetic_generation":"old"}),
-            )],
+            vec![
+                change("connections.fixture.response_max_retries", json!(1)),
+                change(
+                    "connections.fixture.extra_body",
+                    json!({"synthetic_generation":"old"}),
+                ),
+            ],
         )
         .await;
         let target = thread(&control).await;
