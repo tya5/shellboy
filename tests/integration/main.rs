@@ -35,6 +35,8 @@ mod config_setup;
 mod context;
 #[path = "../control_db.rs"]
 mod control_db;
+#[path = "../credentials.rs"]
+mod credentials;
 #[path = "../delete_marker.rs"]
 mod delete_marker;
 #[path = "../deletion.rs"]

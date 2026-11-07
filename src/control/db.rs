@@ -794,7 +794,7 @@ impl Store {
         caller: &Option<Origin>,
     ) -> Result<Option<MutationResult>> {
         let fingerprint = hash(
-            serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
+            serde_json::to_vec(&fingerprint_body(&request.command, caller.as_ref()))
                 .map_err(|_| error(ErrorCode::InvalidArgument, "invalid request encoding"))?,
         );
         let operation = request.operation_id.clone();
@@ -813,7 +813,7 @@ impl Store {
     ) -> Result<RuntimeReservation> {
         request.validate()?;
         let fingerprint = hash(
-            serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
+            serde_json::to_vec(&fingerprint_body(&request.command, caller.as_ref()))
                 .map_err(|_| error(ErrorCode::InvalidArgument, "invalid request encoding"))?,
         );
         let preflight = super::receipt::runtime_preflight(&request).err();
@@ -2897,6 +2897,25 @@ pub(crate) fn operation_details(
     Ok(value)
 }
 
+/// What the saved request hash covers. A stored key is replaced by a digest salted with
+/// a per-process random value, so the receipt table never holds a hash that an offline
+/// guess of the key could confirm. The salt only needs to outlive the owner instance.
+fn fingerprint_body(command: &Command, caller: Option<&Origin>) -> Value {
+    static SALT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    match command {
+        Command::CredentialsSet(args) => {
+            let salt = SALT.get_or_init(|| uuid::Uuid::new_v4().to_string());
+            json!({
+                "command": {"credentials.set": {
+                    "connection": args.connection,
+                    "value_digest": hash(format!("{salt}\0{}", args.value)),
+                }},
+                "caller": caller,
+            })
+        }
+        _ => json!({"command":command,"caller":caller}),
+    }
+}
 fn request_fingerprint<'a>(
     cached: &'a std::sync::OnceLock<Result<String>>,
     request: &Request,
@@ -2904,7 +2923,7 @@ fn request_fingerprint<'a>(
 ) -> Result<&'a str> {
     cached
         .get_or_init(|| {
-            serde_json::to_vec(&json!({"command":request.command,"caller":caller}))
+            serde_json::to_vec(&fingerprint_body(&request.command, caller))
                 .map(hash)
                 .map_err(|_| error(ErrorCode::InvalidArgument, "invalid request encoding"))
         })

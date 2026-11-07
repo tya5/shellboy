@@ -777,6 +777,56 @@ impl std::fmt::Debug for ConfigChange {
             .finish()
     }
 }
+/// The key is write-only: Debug and every reply leave it out.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CredentialsSetArgs {
+    pub connection: String,
+    pub value: String,
+}
+impl std::fmt::Debug for CredentialsSetArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CredentialsSetArgs")
+            .field("connection", &self.connection)
+            .field("value", &"[redacted]")
+            .finish()
+    }
+}
+args!(CredentialsClearArgs { connection: String });
+/// Test a saved connection by `connection`, or a candidate that is not saved by
+/// `base_url` (with optional `api`, `api_key` or `api_key_env`, `api_key_header`,
+/// `ssl_verify`). Exactly one of the two forms.
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectionTestArgs {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api: Option<crate::config::Api>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_header: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssl_verify: Option<bool>,
+}
+impl std::fmt::Debug for ConnectionTestArgs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionTestArgs")
+            .field("connection", &self.connection)
+            .field("base_url", &self.base_url.as_ref().map(|_| "[redacted]"))
+            .field("api", &self.api)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[redacted]"))
+            .field("api_key_env", &self.api_key_env)
+            .field("api_key_header", &self.api_key_header)
+            .field("ssl_verify", &self.ssl_verify)
+            .finish()
+    }
+}
 args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool });
 args!(EventChange {
     thread_id: String,
@@ -971,6 +1021,12 @@ pub enum Command {
     ConfigGet(ConfigGetArgs),
     #[serde(rename = "config.set")]
     ConfigSet(ConfigSetArgs),
+    #[serde(rename = "credentials.set")]
+    CredentialsSet(CredentialsSetArgs),
+    #[serde(rename = "credentials.clear")]
+    CredentialsClear(CredentialsClearArgs),
+    #[serde(rename = "connection.test")]
+    ConnectionTest(ConnectionTestArgs),
 }
 mod command;
 pub(crate) use command::CommandRoute;

@@ -9,7 +9,7 @@ const MAX_READ_RESULT_BYTES: usize = MAX_FRAME_BYTES - 1024 * 1024;
 const MIN_FILE_TIMEOUT_MS: u64 = 1_000;
 
 impl Control {
-    fn config_deadline(&self) -> Instant {
+    pub(super) fn config_deadline(&self) -> Instant {
         // A tiny configured value must not make every settings call time out.
         let millis = self
             .store

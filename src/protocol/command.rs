@@ -75,6 +75,9 @@ impl Command {
             Self::StorageCollect(_) => ("storage.collect", CommandRoute::Runtime),
             Self::ConfigGet(_) => ("config.get", CommandRoute::Runtime),
             Self::ConfigSet(_) => ("config.set", CommandRoute::Runtime),
+            Self::CredentialsSet(_) => ("credentials.set", CommandRoute::Runtime),
+            Self::CredentialsClear(_) => ("credentials.clear", CommandRoute::Runtime),
+            Self::ConnectionTest(_) => ("connection.test", CommandRoute::Runtime),
         }
     }
     /// Canonical protocol name, independent from translated UI titles.
@@ -107,6 +110,7 @@ impl Command {
             | Self::IndexRemove(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_)
+            | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
             | Self::ThreadList(_)
@@ -148,7 +152,9 @@ impl Command {
             | Self::Compact(_)
             | Self::ContextEdit(_)
             | Self::IndexStatus(_)
-            | Self::ConfigSet(_) => false,
+            | Self::ConfigSet(_)
+            | Self::CredentialsSet(_)
+            | Self::CredentialsClear(_) => false,
         }
     }
     /// Late runtime cleanup allowed after cancellation; not the IPC reserved lane.
@@ -209,7 +215,10 @@ impl Command {
             | Self::StorageStatus(_)
             | Self::StorageCollect(_)
             | Self::ConfigGet(_)
-            | Self::ConfigSet(_) => false,
+            | Self::ConnectionTest(_)
+            | Self::ConfigSet(_)
+            | Self::CredentialsSet(_)
+            | Self::CredentialsClear(_) => false,
         }
     }
     /// Must finish admission before the graceful-shutdown context capture?
@@ -271,7 +280,10 @@ impl Command {
             | Self::StorageStatus(_)
             | Self::StorageCollect(_)
             | Self::ConfigGet(_)
-            | Self::ConfigSet(_) => false,
+            | Self::ConnectionTest(_)
+            | Self::ConfigSet(_)
+            | Self::CredentialsSet(_)
+            | Self::CredentialsClear(_) => false,
         }
     }
     /// Observes targets without changing their state; receipt metadata and API cost are separate.
@@ -303,6 +315,7 @@ impl Command {
             | Self::IndexStatus(_)
             | Self::IndexPreview(_)
             | Self::StorageStatus(_)
+            | Self::ConnectionTest(_)
             | Self::ConfigGet(_) => true,
             Self::OwnerShutdown(_)
             | Self::ThreadCreate(_)
@@ -333,7 +346,9 @@ impl Command {
             | Self::IndexShrink(_)
             | Self::IndexRemove(_)
             | Self::StorageCollect(_)
-            | Self::ConfigSet(_) => false,
+            | Self::ConfigSet(_)
+            | Self::CredentialsSet(_)
+            | Self::CredentialsClear(_) => false,
         }
     }
 }

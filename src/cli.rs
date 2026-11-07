@@ -44,6 +44,16 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: ConfigCliCommand,
     },
+    /// Store or remove an API key for a configured connection; needs a running owner.
+    Credentials {
+        #[command(subcommand)]
+        command: CredentialsCommand,
+    },
+    /// Check a connection by asking its endpoint for the model catalog; needs a running owner.
+    Connection {
+        #[command(subcommand)]
+        command: ConnectionCommand,
+    },
     /// Read saved model usage and separate timing totals; no model call.
     Usage {
         #[command(subcommand)]
@@ -124,6 +134,79 @@ pub enum CliCommand {
         #[command(subcommand)]
         command: StorageCommand,
     },
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum CredentialsCommand {
+    /// Store the API key read from standard input for a connection (never from an argument).
+    #[command(
+        after_help = "Needs a running owner; --config does not select the file.\n  printf %s \"$KEY\" | shellboy credentials set --connection proxy\n\nThe key is read from standard input only, so it never appears in the process list or shell history; a terminal is refused so the key is not echoed. It is stored as plain text in credentials.toml beside config.toml (mode 0600 on Unix; on Windows the user profile's permissions apply). An environment variable named by api_key_env takes precedence. The reply never contains the key."
+    )]
+    Set(CredentialsOptions),
+    /// Remove the stored key of a connection.
+    Clear(CredentialsOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct CredentialsOptions {
+    /// Connection name from the configuration file.
+    #[arg(long)]
+    pub connection: String,
+}
+#[derive(Debug, Clone, Subcommand)]
+pub enum ConnectionCommand {
+    /// Send one model-catalog GET and report the facts; no conversation or embedding request.
+    #[command(
+        after_help = "Needs a running owner; --config does not select the file.\n  shellboy connection test --connection proxy\n  printf %s \"$KEY\" | shellboy connection test --base-url https://api.example/v1 --api-key-stdin\n  shellboy connection test --base-url http://localhost:8080/v1 --api-key-env LOCAL_KEY\n\nReports http_status, the model IDs, whether api_key_env is set in the owner's environment, and a failure class (auth, url, unreachable, timeout, ...). A successful reply means the endpoint answered with a catalog; it does not prove the key is valid for any model."
+    )]
+    Test(ConnectionTestOptions),
+}
+#[derive(Debug, Clone, Args)]
+pub struct ConnectionTestOptions {
+    /// A saved connection; otherwise describe a candidate with --base-url.
+    #[arg(long, conflicts_with_all = ["base_url", "api", "api_key_stdin", "api_key_env", "api_key_header", "no_ssl_verify"])]
+    pub connection: Option<String>,
+    /// API root of a candidate that is not saved, e.g. https://proxy.example/v1.
+    #[arg(long)]
+    pub base_url: Option<String>,
+    /// Dialect of the candidate: responses (default), chat_completions or anthropic_messages.
+    #[arg(long)]
+    pub api: Option<String>,
+    /// Read the candidate's key from standard input (never from an argument).
+    #[arg(long, conflicts_with = "api_key_env")]
+    pub api_key_stdin: bool,
+    /// Environment variable that holds the candidate's key in the owner's environment.
+    #[arg(long)]
+    pub api_key_env: Option<String>,
+    /// Header that carries the key instead of Authorization: Bearer.
+    #[arg(long)]
+    pub api_key_header: Option<String>,
+    /// Do not verify the candidate's HTTPS certificate.
+    #[arg(long)]
+    pub no_ssl_verify: bool,
+}
+const MAX_STDIN_KEY_BYTES: usize = 8 * 1024;
+/// One line from standard input; a single trailing line break is dropped.
+async fn read_key<R: AsyncRead + Unpin>(reader: &mut R) -> Result<String, ApiError> {
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_STDIN_KEY_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|_| ApiError::new(ErrorCode::IoFailed, "cannot read the key from stdin"))?;
+    if bytes.len() > MAX_STDIN_KEY_BYTES {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            "the key on stdin is too long",
+        ));
+    }
+    let mut key =
+        String::from_utf8(bytes).map_err(|_| invalid("the key on stdin must be valid UTF-8"))?;
+    if key.ends_with('\n') {
+        key.pop();
+        if key.ends_with('\r') {
+            key.pop();
+        }
+    }
+    Ok(key)
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum ConfigCliCommand {
@@ -1041,8 +1124,28 @@ impl From<StorageOptions> for wire::StorageArgs {
 
 impl Cli {
     pub async fn into_command(self, startup_cwd: &Path) -> Result<Option<wire::Command>, ApiError> {
+        use std::io::IsTerminal;
+        // A key typed at a terminal would be echoed; piping it is the only input path.
+        if self.reads_key_from_stdin() && std::io::stdin().is_terminal() {
+            return Err(invalid(
+                "the key is read from standard input and is not accepted from a terminal, where it would be echoed; pipe it, e.g. printf %s \"$KEY\" | shellboy credentials set --connection NAME",
+            ));
+        }
         self.into_command_with_stdin(startup_cwd, &mut tokio::io::stdin())
             .await
+    }
+    fn reads_key_from_stdin(&self) -> bool {
+        matches!(
+            &self.command,
+            Some(CliCommand::Credentials {
+                command: CredentialsCommand::Set(_)
+            }) | Some(CliCommand::Connection {
+                command: ConnectionCommand::Test(ConnectionTestOptions {
+                    api_key_stdin: true,
+                    ..
+                })
+            })
+        )
     }
     /// Injectable reader avoids process-global stdin manipulation in tests and
     /// permits callers to keep input handling outside the UI OS thread.
@@ -1092,6 +1195,55 @@ impl Cli {
                 command: ConfigCliCommand::Setup(_),
             } => {
                 return Ok(None);
+            }
+            CliCommand::Credentials { .. } | CliCommand::Connection { .. }
+                if self.config.is_some() =>
+            {
+                return Err(invalid(
+                    "credentials and connection test act on the file the running owner loaded; --config cannot select another file. Choose the owner with --data-dir",
+                ));
+            }
+            CliCommand::Credentials {
+                command: CredentialsCommand::Set(a),
+            } => C::CredentialsSet(wire::CredentialsSetArgs {
+                connection: a.connection,
+                value: read_key(stdin).await?,
+            }),
+            CliCommand::Credentials {
+                command: CredentialsCommand::Clear(a),
+            } => C::CredentialsClear(wire::CredentialsClearArgs {
+                connection: a.connection,
+            }),
+            CliCommand::Connection {
+                command: ConnectionCommand::Test(a),
+            } => {
+                let api = match a.api.as_deref() {
+                    None => None,
+                    Some(text) => Some(
+                        serde_json::from_value(serde_json::Value::String(text.to_owned()))
+                            .map_err(|_| {
+                                invalid(
+                                    "--api takes responses, chat_completions or anthropic_messages",
+                                )
+                            })?,
+                    ),
+                };
+                if a.connection.is_none() && a.base_url.is_none() {
+                    return Err(invalid("give --connection NAME or --base-url URL to test"));
+                }
+                C::ConnectionTest(wire::ConnectionTestArgs {
+                    connection: a.connection,
+                    base_url: a.base_url,
+                    api,
+                    api_key: if a.api_key_stdin {
+                        Some(read_key(stdin).await?)
+                    } else {
+                        None
+                    },
+                    api_key_env: a.api_key_env,
+                    api_key_header: a.api_key_header,
+                    ssl_verify: a.no_ssl_verify.then_some(false),
+                })
             }
             CliCommand::Config { .. } if self.config.is_some() => {
                 return Err(invalid(

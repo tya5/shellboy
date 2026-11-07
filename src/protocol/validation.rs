@@ -405,6 +405,62 @@ impl ConfigSetArgs {
         Ok(())
     }
 }
+impl CredentialsSetArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        crate::credential_store::check_connection_name(&self.connection)?;
+        crate::credential_store::check_key(&self.value)
+    }
+}
+const MAX_TEST_URL_BYTES: usize = 2048;
+impl ConnectionTestArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        match (&self.connection, &self.base_url) {
+            (Some(name), None) => {
+                crate::credential_store::check_connection_name(name)?;
+                if self.api.is_some()
+                    || self.api_key.is_some()
+                    || self.api_key_env.is_some()
+                    || self.api_key_header.is_some()
+                    || self.ssl_verify.is_some()
+                {
+                    return Err(invalid(
+                        "a saved connection takes no other field; give base_url instead to test a candidate",
+                    ));
+                }
+                Ok(())
+            }
+            (None, Some(url)) => {
+                if url.trim().is_empty() || url.len() > MAX_TEST_URL_BYTES {
+                    return Err(invalid(format!(
+                        "base_url must be 1 to {MAX_TEST_URL_BYTES} bytes"
+                    )));
+                }
+                if self.api_key.is_some() && self.api_key_env.is_some() {
+                    return Err(invalid("give api_key or api_key_env, not both"));
+                }
+                if let Some(key) = &self.api_key {
+                    crate::credential_store::check_key(key)?;
+                }
+                if let Some(name) = &self.api_key_env
+                    && !crate::config::valid_env_name(name)
+                {
+                    return Err(invalid("api_key_env must be an environment variable name"));
+                }
+                if let Some(header) = &self.api_key_header
+                    && (header.is_empty()
+                        || header.len() > 256
+                        || !crate::config::valid_header_name(header))
+                {
+                    return Err(invalid("api_key_header must be an HTTP header name"));
+                }
+                Ok(())
+            }
+            _ => Err(invalid(
+                "give exactly one of connection (a saved connection) and base_url (a candidate)",
+            )),
+        }
+    }
+}
 impl EventsWaitArgs {
     fn validate(&self) -> Result<(), ApiError> {
         if let Some(after) = &self.after {
@@ -752,6 +808,11 @@ impl Command {
             }
             Self::StorageStatus(_) | Self::StorageCollect(_) | Self::ConfigGet(_) => Ok(()),
             Self::ConfigSet(a) => a.validate(),
+            Self::CredentialsSet(a) => a.validate(),
+            Self::CredentialsClear(a) => {
+                crate::credential_store::check_connection_name(&a.connection)
+            }
+            Self::ConnectionTest(a) => a.validate(),
             Self::EventsWait(a) => a.validate(),
         }
     }

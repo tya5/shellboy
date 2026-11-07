@@ -133,6 +133,10 @@ distinct operations.
 ## Standalone configuration commands (#69)
 
 `config get` and `config set` are owner RPCs (#266, [config](config.md#reading-and-changing-through-the-owner-266)).
+`credentials set|clear` and `connection test` (#269, [config](config.md#stored-api-keys-and-connection-test-269)) are owner RPCs
+too: the wire name is the noun and verb. `credentials set` and `connection test --api-key-stdin` read the key from
+standard input (one trailing line break dropped, 8 KiB, a terminal refused so nothing is echoed); no argument carries
+a key. `--config` is refused on all three, and with no owner they fail with `app_not_running` and change nothing.
 `config init` and `config check` are dispatched before owner RPC conversion and
 reject `--operation-id`, like other standalone command families. Init uses
 exclusive file creation of the bundled full template and returns `created=false`

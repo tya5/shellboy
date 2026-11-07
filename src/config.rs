@@ -39,6 +39,11 @@ pub struct Config {
     /// Startup-only source facts; never accepted from TOML or persisted.
     #[serde(skip)]
     pub source: Option<ConfigSource>,
+    /// Names of connections with a stored key (#269): read at load and updated by
+    /// `credentials.set` / `credentials.clear`, so setup hints need no file I/O.
+    /// Request-time lookup always reads the file.
+    #[serde(skip)]
+    pub stored_keys: StoredKeys,
     pub data_dir: Option<PathBuf>,
     pub default_connection: Option<String>,
     pub default_model: Option<String>,
@@ -189,6 +194,10 @@ pub struct Connection {
     pub segment_chars: Option<usize>,
     /// Overrides `[compaction] reduce_rounds` for this connection.
     pub reduce_rounds: Option<usize>,
+    /// The `credentials.toml` beside the loaded configuration file (#269); never
+    /// accepted from TOML. `None` when the connection did not come from a file.
+    #[serde(skip)]
+    pub credentials_file: Option<PathBuf>,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -222,6 +231,7 @@ impl Default for Connection {
             auto_at_tokens: None,
             segment_chars: None,
             reduce_rounds: None,
+            credentials_file: None,
         }
     }
 }
@@ -260,6 +270,7 @@ impl fmt::Debug for Connection {
             .field("auto_at_tokens", &self.auto_at_tokens)
             .field("segment_chars", &self.segment_chars)
             .field("reduce_rounds", &self.reduce_rounds)
+            .field("credentials_file", &self.credentials_file)
             .finish()
     }
 }
@@ -303,24 +314,105 @@ impl Connection {
         &self,
         env: impl Fn(&str) -> Option<String>,
     ) -> Result<ConnectionCredentials, ConfigError> {
+        self.credentials_with(env, None)
+    }
+    /// A stored key is used only when the environment supplies none (#269).
+    pub fn credentials_with(
+        &self,
+        env: impl Fn(&str) -> Option<String>,
+        stored: Option<&str>,
+    ) -> Result<ConnectionCredentials, ConfigError> {
         let mut headers = self.headers.clone();
-        if let Some(name) = &self.api_key_env {
-            let key = env(name)
-                .filter(|v| !v.trim().is_empty())
-                .ok_or_else(|| ConfigError::MissingCredential(name.clone()))?;
-            if key.contains(['\r', '\n']) {
-                return Err(invalid(
-                    "api_key_env",
-                    "credential must not contain a newline",
-                ));
+        let from_env = self
+            .api_key_env
+            .as_deref()
+            .and_then(env)
+            .filter(|v| !v.trim().is_empty());
+        let stored = stored
+            .filter(|v| !v.trim().is_empty() && self.stored_key_allowed())
+            .map(str::to_owned);
+        match (from_env.or(stored), &self.api_key_env) {
+            (Some(key), _) => {
+                if key.contains(['\r', '\n']) {
+                    return Err(invalid(
+                        "api_key_env",
+                        "credential must not contain a newline",
+                    ));
+                }
+                let (header, value) = match &self.api_key_header {
+                    Some(header) => (header.clone(), key),
+                    None => ("Authorization".into(), format!("Bearer {key}")),
+                };
+                headers.insert(header, value);
             }
-            let (header, value) = match &self.api_key_header {
-                Some(header) => (header.clone(), key),
-                None => ("Authorization".into(), format!("Bearer {key}")),
-            };
-            headers.insert(header, value);
+            (None, Some(name)) => return Err(ConfigError::MissingCredential(name.clone())),
+            (None, None) => {}
         }
         Ok(ConnectionCredentials { headers })
+    }
+    /// A stored key goes into the credential header. Without `api_key_env` that
+    /// header is `Authorization`, which `headers` may already define; then the
+    /// explicit header wins and no key is stored.
+    pub fn stored_key_allowed(&self) -> bool {
+        self.api_key_env.is_some()
+            || !self
+                .headers
+                .keys()
+                .any(|name| name.eq_ignore_ascii_case("authorization"))
+    }
+    /// Which source supplies the key now. A fact about presence, not validity.
+    pub fn key_source(
+        &self,
+        env: impl Fn(&str) -> Option<String>,
+        stored_present: bool,
+    ) -> KeySource {
+        if self
+            .api_key_env
+            .as_deref()
+            .and_then(env)
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            KeySource::Env
+        } else if stored_present && self.stored_key_allowed() {
+            KeySource::Stored
+        } else {
+            KeySource::None
+        }
+    }
+}
+/// Where a connection's API key comes from (#269). Never the value or its length.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum KeySource {
+    Env,
+    Stored,
+    None,
+}
+/// Connection names that have a stored key. Clones of a `Config` share it.
+#[derive(Clone, Default)]
+pub struct StoredKeys(std::sync::Arc<std::sync::RwLock<std::collections::BTreeSet<String>>>);
+impl StoredKeys {
+    pub fn contains(&self, name: &str) -> bool {
+        self.0.read().is_ok_and(|names| names.contains(name))
+    }
+    pub fn replace(&self, names: std::collections::BTreeSet<String>) {
+        if let Ok(mut current) = self.0.write() {
+            *current = names;
+        }
+    }
+    pub fn set(&self, name: &str, stored: bool) {
+        if let Ok(mut names) = self.0.write() {
+            if stored {
+                names.insert(name.to_owned());
+            } else {
+                names.remove(name);
+            }
+        }
+    }
+}
+impl fmt::Debug for StoredKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StoredKeys")
     }
 }
 pub struct ConnectionCredentials {
@@ -653,6 +745,15 @@ impl Config {
             parent,
         )?;
         config.data_dir = Some(data_dir.clone());
+        let credentials_file = crate::credential_store::path_beside(&path);
+        for connection in config.connections.values_mut() {
+            connection.credentials_file = Some(credentials_file.clone());
+        }
+        // An unreadable or invalid file is reported by `config get`; a request that
+        // needs the key fails then, so the load itself ignores it.
+        if let Ok(names) = crate::credential_store::stored_names(&credentials_file) {
+            config.stored_keys.replace(names);
+        }
         config.source = Some(ConfigSource {
             path,
             present: actual_path.is_some(),
@@ -710,6 +811,9 @@ pub(crate) fn valid_env_name(name: &str) -> bool {
         .next()
         .is_some_and(|c| c.is_ascii_alphabetic() || c == b'_')
         && bytes.all(|c| c.is_ascii_alphanumeric() || c == b'_')
+}
+pub(crate) fn valid_header_name(name: &str) -> bool {
+    !name.is_empty() && name.bytes().all(header_name_byte)
 }
 fn header_name_byte(c: u8) -> bool {
     c.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&c)

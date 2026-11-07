@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 78, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 81, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -81,8 +81,14 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .any(|binding| binding.path.join(" ") == "events wait"),
         "events wait must not be offered as a TUI form"
     );
-    // Settings file reads and writes (#266): owner calls with no generated TUI form.
-    for name in ["config get", "config set"] {
+    // Settings reads and writes (#266) and stored keys and connection test (#269): owner calls with no generated TUI form.
+    for name in [
+        "config get",
+        "config set",
+        "credentials set",
+        "credentials clear",
+        "connection test",
+    ] {
         assert!(leaves.remove(name).is_some());
         assert!(
             !CLI_BINDINGS

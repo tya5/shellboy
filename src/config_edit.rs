@@ -91,6 +91,7 @@ fn strings<'a>(
 fn fields(config: &Config) -> BTreeMap<String, Leaf> {
     let Config {
         source: _,
+        stored_keys: _,
         data_dir,
         default_connection,
         default_model,
@@ -158,6 +159,7 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         auto_at_tokens,
         segment_chars,
         reduce_rounds,
+        credentials_file: _,
     } = connection;
     let at = |field| ["connections", name, field];
     out.plain(&at("api"), api);
@@ -353,18 +355,18 @@ fn insert_nested(root: &mut Map<String, Value>, path: &[String], value: Value) {
     current.insert(last.clone(), value);
 }
 
-struct FileState {
-    target: PathBuf,
-    present: bool,
-    bytes: Vec<u8>,
-    hash: String,
-    read_only: bool,
+pub(crate) struct FileState {
+    pub(crate) target: PathBuf,
+    pub(crate) present: bool,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) hash: String,
+    pub(crate) read_only: bool,
 }
 fn file_error(message: &str, path: &Path) -> ApiError {
     ApiError::new(ErrorCode::IoFailed, message).details(json!({"config_path":path,"written":false}))
 }
 /// A symlink resolves to its file, so a linked dotfile stays linked after a write.
-fn read_state(path: &Path) -> Result<FileState, ApiError> {
+pub(crate) fn read_state(path: &Path) -> Result<FileState, ApiError> {
     let target = match std::fs::canonicalize(path) {
         Ok(target) => target,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -411,7 +413,7 @@ fn read_state(path: &Path) -> Result<FileState, ApiError> {
     })
 }
 /// Same strict rules as loading and `config check`, with the paths loading resolves.
-fn parse_file(bytes: &[u8], path: &Path) -> Result<Config, String> {
+pub(crate) fn parse_file(bytes: &[u8], path: &Path) -> Result<Config, String> {
     let text = std::str::from_utf8(bytes).map_err(|_| "The file is not valid UTF-8".to_owned())?;
     let mut config = Config::parse(text).map_err(|error| error.to_string())?;
     if let (Some(executable), Some(parent)) = (&mut config.shell.executable, path.parent()) {
@@ -426,6 +428,18 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
     let state = read_state(&source.path)?;
     let parsed = parse_file(&state.bytes, &source.path);
     let (loaded_values, loaded_hidden) = view(loaded);
+    let credentials_path = crate::credential_store::path_beside(&source.path);
+    let stored = crate::credential_store::stored_names(&credentials_path);
+    let stored_names = stored.as_ref().ok();
+    let key_sources = |config: &Config| {
+        let mut sources = Map::new();
+        for (name, connection) in &config.connections {
+            let present = stored_names.is_some_and(|names| names.contains(name));
+            let source = connection.key_source(|var| std::env::var(var).ok(), present);
+            sources.insert(name.clone(), json!(source));
+        }
+        Value::Object(sources)
+    };
     let mut environment = Map::new();
     for connection in loaded.connections.values() {
         if let Some(name) = connection
@@ -458,6 +472,7 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
         }
         Err(message) => (Value::Null, Vec::new(), json!(message)),
     };
+    let file_sources = parsed.as_ref().map_or(Value::Null, key_sources);
     Ok(json!({
         "config_path": source.path,
         "loaded": {
@@ -467,6 +482,8 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
             "redacted_fields": loaded_hidden,
             // Presence in the owner's own environment; never the value.
             "credential_env_set": environment,
+            // Where each connection's key comes from now: "env", "stored" or "none".
+            "credential_source": key_sources(loaded),
         },
         "file": {
             "present": state.present,
@@ -475,11 +492,28 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
             "error": error,
             "values": file_values,
             "redacted_fields": file_hidden,
+            "credential_source": file_sources,
+        },
+        // The stored-key file beside the configuration; its values are never read out.
+        "credentials_file": {
+            "path": credentials_path,
+            "present": credentials_path.exists(),
+            "valid": stored.is_ok(),
+            "error": stored.as_ref().err().map(ToString::to_string),
         },
         "differs": loaded_hash != file_hash,
         "differing_fields": differing_fields,
         "restart": {"all_fields_require_restart": true},
     }))
+}
+/// The connection as the configuration file holds it now, and whether the file parses.
+/// Blocking.
+pub(crate) fn saved_connection(path: &Path, name: &str) -> Result<Option<Connection>, ApiError> {
+    let state = read_state(path)?;
+    let config = parse_file(&state.bytes, path).map_err(|message| {
+        ApiError::new(ErrorCode::ConfigInvalid, message).details(json!({"config_path":path}))
+    })?;
+    Ok(config.connections.get(name).cloned())
 }
 fn no_source() -> ApiError {
     ApiError::new(
@@ -1010,7 +1044,7 @@ const ERROR_UNABLE_TO_MOVE_REPLACEMENT: i32 = 1176;
 /// The replaced file survives under a name Windows chose; the replacement remains.
 const ERROR_UNABLE_TO_MOVE_REPLACEMENT_2: i32 = 1177;
 /// Returns a warning when the file is in place but a replace was interrupted.
-fn replace_atomically(
+pub(crate) fn replace_atomically(
     path: &Path,
     state: &FileState,
     bytes: &[u8],
