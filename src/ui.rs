@@ -3753,6 +3753,7 @@ impl UiState {
                 view.connection = previous.connection.clone();
                 view.model = previous.model.clone();
                 view.explicit_model = true;
+                view.explicit_effort = true;
                 view.effort = previous.effort.clone();
                 view.auto_compact_at = previous.auto_compact_at;
                 view.title =
@@ -4767,6 +4768,11 @@ impl UiState {
         let view = self.active_view_mut();
         view.connection = config.default_connection.clone();
         view.model = config.default_model.clone();
+        if !view.explicit_effort {
+            view.effort = config.default_connection.as_ref()
+                .and_then(|name| config.connections.get(name))
+                .and_then(|connection| connection.default_effort.clone());
+        }
     }
     fn send_current(&mut self) -> Vec<UiAction> {
         self.refresh_connection_defaults();
@@ -5132,6 +5138,7 @@ impl UiState {
                 };
                 if thread_id.is_none() {
                     self.active_view_mut().effort = Some(effort);
+                    self.active_view_mut().explicit_effort = true;
                     vec![]
                 } else {
                     vec![UiAction::Command(Command::ThreadSet(Box::new(ThreadSetArgs {
