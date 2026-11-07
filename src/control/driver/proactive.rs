@@ -229,7 +229,9 @@ pub(super) async fn maybe_compact(
                     }
                 }
             }
-            if input_tokens < threshold && !insufficient_prefix && !prior_turn_prefix && !insufficient_spill && !exhausted_current_turn {
+            // A spill shortfall below the trigger can wait for the next crossing.
+            // Otherwise each new tool group rewrites the prefix and resets its cache.
+            if input_tokens < threshold && (insufficient_spill || (!insufficient_prefix && !prior_turn_prefix && !exhausted_current_turn)) {
                 return Ok(Some(Measurement::BelowThreshold));
             }
             let input_characters = db.query_row(
@@ -854,7 +856,7 @@ pub(super) async fn maybe_compact(
     };
     let pending_target = if adopted {
         target_plan.map(|plan| {
-            let scope = if summary_scope.is_empty() { "spill" } else { summary_scope };
+            let scope = if observation["summary"]["summary_node_id"].is_string() { summary_scope } else { "spill" };
             let mut value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":scope,"turn":snapshot.turn,"marks":baseline});
             if value.to_string().len() > 1_048_576 {
                 value["marks"] = Value::Null;
