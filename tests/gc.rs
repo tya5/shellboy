@@ -401,6 +401,11 @@ async fn logical_capacity_and_physical_database_space_are_reported_separately() 
     assert!(status.status.logical_live_bytes > 0);
     assert!(status.status.db_bytes > 0);
     assert!(status.warning && status.limit_reached);
+    assert_eq!(status.status.warning_bytes, 1);
+    assert_eq!(status.status.limit_bytes, 1);
+    let wire = serde_json::to_value(&status).unwrap();
+    assert_eq!(wire["warning_bytes"], 1);
+    assert_eq!(wire["limit_bytes"], 1);
     assert!(status.reclaimable_is_lower_bound);
     assert_eq!(status.status.reclaimable_bytes, 0);
     assert_eq!(

@@ -10689,3 +10689,9 @@ send transaction.
 ## #259 small non-boundary restrictions (validation pending)
 
 Planned synthetic coverage: any model can cancel another sender's queued input; any model can reply to any applied pending request; self-target expected replies are accepted; a moved child accepts a new-parent send while its existing Run retains its original `owner_run_id`; rewind proceeds with known-unadmitted queued input but refuses when admission is unknown or the target has a live Run; unknown shell keys warn-and-ignore without a strict policy setting; exec shares the 8 MiB CLI stdin bound. No real API or user data. Commands/results and CI run IDs to be appended after validation.
+
+
+### #265 storage threshold read
+
+- Verified configured `limits.data_warning_bytes` and `limits.data_max_bytes` are serialized by `storage.status` as `warning_bytes` and `limit_bytes`; existing measured totals, booleans and disk-free fields remain distinct. `tests/gc.rs::logical_capacity_and_physical_database_space_are_reported_separately` asserts threshold values and serialized response.
+- Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Studio UI meter rendering, external consumers and non-macOS platforms remain unverified.

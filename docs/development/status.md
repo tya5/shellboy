@@ -1,3 +1,15 @@
+## Storage status capacity thresholds (#265; branch issue-265/storage-threshold-read)
+
+`storage.status` now reports configured logical capacity `warning_bytes` and
+`limit_bytes` alongside the existing measured bytes and threshold booleans. These
+two scalar values let external clients display the capacity meter without a DB
+scan. Focused integration regression passed. The read-only language inventory
+scanned 416 files; it reports 16 pre-existing pending literals in unrelated
+files (the fail-on-pending gate remains red). Full test type-check and default/all-OS
+CI are pending. Per-Thread storage and usage-by-model remain outside this bounded
+change. Studio's pinned v0.10.0 copy still labels config reads unsupported;
+current Shellboy main has `config.get`.
+
 # Development status
 
 ## Recovery-wait external CLI messages (#263; branch issue-263/review-fixes-1)
