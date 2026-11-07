@@ -597,6 +597,12 @@ fn validate_group_boundary(
 // A request node can contain many output items and calls. EXISTS preserves one
 // history row, and the validated ledger relation never reads IDs from text.
 const EXECUTION_RELATION: &str = "FROM (SELECT c.group_id,c.call_id FROM output_item o JOIN tool_group g ON g.attempt_id=o.attempt_id JOIN tool_call c ON c.group_id=g.id WHERE o.node_id=?1 UNION SELECT tr.group_id,tr.call_id FROM tool_result tr WHERE tr.node_id=?1) links JOIN tool_call c ON c.group_id=links.group_id AND c.call_id=links.call_id JOIN tool_group g ON g.id=c.group_id JOIN turn u ON u.id=g.turn_id JOIN shell_execution s ON s.id=c.operation_id AND s.turn_id=g.turn_id AND s.owner_run_id=u.run_id WHERE 1";
+#[doc(hidden)]
+pub fn execution_links_statement_for_tests() -> String {
+    format!(
+        "SELECT c.group_id,c.call_id,c.ordinal,c.state,s.id,s.state,s.cwd,substr(COALESCE(json_extract(s.shell_json,'$.command'),''),1,81),(SELECT tr.node_id FROM tool_result tr WHERE tr.group_id=c.group_id AND tr.call_id=c.call_id),(SELECT CASE WHEN COUNT(DISTINCT o.node_id)=1 THEN MIN(o.node_id) END FROM output_item o WHERE o.attempt_id=g.attempt_id),CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END {EXECUTION_RELATION} ORDER BY g.rowid,c.ordinal LIMIT 8"
+    )
+}
 fn execution_links(
     connection: &Connection,
     node: &str,
@@ -608,9 +614,7 @@ fn execution_links(
             |r| r.get::<_, i64>(0).map(|n| n as u64),
         )
         .map_err(sql_error)?;
-    let sql = format!(
-        "SELECT c.group_id,c.call_id,c.ordinal,c.state,s.id,s.state,s.cwd,substr(COALESCE(json_extract(s.shell_json,'$.command'),''),1,81),(SELECT tr.node_id FROM tool_result tr WHERE tr.group_id=c.group_id AND tr.call_id=c.call_id),(SELECT CASE WHEN COUNT(DISTINCT o.node_id)=1 THEN MIN(o.node_id) END FROM output_item o WHERE o.attempt_id=g.attempt_id) {EXECUTION_RELATION} ORDER BY g.rowid,c.ordinal LIMIT 8"
-    );
+    let sql = execution_links_statement_for_tests();
     let mut statement = connection.prepare(&sql).map_err(sql_error)?;
     let rows = statement
         .query_map([node], |row| {
@@ -631,6 +635,9 @@ fn execution_links(
                 cwd: row.get(6)?,
                 command_excerpt,
                 command_truncated,
+                description: crate::tool_description::label(
+                    row.get::<_, Option<String>>(10)?.as_deref(),
+                ),
                 result_node_id: row.get(8)?,
                 request_node_id: row.get(9)?,
             })

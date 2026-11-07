@@ -466,6 +466,15 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         serde_json::to_value(history.get(body("calls", 65536, None)).await.unwrap()).unwrap();
     database
         .call(|db| {
+            let sql = shellboy::history::execution_links_statement_for_tests();
+            let added = ",CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END";
+            let original = sql.replace(added, "");
+            assert_ne!(sql, original);
+            let plan = |query: &str| -> rusqlite::Result<Vec<String>> {
+                db.prepare(&format!("EXPLAIN QUERY PLAN {query}"))?
+                    .query_map(["calls"], |row| row.get(3))?.collect()
+            };
+            assert_eq!(plan(&original)?, plan(&sql)?, "the indexed plan must not change");
             db.execute("DROP INDEX history_tool_group_attempt", [])?;
             Ok(())
         })
@@ -483,7 +492,75 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         indexed_get, unindexed_get,
         "get content and order must be index-independent"
     );
+    database.call(|db| {
+        for (id, value) in [("shell-0", json!("  inspect\nfiles\u{7} ")), ("shell-1", json!("  \t\r\n")), ("shell-2", json!(123)), ("shell-3", json!("語".repeat(90))), ("shell-5", json!("\u{1b}[31mred\u{1b}[0m\u{2028}line"))] {
+            db.execute("UPDATE shell_execution SET shell_json=json_set(shell_json,'$.description',json(?2)) WHERE id=?1", params![id, value.to_string()])?;
+        }
+        let sql = shellboy::history::execution_links_statement_for_tests();
+        let added = ",CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END";
+        let original = sql.replace(added, "");
+        assert_ne!(sql, original);
+        let plan = |query: &str| -> rusqlite::Result<Vec<String>> {
+            db.prepare(&format!("EXPLAIN QUERY PLAN {query}"))?.query_map(["calls"], |row| row.get(3))?.collect()
+        };
+        let old = plan(&original)?;
+        let new = plan(&sql)?;
+        assert_eq!(old, new, "adding a projection must not change the query plan");
+        Ok(())
+    }).await.unwrap();
     let page = history.list(listing("fork", 20, None)).await.unwrap();
+    let window = database
+        .call(|db| {
+            Ok(shellboy::history::window(
+                db,
+                &shellboy::protocol::HistoryWindowArgs {
+                    thread_id: "fork".into(),
+                    ordinal: None,
+                    node_id: Some("calls".into()),
+                    expect_node_id: None,
+                    before: 1,
+                    after: 1,
+                    excerpt_chars: shellboy::protocol::DEFAULT_HISTORY_EXCERPT_CHARS,
+                },
+            )
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&page.items).unwrap(),
+        serde_json::to_value(&window.items).unwrap()
+    );
+    let mut without_descriptions = serde_json::to_value(&page).unwrap();
+    for item in without_descriptions["items"].as_array_mut().unwrap() {
+        if let Some(executions) = item.get_mut("executions").and_then(Value::as_array_mut) {
+            for execution in executions {
+                execution.as_object_mut().unwrap().remove("description");
+            }
+        }
+    }
+    assert_eq!(
+        without_descriptions, indexed_list,
+        "all existing fields remain unchanged"
+    );
+    let links = &page
+        .items
+        .iter()
+        .find(|n| n.node_id == "calls")
+        .unwrap()
+        .executions;
+    assert_eq!(links[0].description.as_deref(), Some("inspect files"));
+    assert!(links[1].description.is_none());
+    assert!(links[2].description.is_none());
+    assert_eq!(links[3].description.as_ref().unwrap().chars().count(), 80);
+    assert!(links[4].description.is_none());
+    assert!(
+        serde_json::to_value(&links[4])
+            .unwrap()
+            .get("description")
+            .is_none()
+    );
+    assert_eq!(links[5].description.as_deref(), Some("red line"));
     assert_eq!(
         page.items.len(),
         3,

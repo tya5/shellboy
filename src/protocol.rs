@@ -1293,6 +1293,7 @@ args!(HistoryExecutionLink {
     group_id: String, call_id: String, call_ordinal: u64, call_state: String,
     execution_id: String, state: String, cwd: String, command_excerpt: String,
     command_truncated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")] description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] request_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] result_node_id: Option<String>
 });

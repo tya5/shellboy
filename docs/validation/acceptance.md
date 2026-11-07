@@ -10579,3 +10579,11 @@ the header wait and has no test of its own; a real provider, real keys or a real
 file worker; the Studio screen; a key that a provider rejects for reasons other than the header (only the mock's 401 is
 exercised); TLS failures (`ssl_verify`, certificate errors) have no test and classify as `unreachable`. Stage C is
 planned in D-269 and was not built or tested.
+## History execution descriptions
+
+On macOS, the synthetic temporary-database history execution-link test passed:
+list/window equality, unchanged existing fields, missing/invalid/sanitized labels,
+and identical indexed and unindexed query plans. The history-window module
+passed 7 tests; `cargo check --tests`, formatting, test layout, and language audit
+passed. Linux and Windows validation is pending CI; no real Web UI or user data
+was used.

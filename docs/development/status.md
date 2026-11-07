@@ -5213,3 +5213,9 @@ Branch `issue-269/connection-setup-4` (rebased on origin/main after #243 E3; `ap
 integration, then the Studio screen against the shapes in the protocol design.
 Not claimed: Windows behaviour (permissions, `ReplaceFileW` on `credentials.toml`), a real terminal refusing a typed
 key, a real provider, shellboy-web/Studio use.
+
+## History execution descriptions
+
+History execution links expose an optional TUI-formatted shell description to
+`history list` and `history window`; existing command and execution fields are
+unchanged.
