@@ -1,7 +1,8 @@
 # Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
 Status: **study; stage 1 (archive, migration 32), stage 2 (re-parent, no schema
-change) and stage 3 (tags and the cwd filter, migration 34) adopted and implemented**
+change) adopted and implemented; stage 3 (tags and a cwd filter, migration 34) implemented but not
+complete (automatic cwd grouping and a TUI filter are open)**
 (2026-11-06/07, issue #222). Stage 4 (pin) was dropped by the user. Code references are to
 `origin/main` at `cbd4c76edf`.
 
@@ -350,8 +351,10 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
    re-parent with a live owned Run (old owner keeps notices and the stop cascade, new parent
    refused until the Run ends, then owns the next Run), branch view divergence
    after a move, usage and delete following the current tree, preview_stale.
-3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above): done,
-   see "Stage 3 as implemented" (migration 34; TUI filter not added).
+3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above): tags and an
+   exact cwd filter are implemented, see "Stage 3 as implemented" (migration 34). **Not complete:** the user
+   asked for automatic grouping by cwd; there is no listing of distinct cwds and no TUI filter or grouping.
+   Both remain open and await the user's decision.
 4. Done (#256): no stop/retry authority check at all.
 
 Not recommended: ownership transfer of live Runs; folder Threads;
@@ -441,8 +444,9 @@ belongs to #253, so this is `0034_thread_tags`.
 - Wire: `thread.tag {thread_ids: 0..=200, add: 0..=64, remove: 0..=64}` (empty IDs mean the calling Thread;
   at least one tag; one tag in both lists is `invalid_argument`) returns `{changed, unchanged, not_found, add,
   remove}`; none found is `thread_not_found`. `thread.tags {limit 1..=200, cursor}` returns distinct names in
-  byte order, one index seek per name, no counts. `thread.list` gains `tags` (0..=64, AND) and `cwd` (exact
-  match of the saved cwd string; the CLI resolves a relative path against the current directory). `ThreadSummary`
+  byte order, one index seek per name, no counts. `thread.list` gains `tags` (0..=64, AND) and `cwd` (the saved
+  cwd compared after the same lexical cleanup as saved cwds; the CLI resolves a relative path against the current
+  directory, a wire client must send an absolute path, a relative one is `invalid_argument`). `ThreadSummary`
   and `ThreadDetails` gain `tags` (sorted, omitted when empty). Two commands, not a field of `thread.set`:
   one explicit-ID bulk write path like archive, no filter-driven write.
 - Effects: only `thread_tag` rows and `thread.revision` change; `updated_at` does not (list order stays).
@@ -452,8 +456,11 @@ belongs to #253, so this is `0034_thread_tags`.
   Tags are not inherited by create, fork or rewind and are deleted with the Thread in the delete transaction.
 - Filter cost: without tags the list reads its partial index as before. With `--tag` the page starts from the
   members of the first tag (`thread_tag_by_tag`), reaches each Thread by primary key, probes every further tag
-  by primary key and keeps the top `limit + 1` by `(updated_at, id)`: cost is the first tag's membership, not the
-  number of Threads, so name the narrowest tag first. With `--cwd` alone the page seeks `threads_cwd_updated`
+  by primary key and keeps the top `limit + 1` by `(updated_at, id)` in an inner query that selects IDs only; the
+  summary columns (latest Run, Turn, activity) are then read for that page alone. Cost is the first tag's
+  membership, not the number of Threads, so name the narrowest tag first (CLI `--help`, field help, cli-reference
+  and the Agent Guide say so). With `--query` the text match runs after the SQL page, so the page limit is
+  unbounded (-1) and every member of the first tag is materialized. With `--cwd` alone the page seeks `threads_cwd_updated`
   in list order without a sort. The cursor scope is bound to a digest of the sorted tags and the cwd and to the
   archived mode.
 - Item cost: tags of a page come from one statement over the page's IDs (bounded by 200 x 64 rows), tags of
@@ -461,7 +468,8 @@ belongs to #253, so this is `0034_thread_tags`.
 - TUI: none beyond the operation palette forms (no browser filter, no new glyph); see
   [thread browser](thread-browser.md). The browser's rows do not carry `tags`.
 - Not done: tag rename or merge, OR filters, member counts, tag-filtered bulk writes, tag inheritance, tags
-  on other summary paths (browser, Watch), cwd grouping headings in the TUI or Web UI.
+  on other summary paths (browser, Watch). **Open, awaiting the user's decision:** automatic grouping by cwd
+  (a listing of distinct cwds, grouping headings in the TUI or Web UI) and a TUI browser filter.
 
 ## Risks
 

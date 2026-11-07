@@ -519,6 +519,22 @@ async fn the_cwd_filter_is_exact_and_combines_with_tags_and_the_text_query() {
     assert_eq!(in_cwd(&two, &[]).await, std::slice::from_ref(&c));
     assert_eq!(in_cwd(&one, &["x"]).await, std::slice::from_ref(&a));
     assert!(in_cwd("/no/such", &[]).await.is_empty());
+    // Lexical cleanup like saved cwds: trailing slash, `.` and `..` find the same Threads.
+    assert_eq!(
+        in_cwd(&format!("{one}/"), &[]).await,
+        [b.clone(), a.clone()]
+    );
+    assert_eq!(
+        in_cwd(&format!("{one}/./sub/.."), &[]).await,
+        [b.clone(), a.clone()]
+    );
+    // A relative or empty path is refused, never silently empty.
+    for bad in ["../one", "one", "", "."] {
+        let error = list_with(&store, &[], Some(bad), ArchivedFilter::Exclude, 5, None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad:?}");
+    }
     // A prefix is not a match.
     assert!(in_cwd(&dir.path().to_string_lossy(), &[]).await.is_empty());
     // The text query still narrows inside the SQL filter.

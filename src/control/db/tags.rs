@@ -50,12 +50,6 @@ pub(super) fn run(
     };
     let add = normalize_all(&args.add)?;
     let remove = normalize_all(&args.remove)?;
-    if let Some(both) = add.iter().find(|tag| remove.contains(tag)) {
-        return Err(error(
-            ErrorCode::InvalidArgument,
-            format!("tag {both:?} cannot be both added and removed in one call"),
-        ));
-    }
     let encoded = serde_json::to_string(&requested).expect("Thread IDs serialize");
     // At most 200 validated IDs: no cap needed.
     let live: HashSet<String> = tx

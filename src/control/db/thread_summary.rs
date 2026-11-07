@@ -162,12 +162,30 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     } else {
         format!("{predicate} AND ")
     };
-    let columns_from = columns_from.replacen("FROM thread t ", &source, 1);
-    format!(
-        "{columns_from}WHERE {predicate}t.deleted_at IS NULL{archived} AND t.rowid<=?1
+    let window = "t.rowid<=?1
       AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
-      ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4"
-    )
+      ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
+    if tags > 0 {
+        // Choose the page from IDs and sort keys only, then read the summary columns
+        // (latest Run, Turn, activity subqueries) for just those rows: without this
+        // they would run for every member of the tag before the sort.
+        let inner = format!(
+            "SELECT t.id AS id {source}WHERE {predicate} AND t.deleted_at IS NULL{archived} AND {window}"
+        );
+        let columns_from = columns_from.replacen(
+            "FROM thread t ",
+            &format!("FROM ({inner}) p CROSS JOIN thread t ON t.id=p.id "),
+            1,
+        );
+        return format!("{columns_from}ORDER BY t.updated_at DESC,t.id DESC");
+    }
+    let predicate = if predicate.is_empty() {
+        String::new()
+    } else {
+        format!("{predicate} AND ")
+    };
+    let columns_from = columns_from.replacen("FROM thread t ", &source, 1);
+    format!("{columns_from}WHERE {predicate}t.deleted_at IS NULL{archived} AND {window}")
 }
 pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
     Ok(RawSummary {

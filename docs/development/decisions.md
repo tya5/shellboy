@@ -3995,7 +3995,7 @@ new commands, `thread.tag` (explicit IDs, like archive) and `thread.tags` (disti
 `thread.set`: one bulk write path with its own bound (200 IDs x (64 add + 64 remove) statements) and no coupling to
 the settings transaction. A tag is trimmed, one line, 1..=128 scalars, case sensitive; at most 64 per Thread, enforced
 after the writes inside the transaction so a refused call changes nothing. `thread.list` filters with `tags` (AND) and
-`cwd` (exact stored string). Tags are listed by one statement per page (`thread_id IN json_each`) and per `thread get`,
+`cwd` (lexically cleaned like saved cwds; relative is `invalid_argument`). Tags are listed by one statement per page (`thread_id IN json_each`) and per `thread get`,
 not by a correlated subquery in the page statement, so the page plan and its archived-mode indexes are unchanged.
 The tag filter drives from the first tag's members and sorts them (top `limit + 1`), so its cost is that tag's membership
 and the CLI says to put the narrowest tag first; the alternative (scan the visible index and test `EXISTS`) costs the
@@ -4003,7 +4003,9 @@ Thread count for a rare tag. `threads_cwd_updated` is added so `--cwd` is a seek
 per live Thread and an index update when a Thread's cwd or `updated_at` changes. Tag names are paged by one seek per
 name rather than `SELECT DISTINCT`, so a page never reads the members of a tag; no member counts are offered. The cursor
 filter is a SHA-256 digest of the sorted tags and the cwd because 64 tags of 128 characters do not fit the 8 KiB cursor.
-Choices made without a user answer: no TUI browser filter (the palette forms are the whole TUI surface; the form
+Scope: this is NOT the whole of the user's request. The user asked for automatic grouping by cwd; this delivers an
+exact-path filter only. A listing of distinct cwds and a TUI filter or grouping were not built and await the user's
+decision; the choices below were made by the implementer, not by the user. Choices made without a user answer: no TUI browser filter (the palette forms are the whole TUI surface, an implementer default; the form
 takes comma-separated tags, so a tag containing a comma is set through the CLI or wire only); tags are not read on
 the browser/Watch row paths, only in `thread list` and `thread get`; the form and CLI do not suggest existing tags; no
 tag inheritance on fork/rewind/create; a tag change is a `changes_context` write like archive (admitted before shutdown
