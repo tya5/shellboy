@@ -50,6 +50,7 @@ pub fn report(
     env: impl Fn(&str) -> bool,
 ) -> SetupReport {
     let mut missing = Vec::new();
+    let connection_name = connection;
     let connection = connection.and_then(|name| config.connections.get(name));
     if connection.is_none() {
         missing.push("connection (default_connection or Thread connection)".into());
@@ -63,7 +64,9 @@ pub fn report(
         missing.push("base_url (replace the template API root)".into());
     }
     let credential_env = connection.and_then(|connection| connection.api_key_env.clone());
-    let credential_set = credential_env.as_deref().map(env);
+    // A stored key (#269) satisfies the connection even when its variable is unset.
+    let stored = connection_name.is_some_and(|name| config.stored_keys.contains(name));
+    let credential_set = credential_env.as_deref().map(|name| env(name) || stored);
     if credential_set == Some(false) {
         missing.push(format!(
             "API key environment variable {} (missing or empty)",

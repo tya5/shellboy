@@ -102,6 +102,12 @@ shellboy config check
 shellboy
 ```
 
+Instead of exporting the variable, a running owner can keep the key for you:
+`printf %s "$KEY" | shellboy credentials set --connection proxy` stores it as plain text in `credentials.toml` next to the
+configuration file (a variable that is set still takes priority), and `shellboy connection test --connection proxy`
+asks the endpoint for its model list so you can see whether it answers. See
+[store a key and check a connection](configuration.md#store-a-key-and-check-a-connection).
+
 This works in PowerShell too. Existing config files are never overwritten. Use
 identical `--config PATH` options throughout if you choose a custom path. Check
 uses only the model catalog, not a conversation request; no owner is required.

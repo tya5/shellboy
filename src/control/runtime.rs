@@ -266,6 +266,9 @@ impl Control {
             ),
             Command::ConfigGet(_) => self.config_get(disconnected).await,
             Command::ConfigSet(args) => self.config_set(args, caller.as_ref()).await,
+            Command::CredentialsSet(args) => self.credentials_set(args, caller.as_ref()).await,
+            Command::CredentialsClear(args) => self.credentials_clear(args, caller.as_ref()).await,
+            Command::ConnectionTest(args) => self.connection_test(args, disconnected).await,
             Command::HistorySearch(args) => encode_result(
                 self.index.search_report(&args, disconnected).await?,
                 ErrorCode::InvalidState,

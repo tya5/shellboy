@@ -73,6 +73,7 @@ named_jobs! {
     IndexPreview => index_preview, IndexBackfill => index_backfill, IndexRetry => index_retry,
     IndexRebuild => index_rebuild, IndexProbe => index_probe, IndexShrink => index_shrink, IndexRemove => index_remove, StorageStatus => storage_status,
     StorageCollect => storage_collect, ConfigGet => config_get, ConfigSet => config_set,
+    CredentialsSet => credentials_set, CredentialsClear => credentials_clear, ConnectionTest => connection_test,
 }
 
 // Existing mutations awaiting the bounds audit in #200. This list must only shrink.
@@ -163,7 +164,10 @@ impl Kind {
             | Kind::StorageStatus
             | Kind::StorageCollect
             | Kind::ConfigGet
-            | Kind::ConfigSet => Runtime,
+            | Kind::ConfigSet
+            | Kind::CredentialsSet
+            | Kind::CredentialsClear
+            | Kind::ConnectionTest => Runtime,
         }
     }
     pub(super) fn read_lane(self) -> bool {
@@ -198,7 +202,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            56,
+            59,
             "classify new kinds and update this ratchet"
         );
     }

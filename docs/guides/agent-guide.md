@@ -374,6 +374,19 @@ reaches the running owner, including the one running you. Never write a credenti
 `api_key_env` to a variable's name and leave the value to the user's environment. On `operation_conflict`, read
 again and show the user what changed before repeating. Your identity is recorded with the change.
 
+## Keys and connection checks
+
+Never put a key in a command line, in `config.toml`, in a message or in your answer. `shellboy credentials set`
+reads the key from standard input, so run it only when the user asked you to store a key and supplied it for that
+purpose (for example `printf %s "$KEY" | shellboy credentials set --connection NAME`, with the key taken from a
+file or variable the user named); never ask the user to paste one into the conversation. The file is plain text and
+no command returns the value. `shellboy config get` shows only where each key comes from
+(`loaded.credential_source`: `env`, `stored` or `none`). `shellboy connection test --connection NAME` sends one
+model-catalog GET and reports `http_status`, `failure` and `models`; treat `ok: true` as "the endpoint answered with a
+catalog", never as proof the key is valid, and `failure: "auth"` as "the endpoint refused the credential" without
+guessing why. A stored key applies to the next request; a new or changed connection still needs an owner restart.
+Do not run `credentials clear` or replace a key unless asked. Your identity is recorded with the change.
+
 ## Operation tracking, saved context, and deletion preview
 
 Query a lost operation result with `shellboy operation get --operation OPERATION_ID`. Distinguish its receipt state/outcome from downstream completion, and follow targets to their get commands. Check downstream for message and compact. Repeating compact with the same ID returns its original queued acceptance even after downstream completion. pending/result_uncertain do not prove that side effects never occurred or that retrying with a new ID is safe. The query itself creates no receipt; its operation ID does not guarantee replay of the observation. Repeating attachment.add with the same ID returns the original result before mutable preflight, while preserving authentication and request-equality checks.

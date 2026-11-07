@@ -96,6 +96,23 @@ Both need a running owner of the selected `--data-dir`, act on the file it loade
 owner they fail with `app_not_running`. Every field reaches the running owner only after a restart; standalone commands that read the file use it on their next run. See
 [configuration](configuration.md#read-and-change-settings-through-the-owner).
 
+### Stored keys and connection test (3 commands)
+
+| Command | Behavior |
+|---|---|
+| `credentials set --connection NAME` | Store the API key read from **standard input** for a connection in the file. One trailing line break is dropped; the key is refused from a terminal (it would be echoed) and there is no argument for it. Result: `connection`, `stored`, `replaced`, `key_source`, `credentials_path`, `permissions_tightened`, `changed_by`. Never returns the key. Same `--operation-id` replays the saved outcome |
+| `credentials clear --connection NAME` | Remove that connection's stored key. Result: `cleared` (false when there was none; nothing is written), `key_source`, `credentials_path` |
+| `connection test --connection NAME` or `--base-url URL [--api DIALECT] [--api-key-stdin \| --api-key-env VAR] [--api-key-header NAME] [--no-ssl-verify]` | Send one model-catalog GET (no conversation or embedding request) for a saved connection or an unsaved candidate. Result: `sent`, `ok`, `http_status`, `failure` (`auth`, `url`, `rate_limited`, `server`, `http_status`, `timeout`, `unreachable`, `credential_missing`, `invalid_configuration`, `cancelled`, `response`), `models`, `model_count`, `models_truncated`, `credential` (`source`, `api_key_env`, `env_set`). `ok` means a catalog answered, not that the key is valid. No receipt |
+
+```sh
+printf %s "$KEY" | shellboy credentials set --connection proxy
+shellboy connection test --connection proxy
+```
+
+All three need a running owner of the selected `--data-dir`, act on the file it loaded and refuse `--config`.
+`config get` adds `credential_source` (`env`, `stored` or `none` per connection) and `credentials_file`. The key is plain
+text in `credentials.toml`: see [configuration](configuration.md#store-a-key-and-check-a-connection).
+
 ### Standalone configuration (2 commands)
 
 | Command | Behavior |

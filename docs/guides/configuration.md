@@ -81,6 +81,53 @@ verified with a loopback mock, not a particular Ollama/LM Studio release; their
 Responses compatibility is not established here. Do not weaken authentication
 on a remotely exposed endpoint to copy this local-only example.
 
+## Store a key and check a connection
+
+Instead of exporting an environment variable, a running owner can keep an API key for a connection. The commands
+need a running owner of the selected `--data-dir`, act on the file it loaded, refuse `--config` and change nothing
+when no owner is running.
+
+```sh
+printf %s "$KEY" | shellboy credentials set --connection proxy   # reads standard input only
+shellboy connection test --connection proxy
+shellboy config get      # result.loaded.credential_source.proxy: "stored"
+shellboy credentials clear --connection proxy
+```
+
+- **Where it is kept.** `credentials.toml`, in the folder of `config.toml`, as `[connections.NAME]` with `api_key`.
+  The value is **plain text**: treat the file like a password and keep it out of Git and backups you share. On
+  Unix it is created with mode `0600`, and a save tightens a looser mode (`permissions_tightened` in the reply). On
+  Windows Shellboy sets no permissions: the file gets the default access of its folder (your user profile's), and an
+  existing file keeps its access list when it is replaced. That Windows behaviour is how the API is documented to
+  work; it has not been tested on Windows. The file is replaced atomically through a temporary file next to it.
+- **Which key is used.** For each request: the environment variable named by `api_key_env` if it has a value,
+  otherwise the stored key of that connection name, otherwise the usual "variable is missing or empty" error. A key
+  stored or cleared now applies to the **next request**, with no restart. `credentials set` reports `key_source:
+  "env"` when the variable still wins. A connection that defines its own `Authorization` entry under `headers` and
+  has no `api_key_env` keeps that header and refuses a stored key. `api_key_header` (for example `x-api-key`) needs
+  `api_key_env` set as well; the stored key then goes in that header.
+- **The value is write-only.** No command, error, log, `config get` field or saved receipt contains it or its length (the
+  receipt keeps only a digest salted with a random value that exists while the owner runs), and the key is never accepted as a command-line argument: it comes from standard input (a terminal
+  is refused so it is not echoed). A pasted key does not appear in `config.toml`, so its `content_hash` is unchanged.
+- **The connection must exist.** `credentials set` needs the name in the configuration file (add it with
+  `config set` first). The connection itself still takes effect after an owner restart, but its stored key can be
+  saved before that. `credentials clear` also removes the entry of a connection that is gone.
+- **`config get` states the source** per connection under `loaded.credential_source` (what this owner would use now)
+  and `file.credential_source` (the file's connections): `env`, `stored` or `none`. It states presence, not that the
+  key works. `credentials_file` says whether the file exists and parses. A hand edit of `credentials.toml` is read
+  at the next request, but the setup hints in the TUI follow it only after a restart.
+- **`connection test`** sends one GET for the model catalog (the request `config check` sends), for a saved connection
+  or a candidate that is not saved yet (`--base-url`, with `--api-key-stdin` or `--api-key-env`; the key is used for
+  that one request and kept nowhere). It reports facts: `http_status`, the model IDs, whether the `api_key_env`
+  variable is set in the **owner's** environment, and a `failure` class: `auth` (401/403), `url` (404 or an API root
+  that fails validation: use `.../v1`, not `.../v1/responses`), `unreachable`, `timeout`, `credential_missing`
+  (nothing was sent), and so on. A returned catalog does not prove the key is valid for any model, and `auth` does
+  not say whether the key, its scope or a gateway rule is at fault. The reply never includes provider error text.
+  Detecting a variable is the same call with the variable's name: `connection test --base-url URL --api-key-env VAR`
+  returns `credential.env_set`.
+- **macOS limit.** An owner started from the Dock or Finder does not inherit your shell's environment, so the
+  variable check only helps when the owner was started from a terminal; paste the key instead.
+
 ## Read and change settings through the owner
 
 `shellboy config get` shows what the running owner loaded and what the file holds now, and whether they
@@ -97,7 +144,7 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 - **Every change needs an owner restart.** Nothing is applied to the running owner. Until then `config get`
   reports `differs: true` and names the fields in `differing_fields`. Standalone commands that read the file
   themselves, such as `rag` and `storage vacuum`, use the new values on their next run.
-- **Credentials stay in the environment.** `config get` never returns the value of `headers`, `extra_headers`,
+- **Credentials stay out of `config.toml`.** Use the environment, or the stored key above. `config get` never returns the value of `headers`, `extra_headers`,
   `extra_body` or `shell.env`, only names, and hides any credential-looking `base_url` path part or name. Each
   hidden field is listed in `redacted_fields`. `api_key_env` takes a variable name; a value that looks like a
   key is refused and isn't shown. The heuristic can catch a real name, in which case edit the file by hand.
