@@ -5,7 +5,9 @@ use serde_json::{Value, json};
 use shellboy::{
     config::Config,
     control::db::Store,
-    protocol::{ApiError, Command, ErrorCode, Origin, Request, ThreadRewindArgs},
+    protocol::{
+        ApiError, Command, Deliver, ErrorCode, MessageSendArgs, Origin, Request, ThreadRewindArgs,
+    },
     storage::DbWorker,
 };
 use std::sync::Arc;
@@ -225,7 +227,7 @@ async fn refused_while_the_thread_has_live_work_and_nothing_changes() {
     assert!(error.message.contains("live Run"), "{}", error.message);
     // A definitely unadmitted message can be delivered after rewinding.
     f.query(|db| {
-        db.execute_batch("UPDATE run SET state='completed' WHERE id='live'; INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,path_admission)VALUES('rc','op','{\"kind\":\"human\"}','T','n4','accepted','now','unadmitted');").unwrap();
+        db.execute_batch("UPDATE run SET state='completed' WHERE id='live'; INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,path_admission)VALUES('rc','op','{\"kind\":\"human\"}','T','n4','run','turn','accepted','now','unadmitted');").unwrap();
     })
     .await;
     f.rewind(Some("T"), "n2", None).await.unwrap();
@@ -240,6 +242,68 @@ async fn refused_while_the_thread_has_live_work_and_nothing_changes() {
     let error = uncertain.rewind(Some("T"), "n2", None).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidState);
     assert!(error.message.contains("unknown path admission"));
+}
+
+#[tokio::test]
+async fn unadmitted_input_is_delivered_once_on_the_rewound_path() {
+    let script = [
+        plain(4),
+        n_path(4),
+        "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,path_admission)VALUES('rc','op','{\"kind\":\"human\"}','T','n4','run','turn','accepted','now','unadmitted');".into(),
+    ]
+    .concat();
+    let f = Fixture::new(script).await;
+
+    // Rewind moves n3/n4 to the child. The accepted n4 receipt remains pending.
+    f.rewind(Some("T"), "n2", None).await.unwrap();
+    assert_eq!(f.query(|db| ids(db, "T")).await, ["n1", "n2"]);
+
+    // A real human send starts the next Run and invokes resume recovery. It must
+    // append the older accepted input to the selected path before the new prompt.
+    let request = Request::new(
+        format!("instance:{}", uuid::Uuid::new_v4()),
+        Command::MessageSend(MessageSendArgs {
+            human: true,
+            expect_reply: false,
+            sender_label: None,
+            thread_id: Some("T".into()),
+            text: "continue after rewind".into(),
+            deliver: Deliver::Next,
+        }),
+    );
+    f.store.execute(request, None).await.unwrap();
+
+    f.query(|db| {
+        let path = ids(db, "T");
+        assert_eq!(path, ["n1", "n2", "n4"]);
+        assert_eq!(path.iter().filter(|id| id.as_str() == "n4").count(), 1);
+        assert_eq!(
+            scalar(db, "SELECT count(*) FROM receipt WHERE id='rc'").unwrap(),
+            1
+        );
+        assert_eq!(
+            text(db, "SELECT state FROM receipt WHERE id='rc'").unwrap(),
+            "applied"
+        );
+        assert_eq!(
+            text(db, "SELECT path_admission FROM receipt WHERE id='rc'").unwrap(),
+            "admitted"
+        );
+        assert_eq!(
+            text(db, "SELECT hold_reason FROM receipt WHERE id='rc'").unwrap(),
+            "recovered_at_explicit_resume"
+        );
+        assert_eq!(ids(db, "T"), ["n1", "n2", "n4"]);
+        let branch: String = db
+            .query_row(
+                "SELECT id FROM thread WHERE parent_thread_id='T'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ids(db, &branch), ["n1", "n2", "n3", "n4"]);
+    })
+    .await;
 }
 
 #[tokio::test]
