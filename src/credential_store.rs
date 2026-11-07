@@ -150,11 +150,10 @@ pub fn check_key(value: &str) -> Result<(), ApiError> {
         )
         .details(json!({"field":"value","written":false})));
     }
-    if value.chars().any(char::is_control) {
-        return bad("the key must not contain control characters or line breaks");
-    }
-    if value.trim() != value {
-        return bad("the key must not start or end with whitespace");
+    // Printable ASCII only: a zero-width or other invisible character in a pasted key would
+    // make every request fail later with an authentication error nobody can see the cause of.
+    if !value.chars().all(|c| c.is_ascii_graphic()) {
+        return bad("the key must be printable ASCII without spaces or line breaks");
     }
     Ok(())
 }
@@ -174,6 +173,7 @@ fn relabel(mut error: ApiError) -> ApiError {
     error.message = error
         .message
         .replace("configuration file", "credentials file")
+        .replace("configuration path", "credentials path")
         .replace("configuration directory", "credentials directory")
         .replace("new configuration", "new credentials");
     if error.code == ErrorCode::OperationConflict {
@@ -202,7 +202,10 @@ pub struct Outcome {
 }
 
 fn load(path: &Path) -> Result<(crate::config_edit::FileState, DocumentMut), ApiError> {
-    let state = read_state(path).map_err(relabel)?;
+    let mut state = read_state(path).map_err(relabel)?;
+    // The temporary file is created 0600 and keeps that mode: a loose existing file must not
+    // make the new key readable by others, even briefly before the replace.
+    state.inherit_mode = false;
     let text = std::str::from_utf8(&state.bytes)
         .map_err(|_| invalid_file(StoreError::Invalid { line: None }, path))?;
     // Same rules as the request-time reader, so a file this command writes is read back.
@@ -240,23 +243,12 @@ fn loose(path: &Path) -> bool {
 fn loose(_path: &Path) -> bool {
     false
 }
-fn restrict(temporary: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(temporary, std::fs::Permissions::from_mode(0o600))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = temporary;
-        Ok(())
-    }
-}
 fn write(
     path: &Path,
     state: &crate::config_edit::FileState,
     doc: &DocumentMut,
     existed: bool,
+    before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
 ) -> Result<Outcome, ApiError> {
     let edited = if state.present {
         doc.to_string()
@@ -278,9 +270,8 @@ fn write(
         .details(json!({"credentials_path":path,"written":false})));
     }
     let permissions_tightened = state.present && loose(&state.target);
-    // The temporary file is created 0600; a replaced file's mode is not inherited,
-    // so a loose file is corrected by the save itself.
-    let warning = replace_atomically(path, state, edited.as_bytes(), restrict, replace_file)
+    // The replacement is 0600, so a loose file is corrected by the save itself.
+    let warning = replace_atomically(path, state, edited.as_bytes(), before_replace, replace_file)
         .map_err(relabel)?;
     Ok(Outcome {
         existed,
@@ -292,6 +283,15 @@ fn write(
 
 /// Blocking. Stores or replaces the key of one connection.
 pub fn set(path: &Path, connection: &str, value: &str) -> Result<Outcome, ApiError> {
+    set_with(path, connection, value, |_| Ok(()))
+}
+/// `before_replace` sees the finished temporary file; tests read its mode there.
+pub fn set_with(
+    path: &Path,
+    connection: &str,
+    value: &str,
+    before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
+) -> Result<Outcome, ApiError> {
     check_key(value)?;
     check_connection_name(connection)?;
     let (state, mut doc) = load(path)?;
@@ -304,7 +304,7 @@ pub fn set(path: &Path, connection: &str, value: &str) -> Result<Outcome, ApiErr
         return Err(invalid_file(StoreError::Invalid { line: None }, path));
     };
     entry["api_key"] = toml_edit::value(value);
-    write(path, &state, &doc, existed)
+    write(path, &state, &doc, existed, before_replace)
 }
 
 /// Blocking. Removes the key of one connection; nothing is written when there is none.
@@ -331,7 +331,7 @@ pub fn clear(path: &Path, connection: &str) -> Result<Outcome, ApiError> {
     if connections.is_empty() {
         doc.remove("connections");
     }
-    write(path, &state, &doc, true)
+    write(path, &state, &doc, true, |_| Ok(()))
 }
 
 #[cfg(test)]

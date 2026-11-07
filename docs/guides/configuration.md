@@ -108,6 +108,9 @@ shellboy credentials clear --connection proxy
   used without `api_key_env`: the stored key then goes in that header, and no environment variable can override a key
   you typed. With the header but neither a variable nor a stored key, a request fails with a missing-key error
   (the file still loads).
+- **Who can read the file.** Anything that runs as your operating-system user can read `credentials.toml`, including
+  the shell your model uses (it runs as the same user and there is no permission engine between them). The `0600` mode
+  keeps other users out, nothing more. Do not store a key you would not give the model's shell.
 - **The value is write-only.** No command, error, log, `config get` field or saved receipt contains it or its length (the
   receipt keeps only a digest salted with a random value that exists while the owner runs), and the key is never accepted as a command-line argument: it comes from standard input (a terminal
   is refused so it is not echoed). A pasted key does not appear in `config.toml`, so its `content_hash` is unchanged.
@@ -123,7 +126,7 @@ shellboy credentials clear --connection proxy
   that one request and kept nowhere). It reports facts: `http_status`, the model IDs, whether the `api_key_env`
   variable is set in the **owner's** environment, and a `failure` class: `auth` (401/403), `url` (404 or an API root
   that fails validation: use `.../v1`, not `.../v1/responses`), `unreachable`, `timeout`, `credential_missing`
-  (nothing was sent), and so on. A returned catalog does not prove the key is valid for any model, and `auth` does
+  (nothing was sent), and so on. `sent: true` means a request was attempted, not delivered: a refused connection is `sent: true` with `http_status: null`, and only a non-null `http_status` shows that a response came back (a 200 that is not a catalog is `failure: "response"` with its 200). A returned catalog does not prove the key is valid for any model, and `auth` does
   not say whether the key, its scope or a gateway rule is at fault. The reply never includes provider error text.
   Detecting a variable is the same call with the variable's name: `connection test --base-url URL --api-key-env VAR`
   returns `credential.env_set`.

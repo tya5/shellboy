@@ -10489,9 +10489,10 @@ the db-observation feature test). `tests/credentials.rs` covers:
   its next request, the replaced key on the one after, and fails again after `credentials.clear`, with nothing sent
   while no key exists (lazy lookup, no restart).
 - **File.** On Unix (a Unix-only test): created `0600`, a `0644` file is tightened by the save and reported
-  (`permissions_tightened`), other connections' entries survive a set and a clear, no `.tmp` file remains, and the new
+  (`permissions_tightened`), the temporary file read just before the replace is `0600` even when the existing file is `0644`, other connections' entries survive a set and a clear, no `.tmp` file remains, and the new
   file starts with the plain-text warning. An invalid file is left byte for byte, refused with `config_invalid`, and a
-  request that needs it fails with a line number and no content.
+  request that needs it fails with a line number and no content. A key with a zero-width character, a space or a
+  non-ASCII character is refused at save.
 - **Secret safety.** The key value is absent from: the `credentials.set` reply and its replay, the conflict error,
   validation errors for refused values, `Debug` of the command, request and `ConnectionTestArgs`, `config.get`,
   `operation get`, a `connection.test` reply whose mock repeats the received key in its 401 body, every row of
@@ -10504,8 +10505,12 @@ the db-observation feature test). `tests/credentials.rs` covers:
 - **`connection.test`.** A saved connection sends exactly one `GET /v1/models` and no POST; facts only; `credential_missing`
   sends nothing; a wrong key gives `auth` with status 401 and no provider text; 404 gives `url`; a refused-port candidate
   gives `unreachable`; an API root ending in `/responses` gives `url` with `sent:false`; an inline key reaches the mock as
-  a bearer and is stored nowhere; `api_key_env` presence is reported by name, including `PATH` as a set variable. Invalid
+  a bearer and is stored nowhere; `api_key_env` presence is reported by name, including `PATH` as a set variable. A 200 with HTML or with no `data` array is `failure: response` and keeps `http_status: 200`, while a refused port keeps
+  `null`; a candidate with a corrupt `credentials.toml` still works (it never reads the file). Invalid
   and conflicting arguments and a credential pasted as a variable name are refused without echo.
+- **Header-only connection.** `api_key_header` without `api_key_env` loads, sends a stored key in that header and no
+  `Authorization`, fails the request with the missing-key error when no key exists (nothing reaches the server), and the
+  setup hints report it missing until a key is stored. A conflicting `credentials.set` explains the per-process salt.
 - **First send.** From an empty `config.toml`, using only `config.get`, `config.set`, `credentials.set` and
   `connection.test` against the mock, then an owner restart (stage C is not implemented, so a new connection needs one),
   a message reaches the mock `POST /v1/responses` with the stored key as its bearer and the Thread settles.
@@ -10515,7 +10520,8 @@ the db-observation feature test). `tests/credentials.rs` covers:
 
 Not verified: Windows (the permissions statement and `ReplaceFileW` on `credentials.toml` rest on the API documentation
 and the existing `config.toml` replace tests, not on a run); Linux beyond CI; that a real terminal refuses a typed key
-(the check is `IsTerminal` on stdin, tests pipe); a real provider, real keys or a real user configuration; a timed-out
+(the check is `IsTerminal` on stdin, tests pipe); the stored-key read hanging on a FIFO is handled by running it inside
+the header wait and has no test of its own; a real provider, real keys or a real user configuration; a timed-out
 file worker; the Studio screen; a key that a provider rejects for reasons other than the header (only the mock's 401 is
 exercised); TLS failures (`ssl_verify`, certificate errors) have no test and classify as `unreachable`. Stage C is
 planned in D-269 and was not built or tested.

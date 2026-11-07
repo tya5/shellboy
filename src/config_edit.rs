@@ -361,6 +361,10 @@ pub(crate) struct FileState {
     pub(crate) bytes: Vec<u8>,
     pub(crate) hash: String,
     pub(crate) read_only: bool,
+    /// Give the new file the replaced file's mode (the configuration file keeps its
+    /// permissions). A file holding a secret sets this false, so the temporary file stays
+    /// `0600` from creation and is never readable by others, not even before the replace.
+    pub(crate) inherit_mode: bool,
 }
 fn file_error(message: &str, path: &Path) -> ApiError {
     ApiError::new(ErrorCode::IoFailed, message).details(json!({"config_path":path,"written":false}))
@@ -382,6 +386,7 @@ pub(crate) fn read_state(path: &Path) -> Result<FileState, ApiError> {
                 bytes: Vec::new(),
                 hash: sha256_hex([]),
                 read_only: false,
+                inherit_mode: true,
             });
         }
         Err(_) => return Err(file_error("Cannot resolve the configuration path", path)),
@@ -410,6 +415,7 @@ pub(crate) fn read_state(path: &Path) -> Result<FileState, ApiError> {
         hash: sha256_hex(&bytes),
         bytes,
         read_only,
+        inherit_mode: true,
     })
 }
 /// Same strict rules as loading and `config check`, with the paths loading resolves.
@@ -1152,7 +1158,7 @@ fn write_temporary(temporary: &Path, state: &FileState, bytes: &[u8]) -> std::io
     let mut file = options.open(temporary)?;
     file.write_all(bytes)?;
     #[cfg(unix)]
-    if state.present {
+    if state.present && state.inherit_mode {
         file.set_permissions(std::fs::metadata(&state.target)?.permissions())?;
     }
     #[cfg(not(unix))]

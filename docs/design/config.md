@@ -298,8 +298,8 @@ api_key = "..."
 
 It is a separate file so the rule "no key in `config.toml`" stays true and `config.get`'s `content_hash` never covers a
 key. The value is **plain text**: treat the file like a password in a dotfile. Unix creates it `0600` and a save
-corrects a looser mode (`permissions_tightened` says so). The save is a temporary file in the same directory, `sync_all`,
-then the replace used by `config.set` (`rename`; `ReplaceFileW` on Windows with the same interrupted-replace recovery).
+corrects a looser mode (`permissions_tightened` says so). The save is a temporary file in the same directory created `0600` and never loosened (the replaced file's mode is not
+copied, unlike `config.toml`), `sync_all`, then the replace used by `config.set` (`rename`; `ReplaceFileW` on Windows with the same interrupted-replace recovery).
 On Windows no mode bits exist and Shellboy changes no ACL: the file gets the directory's default permissions (the user
 profile's), and an existing file keeps its ACL through `ReplaceFileW`. This is stated as a fact from the API; the
 Windows branch has not been run for this change. There is no keychain integration (decided outside this issue).
@@ -319,7 +319,7 @@ with neither source fails with `ConfigError::MissingKey` (kind `config_missing`)
 either setting exists.
 
 **What leaves the owner.** `credentials.set` takes the value, and no operation returns it. `ConnectionTestArgs`,
-`CredentialsSetArgs` and `HttpModelClient` have hand-written `Debug`; `Connection` carries only the file's path. Errors
+`CredentialsSetArgs` have hand-written `Debug`; `Connection` carries only the file's path (an inline test key is a masked header of that one value). Errors
 are fixed strings and never carry a value, a line or a parser excerpt. The saved request hash of `credentials.set` uses a
 digest of the value salted with a per-process random string, so `operation_receipt` holds nothing an offline guess could
 confirm; the receipt result is the reply below. The diagnostic `config_changed` records `credentials.<connection>` as the
@@ -338,13 +338,17 @@ file at load and follows `credentials.set` / `credentials.clear`; a hand edit sh
 (`base_url`, `api`, `api_key` or `api_key_env`, `api_key_header`, `ssl_verify`). A saved name is resolved from the
 configuration **file** (what the next start will load, so a connection just added by `config.set` can be tested),
 falling back to the loaded one. It sends the same bounded model-catalog GET as `config check` once, through a fresh
-`HttpModelClient`, and nothing else. The reply holds facts: `sent`, `ok`, `http_status` (null when no response),
+`HttpModelClient`, and nothing else. The reply holds facts: `sent`, `ok`, `http_status` (null only when no response arrived; a 200 with HTML or no `data` keeps its 200 and is `response`),
 `failure` (null, or one of `auth`, `url`, `rate_limited`, `server`, `http_status`, `timeout`, `unreachable`,
-`credential_missing`, `invalid_configuration`, `cancelled`, `response`), `models` (sorted, at most 1000 and 256 KiB;
-`model_count` is the full count and `models_truncated` says so), and `credential` (`source` env/stored/inline/none,
+`credential_missing`, `invalid_configuration`, `response`), `models` (the whole sorted catalogue, which the client already
+bounds at 2 MiB and 10,000 ids; `model_count` is its length), and `credential` (`source` env/stored/inline/none,
 `api_key_env`, `env_set`). Success means a catalog answered; it never says the key is valid. A 401 is `auth`, a 404 is
 `url` (the API root is probably wrong), and a variable that is unset in the owner is `credential_missing` without a
-request. An inline key replaces every other source for that one client and is kept nowhere.
+request. `sent` means a request was attempted, not delivered: a refused connection is `sent: true` with `http_status: null`. An
+inline key is put in the candidate's headers (`Authorization: Bearer`, or `api_key_header` itself) for that one request and
+is kept nowhere; a candidate never reads `credentials.toml`. The call is dropped with its HTTP request when the caller
+disconnects or the owner shuts down (`runtime_observation`), so it has no cancel path of its own. The credential read is
+part of the response-header wait, so it obeys cancellation and the deadline.
 
 **Not here (stage C).** `connections` changes still need an owner restart; see the stage C plan in the issue and the
 decision record.

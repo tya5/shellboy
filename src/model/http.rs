@@ -24,6 +24,12 @@ use reqwest::{
     Client, Response,
     header::{HeaderMap, HeaderName, HeaderValue},
 };
+/// A catalog request that failed, with the HTTP status when a response arrived.
+#[derive(Debug)]
+pub struct CatalogFailure {
+    pub http_status: Option<u16>,
+    pub error: ModelError,
+}
 pub use response::{AttemptFailure, ResponseFacts, ResponseReceived};
 #[cfg(test)]
 use response::{parse_retry_after, send_event};
@@ -92,28 +98,8 @@ pub struct HttpModelClient {
     usage_limit: Arc<std::sync::Mutex<Option<TimedUsageLimit>>>,
     rate_gate: rate_gate::RateGate,
     diagnostics: Arc<std::sync::OnceLock<crate::diagnostics::Diagnostics>>,
-    /// A key given for one connection test (#269). It replaces every other source and
-    /// is never part of `Connection`, which is cloned into logs and snapshots.
-    inline_key: Option<Arc<str>>,
-}
-impl std::fmt::Debug for HttpModelClient {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HttpModelClient")
-            .field("connection_name", &self.connection_name)
-            .field(
-                "inline_key",
-                &self.inline_key.as_ref().map(|_| "[redacted]"),
-            )
-            .finish_non_exhaustive()
-    }
 }
 impl HttpModelClient {
-    /// Use this key for every request of this client instead of the environment and the
-    /// stored key. For `connection.test` with a candidate that is not saved yet.
-    pub(crate) fn with_inline_key(mut self, key: &str) -> Self {
-        self.inline_key = Some(key.into());
-        self
-    }
     /// Count the actual dialect input, not discarded Responses-only replay items.
     pub(crate) fn input_characters(&self, request: &Value) -> Result<u64, ModelError> {
         if self.connection.api == crate::config::Api::Responses {
@@ -153,7 +139,6 @@ impl HttpModelClient {
             usage_limit: Arc::new(std::sync::Mutex::new(None)),
             rate_gate,
             diagnostics: Arc::new(std::sync::OnceLock::new()),
-            inline_key: None,
         })
     }
     fn blocking_usage_limit(
@@ -338,14 +323,11 @@ impl HttpModelClient {
             .map_err(|error| ModelError::new("config_invalid", error.to_string()))
     }
     async fn headers(&self) -> Result<(HeaderMap, Vec<String>), ModelError> {
-        let credentials = if let Some(key) = &self.inline_key {
-            self.connection.credentials_with(|_| None, Some(key))
-        } else {
-            let stored = self.stored_key().await?;
-            self.connection
-                .credentials_with(|name| std::env::var(name).ok(), stored.as_deref())
-        }
-        .map_err(|e| ModelError::new("config_missing", e.to_string()))?;
+        let stored = self.stored_key().await?;
+        let credentials = self
+            .connection
+            .credentials_with(|name| std::env::var(name).ok(), stored.as_deref())
+            .map_err(|e| ModelError::new("config_missing", e.to_string()))?;
         let mut headers = HeaderMap::new();
         let mut secrets = Vec::new();
         for (name, value) in credentials.headers() {
@@ -378,7 +360,8 @@ impl HttpModelClient {
         if cancel.is_cancelled() {
             return Err(cancelled());
         }
-        let (mut headers, mut secrets) = self.headers().await?;
+        // The stored-key read is part of the header wait: it obeys cancellation and the deadline.
+        let (mut headers, mut secrets) = deadline.wait_headers(cancel, self.headers()).await??;
         if matches!(endpoint, ApiEndpoint::Responses)
             && self.connection.api == crate::config::Api::AnthropicMessages
         {
@@ -514,22 +497,37 @@ impl HttpModelClient {
         self.models_with_status(cancel)
             .await
             .map(|(_, models)| models)
+            .map_err(|failure| failure.error)
     }
-    /// The catalog with the HTTP status that carried it (`connection.test`).
+    /// The catalog with the HTTP status that carried it (`connection.test`). A failure
+    /// after the response headers (malformed body, no `data`, over a limit) keeps that
+    /// status, so `None` means no response arrived.
     pub async fn models_with_status(
         &self,
         cancel: CancellationToken,
-    ) -> Result<(u16, Vec<String>), ModelError> {
-        let lease = self.rate_gate.acquire(&cancel).await?;
+    ) -> Result<(u16, Vec<String>), CatalogFailure> {
+        let early = |error| CatalogFailure {
+            http_status: None,
+            error,
+        };
+        let lease = self.rate_gate.acquire(&cancel).await.map_err(early)?;
         let mut deadline =
-            Deadline::new(ApiEndpoint::Models, &self.connection, &self.connection_name)?;
-        self.models_request(&cancel, &mut deadline, &lease).await
+            Deadline::new(ApiEndpoint::Models, &self.connection, &self.connection_name)
+                .map_err(early)?;
+        let mut seen = None;
+        self.models_request(&cancel, &mut deadline, &lease, &mut seen)
+            .await
+            .map_err(|error| CatalogFailure {
+                http_status: error.status.or(seen),
+                error,
+            })
     }
     async fn models_request(
         &self,
         cancel: &CancellationToken,
         deadline: &mut Deadline,
         lease: &rate_gate::Lease,
+        seen: &mut Option<u16>,
     ) -> Result<(u16, Vec<String>), ModelError> {
         let (response, secrets, _observation) = self
             .send(
@@ -543,6 +541,7 @@ impl HttpModelClient {
             .await?;
         deadline.received();
         let status = response.status().as_u16();
+        *seen = Some(status);
         if !response.status().is_success() {
             let mut complete = false;
             let error = body::http_error_observed(
