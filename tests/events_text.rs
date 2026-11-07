@@ -599,6 +599,55 @@ async fn a_pending_text_poll_ends_on_disconnect_and_on_owner_shutdown() {
     .await;
 }
 
+/// A live attempt holds text until it is stopped or interrupted, then the entry is gone.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted() {
+    bounded(
+        "the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted",
+        async {
+            let mut fixture = Fixture::new().await;
+            let control = fixture.control.clone();
+            for stop in [true, false] {
+                let t = thread(&control).await;
+                send(&control, &t, "go").await;
+                let provider = fixture.next_request().await;
+                let mut at = cursor(&poll(&control, None, &[&t], 0).await);
+                provider.delta("held");
+                read_text(&control, &mut at, &t, 0, "held").await;
+                let (run, turn) = {
+                    let thread = t.clone();
+                    control
+                        .store
+                        .database
+                        .call(move |db| {
+                            Ok(db.query_row(
+                                "SELECT run_id,id FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1",
+                                [thread],
+                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                            )?)
+                        })
+                        .await
+                        .unwrap()
+                };
+                if stop {
+                    let request = wait_request(&control, Command::RunStop(RunTarget { run_id: run }));
+                    assert!(control.request(request).await.ok);
+                } else {
+                    control.interrupt_turn(t.clone(), turn).await.unwrap();
+                }
+                // The provider stream stays open: only the stop or interrupt can end the attempt.
+                while entry(&poll(&control, None, &[&t], 0).await, &t).is_some() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+                assert_eq!(poll(&control, None, &[], 0).await["live_text"], json!([]));
+                drop(provider);
+            }
+            fixture.close().await;
+        },
+    )
+    .await;
+}
+
 /// A reader that asked and then never reads holds nothing the driver waits on.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_stalled_reader_does_not_block_the_driver() {
@@ -624,8 +673,8 @@ async fn a_stalled_reader_does_not_block_the_driver() {
                 body.push_str(&piece);
             }
         };
-        // Enough retained text that these clients' replies exceed a socket buffer, so the
-        // server's write to them really stays pending while the model keeps streaming.
+        // Retained text large enough that these replies can exceed a socket buffer. Whether a
+        // server write really blocks depends on the OS and is not observed here.
         write(16);
         // 12 pieces: the budget charges 40 bytes per delta, so 16 x 4096 could never be retained.
         wait_retained(&control, &t, 12 * 4096).await;
