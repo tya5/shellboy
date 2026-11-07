@@ -255,7 +255,11 @@ async fn live_connections_default_deletion_is_rejected_before_writing() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn live_connections_catalog_removal_keeps_its_start_generation() {
-    use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::oneshot};
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+        sync::oneshot,
+    };
     crate::test_watchdog::watchdog("live catalog generation", async {
         let root = tempfile::tempdir().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
