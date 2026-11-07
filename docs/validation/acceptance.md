@@ -10695,3 +10695,8 @@ Planned synthetic coverage: any model can cancel another sender's queued input; 
 
 - Verified configured `limits.data_warning_bytes` and `limits.data_max_bytes` are serialized by `storage.status` as `warning_bytes` and `limit_bytes`; existing measured totals, booleans and disk-free fields remain distinct. `tests/gc.rs::logical_capacity_and_physical_database_space_are_reported_separately` asserts threshold values and serialized response.
 - Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Studio UI meter rendering, external consumers and non-macOS platforms remain unverified.
+
+
+### #272 model-grouped bounded usage
+
+- Model-grouped saved-attempt requests/cache ratio aggregate by persisted `model_id` using the existing bounded rowid candidate scan and page cursor. Summary records have no model attribution and are not read or assigned; summary fields report null/unknown. Synthetic regression and `EXPLAIN QUERY PLAN` check pending. Thread shell outcome aggregation is outside this stage.

@@ -1,5 +1,14 @@
 # Development status
 
+## Model-grouped usage groundwork (#272; branch `issue-272/model-usage-group`)
+
+Adds `usage.get --group-by model` using saved attempt model IDs and the existing
+10,000-rowid candidate window, group page limit and cursor. It intentionally skips
+the app_meta summary-usage read: saved summary records have no model ID, so their
+counts/tokens are explicitly unknown for model groups rather than misattributed.
+Thread-level shell exit-code trends and model-shell joins remain a separate stage.
+Focused tests, SQL plan validation, language audit and CI pending.
+
 
 ## Recovery-wait external CLI messages (#263; branch issue-263/review-fixes-1)
 

@@ -40,8 +40,8 @@ fn offset(zone: &str) -> Result<Option<FixedOffset>, ApiError> {
 }
 pub(crate) fn validate(a: &UsageGetArgs) -> Result<(), ApiError> {
     if let Some(group) = &a.group_by {
-        if !matches!(group.as_ref(), "hour" | "day" | "thread") {
-            return Err(invalid("group_by must be hour, day, or thread"));
+        if !matches!(group.as_ref(), "hour" | "day" | "thread" | "model") {
+            return Err(invalid("group_by must be hour, day, thread, or model"));
         }
         offset(a.timezone.as_deref().unwrap_or("local"))?;
         if !(1..=GROUP_LIMIT).contains(&a.limit.unwrap_or(GROUP_LIMIT)) {
@@ -102,7 +102,7 @@ fn query() -> String {
         ) SELECT c.scan_id,a.id,a.turn_id,u.run_id,u.thread_id,t.deleted_at,
             a.state,a.started_at,a.ended_at,
             CASE WHEN a.started_at>=?1 AND a.started_at<?2 THEN 1 ELSE 0 END,{},
-            a.profile_id,
+            a.profile_id,a.model_id,
             CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.status')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.status'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.status') END,
             CASE WHEN json_type(a.input_manifest_json,'$.rate_observation.applied_wait_ms')='integer' AND typeof(json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms'))='integer' THEN json_extract(a.input_manifest_json,'$.rate_observation.applied_wait_ms') END
         FROM candidates c JOIN model_attempt a ON a.id=c.id
@@ -135,6 +135,7 @@ struct Row {
     in_range: bool,
     usage: usage::StandardUsage,
     profile: String,
+    model: String,
     rate_status: Option<u64>,
     rate_wait: Option<u64>,
 }
@@ -251,7 +252,7 @@ impl Group {
         self.compactions = self.compactions.saturating_add(1);
         self.compaction.merge(usage);
     }
-    fn json(mut self, key: &str) -> Value {
+    fn json(mut self, key: &str, include_compaction: bool) -> Value {
         self.inputs.sort_unstable();
         let n = self.inputs.len();
         let percentile = |p: usize| {
@@ -260,7 +261,9 @@ impl Group {
         };
         let mean =
             (n > 0).then(|| self.inputs.iter().map(|n| *n as u128).sum::<u128>() as f64 / n as f64);
-        self.combined.summary_requests = self.compaction.requests;
+        if include_compaction {
+            self.combined.summary_requests = self.compaction.requests;
+        }
         for (combined, summary) in [
             (
                 &mut self.combined.input_tokens,
@@ -279,27 +282,45 @@ impl Group {
                 &self.compaction.output_tokens,
             ),
         ] {
-            combined.add(summary.known_sum.map(u128::from), summary.unknown_count);
-            if summary.overflow {
-                combined.overflow = true;
-                combined.known_sum = None;
+            if include_compaction {
+                combined.add(summary.known_sum.map(u128::from), summary.unknown_count);
+                if summary.overflow {
+                    combined.overflow = true;
+                    combined.known_sum = None;
+                }
             }
         }
-        self.combined
-            .reasoning_tokens
-            .add(None, self.compaction.requests);
-        self.combined
-            .total_tokens
-            .add(None, self.compaction.requests);
-        let mut compaction = json!({"compactions":self.compactions});
-        if let (Value::Object(target), Value::Object(fields)) =
-            (&mut compaction, json!(self.compaction))
-        {
-            target.extend(fields);
+        if include_compaction {
+            self.combined
+                .reasoning_tokens
+                .add(None, self.compaction.requests);
+            self.combined
+                .total_tokens
+                .add(None, self.compaction.requests);
         }
+        let compaction = if include_compaction {
+            let mut compaction = json!({"compactions":self.compactions});
+            if let (Value::Object(target), Value::Object(fields)) =
+                (&mut compaction, json!(self.compaction))
+            {
+                target.extend(fields);
+            }
+            compaction
+        } else {
+            json!({"compactions":null,"coverage":"summary usage is not attributed by model"})
+        };
+        let total = if include_compaction {
+            json!(self.combined)
+        } else {
+            json!({"model_attempt_records":self.combined.model_attempt_records,
+                "summary_requests":null,"input_tokens":self.combined.input_tokens,
+                "cached_tokens":self.combined.cached_tokens,"cache_creation_tokens":null,
+                "output_tokens":self.combined.output_tokens,"reasoning_tokens":self.combined.reasoning_tokens,
+                "total_tokens":self.combined.total_tokens,"coverage":"summary usage is not attributed by model"})
+        };
         json!({"key":key,"model_attempts":self.attempts,"compaction":compaction,
             "connection_rates":{"by_connection":self.rates,"coverage":"current candidate window; unknown facts excluded from counts"},
-            "total":self.combined,
+            "total":total,
             "input_per_request":{"states":["completed","failed","incomplete"],"known_count":n,"unknown_count":self.unknown_inputs,
             "mean":mean,"max":self.inputs.last(),"p50":percentile(50),"p95":percentile(95),
             "percentile_method":"nearest_rank","max_attempt":self.max_input.map(|(_, r)|r)},
@@ -323,6 +344,9 @@ fn bucket_time(time: DateTime<FixedOffset>, group: &str, zone: Option<FixedOffse
 fn bucket(row: &Row, group: &str, zone: Option<FixedOffset>) -> Option<String> {
     if group == "thread" {
         return Some(row.thread.clone());
+    }
+    if group == "model" {
+        return Some(row.model.clone());
     }
     let time = DateTime::parse_from_rfc3339(row.started.as_deref()?).ok()?;
     Some(bucket_time(time, group, zone))
@@ -355,11 +379,19 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         .map(|c| serde_json::from_str(&c.last_sort_key).map_err(|_| expired()))
         .transpose()?;
     let w = window(a, saved.as_ref())?;
-    let initial_compaction_watermark = db
-        .query_row("SELECT COALESCE(max(rowid),0) FROM app_meta", [], |r| {
+    let group_by = a
+        .group_by
+        .as_deref()
+        .ok_or_else(|| invalid("group_by required"))?;
+    let include_compaction = group_by != "model";
+    let initial_compaction_watermark = if include_compaction {
+        db.query_row("SELECT COALESCE(max(rowid),0) FROM app_meta", [], |r| {
             r.get(0)
         })
-        .map_err(error)?;
+        .map_err(error)?
+    } else {
+        0
+    };
     let mut scan = saved.unwrap_or_else(|| Scan {
         since: w.since.unwrap().to_rfc3339(),
         until: w.until.unwrap().to_rfc3339(),
@@ -422,11 +454,12 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
                 in_range: r.get(9)?,
                 usage: usage::StandardUsage::read(r, 10)?,
                 profile: r.get(15)?,
+                model: r.get(16)?,
                 rate_status: r
-                    .get::<_, Option<i64>>(16)?
+                    .get::<_, Option<i64>>(17)?
                     .and_then(|v| u64::try_from(v).ok()),
                 rate_wait: r
-                    .get::<_, Option<i64>>(17)?
+                    .get::<_, Option<i64>>(18)?
                     .and_then(|v| u64::try_from(v).ok()),
             })
         })
@@ -437,18 +470,30 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     rows.truncate(ROW_LIMIT);
     let scanned = rows.len();
     let tail = rows.last().map(|r| r.key);
-    let mut compaction_statement = db.prepare(&compaction_query()).map_err(error)?;
-    let mut candidate_rows = compaction_statement
-        .query(params![
-            scan.compaction_after,
-            scan.compaction_watermark,
-            crate::compaction::SUMMARY_USAGE_MAX_BYTES
-        ])
-        .map_err(error)?;
+    let mut compaction_statement = if include_compaction {
+        Some(db.prepare(&compaction_query()).map_err(error)?)
+    } else {
+        None
+    };
+    let mut candidate_rows = match compaction_statement.as_mut() {
+        Some(statement) => Some(
+            statement
+                .query(params![
+                    scan.compaction_after,
+                    scan.compaction_watermark,
+                    crate::compaction::SUMMARY_USAGE_MAX_BYTES
+                ])
+                .map_err(error)?,
+        ),
+        None => None,
+    };
     let mut compaction_rows = Vec::new();
     let mut compaction_bytes = 0usize;
     let mut compaction_row_more = false;
-    while let Some(row) = candidate_rows.next().map_err(error)? {
+    while let Some(row) = match candidate_rows.as_mut() {
+        Some(rows) => rows.next().map_err(error)?,
+        None => None,
+    } {
         let id: i64 = row.get(0).map_err(error)?;
         let key_bytes = row
             .get_ref(1)
@@ -629,7 +674,7 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         .into_iter()
         .skip(scan.group_offset)
         .take(a.limit.unwrap_or(GROUP_LIMIT) as usize)
-        .map(|(k, g)| g.json(&k))
+        .map(|(k, g)| g.json(&k, include_compaction))
         .collect::<Vec<_>>();
     let continued = scan.continued;
     let more = group_more || row_more || compaction_row_more;
@@ -660,11 +705,11 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
     Ok(
         json!({"thread_id":selection.as_ref().and_then(|s|s.threads.first()).filter(|id|id.len()<=512),"group_by":group_by,"timezone":a.timezone.as_deref().unwrap_or("local"),"requested_period":w.json(),
         "items":items,"more":more,"next_cursor":next_cursor,"scanned_candidates":scanned,"matched_attempts":matched,
-        "scanned_compaction_candidates":compaction_scanned,"scanned_compaction_bytes":compaction_bytes,"compaction_byte_limit":COMPACTION_PAGE_BYTES,"matched_compactions":matched_compactions,
-        "malformed_compaction_records":malformed_compactions,"unknown_time_compaction_records":unknown_time_compactions,
+        "scanned_compaction_candidates":if include_compaction {json!(compaction_scanned)} else {Value::Null},"scanned_compaction_bytes":if include_compaction {json!(compaction_bytes)} else {Value::Null},"compaction_byte_limit":COMPACTION_PAGE_BYTES,"matched_compactions":if include_compaction {json!(matched_compactions)} else {Value::Null},
+        "malformed_compaction_records":if include_compaction {json!(malformed_compactions)} else {Value::Null},"unknown_time_compaction_records":if include_compaction {json!(unknown_time_compactions)} else {Value::Null},
         "excluded_time_count":excluded_times,"outside_period_count":outside_period,"row_limit":ROW_LIMIT,"group_limit":a.limit.unwrap_or(GROUP_LIMIT),"scan_truncated":row_more || compaction_row_more || continued,
         "scope_complete":selection.as_ref().is_none_or(|s|s.complete),"statistics_scope":"current_candidate_window",
-        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary":"recorded_first_request_at","summary_unknown_time":"unknown_time_compaction_records cannot be assigned to a period","summary_malformed":"malformed_compaction_records are excluded, never treated as zero","embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
+        "coverage":{"unknown_starts":"excluded_time_count includes missing, malformed and non-current UTC formats","summary":if include_compaction {"recorded_first_request_at"} else {"not_attributed_by_model"},"summary_unknown_time":if include_compaction {"unknown_time_compaction_records cannot be assigned to a period"} else {"not_scanned_for_model_group"},"summary_malformed":if include_compaction {"malformed_compaction_records are excluded, never treated as zero"} else {"not_scanned_for_model_group"},"embeddings":"not_recorded"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
     )
 }
 

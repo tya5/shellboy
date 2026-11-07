@@ -250,6 +250,8 @@ Turn, then spill or summarize that range. Null means not recorded, not zero.
 Model/shell starts and Run creation select whole lifetimes, not prorated overlap.
 Use `usage get --group-by day|hour|thread` to compare ordinary model-attempt
 usage with the separate summary/compaction section and their combined token total.
+Use `usage get --group-by model` to group saved attempts by model ID; summary
+usage is not attributed to a model and remains explicitly unknown.
 Summary groups are assigned by the first summary-request timestamp; unavailable
 values remain unknown, and summary records may require following `next_cursor`.
 This reports provider usage, not cost.
