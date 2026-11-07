@@ -3,11 +3,13 @@ mod sender;
 pub use sender::{MessageSender, SenderKind, validate_sender_label};
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_CAPABILITIES: &[&str] = &[];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 pub const MAX_LIST_LIMIT: u32 = 200;
@@ -19,9 +21,201 @@ pub const MAX_SEARCH_LIMIT: u32 = 50;
 pub const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
 pub const DEFAULT_ENCODING: &str = "UTF-8";
 
+/// JSON Schema document for the stable RPC envelope and its generated wire types.
+fn operation_result_schemas(
+    generator: &mut schemars::generate::SchemaGenerator,
+) -> serde_json::Value {
+    let mut results = serde_json::Map::new();
+    macro_rules! opaque {
+        ($name:literal) => {
+            results.insert($name.to_owned(), serde_json::Value::Bool(true));
+        };
+    }
+    macro_rules! result {
+        ($name:literal, $ty:ty) => {
+            results.insert(
+                $name.to_owned(),
+                serde_json::to_value(generator.root_schema_for::<$ty>())
+                    .expect("schema serializes"),
+            );
+        };
+    }
+    result!("owner.shutdown", Accepted);
+    opaque!("status");
+    result!("model.list", ModelListResult);
+    result!("thread.list", Page<ThreadSummary>);
+    result!("thread.get", ThreadDetails);
+    opaque!("thread.branches");
+    opaque!("usage.get");
+    opaque!("compact.list");
+    opaque!("shell.list");
+    opaque!("thread.create");
+    opaque!("thread.fork");
+    opaque!("thread.delete");
+    opaque!("thread.delete_preview");
+    opaque!("thread.prune");
+    opaque!("thread.rewind");
+    result!("thread.archive", Accepted);
+    result!("thread.unarchive", Accepted);
+    opaque!("thread.tag");
+    opaque!("thread.tags");
+    opaque!("thread.cwds");
+    result!("thread.set", ThreadDetails);
+    result!("message.reply", MessageAccepted);
+    result!("message.send", MessageAccepted);
+    result!("message.get", MessageDetails);
+    result!("message.cancel", MessageCancelResult);
+    opaque!("operation.get");
+    result!("run.get", RunDetails);
+    opaque!("run.retry");
+    opaque!("run.stop");
+    result!("turn.get", TurnDetails);
+    result!("wait", WaitResult);
+    result!("history.list", Page<HistorySnippet>);
+    result!("history.window", HistoryWindow);
+    result!("history.get", HistoryBody);
+    result!("history.search", Page<SearchMatch>);
+    result!("history.relations", Page<RelationItem>);
+    result!("shell.get", ShellDetails);
+    result!("shell.read", ShellOutput);
+    result!("shell.write", ShellWriteResult);
+    result!("shell.eof", Accepted);
+    result!("shell.stop", Accepted);
+    result!("attachment.add", AttachmentDetails);
+    result!("attachment.list", Page<AttachmentDetails>);
+    result!("attachment.remove", Accepted);
+    opaque!("compact.preview");
+    opaque!("compact");
+    opaque!("context.edit");
+    result!("index.status", IndexStatus);
+    opaque!("index.preview");
+    opaque!("index.backfill");
+    opaque!("index.retry");
+    opaque!("index.rebuild");
+    result!("index.probe", IndexProbeObservation);
+    result!("index.shrink", IndexShrinkStatus);
+    opaque!("index.remove");
+    result!("storage.status", StorageStatus);
+    opaque!("storage.collect");
+    opaque!("config.get");
+    opaque!("config.set");
+    result!("credentials.set", Accepted);
+    result!("credentials.clear", Accepted);
+    opaque!("connection.test");
+    serde_json::Value::Object(results)
+}
+
+pub fn schema_json() -> String {
+    let mut settings = schemars::generate::SchemaSettings::draft2020_12();
+    settings.definitions_path = "/definitions".into();
+    let mut generator = settings.into_generator();
+    let mut definitions = serde_json::Map::new();
+    macro_rules! add_root {
+        ($name:literal, $ty:ty) => {
+            definitions.insert(
+                $name.to_owned(),
+                serde_json::to_value(generator.root_schema_for::<$ty>())
+                    .expect("schema serializes"),
+            );
+        };
+    }
+    let command_schema = generator.root_schema_for::<Command>();
+    let command_schema_value = serde_json::to_value(&command_schema).expect("schema serializes");
+    definitions.insert("Command".into(), command_schema_value.clone());
+    let mut request_options = command_schema_value
+        .as_object()
+        .and_then(|object| object.get("oneOf"))
+        .and_then(serde_json::Value::as_array)
+        .expect("command is an adjacently tagged enum")
+        .clone();
+    for option in &mut request_options {
+        let variant = option
+            .as_object_mut()
+            .expect("command variant is an object");
+        let properties = variant
+            .get_mut("properties")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("command variant has properties");
+        properties.insert(
+            "protocol_version".into(),
+            serde_json::json!({"type":"integer","format":"uint32","minimum":0}),
+        );
+        properties.insert(
+            "operation_id".into(),
+            serde_json::json!({"type":"string","minLength":1}),
+        );
+        properties.insert("origin".into(), serde_json::Value::Bool(true));
+        variant.insert(
+            "additionalProperties".into(),
+            serde_json::Value::Bool(false),
+        );
+        let required = variant
+            .get_mut("required")
+            .and_then(serde_json::Value::as_array_mut)
+            .expect("command variant has required fields");
+        required.extend(
+            ["protocol_version", "operation_id"]
+                .into_iter()
+                .map(serde_json::Value::from),
+        );
+        required.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+        required.dedup();
+    }
+    let request = serde_json::json!({"oneOf": request_options});
+    definitions.insert("Request".into(), request);
+    add_root!("Response", Response<Value>);
+    definitions.insert("Command".into(), command_schema_value);
+    add_root!("Error", ApiError);
+    add_root!("Origin", Origin);
+    add_root!("PageCursor", PageCursor);
+    add_root!("EventCursor", EventCursor);
+    add_root!("Hello", crate::ipc::Hello);
+    add_root!("Welcome", crate::ipc::Welcome);
+    add_root!("Endpoint", crate::app::Endpoint);
+    add_root!("Accepted", Accepted);
+    add_root!("ModelListResult", ModelListResult);
+    add_root!("MessageAccepted", MessageAccepted);
+    add_root!("MessageCancelResult", MessageCancelResult);
+    add_root!("Page", Page<ThreadSummary>);
+    add_root!("ThreadSummary", ThreadSummary);
+    add_root!("ThreadDetails", ThreadDetails);
+    add_root!("MessageDetails", MessageDetails);
+    add_root!("RunDetails", RunDetails);
+    add_root!("TurnDetails", TurnDetails);
+    add_root!("WaitResult", WaitResult);
+    add_root!("HistorySnippet", HistorySnippet);
+    add_root!("HistoryWindow", HistoryWindow);
+    add_root!("HistoryBody", HistoryBody);
+    add_root!("SearchMatch", SearchMatch);
+    add_root!("RelationItem", RelationItem);
+    add_root!("ShellDetails", ShellDetails);
+    add_root!("ShellOutput", ShellOutput);
+    add_root!("ShellWriteResult", ShellWriteResult);
+    add_root!("AttachmentDetails", AttachmentDetails);
+    add_root!("IndexStatus", IndexStatus);
+    add_root!("IndexProbeObservation", IndexProbeObservation);
+    add_root!("IndexShrinkStatus", IndexShrinkStatus);
+    add_root!("StorageStatus", StorageStatus);
+    let operation_results = operation_result_schemas(&mut generator);
+    for (name, schema) in generator.take_definitions(false) {
+        definitions.entry(name).or_insert(schema);
+    }
+    let document = serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://shellboy.dev/schema/protocol-v3.json",
+        "title": "Shellboy local RPC protocol v3",
+        "protocol_version": PROTOCOL_VERSION,
+        "capabilities": PROTOCOL_CAPABILITIES,
+        "operation_results": operation_results,
+        "opaque_result_note": "A true operation schema means the result is opaque JSON, not yet represented by a stable Rust result record.",
+        "definitions": definitions
+    });
+    serde_json::to_string_pretty(&document).expect("schema document serializes")
+}
+
 macro_rules! states {
     ($name:ident { $($variant:ident => $wire:literal),+ $(,)? }) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
         pub enum $name { $(#[serde(rename = $wire)] $variant),+ }
         impl $name {
             pub const VALUES: &'static [Self] = &[$(Self::$variant),+];
@@ -35,7 +229,7 @@ macro_rules! states {
         }
     };
     ($name:ident { $($variant:ident),+ $(,)? }) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
         #[serde(rename_all = "snake_case")]
         pub enum $name { $($variant),+ }
     };
@@ -121,9 +315,10 @@ states!(StorageCategory {
 });
 states!(IndexScope { Threads => "threads", All => "all" });
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, thiserror::Error)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema, thiserror::Error,
+)]
 #[error("{message}")]
-#[serde(deny_unknown_fields)]
 pub struct ApiError {
     pub code: ErrorCode,
     pub message: String,
@@ -196,8 +391,7 @@ fn optional_nonempty(value: Option<&str>, field: &str) -> Result<(), ApiError> {
 }
 
 /// Token is deliberately excluded from Debug to avoid logging shell credentials.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Origin {
     pub instance_id: String,
     pub thread_id: String,
@@ -237,7 +431,7 @@ impl std::fmt::Debug for Origin {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Request {
     pub protocol_version: u32,
     pub operation_id: String,
@@ -420,8 +614,7 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Response<T> {
     pub protocol_version: u32,
     pub operation_id: String,
@@ -473,8 +666,15 @@ impl<T> Response<T> {
 macro_rules! args {
     ($(#[$struct_meta:meta])* $name:ident { $($(#[$meta:meta])* $field:ident : $ty:ty),* $(,)? }) => {
         $(#[$struct_meta])*
-        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
         #[serde(deny_unknown_fields)]
+        pub struct $name { $($(#[$meta])* pub $field: $ty),* }
+    };
+}
+macro_rules! record {
+    ($(#[$struct_meta:meta])* $name:ident { $($(#[$meta:meta])* $field:ident : $ty:ty),* $(,)? }) => {
+        $(#[$struct_meta])*
+        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
         pub struct $name { $($(#[$meta])* pub $field: $ty),* }
     };
 }
@@ -515,7 +715,7 @@ args!(#[derive(Default)] CompactPreviewArgs {
     #[serde(default)] reduce_rounds: Option<u64>
 });
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
-args!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
+record!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
 args!(ThreadCreateArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default)] parent_id: Option<String> });
 args!(ThreadForkArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, thread_id: String, node_id: String, #[serde(default)] cwd: Option<String> });
 args!(DeletionPreviewMarker {
@@ -587,7 +787,7 @@ args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = 
 args!(MessageAskArgs { #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, text: String });
 args!(MessageSendArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
 /// Message delivery timing; `Complete` is Revisit.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Deliver {
     #[default]
@@ -623,11 +823,11 @@ states!(MessageCancelOutcome {
     Forbidden,
     Unavailable
 });
-args!(MessageCancelItem { message_id: String, outcome: MessageCancelOutcome,
+record!(MessageCancelItem { message_id: String, outcome: MessageCancelOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] archive_draft_id: Option<String>
 });
-args!(MessageCancelResult { items: Vec<MessageCancelItem> });
+record!(MessageCancelResult { items: Vec<MessageCancelItem> });
 args!(MessageTarget { message_id: String });
 args!(OperationTarget {
     operation_id: String
@@ -656,7 +856,7 @@ fn utf8() -> String {
     DEFAULT_ENCODING.to_owned()
 }
 /// Which Threads `thread list` returns with respect to archiving (#222).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ArchivedFilter {
     #[default]
@@ -717,7 +917,7 @@ args!(HistoryWindowArgs { thread_id: String,
 // Items carry their own `selection.ordinal`. `total` is one past the last
 // ordinal; `revision` is the Thread's selected-path revision (it also advances
 // on append, which keeps every earlier position valid).
-args!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
+record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -754,8 +954,8 @@ states!(HistoryRelation {
     Previous => "previous", Next => "next", Sources => "sources", Replacements => "replacements"
 });
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
-args!(NodeProvenance { #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>, kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
-args!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
+record!(NodeProvenance { #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>, kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
+record!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
 args!(ShellReadArgs { execution_id: String, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
 args!(ShellWriteArgs {
     execution_id: String,
@@ -787,7 +987,7 @@ args!(ConfigGetArgs {});
 args!(ConfigSetArgs { expected_hash: String, changes: Vec<ConfigChange> });
 /// One named change to the configuration file. `field` is a TOML dotted key;
 /// a missing or null `value` removes the key so its default applies again.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigChange {
     pub field: String,
@@ -804,7 +1004,7 @@ impl std::fmt::Debug for ConfigChange {
     }
 }
 /// The key is write-only: Debug and every reply leave it out.
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialsSetArgs {
     pub connection: String,
@@ -822,7 +1022,7 @@ args!(CredentialsClearArgs { connection: String });
 /// Test a saved connection by `connection`, or a candidate that is not saved by
 /// `base_url` (with optional `api`, `api_key` or `api_key_env`, `api_key_header`,
 /// `ssl_verify`). Exactly one of the two forms.
-#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectionTestArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -854,29 +1054,28 @@ impl std::fmt::Debug for ConnectionTestArgs {
     }
 }
 args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool });
-args!(EventChange {
+record!(EventChange {
     thread_id: String,
     seq: u64
 });
 // Unsaved model text (#243 E3). `offset` counts Unicode scalar values of this attempt's
 // stream, reasoning and refusal text included; it restarts with each attempt.
-args!(EventTextDelta {
+record!(EventTextDelta {
     offset: u64,
     reasoning: bool,
     text: String
 });
-args!(EventLiveText {
+record!(EventLiveText {
     thread_id: String,
     attempt_id: String,
     gap: bool,
     deltas: Vec<EventTextDelta>
 });
-args!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>> });
+record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EventCursor {
     pub v: u32,
     pub instance_id: String,
@@ -901,7 +1100,7 @@ impl EventCursor {
 }
 args!(WaitArgs { conditions: Vec<WaitCondition>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String> });
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WaitCondition {
     ReplyReceived {
@@ -930,7 +1129,7 @@ args!(OwnerShutdownArgs {
     instance_id: String
 });
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "command", content = "args")]
 pub enum Command {
     #[serde(rename = "owner.shutdown")]
@@ -1068,7 +1267,7 @@ pub(crate) use command::CommandRoute;
 pub(crate) mod validation;
 pub(crate) use validation::rfc3339;
 
-args!(ShellToolArgs { command: String, #[serde(default, deserialize_with = "crate::tool_description::deserialize", skip_serializing_if = "Option::is_none")] description: Option<String>, #[serde(default)] background: bool, #[serde(default)] stdin_open: bool, #[serde(default)] initial_stdin: Option<String>, #[serde(default = "utf8")] input_encoding: String, #[serde(default = "utf8")] output_encoding: String });
+args!(ShellToolArgs { command: String, #[serde(default, deserialize_with = "crate::tool_description::deserialize", skip_serializing_if = "Option::is_none")] #[schemars(with = "Option<crate::tool_description::DescriptionSchema>")] description: Option<String>, #[serde(default)] background: bool, #[serde(default)] stdin_open: bool, #[serde(default)] initial_stdin: Option<String>, #[serde(default = "utf8")] input_encoding: String, #[serde(default = "utf8")] output_encoding: String });
 impl ShellToolArgs {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.command, "command")?;
@@ -1084,7 +1283,7 @@ impl ShellToolArgs {
         nonempty(&self.output_encoding, "output_encoding")
     }
 }
-args!(MessageAccepted { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
+record!(MessageAccepted { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String> });
 impl MessageAccepted {
     pub fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.message_id, "message_id")?;
@@ -1099,17 +1298,16 @@ impl MessageAccepted {
         optional_nonempty(self.turn_id.as_deref(), "turn_id")
     }
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Page<T> {
     pub items: Vec<T>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
 }
-args!(WaitResult { status: WaitStatus, matched: Vec<WaitCondition>, snapshot: Value, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String> });
+record!(WaitResult { status: WaitStatus, matched: Vec<WaitCondition>, snapshot: Value, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] hint: Option<String> });
 
 /// Versioned opaque page cursor. Scope, filters, and revision bind it to one query.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PageCursor {
     pub version: u32,
     pub scope: String,
@@ -1239,15 +1437,15 @@ fn frame_io(error: std::io::Error) -> ApiError {
 }
 
 // Core result records deliberately retain provider-specific bodies as JSON payloads.
-args!(RevisitSummary {
+record!(RevisitSummary {
     pending: bool,
     consumed_count: u64
 });
-args!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default)] awaiting_human_count: u64, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String });
-args!(ThreadDetails { #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] segment_chars: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_segment_chars: Option<u64>, #[serde(default)] reduce_rounds: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_reduce_rounds: Option<u64>, #[serde(default)] awaiting_reply: Vec<Value>, #[serde(default)] awaiting_thread_replies: Vec<Value>, #[serde(default)] awaiting_human: Vec<Value>, #[serde(default)] awaiting_replies: Vec<Value>, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
+record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default)] awaiting_human_count: u64, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String });
+record!(ThreadDetails { #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] segment_chars: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_segment_chars: Option<u64>, #[serde(default)] reduce_rounds: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_reduce_rounds: Option<u64>, #[serde(default)] awaiting_reply: Vec<Value>, #[serde(default)] awaiting_thread_replies: Vec<Value>, #[serde(default)] awaiting_human: Vec<Value>, #[serde(default)] awaiting_replies: Vec<Value>, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, children_count: u64, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
 // Present only in the result of a `thread set --parent` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).
-args!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String>, #[serde(default)] live_run_owner_run_id: Option<String> });
-args!(MessageDetails { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
+record!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String>, #[serde(default)] live_run_owner_run_id: Option<String> });
+record!(MessageDetails { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });
 args!(
     #[derive(Eq)]
     RunWaitReason {
@@ -1258,12 +1456,12 @@ args!(
         operation_count: u64
     }
 );
-args!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] owner_run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, owned_run_ids: Vec<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
-args!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
+record!(RunDetails { #[serde(default, skip_serializing_if = "Option::is_none")] waiting_reason: Option<RunWaitReason>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, run_id: String, thread_id: String, state: RunState, #[serde(default, skip_serializing_if = "Option::is_none")] owner_run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, owned_run_ids: Vec<String>, owned_execution_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary> });
+record!(TurnDetails { #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, context: crate::context::ExecutionContext, turn_id: String, run_id: String, thread_id: String, state: TurnState, #[serde(default, skip_serializing_if = "Option::is_none")] end_message_node_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_hint: Option<String> });
 // Optional shell fields describe unknown/live lifecycle facts and the internal
 // output-reader snapshot, which deliberately does not load command ownership.
 // They are not an older-owner protocol compatibility contract.
-args!(ShellDetails {
+record!(ShellDetails {
     execution_id: String, run_id: String, state: ShellState, output_complete: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] started_at: Option<String>,
     #[serde(default)] last_output_at: Option<String>,
@@ -1278,7 +1476,7 @@ args!(ShellDetails {
     #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>
 });
-args!(ShellOutput {
+record!(ShellOutput {
     execution_id: String,
     text: String,
     encoding: String,
@@ -1287,12 +1485,12 @@ args!(ShellOutput {
     output_complete: bool,
     decode_errors: bool
 });
-args!(ShellWriteResult {
+record!(ShellWriteResult {
     execution_id: String,
     bytes_written: u64,
     state: ShellState
 });
-args!(HistoryExecutionLink {
+record!(HistoryExecutionLink {
     group_id: String, call_id: String, call_ordinal: u64, call_state: String,
     execution_id: String, state: String, cwd: String, command_excerpt: String,
     command_truncated: bool,
@@ -1300,12 +1498,12 @@ args!(HistoryExecutionLink {
     #[serde(default, skip_serializing_if = "Option::is_none")] request_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] result_node_id: Option<String>
 });
-args!(HistorySelection {
+record!(HistorySelection {
     thread_id: String,
     ordinal: u64,
     current_cwd: String
 });
-args!(HistorySnippet {
+record!(HistorySnippet {
     #[serde(default)] payload_chars: Option<u64>,
     node_id: String,
     kind: String,
@@ -1317,13 +1515,13 @@ args!(HistorySnippet {
     execution_count: u64,
     executions_truncated: bool
 });
-args!(HistoryBody { context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
-args!(SearchMatch {
+record!(HistoryBody { context: crate::context::ExecutionContext, provenance: NodeProvenance, node_id: String, kind: String, text: String, source_node_ids: Vec<String>, previous_node_ids: Vec<String>, next_node_ids: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] next_cursor: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] tombstone_reason: Option<String> });
+record!(SearchMatch {
     node_id: String,
     excerpt: String,
     distance: f64
 });
-args!(AttachmentDetails { source_node_id: String, delivery_status: String, attachment_id: String, thread_id: String, path: String, kind: AttachmentKind, selected: bool, managed: bool, #[serde(default, skip_serializing_if = "Option::is_none")] unavailable_reason: Option<String> });
+record!(AttachmentDetails { source_node_id: String, delivery_status: String, attachment_id: String, thread_id: String, path: String, kind: AttachmentKind, selected: bool, managed: bool, #[serde(default, skip_serializing_if = "Option::is_none")] unavailable_reason: Option<String> });
 states!(IndexJobState {
     Pending,
     Running,
@@ -1338,14 +1536,14 @@ states!(ManagedFileState {
     Failed
 });
 args!(#[derive(Default)] IndexProbeArgs { #[serde(default, skip_serializing_if = "Option::is_none")] dimensions: Option<usize> });
-args!(IndexStatus { #[serde(default)] auto_history: bool, auto_kinds: Vec<String>, #[serde(default)] held_auto_history: u64, #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation>, #[serde(default, skip_serializing_if = "Option::is_none")] shrink: Option<IndexShrinkStatus>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_vector_payload_bytes: Option<u64> });
-args!(IndexSpaceStatus { space_id: String, connection: String, model: String, dimension: usize, requested_dimensions: Option<usize>, segments: u64, vector_payload_bytes: u64, state: String, selected: bool, #[serde(default, skip_serializing_if = "Option::is_none")] int8_scale: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_remove_with: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] partial: Option<bool> });
+record!(IndexStatus { #[serde(default)] auto_history: bool, auto_kinds: Vec<String>, #[serde(default)] held_auto_history: u64, #[serde(default, skip_serializing_if = "Option::is_none")] space_id: Option<String>, pending: u64, running: u64, done: u64, failed: u64, paused: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>, paused_at: Option<String>, pause_id: Option<String>, spaces: Vec<IndexSpaceStatus>, spaces_total: u64, spaces_truncated: bool, probes: Vec<IndexProbeObservation>, #[serde(default, skip_serializing_if = "Option::is_none")] shrink: Option<IndexShrinkStatus>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_vector_payload_bytes: Option<u64> });
+record!(IndexSpaceStatus { space_id: String, connection: String, model: String, dimension: usize, requested_dimensions: Option<usize>, segments: u64, vector_payload_bytes: u64, state: String, selected: bool, #[serde(default, skip_serializing_if = "Option::is_none")] int8_scale: Option<f64>, #[serde(default, skip_serializing_if = "Option::is_none")] retained_remove_with: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] partial: Option<bool> });
 args!(IndexRemoveArgs {
     space_id: String,
     #[serde(default)]
     dry_run: bool
 });
-args!(IndexShrinkStatus { source_space: String, target_space: Option<String>, phase: String, source_segments: u64, target_segments: u64, started_at: String, error: Option<Value> });
+record!(IndexShrinkStatus { source_space: String, target_space: Option<String>, phase: String, source_segments: u64, target_segments: u64, started_at: String, error: Option<Value> });
 args!(
     #[derive(Default)]
     IndexShrinkArgs {
@@ -1357,13 +1555,115 @@ args!(
         revert: bool
     }
 );
-args!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
-args!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
-args!(Accepted { accepted: bool });
+record!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
+record!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
+record!(Accepted { accepted: bool });
 
 #[cfg(test)]
 mod message_acknowledgement_tests {
     use super::*;
+
+    #[test]
+    fn tolerant_response_records_accept_additive_fields_but_request_args_stay_strict() {
+        let result: MessageAccepted = serde_json::from_value(serde_json::json!({
+            "message_id":"m", "thread_id":"t", "delivery_status":"accepted",
+            "assignment":"pending", "future_field":true
+        }))
+        .unwrap();
+        assert_eq!(result.message_id, "m");
+        assert!(
+            serde_json::from_value::<ThreadListArgs>(serde_json::json!({
+                "future_field":true
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn operation_result_schema_has_every_wire_operation() {
+        let settings = schemars::generate::SchemaSettings::draft2020_12();
+        let mut generator = settings.into_generator();
+        let schema = operation_result_schemas(&mut generator);
+        let results = schema.as_object().unwrap();
+        for name in [
+            "owner.shutdown",
+            "status",
+            "model.list",
+            "thread.list",
+            "thread.get",
+            "thread.branches",
+            "usage.get",
+            "compact.list",
+            "shell.list",
+            "thread.create",
+            "thread.fork",
+            "thread.delete",
+            "thread.delete_preview",
+            "thread.prune",
+            "thread.rewind",
+            "thread.archive",
+            "thread.unarchive",
+            "thread.tag",
+            "thread.tags",
+            "thread.cwds",
+            "thread.set",
+            "message.reply",
+            "message.send",
+            "message.get",
+            "message.cancel",
+            "operation.get",
+            "run.get",
+            "run.retry",
+            "run.stop",
+            "turn.get",
+            "wait",
+            "history.list",
+            "history.window",
+            "history.get",
+            "history.search",
+            "history.relations",
+            "shell.get",
+            "shell.read",
+            "shell.write",
+            "shell.eof",
+            "shell.stop",
+            "attachment.add",
+            "attachment.list",
+            "attachment.remove",
+            "compact.preview",
+            "compact",
+            "context.edit",
+            "index.status",
+            "index.preview",
+            "index.backfill",
+            "index.retry",
+            "index.rebuild",
+            "index.probe",
+            "index.shrink",
+            "index.remove",
+            "storage.status",
+            "storage.collect",
+            "config.get",
+            "config.set",
+            "credentials.set",
+            "credentials.clear",
+            "connection.test",
+        ] {
+            assert!(
+                results.contains_key(name),
+                "missing result schema for {name}"
+            );
+        }
+        assert_eq!(results.len(), 62);
+        for name in ["status", "thread.create", "shell.list", "config.get"] {
+            assert_eq!(
+                results[name],
+                serde_json::Value::Bool(true),
+                "{name} stays opaque"
+            );
+        }
+    }
+
     #[test]
     fn human_ask_and_acknowledgement_use_backward_compatible_wire_fields() {
         let ask = Command::MessageAsk(MessageAskArgs {

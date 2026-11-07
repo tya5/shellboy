@@ -60,6 +60,7 @@ png = "=0.18.1"
 pulldown-cmark = { version = "=0.13.5", default-features = false }
 tui-markdown = { version = "=0.3.12", default-features = false, features = ["highlight-code"] }
 globset = "=0.4.20"
+schemars = { version = "=1.0.4", features = ["derive"] }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
