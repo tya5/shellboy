@@ -155,6 +155,7 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 #[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
+        to_human: false,
         expect_reply: false,
         deliver: Deliver::Next,
         message_id: "m".into(),
@@ -197,6 +198,7 @@ fn assignment_never_exposes_fabricated_or_partial_ids() {
     ] {
         assert!(
             MessageAccepted {
+                to_human: false,
                 expect_reply: false,
                 deliver: Deliver::Next,
                 message_id: "m".into(),
@@ -829,6 +831,7 @@ fn current_output_and_history_results_require_observation_fields() {
 #[test]
 fn message_resume_recovery_is_optional_and_round_trips() {
     let command = Command::MessageSend(MessageSendArgs {
+        to_human: false,
         human: false,
         resume_recovery: true,
         expect_reply: false,
@@ -851,6 +854,7 @@ fn message_delivery_timing_is_one_optional_wire_field() {
         Command::MessageSend(MessageSendArgs {
             resume_recovery: false,
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: None,

@@ -117,6 +117,7 @@ async fn send(
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver,

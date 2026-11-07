@@ -439,6 +439,7 @@ fn send(thread: &str, text: &str) -> Command {
         resume_recovery: false,
 
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -565,6 +566,7 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver,
@@ -595,6 +597,7 @@ async fn auto_unarchive_by_send_and_deliver_complete_wakes_the_new_run() {
             resume_recovery: false,
 
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Complete,
@@ -637,6 +640,7 @@ async fn a_reply_that_starts_a_run_on_an_archived_sender_unarchives_it() {
             request(Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: true,
                 sender_label: None,
                 deliver: Deliver::Next,

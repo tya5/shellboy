@@ -10695,3 +10695,11 @@ Planned synthetic coverage: any model can cancel another sender's queued input; 
 
 - Verified configured `limits.data_warning_bytes` and `limits.data_max_bytes` are serialized by `storage.status` as `warning_bytes` and `limit_bytes`; existing measured totals, booleans and disk-free fields remain distinct. `tests/gc.rs::logical_capacity_and_physical_database_space_are_reported_separately` asserts threshold values and serialized response.
 - Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Studio UI meter rendering, external consumers and non-macOS platforms remain unverified.
+## #262 Human decisions
+
+- [x] `message ask` creates an applied pending reply receipt on the current Thread without a Run/Turn/wake; its change hint notifies `events.wait` observers, and the sender Turn can end (reply integration tests).
+- [x] Human questions and Thread-targeted `--expect-reply` duties appear together, ordered and bounded, in `thread.get.awaiting_replies`; each item identifies recipient kind/Thread, excerpt, creation time and elapsed duration (frontend and reply integration tests).
+- [x] `events.wait --thread` change hints allow a client to refresh only that Thread; `message.reply` answers through the existing path (reply integration test asserts the Thread change effect and answer correlation).
+- [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
+- [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
+- [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.

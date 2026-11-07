@@ -6,7 +6,7 @@ pub struct PendingMessages {
     pub items: Vec<PendingMessage>,
     pub total: u64,
     pub submitted: Vec<SubmittedMessage>,
-    pub awaiting_reply: Vec<ReplyTarget>,
+    pub awaiting_replies: Vec<ReplyTarget>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplyTarget {
@@ -15,6 +15,9 @@ pub struct ReplyTarget {
     pub created_at: String,
     pub excerpt: String,
     pub applied: bool,
+    pub to_human: bool,
+    pub recipient_thread_id: String,
+    pub elapsed_ms: u64,
 }
 impl ReplyTarget {
     pub(super) fn caption(&self, language: UiLanguage) -> String {
@@ -206,7 +209,7 @@ impl QueuePopup {
                 i18n::local!(language, "Esc 戻る | Enter 返信", "Esc Back | Enter Reply"),
                 &self.paint,
             );
-            let items = if pending.awaiting_reply.is_empty() {
+            let items = if pending.awaiting_replies.is_empty() {
                 vec![popup::Item::new(i18n::local!(
                     language,
                     "返事待ちはありません",
@@ -214,7 +217,7 @@ impl QueuePopup {
                 ))]
             } else {
                 pending
-                    .awaiting_reply
+                    .awaiting_replies
                     .iter()
                     .map(|item| {
                         popup::Item::new(format!(
@@ -419,7 +422,7 @@ impl UiState {
     }
     pub(super) fn queue_key(&mut self, key: KeyEvent) -> Vec<UiAction> {
         if self.queue_popup.replies {
-            let count = self.view().pending_messages.awaiting_reply.len();
+            let count = self.view().pending_messages.awaiting_replies.len();
             match key.code {
                 KeyCode::Esc => self.queue_popup.visible = false,
                 KeyCode::Up => {
@@ -434,7 +437,7 @@ impl UiState {
                     if let Some(target) = self
                         .view()
                         .pending_messages
-                        .awaiting_reply
+                        .awaiting_replies
                         .get(self.queue_popup.selected)
                         .cloned()
                     {
@@ -788,7 +791,7 @@ mod tests {
         let mut item = queued("saved");
         item.operation_id = "operation".into();
         let pending = PendingMessages {
-            awaiting_reply: Vec::new(),
+            awaiting_replies: Vec::new(),
             items: vec![item],
             total: 1,
             submitted: vec![SubmittedMessage {
@@ -864,7 +867,7 @@ mod tests {
             generation: *generation,
             nodes: vec![selected("saved")],
             pending: PendingMessages {
-                awaiting_reply: Vec::new(),
+                awaiting_replies: Vec::new(),
                 items: vec![queued("newly-arrived")],
                 total: 1,
                 submitted: vec![binding],

@@ -571,8 +571,8 @@ impl BrowserMessage<'_> {
                     interrupted,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "{}ID {} · Parent {} · {}{}",
-                "{}ID {} | Parent {} | {}{}",
+                "{}ID {} · Parent {} · {}{}{}",
+                "{}ID {} | Parent {} | {}{}{}",
                 thread
                     .revisit
                     .as_ref()
@@ -589,6 +589,11 @@ impl BrowserMessage<'_> {
                     .map(one_line)
                     .unwrap_or_else(|| "none".into()),
                 one_line(activity_label(thread, language)),
+                format_reply_waits(
+                    thread.awaiting_human_count,
+                    thread.awaiting_thread_count,
+                    language
+                ),
                 if interrupted {
                     crate::ui::text_width::glyphs::select(
                         " · Interrupted by app exit",
@@ -605,8 +610,8 @@ impl BrowserMessage<'_> {
                     interrupted,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "{}ID {} · 親 {} · {}{}",
-                "{}ID {} | 親 {} | {}{}",
+                "{}ID {} · 親 {} · {}{}{}",
+                "{}ID {} | 親 {} | {}{}{}",
                 thread
                     .revisit
                     .as_ref()
@@ -623,6 +628,11 @@ impl BrowserMessage<'_> {
                     .map(one_line)
                     .unwrap_or_else(|| "なし".into()),
                 one_line(activity_label(thread, language)),
+                format_reply_waits(
+                    thread.awaiting_human_count,
+                    thread.awaiting_thread_count,
+                    language
+                ),
                 if interrupted {
                     crate::ui::text_width::glyphs::select(
                         " · アプリ終了による中断",
@@ -2603,11 +2613,19 @@ impl ThreadBrowser {
             label.push_str(BrowserText::UnconfirmedFilter.render(self.language));
         }
         let title = one_line(&thread.title);
-        label.push_str(if title.width() == 0 {
-            BrowserText::Untitled.render(self.language)
+        let title = if title.width() == 0 {
+            BrowserText::Untitled.render(self.language).to_owned()
         } else {
-            &title
-        });
+            title
+        };
+        let waits = format_reply_waits(
+            thread.awaiting_human_count,
+            thread.awaiting_thread_count,
+            self.language,
+        );
+        let waits_width = waits.width();
+        label.push_str(&fit(&title, width.saturating_sub(waits_width)));
+        label.push_str(&waits);
         if let Some(summary) = thread.revisit.as_ref()
             && let Some(revisit) = crate::presentation::revisit_label(summary)
         {
@@ -2975,6 +2993,21 @@ fn activity_column_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
         &thread.state
     } else {
         super::watch::phase_label(thread.activity, language, false)
+    }
+}
+fn format_reply_waits(human: u64, threads: u64, language: UiLanguage) -> String {
+    match language {
+        UiLanguage::En if human > 0 && threads > 0 => {
+            format!(" · {} human decisions · {} thread replies", human, threads)
+        }
+        UiLanguage::En if human > 0 => format!(" · {} human decisions", human),
+        UiLanguage::En if threads > 0 => format!(" · {} thread replies", threads),
+        UiLanguage::Ja if human > 0 && threads > 0 => {
+            format!(" · 人の判断待ち{}件・スレッド返信待ち{}件", human, threads)
+        }
+        UiLanguage::Ja if human > 0 => format!(" · 人の判断待ち{}件", human),
+        UiLanguage::Ja if threads > 0 => format!(" · スレッド返信待ち{}件", threads),
+        _ => String::new(),
     }
 }
 fn activity_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
@@ -3421,6 +3454,11 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            awaiting_reply: 0,
+            awaiting_thread_replies: 0,
+            awaiting_human_count: 0,
+            awaiting_thread_count: 0,
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -4258,6 +4296,11 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            awaiting_reply: 0,
+            awaiting_thread_replies: 0,
+            awaiting_human_count: 0,
+            awaiting_thread_count: 0,
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -4503,6 +4546,11 @@ mod patch_tests {
     use super::*;
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
+            awaiting_reply: 0,
+            awaiting_thread_replies: 0,
+            awaiting_human_count: 0,
+            awaiting_thread_count: 0,
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -5233,6 +5281,11 @@ mod archive_tests {
 
     fn row(id: &str, archived: bool) -> ThreadSummary {
         ThreadSummary {
+            awaiting_reply: 0,
+            awaiting_thread_replies: 0,
+            awaiting_human_count: 0,
+            awaiting_thread_count: 0,
+            awaiting_replies: 0,
             last_end_message: None,
             last_input: None,
             thread_id: id.into(),
@@ -5539,6 +5592,11 @@ mod watch_integration_tests {
     use crossterm::event::Event;
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            awaiting_reply: 0,
+            awaiting_thread_replies: 0,
+            awaiting_human_count: 0,
+            awaiting_thread_count: 0,
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -6261,6 +6319,11 @@ mod language_tests {
 
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            awaiting_reply: 0,
+            awaiting_thread_replies: 0,
+            awaiting_human_count: 0,
+            awaiting_thread_count: 0,
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -6592,6 +6655,18 @@ mod language_tests {
         row.state = "raw_native_日本語".into();
         row.cwd = "/原文/workspace".into();
         row.latest_run_stop_reason = Some("app_exit".into());
+        row.awaiting_replies = 2;
+        row.awaiting_reply = 1;
+        row.awaiting_thread_replies = 1;
+        row.awaiting_human_count = 1;
+        row.awaiting_thread_count = 1;
+        let labels = format_reply_waits(
+            row.awaiting_reply,
+            row.awaiting_thread_replies,
+            UiLanguage::Ja,
+        );
+        assert!(labels.contains("人の判断待ち1件"), "{labels}");
+        assert!(labels.contains("スレッド返信待ち1件"), "{labels}");
         let before = format!("{row:?}");
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let info = BrowserMessage::Info {
@@ -6609,6 +6684,19 @@ mod language_tests {
             assert!(info.contains("Native state: raw_native_日本語"));
             assert!(info.contains("Latest Run stop reason: app_exit"));
             assert!(info.contains("raw excerpt 日本語"));
+            let detail = BrowserMessage::Detail {
+                thread: &row,
+                interrupted: false,
+            }
+            .render(language);
+            assert!(
+                detail.contains(if language == UiLanguage::Ja {
+                    "人の判断待ち1件・スレッド返信待ち1件"
+                } else {
+                    "1 human decisions · 1 thread replies"
+                }),
+                "{detail}"
+            );
         }
         assert_eq!(before, format!("{row:?}"));
     }

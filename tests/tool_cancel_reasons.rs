@@ -130,6 +130,7 @@ async fn start(control: &Arc<Control>) -> MessageAccepted {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -194,6 +195,7 @@ async fn check(scenario: Scenario, expected: &str) {
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     thread_id: Some(accepted.thread_id.clone()),

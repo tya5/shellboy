@@ -2144,7 +2144,7 @@ impl OperationId {
             Command::ThreadCwds(_) => Self::ThreadCwds,
             Command::ThreadSet(_) => Self::ThreadSet,
             Command::MessageReply(_) => Self::MessageReply,
-            Command::MessageSend(_) => Self::MessageSend,
+            Command::MessageSend(_) | Command::MessageAsk(_) => Self::MessageSend,
             Command::MessageCancel(_) => Self::MessageCancel,
             Command::MessageGet(_) => Self::MessageGet,
             Command::OperationGet(_) => Self::OperationGet,

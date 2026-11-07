@@ -1,5 +1,5 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
-mod archive;
+pub(super) mod archive;
 mod execute_kind;
 mod reparent;
 mod run_action;
@@ -730,9 +730,9 @@ impl Store {
                     let result = store.send_content(
                         tx,
                         &MessageSendArgs {
-                            resume_recovery: false,
-
                             human: true,
+                            resume_recovery: false,
+                            to_human: false,
                             expect_reply: false,
                             sender_label: None,
                             thread_id: Some(target),
@@ -1001,7 +1001,8 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,segment_chars:None,reduce_rounds:None, parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs { resume_recovery: false, human: true, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
+                let mut result=store.send_content(&tx,&MessageSendArgs { human: true, resume_recovery: false,
+ to_human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -1100,9 +1101,9 @@ impl Store {
                     store.send_content(
                         tx,
                         &MessageSendArgs {
-                            resume_recovery: false,
-
                             human: true,
+                            resume_recovery: false,
+                            to_human: false,
                             expect_reply: false,
                             sender_label: None,
                             thread_id: Some(thread_id),
@@ -1406,6 +1407,7 @@ impl Store {
             }
             Command::MessageReply(args) => self.reply(tx, args, caller, operation_id, now),
             Command::MessageSend(args) => self.send(tx, args, caller, operation_id, now),
+            Command::MessageAsk(args) => self.ask_human(tx, args, caller, operation_id, now),
             Command::MessageGet(args) => {
                 MutationResult::value(message_details(tx, &args.message_id)?)
             }
@@ -1825,6 +1827,37 @@ impl Store {
             },
         )
     }
+    fn ask_human(
+        &self,
+        tx: &Transaction<'_>,
+        args: &crate::protocol::MessageAskArgs,
+        caller: Option<&Origin>,
+        operation_id: &str,
+        now: &str,
+    ) -> Result<MutationResult> {
+        if caller.is_none() || args.thread_id.is_some() {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "human questions require the current model Thread",
+            ));
+        }
+        self.send(
+            tx,
+            &MessageSendArgs {
+                human: false,
+                resume_recovery: false,
+                to_human: true,
+                expect_reply: true,
+                sender_label: None,
+                thread_id: None,
+                text: args.text.clone(),
+                deliver: Deliver::Next,
+            },
+            caller,
+            operation_id,
+            now,
+        )
+    }
     fn send_content(
         &self,
         tx: &Transaction<'_>,
@@ -1841,9 +1874,33 @@ impl Store {
                 "message exceeds configured input limit",
             ));
         }
+        if args.to_human
+            && (!args.expect_reply
+                || args.human
+                || caller.is_none()
+                || args.thread_id.is_some()
+                || args.deliver != Deliver::Next)
+        {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "human questions require a model origin, the current Thread, and default delivery",
+            ));
+        }
         let id = target(args.thread_id.as_deref(), caller)?;
+        if args.to_human {
+            let exists: bool = tx
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
+                    [&id],
+                    |row| row.get(0),
+                )
+                .map_err(sql_error)?;
+            if !exists {
+                return Err(error(ErrorCode::ThreadNotFound, "target Thread not found"));
+            }
+        }
         if args.expect_reply {
-            let pending: i64 = tx.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'", [&id], |row| row.get(0)).map_err(sql_error)?;
+            let pending: i64 = tx.query_row("SELECT count(*) FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'", [&id], |row| row.get(0)).map_err(sql_error)?;
             if pending >= 128 {
                 return Err(error(ErrorCode::InputLimit, "too many pending replies"));
             }
@@ -1856,28 +1913,46 @@ impl Store {
             reason,
             wake,
             owner_changed,
-        } = assign_message(
-            tx,
-            &id,
-            caller,
-            args.deliver,
-            args.human,
-            args.resume_recovery,
-            now,
-        )?;
+        } = if args.to_human {
+            MessageAssignment {
+                run: None,
+                turn: None,
+                assignment: Assignment::Pending,
+                status: DeliveryStatus::Accepted,
+                reason: None,
+                wake: false,
+                owner_changed: None,
+            }
+        } else {
+            assign_message(
+                tx,
+                &id,
+                caller,
+                args.deliver,
+                args.human,
+                args.resume_recovery,
+                now,
+            )?
+        };
         let message_id = uuid::Uuid::new_v4().to_string();
-        let payload = json!({"role":"user","content":content.elements});
+        let role = if args.to_human { "assistant" } else { "user" };
+        let payload = json!({"role":role,"content":content.elements});
         let body = payload.to_string();
-        tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,'user',?3,?4,?5,?6)",params![message_id,assigned_turn,now,body,body.len() as i64,hash(body.as_bytes())]).map_err(sql_error)?;
+        tx.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![message_id,assigned_turn,if args.to_human {"assistant"} else {"user"},now,body,body.len() as i64,hash(body.as_bytes())]).map_err(sql_error)?;
         self.index
             .authorize_new_tx(tx, std::slice::from_ref(&message_id))?;
         let receipt_id = uuid::Uuid::new_v4().to_string();
-        let state = match status {
-            DeliveryStatus::Accepted => "accepted",
-            DeliveryStatus::Held => "held",
-            _ => unreachable!(),
+        let state = if args.to_human {
+            "applied"
+        } else {
+            match status {
+                DeliveryStatus::Accepted => "accepted",
+                DeliveryStatus::Held => "held",
+                _ => unreachable!(),
+            }
         };
         let accepted = MessageAccepted {
+            to_human: args.to_human,
             expect_reply: args.expect_reply,
             message_id: message_id.clone(),
             thread_id: id.clone(),
@@ -1893,12 +1968,24 @@ impl Store {
             saved_acceptance["reply"] = json!({"state":"pending"});
         }
         tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at,hold_reason,result_json) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?9,?10,?11)",params![receipt_id,operation_id,serde_json::to_string(&content.sender).unwrap(),id,message_id,accepted.run_id,accepted.turn_id,state,now,reason,saved_acceptance.to_string()]).map_err(sql_error)?;
+        if args.to_human {
+            crate::control::db::archive::clear_for_question(tx, &id, now).map_err(sql_error)?;
+            tx.execute(
+                "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,COALESCE(MAX(ordinal)+1,0),?2 FROM thread_path WHERE thread_id=?1",
+                params![id, message_id],
+            ).map_err(sql_error)?;
+            tx.execute(
+                "UPDATE thread SET cursor_node_id=?2,selection_revision=selection_revision+1 WHERE id=?1",
+                params![id, message_id],
+            ).map_err(sql_error)?;
+        }
         tx.execute(
             "UPDATE thread SET revision=revision+1,updated_at=?2 WHERE id=?1",
             params![id, now],
         )
         .map_err(sql_error)?;
         bump_roots(tx)?;
+        let accepted_thread = accepted.thread_id.clone();
         let mut result = MutationResult::value(accepted)?;
         if let Some(owner) = owner_changed {
             result.changed_threads.push(owner);
@@ -1912,6 +1999,9 @@ impl Store {
         } else {
             // Queued or held messages change saved delivery state without a wake (#243).
             result.changed_threads.push(id);
+        }
+        if args.to_human && !result.changed_threads.contains(&accepted_thread) {
+            result.changed_threads.push(accepted_thread);
         }
         Ok(result)
     }
@@ -1946,14 +2036,7 @@ fn assign_message(
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| error(ErrorCode::ThreadNotFound, "target Thread not found"))?;
-    let run: Option<(String, String)> = tx
-        .query_row(
-            "SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
-            [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(sql_error)?;
+    let run:Option<(String,String,Option<String>)>=tx.query_row("SELECT id,state,owner_run_id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(sql_error)?;
     let mut assigned_run = None;
     let mut assigned_turn = None;
     let mut assignment = Assignment::Pending;
@@ -1961,7 +2044,16 @@ fn assign_message(
     let mut reason = None;
     let mut wake = false;
     let mut owner_changed = None;
-    if let Some((run_id, state)) = run {
+    if let Some((run_id, state, owner)) = run {
+        if let Some(caller) = caller
+            && parent.as_deref() == Some(&caller.thread_id)
+            && owner.as_deref().is_some_and(|owner| owner != caller.run_id)
+        {
+            return Err(error(
+                ErrorCode::InvalidState,
+                "child Run is owned by another live parent Run",
+            ));
+        }
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
             .query_row(
@@ -2001,7 +2093,7 @@ fn assign_message(
                             tx,
                             id,
                             "recovery_resumed",
-                            recovery_resume_actor(caller, human, resume_recovery),
+                            actor(caller),
                             json!({"run_id":run_id,"turn_id":turn_id}),
                             now,
                         )
@@ -2100,14 +2192,6 @@ fn actor(caller: Option<&Origin>) -> Value {
     caller.map(|value|json!({"kind":"shell","thread_id":value.thread_id,"run_id":value.run_id,"execution_id":value.execution_id,"turn_id":value.turn_id})).unwrap_or_else(||json!({"kind":"human"}))
 }
 
-fn recovery_resume_actor(caller: Option<&Origin>, human: bool, explicit: bool) -> Value {
-    if caller.is_none() && !human && explicit {
-        json!({"kind":"external_cli"})
-    } else {
-        actor(caller)
-    }
-}
-
 fn queue_compact_tx(
     tx: &Transaction<'_>,
     thread: Option<&str>,
@@ -2161,12 +2245,18 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), awaiting_thread_replies: Vec::new(), awaiting_human: Vec::new(), awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.tags = tags::for_thread(connection, id)?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;
-    details.awaiting_reply = super::reply::awaiting_reply_tx(connection, id).map_err(sql_error)?;
+    details.awaiting_replies =
+        super::reply::awaiting_replies_tx(connection, id, None).map_err(sql_error)?;
+    details.awaiting_reply =
+        super::reply::awaiting_replies_tx(connection, id, Some(true)).map_err(sql_error)?;
+    details.awaiting_thread_replies =
+        super::reply::awaiting_replies_tx(connection, id, Some(false)).map_err(sql_error)?;
+    details.awaiting_human = details.awaiting_reply.clone();
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
         .query_row(
@@ -2473,6 +2563,7 @@ pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetai
             .unwrap_or(Assignment::ExistingTurn)
     };
     Ok(MessageDetails {
+        to_human: metadata["to_human"] == true,
         sender: MessageSender::from_saved(Some(&row.6)),
         context: crate::context::for_message(connection, id)?,
         message_id: id.into(),
@@ -4375,7 +4466,7 @@ mod agents_reference_tests {
         );
     }
     #[tokio::test]
-    async fn sender_receipts_cover_appends_deleted_sources_labels_and_unrestricted_cancel() {
+    async fn sender_receipts_cover_appends_deleted_sources_labels_and_cancel_authority() {
         let (_root, store) = fixture().await;
         let source = store
             .execute(req(create(None, None, None)), None)
@@ -4411,9 +4502,9 @@ mod agents_reference_tests {
             let accepted = store
                 .execute(
                     req(Command::MessageSend(MessageSendArgs {
-                        resume_recovery: false,
-
                         human: false,
+                        resume_recovery: false,
+                        to_human: false,
                         expect_reply: false,
                         thread_id: Some(target.clone()),
                         text: "synthetic sender fixture".into(),
@@ -4500,9 +4591,23 @@ mod agents_reference_tests {
             .unwrap()
             .result;
         assert_eq!(result["sender"]["thread_id"], source);
+        let own = store
+            .execute(
+                req(Command::MessageCancel(MessageCancelArgs {
+                    message_ids: vec![model_id.clone()],
+                })),
+                Some(origin.clone()),
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            own["items"][0]["outcome"], "cancelled",
+            "additive kind/label must preserve top-level sender ownership"
+        );
         let mut foreign = origin.clone();
         foreign.thread_id = "different-thread".into();
-        let cancelled_by_other_thread = store
+        let denied = store
             .execute(
                 req(Command::MessageCancel(MessageCancelArgs {
                     message_ids: vec![model_id.clone()],
@@ -4512,10 +4617,7 @@ mod agents_reference_tests {
             .await
             .unwrap()
             .result;
-        assert_eq!(
-            cancelled_by_other_thread["items"][0]["outcome"],
-            "cancelled"
-        );
+        assert_eq!(denied["items"][0]["outcome"], "forbidden");
         // A model claiming 'human' still cannot resume a recovery-wait Turn.
         let target_id = target.clone();
         store
@@ -4532,8 +4634,9 @@ mod agents_reference_tests {
         let held = store
             .execute(
                 req(Command::MessageSend(MessageSendArgs {
-                    resume_recovery: false,
                     human: false,
+                    resume_recovery: false,
+                    to_human: false,
                     expect_reply: false,
                     thread_id: Some(target),
                     text: "no authority from label".into(),
@@ -4639,7 +4742,7 @@ mod interrupted_message_assignment_tests {
                 "child",
                 caller.as_ref(),
                 Deliver::Next,
-                false,
+                true,
                 false,
                 "resume",
             )
@@ -4803,8 +4906,9 @@ mod message_acknowledgement_state_tests {
         let request = Request::new(
             "fixture:typed-ack",
             Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
                 human: false,
+                resume_recovery: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 thread_id: Some("t".into()),
@@ -5130,8 +5234,9 @@ mod owned_child_notification_tests {
             let request = Request::new(
                 "fixture:new-child",
                 Command::MessageSend(MessageSendArgs {
-                    resume_recovery: false,
                     human: false,
+                    resume_recovery: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     thread_id: Some("child".into()),
@@ -5198,9 +5303,9 @@ mod owned_child_notification_tests {
                             Request::new(
                                 "fixture:existing-child",
                                 Command::MessageSend(MessageSendArgs {
-                                    resume_recovery: false,
-
                                     human: false,
+                                    resume_recovery: false,
+                                    to_human: false,
                                     expect_reply: false,
                                     sender_label: None,
                                     thread_id: Some("child".into()),

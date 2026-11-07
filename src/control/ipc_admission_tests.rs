@@ -293,6 +293,7 @@ async fn disconnecting_a_send_observer_does_not_lose_commit_effects_or_race_shut
                 Command::MessageSend(crate::protocol::MessageSendArgs {
                     resume_recovery: false,
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,

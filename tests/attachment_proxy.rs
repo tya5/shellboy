@@ -59,6 +59,7 @@ async fn historical_image_replays_at_its_source_with_local_luna() {
             resume_recovery: false,
 
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,

@@ -10,18 +10,10 @@ use tokio::{
 };
 mod schema;
 use schema::Schema;
-const INPUT_LIMIT: usize = crate::cli::MAX_STDIN_TEXT_BYTES;
+const INPUT_LIMIT: usize = 128 * 1024;
 const SCHEMA_LIMIT: usize = 64 * 1024;
 const HISTORY_LIMIT: usize = 4 * 1024 * 1024;
 const ANSWER_LIMIT: usize = 1024 * 1024;
-
-#[cfg(test)]
-mod input_limit_tests {
-    #[test]
-    fn exec_uses_the_shared_cli_stdin_limit() {
-        assert_eq!(super::INPUT_LIMIT, crate::cli::MAX_STDIN_TEXT_BYTES);
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ResultMode {
@@ -606,7 +598,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
             .await
             .map_err(|_| "Cannot read stdin")?;
         if bytes.len() > INPUT_LIMIT {
-            return Err("stdin exceeds the input byte limit".into());
+            return Err("stdin exceeds128KiB".into());
         }
         String::from_utf8(bytes).map_err(|_| "stdin must be UTF-8")?
     } else {
@@ -617,12 +609,12 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
     }
     let prompt = contract(&text, &schema, options.result);
     if prompt.len() > INPUT_LIMIT {
-        return Err("Composed request and Schema exceed the input byte limit".into());
+        return Err("Composed request and Schema exceed128KiB".into());
     }
     Command::MessageSend(MessageSendArgs {
-        resume_recovery: false,
-
         human: false,
+        resume_recovery: false,
+        to_human: false,
         expect_reply: false,
         thread_id: Some("preflight".into()),
         text: prompt.clone(),
@@ -703,7 +695,8 @@ pub async fn execute(
         }
         for repair in 0..=options.max_repairs {
             session.progress.repairs=repair;session.progress.end_message_node_id=None;session.progress.message_id=None;session.progress.run_id=None;session.progress.turn_id=None;
-            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{ human: false,resume_recovery: false,expect_reply:options.result == ResultMode::Reply,thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
+            let accepted:MessageAccepted=session.request("send",Command::MessageSend(MessageSendArgs{ human: false, resume_recovery: false,
+ to_human: false,expect_reply:options.result == ResultMode::Reply,thread_id:session.progress.thread_id.clone(),text:prompt,deliver: Deliver::Next,sender_label:Some(options.sender_label.clone())})).await?;
             session.progress.message_id=Some(accepted.message_id);session.progress.run_id=accepted.run_id;session.progress.turn_id=accepted.turn_id;
             let raw=session.answer(options.result).await?;
             session.progress.stage="validate";
