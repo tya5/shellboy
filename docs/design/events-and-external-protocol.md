@@ -7,7 +7,7 @@ may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wai
 Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved).
 
 Context (user decision 2026-11-06): the Web UI is a separate project
-(`shellboy-web`, a Rust bridge on the same machine that speaks the existing
+(`shellboy-studio`, a Rust bridge on the same machine that speaks the existing
 local IPC to the owner and serves HTTP/WebSocket to a browser). Core adds only
 stable external surfaces: change notification without polling (#243) and the
 RPC as a documented external contract (#244).
@@ -93,7 +93,7 @@ tool start (no condition matches it). Nothing was measured; see §3.
 - `PROTOCOL_VERSION = 2` (`protocol.rs:10`); owner and client both reject any
   other version at endpoint metadata and Welcome (`ipc.rs:85, 235, 332`).
   protocol.md (PR1-10, Issue #33) states "Use the same release for CLI and
-  owner … No capability negotiation". `shellboy-web` breaks that assumption.
+  owner … No capability negotiation". `shellboy-studio` breaks that assumption.
 - Every `args!` type has `#[serde(deny_unknown_fields)]` (`protocol.rs:376-383`),
   and the **same macro defines result records** (`ThreadDetails :922`,
   `RunDetails :934`, `TurnDetails :935`, `MessageAccepted :762`,
@@ -341,7 +341,7 @@ Command → result mapping: one exhaustive `match` in `protocol` that returns
 the result schema per `Command` variant (consistent with R3-3: exhaustive
 matches, no metadata registry). Operations whose results are still `json!`
 values are marked opaque in the schema; typing them is follow-up work, one
-issue per family, ordered by what `shellboy-web` actually reads.
+issue per family, ordered by what `shellboy-studio` actually reads.
 
 Export and drift: `shellboy protocol schema` prints one JSON document
 (envelope, handshake, per-operation args and result, capabilities, version).
@@ -363,7 +363,7 @@ or breaking stays a review decision.
 | E (measure first) | E1 per-Thread digest in `changes`; E2 persistent multi-frame stream; E3 live text deltas for Web (in-memory, lossy, explicit gap, falls back to saved output); E4 durable typed change log (schema change) | each needs its own decision |
 
 A1 and B are the smallest valuable first steps: B alone removes chat polling.
-A2 and D must land before `shellboy-web` depends on the RPC.
+A2 and D must land before `shellboy-studio` depends on the RPC.
 
 ## 6. Risks
 
@@ -391,7 +391,7 @@ A2 and D must land before `shellboy-web` depends on the RPC.
 4. Is live token streaming required in the first Web milestone? If yes, E3
    needs a design (bounded per-attempt buffer, explicit gaps) before the Web
    project starts.
-5. How should `shellboy-web` obtain types: generate from the JSON Schema,
+5. How should `shellboy-studio` obtain types: generate from the JSON Schema,
    depend on this crate by git (pulls the TUI stack), or split a small
    protocol crate?
 6. Long-polls on the ordinary permit pool (simplest) or a dedicated class?

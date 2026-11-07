@@ -3875,7 +3875,7 @@ move key is asked for, models re-parent Threads they do not own in practice (a c
 then be reconsidered), or trees deeper than 1,024 appear.
 ## D-266: Configuration read and write in the owner (2026-11-07)
 
-The user decided the core gets `config.get` and `config.set`, for the Web settings screen (shellboy-web
+The user decided the core gets `config.get` and `config.set`, for the Web settings screen (shellboy-studio
 `docs/design/analytics-settings.md`, option A).
 
 - **New dependency `toml_edit =0.25.19`.** Needed to change a value while keeping comments, order and untouched
