@@ -734,6 +734,110 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn live_connections_embedding_edits_keep_the_index_identity_until_restart() {
+        use crate::{config::PathEnvironment, config_edit, protocol::ConfigChange};
+        use serde_json::json;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        std::fs::write(&path, "default_connection='chat'\ndefault_model='synthetic'\n[connections.chat]\nbase_url='http://127.0.0.1:1/v1'\n[connections.\"embed.dot\"]\nbase_url='http://127.0.0.1:2/v1'\n[embedding]\nconnection='embed.dot'\nmodel='embed-model'\n").unwrap();
+        let load = || {
+            Config::load_with_overrides(
+                Some(&path),
+                Some(&root.path().join("data")),
+                root.path(),
+                &PathEnvironment::current(),
+            )
+            .unwrap()
+            .config
+        };
+        let config = load();
+        let clients = config.live_connections.clients(&config);
+        let old_profile = profile_key(&config).unwrap();
+        let old_family = endpoint_family_key(&config).unwrap();
+        let old_client = clients.get("embed.dot").unwrap();
+        let hash = config_edit::read(&config).unwrap()["file"]["content_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let changes = vec![
+            ConfigChange {
+                field: "connections.\"embed.dot\".base_url".into(),
+                value: Some(json!("http://127.0.0.1:3/v1")),
+            },
+            ConfigChange {
+                field: "connections.chat.request_timeout_ms".into(),
+                value: Some(json!(12345)),
+            },
+            ConfigChange {
+                field: "default_model".into(),
+                value: Some(json!("new-model")),
+            },
+            ConfigChange {
+                field: "embedding.model".into(),
+                value: Some(json!("new-embed-model")),
+            },
+        ];
+        let applied = config_edit::apply_live(&path, &hash, &changes, &config, &clients).unwrap();
+        assert_eq!(applied.result["restart_required"], true);
+        assert_eq!(applied.result["applied_to_running_owner"], true);
+        for entry in applied.result["changes"].as_array().unwrap() {
+            let pending = entry["field"]
+                .as_str()
+                .unwrap()
+                .starts_with("connections.\"embed.dot\".")
+                || entry["field"] == "embedding.model";
+            assert_eq!(entry["restart_required"], pending, "{entry}");
+            assert_eq!(entry["applied_to_running_owner"], !pending, "{entry}");
+        }
+        assert_eq!(profile_key(&config.current()).unwrap(), old_profile);
+        assert_eq!(endpoint_family_key(&config.current()).unwrap(), old_family);
+        // A retained client remains usable as a value; no embedding request is sent by editing.
+        assert_eq!(
+            old_client.extra_digest(),
+            clients.get("embed.dot").unwrap().extra_digest()
+        );
+        let got = config_edit::read(&config).unwrap();
+        assert_eq!(
+            got["loaded"]["values"]["connections"]["embed.dot"]["base_url"],
+            "http://127.0.0.1:2/v1"
+        );
+        assert_eq!(
+            got["differing_fields"],
+            json!(["connections.\"embed.dot\".base_url", "embedding.model"])
+        );
+        assert_eq!(got["loaded"]["values"]["default_model"], "new-model");
+        let restarted = load();
+        assert_ne!(profile_key(&restarted).unwrap(), old_profile);
+        assert_ne!(endpoint_family_key(&restarted).unwrap(), old_family);
+        let before = std::fs::read(&path).unwrap();
+        let hash = got["file"]["content_hash"].as_str().unwrap();
+        let error = config_edit::apply_live(
+            &path,
+            hash,
+            &[
+                ConfigChange {
+                    field: "embedding.connection".into(),
+                    value: None,
+                },
+                ConfigChange {
+                    field: "embedding.model".into(),
+                    value: None,
+                },
+                ConfigChange {
+                    field: "connections.\"embed.dot\"".into(),
+                    value: None,
+                },
+            ],
+            &config,
+            &clients,
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::ConfigInvalid);
+        assert_eq!(error.details.unwrap()["written"], false);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
     #[test]
     fn segmentation_policy_changes_identity_but_not_endpoint_failure_family() {
         let mut config = Config::default();

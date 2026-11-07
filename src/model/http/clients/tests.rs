@@ -161,7 +161,7 @@ async fn repeated_registry_lookups_share_tcp_across_catalog_embedding_and_json_r
         .connections
         .insert("shared".into(), server.connection.clone());
     let clients = HttpClients::new(&config);
-    assert_eq!(clients.entries.len(), 1);
+    assert_eq!(clients.snapshot().entries.len(), 1);
     assert_eq!(
         clients
             .get("shared")
@@ -360,7 +360,7 @@ async fn initialization_failure_is_local_to_one_configured_profile() {
         ..Default::default()
     };
     let clients = HttpClients::new(&config);
-    assert_eq!(clients.entries.len(), 2);
+    assert_eq!(clients.snapshot().entries.len(), 2);
     assert!(clients.get("invalid").is_err());
     assert_eq!(
         clients
@@ -712,7 +712,7 @@ async fn usage_limit_slots_are_connection_bounded_shared_and_expire_on_tokio_clo
         },
     );
     let clients = HttpClients::new(&config);
-    assert_eq!(clients.entries.len(), 2);
+    assert_eq!(clients.snapshot().entries.len(), 2);
     let one = clients.get("one").unwrap();
     let fact = crate::model::usage_limit::UsageLimit::parse(
         &json!({"error":{
@@ -1165,4 +1165,36 @@ async fn catalog_429_blocks_embedding_on_same_profile_until_cancelled() {
     assert!(!embedding.is_finished());
     cancel.cancel();
     assert_eq!(embedding.await.unwrap().unwrap_err().kind, "cancelled");
+}
+
+#[tokio::test]
+async fn live_connections_rebuild_only_changed_clients_and_keep_existing_generations() {
+    let mut config = Config::parse("default_connection='chat'\ndefault_model='synthetic'\n[connections.chat]\nbase_url='http://127.0.0.1:1/v1'\n[connections.keep]\nbase_url='http://127.0.0.1:2/v1'\n").unwrap();
+    let clients = config.live_connections.clients(&config);
+    let old = clients.snapshot();
+    let old_chat = old.get("chat").unwrap();
+    let keep = old.get("keep").unwrap();
+    config.connections.get_mut("chat").unwrap().base_url = "http://127.0.0.1:3/v1".into();
+    config.default_model = Some("new-model".into());
+    clients.adopt(&config, None);
+    let next = clients.snapshot();
+    assert!(Arc::ptr_eq(&keep.pool, &next.get("keep").unwrap().pool));
+    assert!(!Arc::ptr_eq(
+        &old_chat.pool,
+        &next.get("chat").unwrap().pool
+    ));
+    assert_eq!(old_chat.connection.base_url, "http://127.0.0.1:1/v1");
+    assert_eq!(
+        next.get("chat").unwrap().connection.base_url,
+        "http://127.0.0.1:3/v1"
+    );
+    assert_eq!(old.default_model.as_deref(), Some("synthetic"));
+    assert_eq!(next.default_model.as_deref(), Some("new-model"));
+    assert_eq!(config.current().default_model.as_deref(), Some("new-model"));
+    config.connections.remove("chat");
+    config.default_connection = Some("keep".into());
+    clients.adopt(&config, None);
+    assert!(clients.get("chat").is_err());
+    assert!(old.get("chat").is_ok());
+    assert_eq!(config.current().default_connection.as_deref(), Some("keep"));
 }

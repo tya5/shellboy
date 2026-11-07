@@ -617,8 +617,8 @@ started write finishes and is reported. There is no authority check (#256). Neit
     "redacted_fields": [ /* ... */ ]
   },
   "differs": true,                  // file bytes differ from what was loaded, comments included
-  "differing_fields": ["default_model"],  // effective values; null when the file is invalid
-  "restart": {"all_fields_require_restart": true}
+  "differing_fields": ["shell.env.MY_VAR"],  // effective pending values; null when the file is invalid
+  "restart": {"all_fields_require_restart": false}
 }
 
 // config.set: args. field is a TOML dotted key; a missing or null value removes the key.
@@ -631,12 +631,13 @@ started write finishes and is reported. There is no authority check (#256). Neit
 // config.set: result
 {"config_path": "...", "written": true,
  "previous_hash": "...", "content_hash": "...",    // the new hash, usable for the next change
- "restart_required": true, "applied_to_running_owner": false,
+ "restart_required": true, "applied_to_running_owner": true, // mixed edit: live default + restart-only shell
  "changed_by": null,                               // Origin identity of a model shell; null for a terminal
  "changes": [
    {"field": "default_model", "previous": "model-a", "value": "model-b",
-    "sensitive": false, "restart_required": true},
-   {"field": "shell.env.MY_VAR", "sensitive": true, "restart_required": true}
+    "sensitive": false, "restart_required": false, "applied_to_running_owner": true},
+   {"field": "shell.env.MY_VAR", "sensitive": true, "restart_required": true,
+    "applied_to_running_owner": false}
  ]}
 ```
 
@@ -744,3 +745,16 @@ and `api_key_env`, or a credential-looking `api_key_env`/`api_key_header` (`deta
 `credentials.toml` is invalid (unchanged, `details.credentials_path`); `io_failed` otherwise. `details.written = false`
 when nothing was written. A refused value is never echoed. Rejected unknown argument names as for every command. No
 protocol version change: the commands are additive, as `config.get` was.
+
+### Live connection application (#269 stage C)
+
+For an owner-routed `config.set`, each `changes` entry now contains `applied_to_running_owner`. Ordinary
+`connections.*`, `default_connection` and `default_model` changes report it as true and `restart_required` as false.
+Changes to the running embedding connection and other settings report false/true. The top-level flags are ORs of
+entry flags (a mixed edit can set both; no effective changes sets neither). Removing the running default or embedding
+connection is rejected with `config_invalid` and `details.written: false` before any write. An already-started request
+retains its original connection; next-request lookup of a removed Thread connection uses existing recovery.
+
+`config.get.restart.all_fields_require_restart` changes to false. `loaded.values` and `differing_fields` account for
+live connection/default adoption. `loaded.content_hash` and `differs` remain startup-byte facts, not a restart gate.
+Consumers such as Studio must use the per-change flags/differing fields rather than infer restart from `differs`.

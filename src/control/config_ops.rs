@@ -1,5 +1,5 @@
 //! `config.get` and `config.set`: file work on the owner's bounded control-file pool.
-//! Nothing here changes the running owner; a saved file takes effect after a restart.
+//! Live connection adoption is serialized with configuration and credential writes.
 use super::*;
 use crate::protocol::{ConfigSetArgs, MAX_FRAME_BYTES};
 use tokio::time::{Duration, Instant};
@@ -72,6 +72,8 @@ impl Control {
                 )
                 .details(json!({"written":false}))
             })?;
+        let config = self.store.config.clone();
+        let clients = self.store.clients.clone();
         let applied = self
             .attachments
             .control_files()
@@ -79,7 +81,7 @@ impl Control {
                 // A timed-out caller stops waiting, but the next change must not start
                 // until this one has really ended, so the closure owns the guard.
                 let _guard = guard;
-                crate::config_edit::apply(&path, &args.expected_hash, &args.changes)
+                crate::config_edit::apply_live(&path, &args.expected_hash, &args.changes, &config, &clients)
             })
             .await
             .map_err(|error| {

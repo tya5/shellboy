@@ -358,6 +358,8 @@ impl Control {
         caller: Option<Origin>,
         disconnected: CancellationToken,
     ) -> Result<Value, ApiError> {
+        let config = &self.store.config.current();
+        let clients = self.store.clients.snapshot();
         // Validate an explicit Thread even when the connection overrides it.
         let thread = args.thread_id.clone().or_else(|| {
             args.connection
@@ -381,10 +383,10 @@ impl Control {
         let connection = args
             .connection
             .or(thread_connection)
-            .or_else(|| self.store.config.default_connection.clone())
+            .or_else(|| clients.default_connection.clone())
             .ok_or_else(|| {
                 crate::config_setup::enrich(
-                    &self.store.config,
+                    config,
                     None,
                     Some("catalog"),
                     ApiError::new(
@@ -393,22 +395,18 @@ impl Control {
                     ),
                 )
             })?;
-        self.store
-            .config
-            .connections
-            .get(&connection)
-            .ok_or_else(|| {
-                crate::config_setup::enrich(
-                    &self.store.config,
-                    Some(&connection),
-                    Some("catalog"),
-                    ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured"),
-                )
-            })?;
+        clients.connections.get(&connection).ok_or_else(|| {
+            crate::config_setup::enrich(
+                config,
+                Some(&connection),
+                Some("catalog"),
+                ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured"),
+            )
+        })?;
         let fetch = async {
-            let client = self.store.clients.get(&connection).map_err(|error| {
+            let client = clients.get(&connection).map_err(|error| {
                 crate::config_setup::enrich(
-                    &self.store.config,
+                    config,
                     Some(&connection),
                     Some("catalog"),
                     model_list_error(error),
@@ -419,7 +417,7 @@ impl Control {
                 .await
                 .map_err(|error| {
                     crate::config_setup::enrich(
-                        &self.store.config,
+                        config,
                         Some(&connection),
                         Some("catalog"),
                         model_list_error(error),
@@ -433,11 +431,21 @@ impl Control {
         };
         encode_result(
             ModelListResult {
-                api: self.store.config.connections[&connection]
+                api: clients
+                    .connections
+                    .get(&connection)
+                    .ok_or_else(|| {
+                        ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
+                    })?
                     .api
                     .as_str()
                     .into(),
-                unavailable_features: self.store.config.connections[&connection]
+                unavailable_features: clients
+                    .connections
+                    .get(&connection)
+                    .ok_or_else(|| {
+                        ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
+                    })?
                     .api
                     .unavailable_features(),
                 connection,

@@ -376,8 +376,11 @@ Once the conversation's purpose is clear, edit your own title with `shellboy thr
 Read settings with `shellboy config get`; it never returns a credential value. Change them with
 `shellboy config set` only when the user asked for that change, not to work around a problem you met. Before
 writing, show the current and new values of each field. Pass `result.file.content_hash` as `--expected-hash`.
-Afterwards, show the returned `changes` and say that the owner must be restarted for them to take effect; none
-reaches the running owner, including the one running you. Never write a credential value into the file: set
+Afterwards, show the returned `changes` and their `restart_required` / `applied_to_running_owner` facts.
+Connections and default connection/model apply from the next request; an in-flight request keeps its original client.
+The running embedding connection and all other settings still need restart. Removing the running default or embedding
+connection is refused. A removed Thread connection needs an explicit `thread set --connection Q --model M` before retry.
+Never write a credential value into the config file: set
 `api_key_env` to a variable's name and leave the value to the user's environment. On `operation_conflict`, read
 again and show the user what changed before repeating. Your identity is recorded with the change.
 
@@ -391,7 +394,8 @@ no command returns the value. `shellboy config get` shows only where each key co
 (`loaded.credential_source`: `env`, `stored` or `none`). `shellboy connection test --connection NAME` (fine for diagnosing a saved connection) sends one
 model-catalog GET and reports `http_status`, `failure` and `models`; treat `ok: true` as "the endpoint answered with a
 catalog", never as proof the key is valid, and `failure: "auth"` as "the endpoint refused the credential" without
-guessing why. A stored key applies to the next request; a new or changed connection still needs an owner restart.
+guessing why. A stored key and ordinary connection edits apply to the next request. The connection used by
+`embedding.connection` keeps restart semantics so the index identity does not change mid-owner.
 Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`clear` only when asked. The credentials file is readable by any process of the user, including your shell, so never print or copy it. Your identity is recorded with the change.
 
 ## Operation tracking, saved context, and deletion preview

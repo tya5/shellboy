@@ -48,6 +48,8 @@ pub struct Config {
     /// Request-time lookup always reads the file.
     #[serde(skip)]
     pub stored_keys: StoredKeys,
+    #[serde(skip)]
+    pub live_connections: LiveConnections,
     pub data_dir: Option<PathBuf>,
     pub default_connection: Option<String>,
     pub default_model: Option<String>,
@@ -683,7 +685,38 @@ section!(positive "logging", Logging {
 
 mod validation;
 
+/// Shared with the owner's HTTP registry; never loaded from TOML or serialized.
+#[derive(Clone, Default)]
+pub struct LiveConnections(
+    std::sync::Arc<std::sync::OnceLock<std::sync::Arc<crate::model::http::HttpClients>>>,
+);
+impl std::fmt::Debug for LiveConnections {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("LiveConnections")
+    }
+}
+impl LiveConnections {
+    pub(crate) fn clients(
+        &self,
+        config: &Config,
+    ) -> std::sync::Arc<crate::model::http::HttpClients> {
+        self.0
+            .get_or_init(|| std::sync::Arc::new(crate::model::http::HttpClients::new(config)))
+            .clone()
+    }
+}
 impl Config {
+    /// One registry generation, with startup-only settings left untouched. No I/O.
+    pub(crate) fn current(&self) -> Self {
+        let mut current = self.clone();
+        if let Some(clients) = self.live_connections.0.get() {
+            let snapshot = clients.snapshot();
+            current.connections = snapshot.connections.clone();
+            current.default_connection = snapshot.default_connection.clone();
+            current.default_model = snapshot.default_model.clone();
+        }
+        current
+    }
     pub fn parse(source: &str) -> Result<Self, ConfigError> {
         // Do not embed TOML's rendered error: it can quote secret header values.
         let config: Self = toml::from_str(source).map_err(|error: toml::de::Error| {

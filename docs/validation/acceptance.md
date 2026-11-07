@@ -10579,3 +10579,10 @@ the header wait and has no test of its own; a real provider, real keys or a real
 file worker; the Studio screen; a key that a provider rejects for reasons other than the header (only the mock's 401 is
 exercised); TLS failures (`ssl_verify`, certificate errors) have no test and classify as `unreachable`. Stage C is
 planned in D-269 and was not built or tested.
+
+## #269 stage C: live connection validation (2026-11-07)
+
+Validation pending. Intended evidence: deterministic loopback request barrier across swap/removal, real owner
+`config.set`/`credentials.set` concurrency, live defaults and TUI snapshots, unchanged embedding identity and client,
+restart-only embedding field differences, default/embedding deletion rejection and strict non-live response flags.
+No live provider or user data will be used; final tip default/all-OS CI must be recorded separately.

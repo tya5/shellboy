@@ -92,6 +92,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
     let Config {
         source: _,
         stored_keys: _,
+        live_connections: _,
         data_dir,
         default_connection,
         default_model,
@@ -431,6 +432,7 @@ pub(crate) fn parse_file(bytes: &[u8], path: &Path) -> Result<Config, String> {
 
 /// The `config.get` result. Blocking; `loaded` is what the owner parsed at startup.
 pub fn read(loaded: &Config) -> Result<Value, ApiError> {
+    let loaded = &loaded.current();
     let source = loaded.source.as_ref().ok_or_else(no_source)?;
     let state = read_state(&source.path)?;
     let parsed = parse_file(&state.bytes, &source.path);
@@ -510,7 +512,7 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
         },
         "differs": loaded_hash != file_hash,
         "differing_fields": differing_fields,
-        "restart": {"all_fields_require_restart": true},
+        "restart": {"all_fields_require_restart": false},
     }))
 }
 /// The connection as the configuration file holds it now, and whether the file parses.
@@ -574,6 +576,34 @@ pub fn apply_with_replace(
     before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
     replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
 ) -> Result<Applied, ApiError> {
+    apply_runtime(path, expected_hash, changes, before_replace, replace, None)
+}
+
+pub(crate) fn apply_live(
+    path: &Path,
+    expected_hash: &str,
+    changes: &[ConfigChange],
+    loaded: &Config,
+    clients: &crate::model::http::HttpClients,
+) -> Result<Applied, ApiError> {
+    apply_runtime(
+        path,
+        expected_hash,
+        changes,
+        |_| Ok(()),
+        replace_file,
+        Some((loaded, clients)),
+    )
+}
+
+fn apply_runtime(
+    path: &Path,
+    expected_hash: &str,
+    changes: &[ConfigChange],
+    before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
+    replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
+    runtime: Option<(&Config, &crate::model::http::HttpClients)>,
+) -> Result<Applied, ApiError> {
     let state = read_state(path)?;
     if state.hash != expected_hash {
         return Err(conflict(expected_hash, &state.hash));
@@ -596,11 +626,33 @@ pub fn apply_with_replace(
         )
         .details(json!({"written":false})));
     }
-    let after = parse_file(edited.as_bytes(), path).map_err(|message| {
+    let mut after = parse_file(edited.as_bytes(), path).map_err(|message| {
         ApiError::new(ErrorCode::ConfigInvalid, message)
             .hint("Nothing was written. Correct the value; the whole file must pass the same rules as config check")
             .details(json!({"written":false}))
     })?;
+    if let Some((loaded, _)) = runtime {
+        let current = loaded.current();
+        for name in [
+            current.default_connection.as_deref(),
+            loaded.embedding.connection.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !after.connections.contains_key(name) {
+                return Err(ApiError::new(
+                    ErrorCode::ConfigInvalid,
+                    "Cannot remove the default or embedding connection",
+                )
+                .details(json!({"written":false})));
+            }
+        }
+        for connection in after.connections.values_mut() {
+            connection.credentials_file = Some(crate::credential_store::path_beside(path));
+            connection.stored_keys = loaded.stored_keys.clone();
+        }
+    }
     let before = parse_file(&state.bytes, path).ok();
     let written = edited != text;
     let after_fields = fields(&after);
@@ -627,6 +679,21 @@ pub fn apply_with_replace(
         "restart_required": written,
         "applied_to_running_owner": false,
     });
+    if let Some((loaded, _)) = runtime {
+        let entries = result["changes"].as_array_mut().expect("change entries");
+        for entry in entries.iter_mut() {
+            let field = entry["field"].as_str().expect("field name");
+            let live = live_field(field, loaded.embedding.connection.as_deref());
+            entry["restart_required"] = json!(!live);
+            entry["applied_to_running_owner"] = json!(live);
+        }
+        let restart = entries.iter().any(|e| e["restart_required"] == true);
+        let live = entries
+            .iter()
+            .any(|e| e["applied_to_running_owner"] == true);
+        result["restart_required"] = json!(restart);
+        result["applied_to_running_owner"] = json!(live);
+    }
     // Checked before the replace: a saved outcome must never hide a finished write.
     if serde_json::to_vec(&result).map_or(usize::MAX, |bytes| bytes.len()) > MAX_RESULT_BYTES {
         return Err(ApiError::new(
@@ -649,12 +716,43 @@ pub fn apply_with_replace(
             result["warning"] = json!(warning);
         }
     }
+    if let Some((loaded, clients)) = runtime {
+        clients.adopt(&after, loaded.embedding.connection.as_deref());
+    }
     Ok(Applied {
         result,
         written,
         fields: names,
     })
 }
+fn live_field(name: &str, embedding: Option<&str>) -> bool {
+    if matches!(name, "default_connection" | "default_model") {
+        return true;
+    }
+    if name == "connections" {
+        return true;
+    }
+    let Some(rest) = name.strip_prefix("connections.") else {
+        return false;
+    };
+    !embedding.is_some_and(|name| {
+        let name = Key::new(name).display_repr().into_owned();
+        rest == name
+            || rest
+                .strip_prefix(&name)
+                .is_some_and(|suffix| suffix.starts_with('.'))
+    })
+}
+
+/// Compare every classified definition field, including secrets, without emitting it.
+pub(crate) fn same_connection(a: &Connection, b: &Connection) -> bool {
+    let mut left = Fields::default();
+    let mut right = Fields::default();
+    connection_fields(&mut left, "connection", a);
+    connection_fields(&mut right, "connection", b);
+    changed_names(&left.0, &right.0).is_empty()
+}
+
 fn change_entry(name: &str, before: Option<Option<&Leaf>>, after: Option<&Leaf>) -> Value {
     let hidden = |leaf: Option<&Leaf>| leaf.is_some_and(|leaf| shown(leaf).1);
     let sensitive = before.is_some_and(hidden) || hidden(after);
