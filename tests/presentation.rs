@@ -1551,3 +1551,42 @@ fn markdown_table_borders_are_invariant_without_rewriting_user_glyphs() {
         assert!(lines.iter().all(|line| line.width() <= 22), "{rendered:?}");
     }
 }
+
+#[test]
+fn a_parent_move_shows_before_and_after_in_both_languages_and_detach_reads_as_unset() {
+    use shellboy::config::UiLanguage;
+    for (before, after, ja, en) in [
+        (
+            json!({"parent_id":"a"}),
+            json!({"parent_id":"b"}),
+            "親会話: a > b",
+            "Parent Thread: a > b",
+        ),
+        (
+            json!({"parent_id":"a"}),
+            json!({"parent_id":null}),
+            "親会話: a > 未設定",
+            "Parent Thread: a > Not set",
+        ),
+        (
+            json!({"parent_id":null}),
+            json!({"parent_id":"b"}),
+            "親会話: 未設定 > b",
+            "Parent Thread: Not set > b",
+        ),
+    ] {
+        let event = json!({"kind":"thread_parent","change":{"before":before,"after":after}});
+        let payload = json!({"text":format!("Shellboy event v1: {event}")});
+        let p = project("event", &payload, &text_of_payload(&payload), 0);
+        assert_eq!(p.event_class, EventClass::Change);
+        assert!(p.title.contains(ja), "{}", p.title);
+        let english: Vec<String> = p
+            .ui_messages
+            .bodies
+            .iter()
+            .flat_map(|(_, messages)| messages.iter().map(|m| m.render(UiLanguage::En)))
+            .collect();
+        assert!(english.iter().any(|line| line.contains(en)), "{english:?}");
+        assert!(english.iter().all(|line| !line.contains("null")));
+    }
+}

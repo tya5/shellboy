@@ -232,3 +232,59 @@ async fn a_read_is_bounded_validated_and_changes_nothing() {
         .await;
     assert_eq!(before, after);
 }
+
+#[tokio::test]
+async fn a_moved_fork_leaves_its_family_and_a_detached_fork_becomes_its_own_root() {
+    let f = Fixture::new([conversation(6), n_path(6)].concat()).await;
+    let forked = f.fork("T", "n3").await;
+    let other = f
+        .run(Command::ThreadCreate(
+            shellboy::protocol::ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
+            },
+        ))
+        .await
+        .unwrap()["thread_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let before = f.branches("T", 50, None).await.unwrap();
+    assert_eq!(before["family_threads"], 2);
+    // Move the fork under an unrelated Thread: it leaves T's family and, with no shared
+    // path prefix, has an unknown divergence under its new parent.
+    f.run(Command::ThreadSet(Box::new(
+        shellboy::protocol::ThreadSetArgs {
+            thread_id: Some(forked.clone()),
+            parent_id: Some(other.clone()),
+            ..Default::default()
+        },
+    )))
+    .await
+    .unwrap();
+    let old_family = f.branches("T", 50, None).await.unwrap();
+    assert_eq!(old_family["family_threads"], 1);
+    let new_family = f.branches(&forked, 50, None).await.unwrap();
+    assert_eq!(new_family["root_thread_id"], other.as_str());
+    assert_eq!(
+        item(&new_family, &forked)["divergence_unknown"],
+        "no_shared_prefix"
+    );
+    // Detached, the fork is the root of its own family.
+    f.run(Command::ThreadSet(Box::new(
+        shellboy::protocol::ThreadSetArgs {
+            thread_id: Some(forked.clone()),
+            parent_id: Some(String::new()),
+            ..Default::default()
+        },
+    )))
+    .await
+    .unwrap();
+    let alone = f.branches(&forked, 50, None).await.unwrap();
+    assert_eq!(alone["root_thread_id"], forked.as_str());
+    assert_eq!(alone["family_threads"], 1);
+}

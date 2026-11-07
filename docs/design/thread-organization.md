@@ -424,7 +424,7 @@ Follows §3 with these concrete choices (decision D-222-2).
   that order (deduplicated), so lineage caches and `events.wait` clients refresh both sides.
 - Bounds: the walk (1,024 steps) is the only loop; one UPDATE and one context row per call;
   `thread.set` stays in the writer-bound exemption list because the call is O(1,024) at most.
-- Not done: ownership transfer of live Runs, retry authority aligned with stop, a TUI move key
+- Not done: ownership transfer of live Runs (stop/retry have no authority check since #256, so a move changes only notices and the stop cascade), a TUI move key
   or drag gesture, moving several Threads in one call (use one call per Thread; the Web UI
   can repeat it).
 

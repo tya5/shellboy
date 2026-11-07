@@ -296,11 +296,14 @@ async fn ancestor_walk_is_bounded_and_ends_at_a_stored_cycle() {
             .unwrap()
         }
     };
-    let short = build(1000).await;
-    run(&store, set_parent(&top, &short)).await.unwrap();
+    // The new parent may have 1,024 ancestors (the root plus 1,023 chain Threads), not 1,025.
+    let at_bound = build(1024).await;
+    run(&store, set_parent(&top, &at_bound)).await.unwrap();
     run(&store, set_parent(&top, "")).await.unwrap();
-    let long = build(1100).await;
-    let error = run(&store, set_parent(&top, &long)).await.unwrap_err();
+    let past_bound = build(1025).await;
+    let error = run(&store, set_parent(&top, &past_bound))
+        .await
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::InputLimit);
     assert!(parent_of(&store, &top).await.is_none());
     // A cycle already stored above the new parent (corrupt data) cannot loop the write.
@@ -399,16 +402,22 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
         .await
         .unwrap_err();
     assert_eq!(refused.code, ErrorCode::InvalidState);
+    // Stopping the old owner's Run cascades to the child Run it still owns, although the
+    // child no longer has it as parent.
     let stopped = store
         .execute(
             request(Command::RunStop(RunTarget {
-                run_id: child_run.clone(),
+                run_id: old_run["run_id"].as_str().unwrap().into(),
             })),
             Some(old_origin.clone()),
         )
         .await
         .unwrap();
-    assert_eq!(stopped.stop_runs, std::slice::from_ref(&child_run));
+    assert!(
+        stopped.stop_runs.contains(&child_run),
+        "the owner's stop reaches the moved child's Run: {:?}",
+        stopped.stop_runs
+    );
     // Once the Run has ended, the new parent's send starts a Run it owns.
     store
         .database
@@ -444,7 +453,7 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
 }
 
 #[tokio::test]
-async fn a_pending_reply_still_goes_to_its_sender_after_the_recipient_moves() {
+async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() {
     let (_dir, store) = store().await;
     let (sender, other) = (create(&store, None).await, create(&store, None).await);
     let recipient = create(&store, Some(&sender)).await;
@@ -469,28 +478,124 @@ async fn a_pending_reply_still_goes_to_its_sender_after_the_recipient_moves() {
         .await
         .unwrap()
         .result;
+    let message_id = asked["message_id"].as_str().unwrap().to_owned();
     run(&store, set_parent(&recipient, &other)).await.unwrap();
-    let message_id = asked["message_id"].as_str().unwrap();
-    let state = run(
+    let pending = run(
         &store,
         Command::MessageGet(MessageTarget {
-            message_id: message_id.into(),
+            message_id: message_id.clone(),
         }),
     )
     .await
     .unwrap();
-    assert_eq!(state["reply"]["state"], json!("pending"));
-    assert_eq!(state["thread_id"], json!(recipient));
+    assert_eq!(pending["reply"]["state"], json!("pending"));
+    assert_eq!(pending["thread_id"], json!(recipient));
+    // The recipient's input is applied and the sender's Run has ended; the reply is
+    // addressed by the receipt's recorded sender, not by the (changed) parent.
+    store
+        .database
+        .call({
+            let (message_id, sender_run) = (
+                message_id.clone(),
+                started["run_id"].as_str().unwrap().to_owned(),
+            );
+            move |db| {
+                db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&message_id])?;
+                db.execute("UPDATE run SET state='completed',ended_at='now' WHERE id=?1", [&sender_run])?;
+                db.execute("UPDATE turn SET state='completed',ended_at='now' WHERE run_id=?1", [&sender_run])?;
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+    let reply = run(
+        &store,
+        Command::MessageReply(MessageReplyArgs {
+            message_id: message_id.clone(),
+            text: "the answer".into(),
+            sender_label: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply["thread_id"], json!(sender), "{reply}");
+    let answered = run(
+        &store,
+        Command::MessageGet(MessageTarget {
+            message_id: message_id.clone(),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_ne!(answered["reply"]["state"], json!("pending"), "{answered}");
+    let other_inputs: i64 = {
+        let other = other.clone();
+        store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM receipt WHERE target_thread_id=?1",
+                    [other],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    };
+    assert_eq!(other_inputs, 0, "the new parent received nothing");
     store.database.shutdown().await.unwrap();
 }
 
+async fn selected_threads(store: &Store, root: &str) -> i64 {
+    run(
+        store,
+        Command::UsageGet(UsageGetArgs {
+            thread_id: Some(root.into()),
+            include_children: true,
+            ..Default::default()
+        }),
+    )
+    .await
+    .unwrap()["selected_threads"]
+        .as_i64()
+        .unwrap()
+}
+
 #[tokio::test]
-async fn usage_and_delete_follow_the_current_tree_and_combined_fields_apply() {
+async fn usage_with_children_and_guarded_delete_follow_the_current_tree() {
     let (_dir, store) = store().await;
     let (a, b) = (create(&store, None).await, create(&store, None).await);
     let child = create(&store, Some(&a)).await;
+    assert_eq!(selected_threads(&store, &a).await, 2);
+    assert_eq!(selected_threads(&store, &b).await, 1);
+    // A delete preview of the old subtree goes stale when the child moves away.
+    let preview = run(
+        &store,
+        Command::ThreadDeletePreview(ThreadDeleteArgs {
+            preview_marker: None,
+            thread_id: a.clone(),
+            descendants: true,
+        }),
+    )
+    .await
+    .unwrap();
+    let marker: DeletionPreviewMarker =
+        serde_json::from_value(preview["preview_marker"].clone()).unwrap();
     run(&store, set_parent(&child, &b)).await.unwrap();
-    // Deleting the old parent's subtree leaves the moved child.
+    assert_eq!(selected_threads(&store, &a).await, 1);
+    assert_eq!(selected_threads(&store, &b).await, 2);
+    let stale = run(
+        &store,
+        Command::ThreadDelete(ThreadDeleteArgs {
+            preview_marker: Some(marker),
+            thread_id: a.clone(),
+            descendants: true,
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(stale.code, ErrorCode::PreviewStale);
+    // Without a marker, deleting the old subtree leaves the moved child.
     run(
         &store,
         Command::ThreadDelete(ThreadDeleteArgs {
@@ -502,12 +607,33 @@ async fn usage_and_delete_follow_the_current_tree_and_combined_fields_apply() {
     .await
     .unwrap();
     assert_eq!(parent_of(&store, &child).await.as_deref(), Some(b.as_str()));
-    // A move combined with a title change is one transaction and one result.
+    store.database.shutdown().await.unwrap();
+}
+
+async fn thread_parent_events(store: &Store, id: &str) -> i64 {
+    let id = id.to_owned();
+    store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM event WHERE target_thread_id=?1 AND json_extract(payload_ref_json,'$.kind')='thread_parent'",
+                [id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn combined_fields_apply_together_and_any_failure_rolls_the_move_back() {
+    let (_dir, store) = store().await;
+    let (a, child) = (create(&store, None).await, create(&store, None).await);
     let both = run(
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(child.clone()),
-            parent_id: Some(String::new()),
+            parent_id: Some(a.clone()),
             title: Some("renamed".into()),
             ..Default::default()
         })),
@@ -515,22 +641,37 @@ async fn usage_and_delete_follow_the_current_tree_and_combined_fields_apply() {
     .await
     .unwrap();
     assert_eq!(both["title"], json!("renamed"));
-    assert!(parent_of(&store, &child).await.is_none());
-    // A failing move rolls the other fields back.
+    assert_eq!(parent_of(&store, &child).await.as_deref(), Some(a.as_str()));
+    let revision_before = revision(&store, &child).await;
+    // Invalid input is refused before any write.
+    let invalid = run(
+        &store,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(child.clone()),
+            parent_id: Some(String::new()),
+            auto_compact_at: Some("-5".into()),
+            ..Default::default()
+        })),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(invalid.code, ErrorCode::InvalidArgument);
+    // A failure after the move has been applied inside the transaction rolls it back.
+    let events_before = thread_parent_events(&store, &child).await;
     let failed = run(
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(child.clone()),
-            parent_id: Some(child.clone()),
-            title: Some("never".into()),
+            parent_id: Some(String::new()),
+            connection: Some("not-configured".into()),
             ..Default::default()
         })),
     )
-    .await;
-    assert!(failed.is_err());
-    assert_eq!(
-        text(&store, &child, "SELECT title FROM thread WHERE id=?1").await,
-        "renamed"
-    );
+    .await
+    .unwrap_err();
+    assert_eq!(failed.code, ErrorCode::ConfigInvalid);
+    assert_eq!(parent_of(&store, &child).await.as_deref(), Some(a.as_str()));
+    assert_eq!(revision(&store, &child).await, revision_before);
+    assert_eq!(thread_parent_events(&store, &child).await, events_before);
     store.database.shutdown().await.unwrap();
 }

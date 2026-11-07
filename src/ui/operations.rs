@@ -3050,6 +3050,38 @@ mod tests {
         );
     }
     #[test]
+    fn parent_form_distinguishes_unchanged_detach_and_move() {
+        let context = Context::default();
+        let mut form = Form::new(OpKind::ThreadSet, &context);
+        let set = |form: &mut Form, name: &str, value: &str| {
+            form.fields
+                .iter_mut()
+                .find(|f| f.name == name)
+                .unwrap()
+                .value = value.into();
+        };
+        set(&mut form, "model", "unchanged-model");
+        // Empty leaves the parent alone.
+        assert!(
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.is_none())
+        );
+        // `none` detaches (the wire value is the empty string).
+        set(&mut form, "parent", "none");
+        assert!(
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.as_deref() == Some(""))
+        );
+        // An ID moves the Thread under it.
+        set(&mut form, "parent", "new-parent-id");
+        assert!(
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.as_deref() == Some("new-parent-id"))
+        );
+        // A move alone is a valid thread.set (no other field needed).
+        set(&mut form, "model", "");
+        assert!(
+            matches!(form.command(&context.cwd).unwrap(), Command::ThreadSet(a) if a.parent_id.is_some() && a.model.is_none())
+        );
+    }
+    #[test]
     fn cleared_or_unknown_choices_are_rejected_without_sending_or_losing_input() {
         let context = Context::default();
         for (kind, name, expected_error) in [

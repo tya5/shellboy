@@ -3849,7 +3849,7 @@ title/settings still bump it). The change is recorded as a `thread_parent` conte
 settings glyph. Open product points resolved conservatively: (1) no new TUI key or drag, only
 the F8 settings field; (2) an archived Thread may be a parent (its children then show the
 existing "not in this list" marker); (3) no caller restriction, as the study found a model can
-already delete a stopped Thread; (4) no ownership transfer and no retry-authority change;
+already delete a stopped Thread; (4) no ownership transfer of live Runs (stop and retry have no authority check since #256);
 (5) the Thread's own settings are not copied from the new parent; (6) one Thread per call.
 Reason: the study shows every reader recomputes from the current column; the smallest change is
 one validated UPDATE with a cycle check, and anything touching live ownership has no safe

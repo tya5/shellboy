@@ -787,11 +787,17 @@ impl Message {
                 field,
                 before,
                 after,
-            } => crate::ui::text_width::glyphs::formatted!(
-                "{}: {before} → {after}",
-                "{}: {before} > {after}",
-                field_label(field, language)
-            ),
+            } => {
+                // An empty side is an unset value (a cleared parent, effort or title).
+                let unset = crate::ui::i18n::local!(language, "未設定", "Not set");
+                let before = if before.is_empty() { unset } else { before };
+                let after = if after.is_empty() { unset } else { after };
+                crate::ui::text_width::glyphs::formatted!(
+                    "{}: {before} → {after}",
+                    "{}: {before} > {after}",
+                    field_label(field, language)
+                )
+            }
         }
     }
     fn retained_bytes(&self) -> usize {
@@ -1127,6 +1133,7 @@ pub(super) fn event_messages(
     }
     let change = &event["change"];
     for key in [
+        "parent_id",
         "connection",
         "model",
         "cwd",
@@ -1144,6 +1151,9 @@ pub(super) fn event_messages(
             let before = change["before"].get(key).unwrap_or(&Value::Null);
             if before != after {
                 let show = |v: &Value| {
+                    if v.is_null() {
+                        return String::new();
+                    }
                     clipped(
                         v.as_str()
                             .map(str::to_owned)

@@ -61,8 +61,8 @@ under another live Thread or detaches it. No schema change. Cycle check by a bou
 walk (1,024 steps) in the write transaction; live Runs keep their owner (no ownership transfer);
 `changed_threads` is the moved Thread, old parent and new parent; `updated_at` is untouched; a
 `thread_parent` context entry is recorded; the result carries `parent_change`. Docs: cli-reference,
-tui, thread-browser, protocol, delegation (retry wording), agent-guide, thread-organization
-"Stage 2 as implemented"; decision D-222-2. Not started: stage 3 (tags), stage 4 (pin).
+tui, thread-browser, protocol, delegation (ownership wording), agent-guide, thread-organization
+"Stage 2 as implemented"; decision D-222-2. Not started: stage 3 (tags). Pin was dropped by the user.
 Resume point: all-OS CI on the final SHA, then owner review.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
