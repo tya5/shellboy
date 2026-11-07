@@ -340,6 +340,11 @@ pub enum TurnCommand {
 #[derive(Debug, Clone, Subcommand)]
 pub enum HistoryCommand {
     List(HistoryListOptions),
+    /// Read the selected path around an end, position or node: bounded, no cursor.
+    #[command(
+        after_help = "  shellboy history window --thread THREAD_ID --before 20\n  shellboy history window --thread THREAD_ID --ordinal 4000 --before 10 --after 10\n\nWith no --ordinal/--node the window ends at the last node. Each item carries selection.ordinal; total is one past the last ordinal and revision changes on append, rewind and compaction. An append keeps every earlier position valid; a stale position fails with cursor_expired (details: revision, total). Pass --expect-node with --ordinal to detect a rewound or compacted path."
+    )]
+    Window(HistoryWindowOptions),
     Get(HistoryGetOptions),
     Search(SearchOptions),
     Relations(HistoryRelationsOptions),
@@ -749,6 +754,29 @@ pub struct HistoryListOptions {
     /// Related shell's saved native state (starting/running/stopping/exited/failed/stopped).
     #[arg(long = "status")]
     pub state: Option<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct HistoryWindowOptions {
+    #[arg(long = "thread")]
+    pub thread_id: String,
+    /// Position on the selected path (0 is the first node); default is the end.
+    #[arg(long, conflicts_with = "node_id")]
+    pub ordinal: Option<u64>,
+    /// Anchor at this node on the selected path.
+    #[arg(long = "node")]
+    pub node_id: Option<String>,
+    /// With --ordinal: fail with cursor_expired unless this node still sits there.
+    #[arg(long = "expect-node", requires = "ordinal")]
+    pub expect_node_id: Option<String>,
+    /// Items before the anchor; before + after + 1 is at most 200.
+    #[arg(long, default_value_t = 20)]
+    pub before: u32,
+    /// Items after the anchor.
+    #[arg(long, default_value_t = 20)]
+    pub after: u32,
+    /// Maximum Unicode scalar characters in each excerpt; zero omits its content.
+    #[arg(long, default_value_t=wire::DEFAULT_HISTORY_EXCERPT_CHARS, value_parser=clap::value_parser!(u32).range(0..=wire::MAX_HISTORY_EXCERPT_CHARS as i64))]
+    pub excerpt_chars: u32,
 }
 #[derive(Debug, Clone, Args)]
 pub struct HistoryGetOptions {
@@ -1213,6 +1241,15 @@ impl Cli {
                     run_id: a.run_id,
                     since: a.since,
                     state: a.state,
+                }),
+                HistoryCommand::Window(a) => C::HistoryWindow(wire::HistoryWindowArgs {
+                    thread_id: a.thread_id,
+                    ordinal: a.ordinal,
+                    node_id: a.node_id,
+                    expect_node_id: a.expect_node_id,
+                    before: a.before,
+                    after: a.after,
+                    excerpt_chars: a.excerpt_chars,
                 }),
                 HistoryCommand::Get(a) => C::HistoryGet(wire::HistoryGetArgs {
                     end_message_only: a.end_message_only,

@@ -100,6 +100,7 @@ the current Turn's snapshot. The provenance header itself adds no authority.
 | Assignment of a sent request | `shellboy message get --message MESSAGE_ID` | inspect `reply.state`, then read `reply.node_id` when replied |
 | Output of a launched command | `shellboy shell get --execution WORK_EXECUTION_ID` | shell read with that same ID; continue using the read cursor |
 | Evidence for a conversation's decisions | `shellboy history search ...` / `history list ...` | history get by node ID; history relations for relationships |
+| The recent end (or a position) of a long Thread | `shellboy history window --thread THREAD_ID --before 20` | `--ordinal N --expect-node NODE_ID` to read around a position you saw; `cursor_expired` means the path changed, re-read from the end |
 | Search across guides, documents, and history | `shellboy rag search --scope ... --query ...` | rag get by reference; explicitly include the history scope |
 
 `status` defaults to nonterminal work. Add `--all` to investigate completion, failure, or stopping too.

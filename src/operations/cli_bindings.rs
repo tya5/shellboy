@@ -293,6 +293,20 @@ const MEANINGS: &[Meaning] = &[
         None,
     ),
     (
+        OperationId::HistoryWindow,
+        &["history", "window"],
+        &[
+            ("thread_id", FieldId::Thread),
+            ("ordinal", FieldId::Ordinal),
+            ("node_id", FieldId::Node),
+            ("expect_node_id", FieldId::ExpectNode),
+            ("before", FieldId::ItemsBefore),
+            ("after", FieldId::ItemsAfter),
+            ("excerpt_chars", FieldId::ExcerptChars),
+        ],
+        None,
+    ),
+    (
         OperationId::HistoryGet,
         &["history", "get"],
         &[

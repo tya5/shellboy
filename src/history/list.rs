@@ -171,7 +171,7 @@ fn list_position(
     }
     Ok((start, watermark))
 }
-fn history_snippet(
+pub(super) fn history_snippet(
     connection: &Connection,
     row: &rusqlite::Row<'_>,
     thread_id: &str,

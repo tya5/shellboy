@@ -700,11 +700,11 @@ mod tests {
             .iter()
             .map(|kind| kind.catalogue())
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(ids.len(), 66);
+        assert_eq!(ids.len(), 67);
         assert_eq!(ids, OperationId::ALL.iter().copied().collect());
         assert_eq!(
             crate::operations::CLI_BINDINGS.len(),
-            67,
+            68,
             "attach is a CLI shorthand, not another operation"
         );
         let clients = OpKind::ALL

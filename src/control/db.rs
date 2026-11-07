@@ -1493,6 +1493,7 @@ impl Store {
                 Ok(result)
             }
             Command::HistoryList(args) => MutationResult::value(history::list_nodes(tx, args)?),
+            Command::HistoryWindow(args) => MutationResult::value(history::window(tx, args)?),
             Command::HistoryGet(args) => {
                 let (body, parts) = history::read_node(tx, args)?;
                 let mut value = serde_json::to_value(body).map_err(|_| {

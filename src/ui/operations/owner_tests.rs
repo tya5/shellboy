@@ -56,7 +56,7 @@ fn owner_forms_cover_every_owner_catalogue_identity_without_client_stubs() {
         .iter()
         .map(|kind| kind.catalogue())
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(implemented.len(), 50);
+    assert_eq!(implemented.len(), 51);
     assert_eq!(implemented, owner);
     for kind in OpKind::OWNER {
         let form = Form::new(*kind, &context());
@@ -211,7 +211,7 @@ fn headers_never_become_actions_and_help_preserves_edits_and_references() {
     let actions = operations.rows().to_vec();
     let rendered = screen(&operations);
     assert!(rendered.contains("その他の操作"));
-    assert!(rendered.contains("66件"));
+    assert!(rendered.contains("67件"));
     operations.key(key(KeyCode::Home));
     for (index, expected) in actions.iter().enumerate() {
         assert_eq!(OpKind::ALL[operations.selected], *expected);

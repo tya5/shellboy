@@ -34,6 +34,20 @@ CLI output uses a JSON envelope. Check `ok` and `error`; read content from `resu
 shellboy history list --thread THREAD_ID --limit 20 --cursor 'CURSOR'
 ```
 
+### Reading the selected path by position (`history window`)
+
+`history list` walks forward from the start with a cursor that a later append invalidates. To read a long Thread cheaply, for example its tail, use `history window`; its cost follows the number of items asked for, not the Thread length.
+
+```sh
+shellboy history window --thread THREAD_ID --before 20                  # the last 21 nodes
+shellboy history window --thread THREAD_ID --ordinal 4000 --before 10 --after 10
+shellboy history window --thread THREAD_ID --node NODE_ID --before 5 --after 5
+```
+
+With neither `--ordinal` nor `--node` the window ends at the last node. `--before` and `--after` default to 20 and `--before + --after + 1` is at most 200. Items have the same shape as `history list` (`--excerpt-chars` works the same, `selection.ordinal` is the position, counted from 0); there is no cursor and no run/since/status filter. The result is `{thread_id, revision, total, items}`: `total` is the path length (one past the last position) and `revision` is the Thread's selected-path revision.
+
+Appending advances `revision` but never moves an earlier position, so a position you already read stays valid. Rewind and compaction also advance `revision` and move or remove positions. `revision` alone cannot tell the two apart, so when you reuse a position pass the node you saw there: `--ordinal N --expect-node NODE_ID`. A position past the end, a `--node` that is no longer on the path, or an `--expect-node` mismatch fails with `cursor_expired`, and `error.details` carries the current `revision` and `total`; read again from the end or from a position below `total`.
+
 The `text` returned by `history get` is a body page respecting UTF-8 character boundaries. `source_node_ids` identifies sources of summaries and similar content; `previous_node_ids` and `next_node_ids` reference original neighboring nodes. Call `history get` again for an ID you want to follow. Reading originals does not alter the Thread's adopted path. `provenance` returns node kind, creation time, current original-content revision, and originating Thread/Run/Turn only where corresponding stored records exist. Do not confuse membership in a forked Thread with the origin.
 
 The `context` from `history get` contains stored creation time, originating Turn/Run/Thread, and present/tombstone state. Even after body reclamation, inspect tombstone_reason and origin. These values do not infer adoption into a fork or execution start time.
