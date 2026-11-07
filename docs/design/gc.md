@@ -14,6 +14,14 @@ managed画像のdeleting→unlink→deletedとpin/active検査は共有Attachmen
 
 容量は論理live bytesと物理DB/WAL/managed/log bytes、DB再利用可能page bytesを分離する。DELETE直後にOS空き容量が増えると説明せず、自動VACUUMを実行しない（明示コマンドは[末尾の節](#明示的なstorage-vacuum-238)）。物理属性の取得は有限file worker上で実施し、UI/main OS threadから同期stat/走査を呼ばない。logical limit超過は新しい副作用をstorage_limitで保留するための判定として公開し、停止/終端保存/GCは許す。保存済みspaceのsemantic閲覧はquery embeddingだけを生成して許可し、索引pauseを変更しない。索引用の新規embedding停止と閲覧を区別する（[G10](index.md#論理容量上限とsemantic閲覧g10)）。
 
+## 空き容量の下限（#261）
+
+SSDが満杯になるのは致命的なので、論理量とは別に、データ保存先のボリュームの空きを同じ関門 `require_capacity_tx` で見る。論理データ量の既定は警告40 GiB・上限50 GiB。`limits.disk_free_min_bytes`（既定5 GiB、正の整数）を切ると、論理上限と同じ範囲（model・shell・child・summary・indexの新規作業と下書き受付）を `storage_limit` で保留する。停止・終端記録・観測・GC・`storage collect` は止めない。論理上限と空き不足は `details.reason`（`logical_limit` / `disk_free_low`）で区別し、両方なら論理上限を返す。
+
+空きは `Connection::path()` の親（DBファイルのあるdirectory）に対する `fs2::available_space` を呼び出しごとに読む。cacheを持たないので、古い値で満杯を許すことも、空きが戻った後に保留し続けることもない。symlinkのdata directoryはOSが解決した先のボリュームを見る。1回はstatvfs相当の1 syscallで、同じ関門が読む論理量counter（O(1)）と同程度の小さな費用である（実測は[検証状況](../validation/acceptance.md)）。新しいworker・queue・threadは追加しない。UIのmain OS threadは呼ばない。取得できないとき（in-memory接続・FS非対応）は保留せず、`storage status` の `disk_free_state` を `unknown` にして事実を示す。下限の2倍を切ると `warning`、下限を切ると `held`。TUIのstorage表示は物理sampleの `disk_guard` に同じ状態を載せ、新しい記号は足さない。
+
+モデルのshellが実行するコマンド自身の書込みは止められない。止めるのは新しい作業だけで、実行中のコマンドは止めない。空きが戻れば、保留されたTurnは既存の明示retryで再開する。
+
 logical bytesの採用定義は保存本文（nodeと監査outputの重複を含む）、snapshot/draft/attempt/event/receipt本文、pipe原文、managed raw_size、vec float32要素、`app_meta` の `index.*` 入力/preview/bootstrap/auto payloadの合計。SQLiteのB-tree/索引page overheadとは別の値とする。`reclaimable_bytes` はrawから確実に回収できる下限であり、会話GCやmanaged候補の未確定見積りを加算しない。詳細応答の `reclaimable_is_lower_bound` をtrueとし、quotaはこの見積りではなくlogical live合計で判定する。索引workerも同じ `require_capacity_tx` を利用する。
 
 raw候補metadataは128実行ずつ取得し、chunkは128行かつ1 MiB以内のtransactionに分ける（単独の既存oversize chunkだけは進捗のため許容）。root/出典/sweepは各128件。mark後のruntime pin追加を含め、各破壊候補を現在のpinを含むrootと逆方向の再帰出典で同transaction内に再検証する。sweep cursorは戻さず、継続するpin追加で進捗を失わない。root revisionだけでは捉えられない一時読取り保護をこの検査で補う。

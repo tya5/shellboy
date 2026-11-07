@@ -15,10 +15,14 @@ use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, Notify, watch};
 use tokio_util::sync::CancellationToken;
 
+mod disk;
 mod event_retention;
 mod history;
 pub(crate) mod observation;
 mod usage;
+#[cfg(test)]
+pub(crate) use disk::tests::force_free as force_free_for_test;
+pub use disk::{DiskState, disk_state};
 use history::history_step;
 use usage::{logical_usage, physical_usage};
 
@@ -168,6 +172,11 @@ pub struct StorageDetails {
     pub logical_managed_bytes: u64,
     pub warning: bool,
     pub limit_reached: bool,
+    /// Minimum free bytes on the data directory's volume (`limits.disk_free_min_bytes`).
+    pub disk_free_min_bytes: u64,
+    /// `held` below the minimum, `warning` below twice the minimum, `unknown`
+    /// when the filesystem reported no free space (nothing is held then).
+    pub disk_free_state: DiskState,
     pub reclaimable_is_lower_bound: bool,
 }
 #[derive(Debug, Clone, Serialize)]
@@ -330,6 +339,8 @@ impl GcService {
             logical_managed_bytes: logical.managed,
             warning: total >= self.config.limits.data_warning_bytes,
             limit_reached: total >= self.config.limits.data_max_bytes,
+            disk_free_min_bytes: self.config.limits.disk_free_min_bytes,
+            disk_free_state: disk_state(physical.4, self.config.limits.disk_free_min_bytes),
             reclaimable_is_lower_bound: true,
         })
     }
@@ -1058,7 +1069,15 @@ fn raw_stats_tx(db: &Connection, cutoff: Option<String>) -> Result<(u64, u64, u6
 
 /// Shared DB-lane gate for model, shell, child, summary and index workers.
 /// Stop, terminal-record, observation and GC operations must remain available.
+/// Holds new work at the logical data limit or when the data volume's free
+/// space is below `limits.disk_free_min_bytes`; the two carry distinct
+/// `details.reason` values (`logical_limit`, `disk_free_low`). Unknown free
+/// space never holds.
 pub fn require_capacity_tx(db: &Connection, config: &Config) -> Result<()> {
+    require_capacity_with(db, config, disk::database_volume_free(db))
+}
+/// The gate with the volume's free bytes supplied (`None` = unknown).
+pub fn require_capacity_with(db: &Connection, config: &Config, free: Option<u64>) -> Result<()> {
     let used = logical_usage(db)?;
     if used.total() >= config.limits.data_max_bytes {
         return Err(ApiError::new(
@@ -1066,9 +1085,16 @@ pub fn require_capacity_tx(db: &Connection, config: &Config) -> Result<()> {
             "Logical data limit reached; new work is held",
         )
         .hint("Collect eligible raw/managed data or free capacity, then explicitly retry")
-        .details(
-            json!({"logical_live_bytes":used.total(),"limit_bytes":config.limits.data_max_bytes}),
-        ));
+        .details(json!({"reason":"logical_limit","logical_live_bytes":used.total(),"limit_bytes":config.limits.data_max_bytes})));
+    }
+    let minimum = config.limits.disk_free_min_bytes;
+    if disk_state(free, minimum) == DiskState::Held {
+        return Err(ApiError::new(
+            ErrorCode::StorageLimit,
+            "Free disk space is below the minimum; new work is held",
+        )
+        .hint("Free space on the data directory's volume, or lower limits.disk_free_min_bytes, then explicitly retry; running commands are not stopped")
+        .details(json!({"reason":"disk_free_low","filesystem_free_bytes":free,"disk_free_min_bytes":minimum})));
     }
     Ok(())
 }

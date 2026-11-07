@@ -331,7 +331,7 @@ Changed history path/revision or target can cause `cursor_expired`; encoding mis
 | `cursor_encoding_mismatch` | Restore encoding or reread without cursor |
 | `output_expired` | Raw reclaimed; use saved excerpts/history rather than interpreting as empty output |
 | `input_limit` | Body/attachment/stdin/frame limit; split or revise selection |
-| `storage_limit` | Logical capacity limit; inspect storage status/collect, consider unnecessary Thread deletion, explicitly retry |
+| `storage_limit` | Logical capacity limit (`details.reason=logical_limit`) or low free disk space on the data volume (`disk_free_low`, with `filesystem_free_bytes` and `disk_free_min_bytes`); inspect storage status/collect, consider unnecessary Thread deletion, explicitly retry |
 | `save_failed` | Canonical persistence failed; do not assume success, inspect acceptance/operation/storage |
 | `io_failed` | Communication/file/shell I/O failure; decide recovery from hint/details/target state |
 

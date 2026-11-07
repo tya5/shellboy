@@ -132,7 +132,7 @@ pub(super) fn physical_usage(directory: &Path) -> Result<(u64, u64, u64, u64, Op
         size(&directory.join("shellboy.db-wal"))?,
         files(&directory.join("managed/clipboard"))?.saturating_add(files(&directory.join("tmp"))?),
         files(&directory.join("logs"))?,
-        fs2::available_space(directory).ok(),
+        super::disk::volume_free(directory),
     ))
 }
 

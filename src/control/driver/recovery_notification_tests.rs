@@ -520,6 +520,61 @@ async fn capacity_failure_through_drive_persists_one_transition_time() {
 }
 
 #[tokio::test]
+async fn low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns() {
+    let (root, owner, control, accepted) =
+        preparation_tests::fixture("http://127.0.0.1:9/v1").await;
+    // Injected free space for this temporary data directory; no disk is filled.
+    let data = owner.loaded.data_dir.clone();
+    crate::gc::force_free_for_test(&data, Some(1 << 30));
+    let slot = DriverSlot {
+        id: id(),
+        run_id: accepted.run_id.clone().unwrap(),
+        stop: CancellationToken::new(),
+        nudge: Arc::new(Notify::new()),
+        foreground: Arc::new(ForegroundSlot::default()),
+        turn: Arc::new(tokio::sync::Mutex::new(None)),
+    };
+    let error = drive(control.clone(), accepted.thread_id.clone(), slot)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::StorageLimit);
+    let details = error.details.as_ref().unwrap();
+    assert_eq!(details["reason"], "disk_free_low");
+    assert_eq!(details["filesystem_free_bytes"], 1u64 << 30);
+    assert_eq!(details["disk_free_min_bytes"], 5u64 << 30);
+    owner
+        .db
+        .call(|db| {
+            let (turn, generation): (String, i64) =
+                db.query_row("SELECT id,generation FROM turn", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+            let reason = assert_reason_and_event(db, &turn, generation);
+            assert_eq!(reason["details"]["reason"], "disk_free_low");
+            Ok(())
+        })
+        .await
+        .unwrap();
+    // Space returns: an explicit retry makes the same Turn runnable again and
+    // the gate passes without any other step.
+    crate::gc::force_free_for_test(&data, Some(100 << 30));
+    let retried = control
+        .request(Request::new(
+            format!("{}:{}", control.store.instance_id, id()),
+            Command::RunRetry(RunTarget {
+                run_id: accepted.run_id.clone().unwrap(),
+            }),
+        ))
+        .await;
+    assert!(retried.ok, "{:?}", retried.error);
+    control.gc.require_capacity().await.unwrap();
+    let ready = preparation_tests::ready(&control, &accepted).await;
+    assert_eq!(ready.thread, accepted.thread_id);
+    preparation_tests::close(control, owner).await;
+    drop(root);
+}
+
+#[tokio::test]
 async fn existing_turn_preparation_failure_persists_one_transition_time() {
     let (_root, owner, control, accepted) =
         preparation_tests::fixture("http://127.0.0.1:9/v1").await;

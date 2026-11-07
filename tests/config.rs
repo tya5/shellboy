@@ -146,6 +146,7 @@ fn invariants_are_rejected_without_clamping() {
         "[retention]\ntool_raw_days=0",
         "[limits]\nattachment_file_bytes=100\nattachment_request_bytes=99",
         "[limits]\ndata_warning_bytes=100\ndata_max_bytes=100",
+        "[limits]\ndisk_free_min_bytes=0",
         "[io]\noutput_batch_bytes=10\noutput_buffer_bytes=9",
         "[indexing]\nretries=1",
         "[indexing]\nretry_delays_ms=[0,1]",
@@ -357,6 +358,7 @@ fn every_positive_field_and_zero_allowed_section_keeps_the_existing_contract() {
                 "draft_bytes",
                 "data_warning_bytes",
                 "data_max_bytes",
+                "disk_free_min_bytes",
             ][..],
         ),
         (
@@ -1200,4 +1202,25 @@ fn indexing_auto_kinds_default_to_user_summary_and_assistant_response_and_reject
     );
     let error = Config::parse("[indexing]\nauto_kinds=[\"tool_output\"]\n").unwrap_err();
     assert!(matches!(error, ConfigError::Invalid { key, .. } if key == "indexing.auto_kinds"));
+}
+
+#[test]
+fn disk_free_minimum_defaults_and_old_data_limits_still_load() {
+    let defaults = Config::parse("").unwrap();
+    assert_eq!(defaults.limits.data_warning_bytes, 40 << 30);
+    assert_eq!(defaults.limits.data_max_bytes, 50 << 30);
+    assert_eq!(defaults.limits.disk_free_min_bytes, 5 << 30);
+    // Configs written for the former 8/10 GiB defaults keep their values.
+    let old = Config::parse("[limits]\ndata_warning_bytes=8589934592\ndata_max_bytes=10737418240")
+        .unwrap();
+    assert_eq!(old.limits.data_max_bytes, 10 << 30);
+    assert_eq!(old.limits.disk_free_min_bytes, 5 << 30);
+    // A small disk can lower the minimum; no relation to the data limits is imposed.
+    let small = Config::parse("[limits]\ndisk_free_min_bytes=1048576").unwrap();
+    assert_eq!(small.limits.disk_free_min_bytes, 1 << 20);
+    assert!(
+        Config::parse("[limits]\ndisk_free_min_bytes=1\ndata_warning_bytes=2\ndata_max_bytes=3")
+            .is_ok()
+    );
+    assert!(Config::parse("[limits]\ndata_warning_bytes=100\ndata_max_bytes=100").is_err());
 }
