@@ -8,7 +8,10 @@ use ratatui::style::Style;
 fn rows(view: &ThreadView) -> &[ReplyTarget] {
     &view.pending_messages.awaiting_replies
 }
-pub(super) fn height(available: u16, collapsed: bool, capacity: usize) -> u16 {
+pub(super) fn height(available: u16, collapsed: bool, capacity: usize, count: usize) -> u16 {
+    if count == 0 {
+        return 0;
+    }
     RegionLayout::new(capacity, collapsed).height(available, 0)
 }
 pub(super) fn configure(view: &mut ThreadView, collapsed: bool, capacity: usize, area: Rect) {
@@ -195,7 +198,8 @@ mod tests {
 
     #[test]
     fn empty_and_mixed_reply_region_uses_existing_marks() {
-        assert_eq!(height(20, false, 1), 3);
+        assert_eq!(height(20, false, 1, 0), 0);
+        assert_eq!(height(20, false, 1, 1), 3);
         let mut view = ThreadView::new(&Config::default(), std::path::PathBuf::from("/tmp"));
         view.pending_messages.awaiting_replies = vec![
             ReplyTarget {

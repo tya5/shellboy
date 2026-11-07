@@ -6844,6 +6844,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         remaining,
         state.awaiting_human_collapsed,
         state.config.ui.awaiting_human_rows,
+        state.view().pending_messages.awaiting_replies.len(),
     );
     let held_height = held_input::height(
         remaining.saturating_sub(human_height),
