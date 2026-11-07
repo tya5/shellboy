@@ -5035,6 +5035,46 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
 }
 
 #[tokio::test]
+async fn issue_271_spill_shortfall_waits_until_threshold_recrossing() {
+    crate::test_watchdog::watchdog("issue 271 repeated spill", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        send(&control, &target, "synthetic repeated spill").await;
+        let command = if cfg!(windows) { "[string]::new([char]48, 20000)" } else { "printf %020000d 0" };
+        let mut last_epoch = None;
+        let mut uncached = 0usize;
+        let mut prior = Vec::new();
+        let mut epochs = Vec::new();
+        for n in 0..7 {
+            let request = incoming(&control, &mut receive).await;
+            let id = target.clone();
+            let epoch: i64 = control.store.database.call(move |db| Ok(db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [id], |r| r.get(0))?)).await.unwrap();
+            let bytes = request.body["input"].to_string().into_bytes();
+            let common = if last_epoch == Some(epoch) { prior.iter().zip(&bytes).take_while(|(a,b)| a == b).count() } else { 0 };
+            uncached += bytes.len() - common;
+            prior = bytes;
+            last_epoch = Some(epoch);
+            epochs.push(epoch);
+            request.reply.send((200, json!({"id":format!("issue271-{n}"),"status":"completed","usage":{"input_tokens":if n < 2 {200001} else {190000},"output_tokens":1},"output":[{"type":"function_call","call_id":format!("issue271-{n}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
+        }
+        eprintln!("issue271 modeled_uncached_bytes={uncached} epochs={epochs:?}");
+        let crossing = incoming(&control, &mut receive).await;
+        crossing.reply.send((200, json!({"id":"cross", "status":"completed", "usage":{"input_tokens":200001,"output_tokens":1}, "output":[{"type":"function_call","call_id":"cross","name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
+        let after_crossing = incoming(&control, &mut receive).await;
+        let id = target.clone();
+        let recross_epoch: i64 = control.store.database.call(move |db| Ok(db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [id], |r| r.get(0))?)).await.unwrap();
+        assert!(recross_epoch > *epochs.last().unwrap(), "spill must resume after threshold recrossing");
+        after_crossing.reply.send((200, answer("finished"))).unwrap();
+        settled(&control, &target).await;
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+        assert_eq!(epochs, [0, 0, 1, 1, 1, 1, 1], "below-threshold shortfall must not rewrite each request");
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn proactive_target_escalates_before_threshold_recrossing() {
     crate::test_watchdog::watchdog("proactive calibrated shortfall", async {
         let root = tempfile::tempdir().unwrap();
