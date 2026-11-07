@@ -1590,6 +1590,7 @@ mod confirmation_language_tests {
     fn index_confirmation_screen_preserves_external_preview_in_both_languages() {
         fn configure(ui: &mut UiState) {
             let args = IndexArgs {
+                kinds: Vec::new(),
                 scope: Some(IndexScope::All),
                 ..Default::default()
             };

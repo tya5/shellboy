@@ -245,6 +245,7 @@ impl Fixture {
     }
     fn rebuild_args(dimensions: Option<usize>) -> IndexArgs {
         IndexArgs {
+            kinds: Vec::new(),
             dimensions,
             source_ids: vec!["alpha".into(), "beta".into(), "gamma".into()],
             ..Default::default()

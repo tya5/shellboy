@@ -511,6 +511,7 @@ async fn retry_preview_matches_current_targets_and_reports_unread_admissions() {
     let explicit = f
         .service
         .preview(IndexArgs {
+            kinds: Vec::new(),
             space_id: Some(active),
             ..Default::default()
         })
@@ -528,6 +529,7 @@ async fn retry_preview_matches_current_targets_and_reports_unread_admissions() {
     assert!(
         f.service
             .preview(IndexArgs {
+                kinds: Vec::new(),
                 space_id: Some("retired".into()),
                 ..Default::default()
             })

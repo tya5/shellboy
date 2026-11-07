@@ -1178,3 +1178,23 @@ fn held_input_rows_have_independent_strict_bounds() {
         assert!(Config::parse(&format!("[ui]\nheld_input_rows = {invalid}\n")).is_err());
     }
 }
+
+#[test]
+fn indexing_auto_kinds_default_to_user_and_summary_and_reject_unknown_kinds() {
+    let config = Config::parse("").unwrap();
+    assert_eq!(config.indexing.auto_kinds, ["user", "summary"]);
+    let config =
+        Config::parse("[indexing]\nauto_kinds=[\"user\",\"summary\",\"tool_result\"]\n").unwrap();
+    assert!(
+        config.indexing.auto_includes("tool_result") && !config.indexing.auto_includes("spill")
+    );
+    assert!(
+        Config::parse("[indexing]\nauto_kinds=[]\n")
+            .unwrap()
+            .indexing
+            .auto_kinds
+            .is_empty()
+    );
+    let error = Config::parse("[indexing]\nauto_kinds=[\"tool_output\"]\n").unwrap_err();
+    assert!(matches!(error, ConfigError::Invalid { key, .. } if key == "indexing.auto_kinds"));
+}

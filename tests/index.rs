@@ -148,7 +148,13 @@ struct Fixture {
     proxy: Proxy,
 }
 impl Fixture {
-    async fn new(config: Config) -> Self {
+    /// Legacy behavior for the older tests: every searchable kind is automatic.
+    async fn new(mut config: Config) -> Self {
+        config.indexing.auto_kinds = shellboy::config::INDEXABLE_KINDS.map(String::from).to_vec();
+        Self::with_request_timeout(config, 60_000).await
+    }
+    /// The configuration exactly as given (the real default is user + summary).
+    async fn new_exact(config: Config) -> Self {
         Self::with_request_timeout(config, 60_000).await
     }
     async fn with_request_timeout(mut config: Config, request_timeout_ms: u64) -> Self {
@@ -256,6 +262,7 @@ impl Fixture {
 }
 fn args() -> IndexArgs {
     IndexArgs {
+        kinds: Vec::new(),
         dimensions: None,
         scope: None,
         space_id: None,
@@ -283,6 +290,7 @@ async fn newly_finalized_only_no_implicit_backfill_and_real_vec_search() {
     let preview = f
         .service
         .backfill(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             scope: Some(IndexScope::All),
             ..args()
@@ -449,6 +457,7 @@ async fn explicit_length_error_splits_finitely_and_rebuild_failure_preserves_old
     f.proxy.push(Reply::Error(400, "unknown_provider_failure"));
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
@@ -472,6 +481,7 @@ async fn rebuild_success_switches_once_and_all_space_vector_gc_rolls_back_atomic
     let old = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
@@ -626,6 +636,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     let old_space = f.service.status(args()).await.unwrap().space_id;
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
@@ -787,6 +798,7 @@ async fn raw_gc_keeps_canonical_quote_and_attachment_vectors_including_legacy_wi
     let management = f
         .service
         .management_status(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
@@ -932,6 +944,7 @@ async fn raw_retention_during_inflight_embedding_does_not_resurrect_vectors() {
     let management = f
         .service
         .management_status(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
@@ -958,6 +971,7 @@ async fn partially_failed_candidate_is_visible_and_retry_completes_before_switch
     f.proxy.push(Reply::Error(400, "unknown_failure"));
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["cat-source".into(), "dog-source".into()],
             ..args()
@@ -1094,6 +1108,7 @@ async fn new_finalized_sources_during_rebuild_are_caught_up_before_switch() {
     let old = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["old".into()],
             ..args()
@@ -1163,6 +1178,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     let selected = f
         .service
         .management_status(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             thread_ids: vec!["view".into()],
             ..args()
@@ -1179,6 +1195,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     let preview = f
         .service
         .preview(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             scope: Some(IndexScope::All),
             ..args()
@@ -1200,6 +1217,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     let status = f
         .service
         .management_status(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["done".into()],
             ..args()
@@ -1212,6 +1230,7 @@ async fn management_coverage_is_scoped_read_only_and_rejects_stale_versions() {
     assert_eq!(
         f.service
             .preview(IndexArgs {
+                kinds: Vec::new(),
                 dimensions: None,
                 source_ids: vec!["done".into()],
                 ..args()
@@ -1243,6 +1262,7 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
     assert_eq!(f.proxy.count(), calls);
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
@@ -1263,6 +1283,7 @@ async fn management_keeps_raw_coverage_unverified_and_space_history_visible() {
     let explicit = f
         .service
         .management_status(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             space_id: Some(old.clone()),
             source_ids: vec!["raw-node".into()],
@@ -1291,6 +1312,7 @@ async fn fee_preview_credits_completed_length_split_children_without_api_or_new_
     let preview = f
         .service
         .preview(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
@@ -1318,6 +1340,7 @@ async fn interrupted_rebuild_fence_stays_visible_across_retry_and_restart() {
     let active = f.service.status(args()).await.unwrap().space_id.unwrap();
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["source".into()],
             ..args()
@@ -1474,6 +1497,7 @@ async fn decoding_change_atomically_invalidates_all_spaces_without_touching_raw_
     f.drain().await;
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["raw-node".into()],
             ..args()
@@ -2079,6 +2103,7 @@ async fn changing_split_chars_changes_space_and_fee_preview_without_implicit_bac
         "configuration changes do not authorize historical work"
     );
     let selected = IndexArgs {
+        kinds: Vec::new(),
         dimensions: None,
         source_ids: vec!["source".into()],
         ..args()
@@ -2426,6 +2451,7 @@ async fn real_thread_delete_hides_path_only_sources_until_gc_reclaims_payload_an
     let preview = f
         .service
         .preview(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             thread_ids: vec!["deleted".into()],
             ..args()
@@ -2545,6 +2571,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         let alternate = if inactive {
             f.service
                 .rebuild(IndexArgs {
+                    kinds: Vec::new(),
                     dimensions: None,
                     source_ids: vec!["seed".into()],
                     ..args()
@@ -2603,6 +2630,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
             assert!(
                 f.service
                     .retry(IndexArgs {
+                        kinds: Vec::new(),
                         dimensions: None,
                         space_id: Some(old.clone()),
                         ..args()
@@ -2614,6 +2642,7 @@ async fn paused_or_inactive_inflight_space_keeps_fixed_input_for_explicit_same_s
         }
         f.service
             .retry(IndexArgs {
+                kinds: Vec::new(),
                 dimensions: None,
                 space_id: Some(old.clone()),
                 source_ids: vec!["target".into()],
@@ -2656,6 +2685,7 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     f.node("rebuild", "abcdefghijklmnop").await;
     f.service
         .rebuild(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             source_ids: vec!["rebuild".into()],
             ..args()
@@ -2710,6 +2740,7 @@ async fn paused_candidate_inflight_result_keeps_old_active_until_explicit_retry_
     assert_eq!(f.proxy.count(), before + 1);
     f.service
         .retry(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             space_id: Some(candidate.clone()),
             ..args()
@@ -3359,6 +3390,7 @@ async fn auto_history_status_separates_held_admissions_bootstrap_and_jobs() {
         assert_eq!((on.pending, on.held_auto_history), (3, 0));
         let selected_space = off
             .status(IndexArgs {
+                kinds: Vec::new(),
                 space_id: mixed.space_id,
                 ..args()
             })
@@ -3546,5 +3578,300 @@ async fn startup_removes_obsolete_paused_cleanup_keys() {
     let workers = f.service.start().await.unwrap();
     assert_eq!(count_rows(&f.db, "SELECT count(*) FROM app_meta WHERE key IN ('index.pause_cleanup.state','index.pause_cleanup.discarded')").await, 0);
     workers.shutdown().await;
+    f.close().await;
+}
+
+// ---- #254: which node kinds automatic indexing takes in ----
+
+fn tool_payload(text: &str) -> Value {
+    json!({"item":{"type":"function_call_output","call_id":"c","output":text}})
+}
+async fn seed_kinds(f: &Fixture) {
+    f.node("u", "user cat message").await;
+    f.payload("s", "summary", json!({"item":{"role":"developer","content":[{"type":"input_text","text":"summary dog text"}]}})).await;
+    f.payload("t", "tool_result", tool_payload("tool output zebra"))
+        .await;
+    f.payload("a", "assistant_response", json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"assistant answer yak"}]}]})).await;
+    f.payload("p", "spill", json!({"text":"spill body gnu"}))
+        .await;
+}
+async fn authorize(f: &Fixture, ids: &[&str]) -> Vec<String> {
+    let ids: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    let service = f.service.clone();
+    f.db.call(move |db| {
+        let tx = db.transaction()?;
+        service.authorize_new_tx(&tx, &ids)?;
+        let keys = tx
+            .prepare("SELECT value FROM app_meta WHERE key LIKE 'index.auto.%' ORDER BY key")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        tx.commit()?;
+        Ok(keys
+            .iter()
+            .map(|v| {
+                serde_json::from_str::<Value>(v).unwrap()["node_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect())
+    })
+    .await
+    .unwrap()
+}
+fn requested_inputs(f: &Fixture) -> Vec<String> {
+    f.proxy
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .flat_map(|r| match &r["input"] {
+            Value::Array(items) => items
+                .iter()
+                .filter_map(|i| i.as_str().map(str::to_owned))
+                .collect(),
+            other => other
+                .as_str()
+                .map(str::to_owned)
+                .into_iter()
+                .collect::<Vec<_>>(),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn automatic_indexing_takes_only_user_messages_and_summaries_by_default() {
+    let f = Fixture::new_exact(Config::default()).await;
+    seed_kinds(&f).await;
+    let mut registered = authorize(&f, &["u", "s", "t", "a", "p"]).await;
+    registered.sort();
+    assert_eq!(registered, ["s", "u"]);
+    f.drain().await;
+    let inputs = requested_inputs(&f).join("\n");
+    assert!(inputs.contains("user cat message") && inputs.contains("summary dog text"));
+    for omitted in ["zebra", "yak", "gnu"] {
+        assert!(
+            !inputs.contains(omitted),
+            "{omitted} must not be embedded automatically"
+        );
+    }
+    f.close().await;
+}
+
+#[tokio::test]
+async fn configured_auto_kinds_choose_what_is_registered() {
+    let mut config = Config::default();
+    config.indexing.auto_kinds = vec!["tool_result".into(), "assistant_response".into()];
+    let f = Fixture::new_exact(config).await;
+    seed_kinds(&f).await;
+    let mut registered = authorize(&f, &["u", "s", "t", "a", "p"]).await;
+    registered.sort();
+    assert_eq!(registered, ["a", "t"]);
+    f.close().await;
+}
+
+#[tokio::test]
+async fn explicit_kinds_add_to_preview_and_backfill_exactly() {
+    let f = Fixture::new_exact(Config::default()).await;
+    seed_kinds(&f).await;
+    let all = IndexArgs {
+        scope: Some(IndexScope::All),
+        ..args()
+    };
+    // Default selection: user + summary only; the other three kinds are reported, not counted.
+    let preview = f.service.preview(all.clone()).await.unwrap();
+    assert_eq!((preview.sources, preview.excluded_sources), (2, 3));
+    assert_eq!(preview.kinds, ["user", "summary"]);
+    assert_eq!(
+        preview.characters,
+        "user cat message".len() as u64 + "summary dog text".len() as u64
+    );
+    assert_eq!(
+        f.proxy.count(),
+        0,
+        "preview must not call the embedding API"
+    );
+    // Adding a kind changes the preview and the backfill by exactly that kind.
+    let with_tool = IndexArgs {
+        kinds: vec!["tool_result".into()],
+        ..all.clone()
+    };
+    let preview = f.service.preview(with_tool.clone()).await.unwrap();
+    assert_eq!((preview.sources, preview.excluded_sources), (3, 2));
+    assert_eq!(preview.segments, 3);
+    assert_eq!(f.proxy.count(), 0);
+    let admitted = f.service.backfill(with_tool).await.unwrap();
+    assert_eq!(
+        (
+            admitted.sources,
+            admitted.segments,
+            admitted.excluded_sources
+        ),
+        (3, 3, 2)
+    );
+    f.drain().await;
+    let inputs = requested_inputs(&f).join("\n");
+    assert!(inputs.contains("tool output zebra"));
+    assert!(!inputs.contains("yak") && !inputs.contains("gnu"));
+    // Everything that was embedded is now counted as already indexed; nothing is embedded twice.
+    let again = f
+        .service
+        .preview(IndexArgs {
+            kinds: vec!["tool_result".into()],
+            ..all.clone()
+        })
+        .await
+        .unwrap();
+    assert_eq!(again.already_indexed, again.segments);
+    // `all` takes in every searchable kind.
+    let everything = f
+        .service
+        .preview(IndexArgs {
+            kinds: vec!["all".into()],
+            ..all
+        })
+        .await
+        .unwrap();
+    assert_eq!((everything.sources, everything.excluded_sources), (5, 0));
+    f.close().await;
+}
+
+#[tokio::test]
+async fn explicit_source_ids_are_never_filtered_by_kind() {
+    let f = Fixture::new_exact(Config::default()).await;
+    seed_kinds(&f).await;
+    let preview = f
+        .service
+        .preview(IndexArgs {
+            source_ids: vec!["t".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    assert_eq!((preview.sources, preview.excluded_sources), (1, 0));
+    f.service
+        .backfill(IndexArgs {
+            source_ids: vec!["t".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    f.drain().await;
+    assert!(requested_inputs(&f).join("\n").contains("zebra"));
+    f.close().await;
+}
+
+#[tokio::test]
+async fn invalid_kind_is_rejected_and_retry_takes_no_kind() {
+    let f = Fixture::new_exact(Config::default()).await;
+    let retry = f
+        .service
+        .retry(IndexArgs {
+            kinds: vec!["tool_result".into()],
+            ..args()
+        })
+        .await;
+    assert!(retry.is_err());
+    let command = shellboy::protocol::Command::IndexPreview(IndexArgs {
+        kinds: vec!["bogus".into()],
+        scope: Some(IndexScope::All),
+        ..args()
+    });
+    assert!(command.validate().is_err());
+    f.close().await;
+}
+
+#[tokio::test]
+async fn queued_authorization_of_a_now_excluded_kind_is_consumed_without_blocking_activation() {
+    // Registered while tool_result was automatic; the owner then restarts with the default.
+    let mut earlier = Config::default();
+    earlier.indexing.auto_kinds = vec!["user".into(), "tool_result".into()];
+    let f = Fixture::new_exact(earlier.clone()).await;
+    seed_kinds(&f).await;
+    f.service
+        .backfill(IndexArgs {
+            source_ids: vec!["u".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    f.drain().await;
+    let before = f.service.status(args()).await.unwrap().space_id.unwrap();
+    assert_eq!(authorize(&f, &["t"]).await, ["t"]);
+    let mut restart = (*f.config).clone();
+    restart.indexing.auto_kinds = vec!["user".into(), "summary".into()];
+    let restarted = IndexService::new(f.db.clone(), Arc::new(restart));
+    restarted
+        .rebuild(IndexArgs {
+            source_ids: vec!["u".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    for _ in 0..1000 {
+        if !restarted
+            .process_one(CancellationToken::new())
+            .await
+            .unwrap()
+        {
+            break;
+        }
+    }
+    // The stale tool_result authorization is consumed, not embedded, and does not
+    // keep the rebuilt candidate from becoming the active space.
+    assert_eq!(
+        count_rows(
+            &f.db,
+            "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.auto.%'"
+        )
+        .await,
+        0
+    );
+    assert!(!requested_inputs(&f).join("\n").contains("zebra"));
+    let after = restarted.status(args()).await.unwrap();
+    assert_ne!(after.space_id.unwrap(), before);
+    assert_eq!((after.pending, after.running, after.failed), (0, 0, 0));
+    f.close().await;
+}
+
+#[tokio::test]
+async fn scope_status_names_kinds_that_are_not_indexed_automatically() {
+    let f = Fixture::new_exact(Config::default()).await;
+    seed_kinds(&f).await;
+    f.service
+        .backfill(IndexArgs {
+            source_ids: vec!["u".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    f.drain().await;
+    let report = f
+        .service
+        .search_report(&search_args("cat", 5), CancellationToken::new())
+        .await
+        .unwrap();
+    let status = &report["scope_status"][0];
+    assert_eq!(status["auto_kinds"], json!(["user", "summary"]));
+    assert_eq!(
+        status["kinds_not_auto_indexed"],
+        json!(["assistant_response", "tool_result", "spill", "event"])
+    );
+    assert!(
+        status["message"]
+            .as_str()
+            .unwrap()
+            .contains("--mode keyword")
+    );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn index_status_reports_auto_kinds() {
+    let f = Fixture::new_exact(Config::default()).await;
+    assert_eq!(
+        f.service.status(args()).await.unwrap().auto_kinds,
+        ["user", "summary"]
+    );
     f.close().await;
 }

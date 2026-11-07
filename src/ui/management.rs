@@ -1676,6 +1676,7 @@ mod preview_notice_tests {
     fn index_loading_preview_is_bilingual_at_standard_widths() {
         fn configure(ui: &mut UiState) {
             let args = IndexArgs {
+                kinds: Vec::new(),
                 scope: Some(IndexScope::All),
                 ..Default::default()
             };
@@ -1709,6 +1710,7 @@ mod preview_notice_tests {
             let mut popup = ManagementPopup::default();
             popup.set_language(language);
             let args = IndexArgs {
+                kinds: Vec::new(),
                 scope: Some(IndexScope::All),
                 ..Default::default()
             };
@@ -1750,6 +1752,7 @@ mod preview_notice_tests {
         let mut popup = ManagementPopup::default();
         popup.set_language(UiLanguage::En);
         let args = IndexArgs {
+            kinds: Vec::new(),
             scope: Some(IndexScope::All),
             ..Default::default()
         };

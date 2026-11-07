@@ -499,7 +499,35 @@ section!(positive "workers", Workers {
     attachment: usize = 2,
     control_file: usize = 1
 });
-section!(Indexing { auto_history: bool = true, concurrency: usize = 1, split_chars: usize = 2_000, retries: usize = 2, common_failure_pause_count: usize = 3, retry_delays_ms: Vec<u64> = vec![1_000, 4_000] });
+/// Node kinds that carry searchable text (`history::search_bodies`). Same words
+/// as `history search --kind`; kinds not listed never have an embeddable body.
+pub const INDEXABLE_KINDS: [&str; 6] = [
+    "user",
+    "summary",
+    "assistant_response",
+    "tool_result",
+    "spill",
+    "event",
+];
+/// Kinds that automatic indexing takes in unless `indexing.auto_kinds` says otherwise.
+pub fn default_auto_kinds() -> Vec<String> {
+    vec!["user".into(), "summary".into()]
+}
+section!(Indexing { auto_history: bool = true, auto_kinds: Vec<String> = default_auto_kinds(), concurrency: usize = 1, split_chars: usize = 2_000, retries: usize = 2, common_failure_pause_count: usize = 3, retry_delays_ms: Vec<u64> = vec![1_000, 4_000] });
+impl Indexing {
+    /// Searchable kinds that automatic indexing leaves out. Their text is not
+    /// complete in semantic results; keyword search reads the originals.
+    pub fn kinds_not_auto_indexed(&self) -> Vec<&'static str> {
+        INDEXABLE_KINDS
+            .into_iter()
+            .filter(|kind| !self.auto_includes(kind))
+            .collect()
+    }
+    /// Whether automatic indexing takes in nodes of this kind.
+    pub fn auto_includes(&self, kind: &str) -> bool {
+        self.auto_kinds.iter().any(|k| k == kind)
+    }
+}
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CopyBackend {

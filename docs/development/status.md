@@ -22,6 +22,21 @@ not cleared on Changed. Queued-input cancel (`/queue` D/A) takes effect without 
 live-Run refusal unchanged and now covered by a UI refusal test. Docs: TUI guide, thread-browser
 design, effective spec, decisions, acceptance. Agent Guide unaffected (TUI-only; the model CLI
 `message cancel` is unchanged). Resume: check CI on the branch tip; TUI was not driven by hand.
+## Automatic indexing kinds (#254; on branch issue-254/index-targets, CI pending)
+
+New `[indexing] auto_kinds` (default `["user","summary"]`; words `user`, `summary`,
+`assistant_response`, `tool_result`, `spill`, `event`; restart to change; reported by
+`index status` and `config check`). Only listed kinds are registered when finalized;
+summaries are now registered automatically (they never were before), tool results,
+replies and attachment notices no longer are by default. `index preview|backfill|rebuild|status`
+take repeatable `--kind` (or `all`) to add kinds for Thread/`--scope all` selections;
+`--source` is never filtered, `retry` rejects `--kind`. Results carry `kinds` and
+`excluded_sources`. Search `scope_status` lists `auto_kinds` / `kinds_not_auto_indexed`
+and says keyword search covers every kind; Agent Guide says when to use keyword search
+and to ask before paid backfill. No schema, table, queue or worker change. Existing
+vectors and already-queued jobs are untouched. Measurements are in
+docs/validation/acceptance.md. Resume: CI on the final SHA, then owner review; the
+owner decides when to restart with the new default and whether to backfill anything.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 

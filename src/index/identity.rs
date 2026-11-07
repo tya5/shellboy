@@ -98,14 +98,21 @@ impl IndexService {
 
     pub async fn retry(&self, args: IndexArgs) -> Result<(), ApiError> {
         self.key()?;
+        if !args.kinds.is_empty() {
+            return Err(err(
+                ErrorCode::InvalidArgument,
+                "retry resumes work that was already authorized; it does not take --kind",
+            ));
+        }
         let current_key = self.profile_key.clone().unwrap();
         let compatible_keys = self.identity_keys();
         let family = self.failure_key().map(str::to_owned);
         let filter =
             if args.scope.is_some() || !args.source_ids.is_empty() || !args.thread_ids.is_empty() {
                 Some(
-                    self.selected_sources(&args)
+                    self.select_sources(&args, source::KindFilter::Any)
                         .await?
+                        .ids
                         .into_iter()
                         .collect::<HashSet<_>>(),
                 )
@@ -181,6 +188,7 @@ impl IndexService {
             .call(move |db| read_status(db, args, keys, family, auto_history))
             .await
             .map_err(db_error)?;
+        status.auto_kinds = self.config.indexing.auto_kinds.clone();
         if let Some(reason) = self.storage_stop_reason() {
             status.paused = true;
             status.reason = Some(match status.reason.take() {
@@ -438,6 +446,7 @@ fn read_status(
     let mut status = IndexStatus {
         space_id: selected.clone(),
         auto_history,
+        auto_kinds: Vec::new(),
         held_auto_history: 0,
         pending: 0,
         running: 0,

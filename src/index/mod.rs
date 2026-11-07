@@ -91,6 +91,11 @@ pub struct FeePreview {
     pub characters: u64,
     pub already_indexed: u64,
     pub unavailable: u64,
+    /// Sources of other indexable kinds in the selected Threads/all history
+    /// that this operation left out (not counted, not embedded).
+    pub excluded_sources: u64,
+    /// Kinds a Thread/all-history selection took in for this operation.
+    pub kinds: Vec<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceSpan {
@@ -153,6 +158,59 @@ pub struct IndexService {
     /// unit across workers (storage design #171). Settling claims whose HTTP
     /// request already ran stays on the foreground lane.
     background: tokio::sync::Mutex<crate::storage::BackgroundRequester>,
+}
+/// Durable, cheap authorization of newly finalized nodes whose kind is one of
+/// `indexing.auto_kinds`. Other kinds are never registered; they enter the index
+/// only through an explicit command.
+pub(crate) fn authorize_new_nodes_tx(
+    tx: &Transaction<'_>,
+    config: &Config,
+    profile_key: &str,
+    node_ids: &[String],
+) -> Result<(), ApiError> {
+    if !config.indexing.auto_history {
+        return Ok(());
+    }
+    for node_id in node_ids {
+        let kind: Option<String> = tx
+            .query_row("SELECT kind FROM node WHERE id=?1", [node_id], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(sql_error)?;
+        if !kind.is_some_and(|kind| config.indexing.auto_includes(&kind)) {
+            continue;
+        }
+        let value = serde_json::to_string(&AutoAdmission {
+            recovery: false,
+            recovery_group: None,
+            recovery_authorization: None,
+            recovery_witness: None,
+            recovery_body_kind: None,
+            node_id: node_id.clone(),
+            state: "pending".into(),
+            error: None,
+        })
+        .map_err(|_| err(ErrorCode::InvalidState, "Cannot encode index authorization"))?;
+        tx.execute(
+            "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
+            params![IndexKeys::new(profile_key).auto(node_id), value],
+        )
+        .map_err(sql_error)?;
+    }
+    Ok(())
+}
+/// Compaction stores summaries/spills without an `IndexService`; this applies the
+/// same kind filter for the config's own profile.
+pub(crate) fn authorize_new_nodes_for_config_tx(
+    tx: &Transaction<'_>,
+    config: &Config,
+    node_ids: &[String],
+) -> Result<(), ApiError> {
+    match identity::profile_key(config) {
+        Some(key) => authorize_new_nodes_tx(tx, config, &key, node_ids),
+        None => Ok(()),
+    }
 }
 /// Declared bound of one index scheduling unit (single-row or batch claims).
 const SCHEDULE_UNIT: std::num::NonZeroU32 = std::num::NonZeroU32::new(128).unwrap();
@@ -444,31 +502,10 @@ impl IndexService {
         tx: &Transaction<'_>,
         node_ids: &[String],
     ) -> Result<(), ApiError> {
-        if !self.config.indexing.auto_history {
-            return Ok(());
+        match &self.profile_key {
+            Some(key) => authorize_new_nodes_tx(tx, &self.config, key, node_ids),
+            None => Ok(()),
         }
-        let Some(key) = &self.profile_key else {
-            return Ok(());
-        };
-        for node_id in node_ids {
-            let value = serde_json::to_string(&AutoAdmission {
-                recovery: false,
-                recovery_group: None,
-                recovery_authorization: None,
-                recovery_witness: None,
-                recovery_body_kind: None,
-                node_id: node_id.clone(),
-                state: "pending".into(),
-                error: None,
-            })
-            .map_err(|_| err(ErrorCode::InvalidState, "Cannot encode index authorization"))?;
-            tx.execute(
-                "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
-                params![IndexKeys::new(key).auto(node_id), value],
-            )
-            .map_err(sql_error)?;
-        }
-        Ok(())
     }
     /// Saved index changes only; never consume the worker wake permit.
     pub(crate) async fn saved_changed(&self) {
@@ -655,8 +692,16 @@ impl IndexService {
         if args.scope.is_none() && args.source_ids.is_empty() && args.thread_ids.is_empty() {
             return self.retry_preview(args).await;
         }
-        let ids = self.selected_sources(&args).await?;
-        let mut result = FeePreview::default();
+        let kinds = self.selected_kinds(&args);
+        let selection = self
+            .select_sources(&args, source::KindFilter::Selected)
+            .await?;
+        let ids = selection.ids;
+        let mut result = FeePreview {
+            excluded_sources: selection.excluded,
+            kinds,
+            ..FeePreview::default()
+        };
         let write_space = self.write_space(&args).await?;
         for node in ids {
             if let Some(source) = self.load_source(&node).await? {
@@ -810,9 +855,16 @@ impl IndexService {
     pub async fn backfill(&self, args: IndexArgs) -> Result<FeePreview, ApiError> {
         self.key()?;
         self.write_space(&args).await?;
-        let ids = self.selected_sources(&args).await?;
-        self.enqueue(&ids, "active", "explicit-backfill", None)
-            .await
+        let kinds = self.selected_kinds(&args);
+        let selection = self
+            .select_sources(&args, source::KindFilter::Selected)
+            .await?;
+        let mut preview = self
+            .enqueue(&selection.ids, "active", "explicit-backfill", None)
+            .await?;
+        preview.excluded_sources = selection.excluded;
+        preview.kinds = kinds;
+        Ok(preview)
     }
     pub async fn rebuild(&self, args: IndexArgs) -> Result<FeePreview, ApiError> {
         let key = self.key()?.to_owned();
@@ -829,9 +881,17 @@ impl IndexService {
         let requested = args.dimensions;
         let full_rebuild = args.scope == Some(IndexScope::All) && args.space_id.is_none();
         let config = self.config.clone();
-        let ids = self.selected_sources(&args).await?;
+        let kinds = self.selected_kinds(&args);
+        let selection = self
+            .select_sources(&args, source::KindFilter::Selected)
+            .await?;
+        let (ids, excluded) = (selection.ids, selection.excluded);
         if ids.is_empty() {
-            return Ok(FeePreview::default());
+            return Ok(FeePreview {
+                excluded_sources: excluded,
+                kinds,
+                ..FeePreview::default()
+            });
         }
         let group = format!("rebuild-{}", id());
         let group_copy = group.clone();
@@ -910,7 +970,10 @@ impl IndexService {
             .map_err(db_error)?;
         self.publish_saved(true);
         self.spaces_changed(); // the previous rebuild candidate may be inactive now
-        self.enqueue(&ids, &group, "explicit-rebuild", None).await
+        let mut preview = self.enqueue(&ids, &group, "explicit-rebuild", None).await?;
+        preview.excluded_sources = excluded;
+        preview.kinds = kinds;
+        Ok(preview)
     }
     async fn enqueue(
         &self,
@@ -949,6 +1012,12 @@ impl IndexService {
                     preview.unavailable += 1;
                     continue;
                 };
+                // Pending authorizations written before the setting changed.
+                if authorization.starts_with("new-finalized")
+                    && !self.config.indexing.auto_includes(&source.kind)
+                {
+                    continue;
+                }
                 if expected
                     .is_some_and(|(witness, kind)| !source.witness.matches_body(witness, kind))
                 {

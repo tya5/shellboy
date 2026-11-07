@@ -148,7 +148,7 @@ Changing connection or model advances the outgoing reasoning epoch and excludes 
 
 ## Search requires a separate index
 
-After configuring an embedding connection/model, newly finalized conversation content is registered for automatic indexing when `indexing.auto_history=true` (default). Startup or configuration changes alone do not automatically backfill all history. Search results are not automatically injected into every model input either.
+After configuring an embedding connection/model, newly finalized conversation content of the kinds listed in `indexing.auto_kinds` (default: your messages and summaries) is registered for automatic indexing when `indexing.auto_history=true` (default). Tool output, model replies and other kinds are not indexed automatically; see [Choosing which kinds are indexed](#choosing-which-kinds-are-indexed). Startup or configuration changes alone do not automatically backfill all history. Search results are not automatically injected into every model input either.
 
 ```text
 /search error handling for the current task
@@ -244,6 +244,25 @@ Search excludes deleted nodes, reclaimed bodies, and stale index entries. Deleti
 
 Relations cursors exclude relationships added after the first page but do not reserve a whole-DB snapshot or body retention. A target node revision change produces CursorExpired. Related-node metadata reflects page retrieval time. Re-searching or querying current values creates no receipt and observes again even with the same operation ID. Cursor snapshot conditions and expiration remain separately enforced. Repeating semantic search can incur another query embedding charge.
 
+## Choosing which kinds are indexed
+
+Tool output is about 96% of an index built from everything, so automatic indexing takes in only the kinds named by `indexing.auto_kinds`: by default `user` and `summary`. The words are the node kinds that `history search --kind` already uses: `user`, `summary`, `assistant_response`, `tool_result` (shell results, including retained full output), `spill` and `event`. Other node kinds carry no searchable text. The setting is read at owner start (restart to change it) and appears as `auto_kinds` in `index status` and `config check`.
+
+Summaries are registered when they are created, like your messages. Verified against the code for #254: before this change summaries and spills were never registered automatically, and tool results, model replies and attachment notices always were.
+
+What the setting does and does not do:
+
+- It changes only what is registered from now on. Vectors that exist are never removed, and jobs already queued keep running; a registration written before a restart that no longer matches the list is dropped without embedding when its turn comes, and does not keep a rebuild candidate from becoming active.
+- Search still finds the other kinds, without embeddings: `shellboy rag search --scope history --mode keyword --query TEXT` reads the retained originals of every kind. Semantic and hybrid results from `history search` / `rag search` say in `scope_status` (`auto_kinds`, `kinds_not_auto_indexed`) that those kinds can be missing; they never claim complete coverage.
+- Explicit commands add kinds for the Threads you choose. `index preview`, `backfill`, `rebuild` and `index status` accept `--kind WORD` (repeatable; `all` means every searchable kind) in addition to `--scope`/`--thread`/`--source`. A Thread or `--scope all` selection takes in `auto_kinds` plus the `--kind` words and nothing else; the preview counts exactly that selection and reports `kinds` and `excluded_sources` (sources of other kinds that were left out). `--source NODE_ID` names a node explicitly and is never filtered. `retry` resumes work that was already authorized and does not take `--kind`.
+
+```sh
+shellboy index preview --scope threads --thread THREAD_ID --kind tool_result
+shellboy index backfill --scope threads --thread THREAD_ID --kind tool_result
+```
+
+Backfill into the active space only adds missing parts; segments already indexed show as `already_indexed`. `rebuild` builds a new space from the selected sources only, so `rebuild --scope all` with the default kinds does not carry over tool-output vectors that the old space holds: add `--kind all` (or the kinds you want to keep) before rebuilding. The old space keeps its vectors until storage cleanup removes it. The TUI index panel uses the configured kinds and shows a line for sources of other kinds that were not included; choosing extra kinds is a CLI option.
+
 ## Concurrent searches and reader recovery
 
 `history search` permits one semantic search at a time per owner. The single slot is held from before embedding HTTP through ranking and result revalidation; concurrent child Threads share it. When busy, it immediately rejects another request with `InvalidState` before sending an additional query embedding; this rejection incurs no embedding charge. A slow embedding provider can therefore keep other searches busy until completion, cancellation, or the existing embedding timeout (60 seconds by default). Serialize child searches, or have the parent search once and share the results. Wait for the current search to finish before retrying; do not spin or launch parallel retries.
@@ -305,7 +324,8 @@ omitted text back. `/compact` without flags still requests a model summary.
 ## Automatic history indexing policy
 
 `indexing.auto_history=false` holds automatic ingestion without removing existing
-vectors or disabling standalone knowledge RAG. Restart the owner after changing
+vectors or disabling standalone knowledge RAG. `indexing.auto_kinds` narrows which
+kinds automatic ingestion takes in (see above) and is independent of it. Restart the owner after changing
 it. Explicit `index backfill` / `rebuild` / `probe` remain available and may cost
 money. `index status` and `config check` report `auto_history`.
 `history search` returns an object with `items`, `auto_history`, `degraded` and
@@ -313,5 +333,7 @@ money. `index status` and `config check` report `auto_history`.
 newer nodes may be absent and searches only retained indexed sources, even if
 `items` is empty. This is not an exact missing-node count. Keyword search remains
 available for retained originals; existing coverage is never a completeness claim.
+`scope_status` also lists `auto_kinds` and `kinds_not_auto_indexed`: kinds that
+semantic search finds only after an explicit backfill.
 For storage cleanup, `storage collect --category index` removes eligible inactive
 spaces; no existing CLI removes the active index alone while keeping all history.

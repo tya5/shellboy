@@ -588,7 +588,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `io` | `term_grace_ms=2000`, `drain_timeout_ms=1000`, `self_reply_grace_ms=250`, `shutdown_grace_ms=5000` | Termination grace, pipe drain, self-stop reply, shutdown UI grace |
 | `io` | `output_buffer_bytes=8388608`, `output_batch_bytes=65536`, `output_batch_ms=25` | Raw collection buffer 8MiB, DB batch 64KiB/25ms |
 | `workers` | `attachment=2`, `control_file=1` | Bounded file-worker counts |
-| `indexing` | `auto_history=true`, `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
+| `indexing` | `auto_history=true`, `auto_kinds=["user","summary"]`, `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
 | `ui` | `language="en"`, `max_fps=30`, `live_work_rows=3`, `held_input_rows=3`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"`, `motion="on"` | UI language (`en` or `ja`), rendering, motion, independent owned-work and held-input rows, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait. Keyboard enhancement is negotiated at runtime, not configured here; Ctrl+J is the portable fallback and Shift+Enter requires terminal support. |
 | `logging` | `file_bytes=5242880`, `files=3` | Diagnostic logs, 5MiB ×3 |
 
@@ -637,6 +637,32 @@ backfill sources skipped while off: preview and explicitly select them if needed
 `index status` and `config check` expose `auto_history`. History semantic results
 flag disabled automatic coverage via `degraded` / `scope_status`; keyword reads
 still cover retained original text, including newer unindexed nodes.
+
+## Choose which kinds automatic indexing takes in
+
+`[indexing] auto_kinds` lists the kinds of conversation content that are indexed
+automatically (a TOML array of words; restart the owner to change it). The default
+is `["user", "summary"]`: what you wrote and the summaries Shellboy makes. Tool
+output is by far most of the volume, so it is not indexed unless you ask.
+
+| Word | Content |
+| --- | --- |
+| `user` | Your messages (and attachment paths they carry) |
+| `summary` | Summaries made by `compact --summary` and automatic compaction |
+| `assistant_response` | The model's replies |
+| `tool_result` | Shell command results, including the retained full output |
+| `spill` | Detail moved out of the context by spill or omit |
+| `event` | Attachment-addition notices |
+
+Only the listed kinds are registered when they are finalized. Existing vectors are
+never removed by changing the list, and work that was already queued continues.
+Other kinds stay readable by `shellboy rag search --mode keyword`, and a Thread can
+add them explicitly: `shellboy index preview --scope threads --thread ID --kind tool_result`,
+then `index backfill` with the same arguments (see
+[History and search](history-and-search.md#choosing-which-kinds-are-indexed)).
+`index status` and `config check` report `auto_kinds`. An empty list indexes
+nothing automatically but, unlike `auto_history=false`, is not reported as a
+disabled switch. Unknown words are a configuration error.
 
 `storage collect --category index` collects eligible inactive spaces only; turning automatic indexing off does not free active-index bytes.
 There is no CLI to erase all active vectors while retaining history; do not delete SQLite tables or the database manually.

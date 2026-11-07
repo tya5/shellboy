@@ -15,6 +15,7 @@ impl SummaryAdoption {
     pub(super) fn adopt_tx(
         mut self,
         tx: &rusqlite::Transaction<'_>,
+        config: &Config,
         cancel: &CancellationToken,
     ) -> Result<CompactResult, StorageError> {
         if cancel.is_cancelled() {
@@ -23,7 +24,14 @@ impl SummaryAdoption {
             )));
         }
         validate(tx, &self.snapshot)?;
-        let node = store_replacement(tx, &self.snapshot, &self.sources, &self.payload, FORMAT)?;
+        let node = store_replacement(
+            tx,
+            config,
+            &self.snapshot,
+            &self.sources,
+            &self.payload,
+            FORMAT,
+        )?;
         let mut path = self.snapshot.groups[..self.start]
             .iter()
             .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))

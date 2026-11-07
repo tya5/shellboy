@@ -882,6 +882,15 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     let config = root.path().join("config.toml");
     std::fs::write(&config,"default_connection=\"fixture\"\ndefault_model=\"fixture-model\"\n[connections.fixture]\nbase_url=\"http://127.0.0.1:9/v1\"\n[ui]\ncopy_backend=\"osc52\"\n").unwrap();
     japanese_ui_fixture_config(&config);
+    // The preview below counts the user message and the attachment notice (an event node), which is not automatic by default.
+    std::fs::write(
+        &config,
+        format!(
+            "{}\n[indexing]\nauto_kinds=[\"user\",\"summary\",\"event\"]\n",
+            std::fs::read_to_string(&config).unwrap()
+        ),
+    )
+    .unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(root.path().join("data")),
@@ -1019,6 +1028,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     assert_eq!(loaded.4, expected);
     assert!(loaded.5.is_empty() && loaded.6.is_none());
     let scope = IndexArgs {
+        kinds: Vec::new(),
         dimensions: None,
         scope: Some(IndexScope::Threads),
         space_id: None,
@@ -1272,6 +1282,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
     );
     assert_eq!(field(&shown, "/logical/complete"), "true");
     send.send(UiAction::Manage(Command::IndexStatus(IndexArgs {
+        kinds: Vec::new(),
         dimensions: None,
         scope: Some(IndexScope::All),
         space_id: None,

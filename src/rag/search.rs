@@ -707,9 +707,19 @@ pub(super) async fn search(
                             "Provider failure paused semantic search; no request was sent",
                         ));
                     }
-                    let (hits, automatic) = history::semantic(context, query, thread).await?;
+                    let (hits, automatic, auto_kinds) =
+                        history::semantic(context, query, thread).await?;
                     lists.push(hits);
                     semantic = "ok";
+                    let omitted = crate::config::INDEXABLE_KINDS
+                        .into_iter()
+                        .filter(|kind| !auto_kinds.iter().any(|k| k == kind))
+                        .collect::<Vec<_>>();
+                    if !omitted.is_empty() {
+                        warnings.entry("history_kinds_not_indexed".into()).or_insert_with(|| json!({
+                            "code":"history_kinds_not_indexed","auto_kinds":auto_kinds,"kinds":omitted,
+                            "message":"Semantic history search covers only the kinds indexed automatically plus anything explicitly backfilled; other kinds may be missing. Use --mode keyword to search originals of every kind, or ask before a paid index backfill"}));
+                    }
                     if !automatic {
                         warnings.entry("auto_history_disabled".into()).or_insert_with(||json!({"code":"auto_history_disabled","message":"Automatic history indexing is off; newer sources may be missing. Semantic search covers retained indexed sources only; explicitly backfill or use keyword search"}));
                     }
@@ -758,6 +768,16 @@ pub(super) async fn search(
             status["auto_history"] = json!(false);
             status["coverage"] = json!("indexed_sources_only");
             status["reason"] = json!("auto_history_disabled");
+        }
+        if history_scope(scope).is_some()
+            && mode != SearchMode::Keyword
+            && semantic == "ok"
+            && let Some(warning) = warnings.get("history_kinds_not_indexed")
+        {
+            status["coverage"] = json!("indexed_sources_only");
+            status["auto_kinds"] = warning["auto_kinds"].clone();
+            status["kinds_not_auto_indexed"] = warning["kinds"].clone();
+            status["keyword_covers_all_kinds"] = json!("rag search --mode keyword");
         }
         if duplicate {
             status["duplicate_of"] = json!(format!(

@@ -927,7 +927,7 @@ fn index_status_additive_policy_defaults_do_not_change_config_defaults() {
     let base = json!({
         "pending":0,"running":0,"done":0,"failed":0,"paused":false,
         "paused_at":null,"pause_id":null,"spaces":[],"spaces_total":0,
-        "spaces_truncated":false,"probes":[]
+        "spaces_truncated":false,"probes":[],"auto_kinds":[]
     });
     let absent: IndexStatus = serde_json::from_value(base.clone()).unwrap();
     assert!(!absent.auto_history);

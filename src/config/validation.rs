@@ -42,6 +42,7 @@ impl Config {
         self.limits.validate_relations()?;
         self.io.validate_relations()?;
         self.indexing.validate_retries()?;
+        self.indexing.validate_auto_kinds()?;
         for (name, connection) in &self.connections {
             connection.validate(name)?;
         }
@@ -463,6 +464,19 @@ impl Indexing {
             return Err(invalid(
                 "indexing.concurrency",
                 "exceeds the supported worker permit range",
+            ));
+        }
+        Ok(())
+    }
+    fn validate_auto_kinds(&self) -> Result<(), ConfigError> {
+        if self
+            .auto_kinds
+            .iter()
+            .any(|kind| !super::INDEXABLE_KINDS.contains(&kind.as_str()))
+        {
+            return Err(invalid(
+                "indexing.auto_kinds",
+                "must list only user, summary, assistant_response, tool_result, spill or event",
             ));
         }
         Ok(())
