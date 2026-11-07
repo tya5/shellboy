@@ -1,14 +1,15 @@
 # Development status
 
-## Recovery-wait external CLI messages (#263; branch issue-263/resume-recovery)
+## Recovery-wait external CLI messages (#263; branch issue-263/review-fixes-1)
 
-Non-human `message send` inputs now remain held at a live `recovery_wait` Turn by
-default; `--resume-recovery` explicitly resumes the same Turn. The message receipt
-records caller identity. TUI/chat human input and `message reply` preserve explicit
-resume behavior.
-Tests: `tests/control_db.rs`, `tests/cli.rs`, `tests/protocol.rs`, and TUI form mapping (run pending).
-Docs: CLI reference/design, delegation, Agent Guide, secretary recipe, Control design.
-Resume: finish local focused checks, then default and all-OS CI on the pushed tip.
+Non-human `message send` inputs remain held at a live `recovery_wait` Turn by
+default; `--resume-recovery` explicitly resumes the same Turn and records a distinct
+`external_cli` actor (shell-origin callers retain shell identity). Caller-less human
+`message reply` is marked as human input when delivered back to its model sender, so
+it resumes that sender's recovery Turn; model-origin replies remain non-human and held.
+Tests: `tests/reply.rs` covers human/model reply behavior; `tests/control_db.rs` checks
+external CLI actor provenance. Focused local tests passed; default and all-OS CI pending
+on the new branch tip. W8 P1/P2 addressed; Studio/provider behavior not exercised.
 
 ## Secretary stack memo (docs only; on branch doc/secretary-stack)
 

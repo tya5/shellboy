@@ -4162,8 +4162,7 @@ Human TUI/chat input and `message reply` remain explicit recovery actions. All
 non-human `message send` calls are held on a live `recovery_wait` Turn by default,
 regardless of whether they have a model Origin. `--resume-recovery` is the explicit
 per-message opt-in, including for a model sending from another Thread; its
-`recovery_resumed` event records the caller actor (human or shell Origin); the
-message receipt also retains authenticated sender provenance. Existing generation CAS and
+`recovery_resumed` records `external_cli` for a caller-less explicit CLI resume, `human` for a human reply/input, and the authenticated shell Origin for model-origin resume; the message receipt retains authenticated sender provenance. A caller-less reply is forwarded as human input, while a model-origin reply remains non-human. Existing generation CAS and
 receipt-scope checks remain the authority for what can be resumed. This avoids
 automatic scheduler/CLI restart while allowing deliberate automation. Revisit if
 callers need a narrower authority boundary or if external CLI callers use the flag

@@ -10680,3 +10680,9 @@ on the final tip. The language inventory audit completed; its existing 13 pendin
 Japanese source literals remain outside this change. A live TUI/chat terminal was not
 manually driven; the preserved `human` flag path is covered through the same Control
 send transaction.
+
+### W8 review follow-up (#263 P1/P2)
+
+- Caller-less human `message reply` routed back to its model sender is marked `human: true` and resumes that sender's live recovery-wait Turn. An authenticated model-origin reply stays non-human and is held. Covered end to end in `tests/reply.rs`.
+- A caller-less explicit `message send --resume-recovery` records actor kind `external_cli`, not `human`; shell-origin resumes retain their authenticated shell actor. Covered by `tests/control_db.rs`.
+- Verified locally with `cargo test --locked --test integration reply::human_reply_resumes_recovery_but_model_reply_does_not` and `cargo test --locked --test integration control_db::external_cli_explicit_recovery_resume_is_not_recorded_as_human`; CI pending on branch tip. Studio and real-provider behavior not exercised.

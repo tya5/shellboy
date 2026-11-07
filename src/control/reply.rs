@@ -251,7 +251,9 @@ impl super::db::Store {
                 tx,
                 &MessageSendArgs {
                     resume_recovery: false,
-                    human: false,
+                    // A caller-less reply is a human's explicit answer; model
+                    // replies carry the authenticated shell origin.
+                    human: caller.is_none(),
                     expect_reply: false,
                     sender_label: args.sender_label.clone(),
                     thread_id: Some(target.into()),

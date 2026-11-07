@@ -114,6 +114,87 @@ async fn reply_requires_applied_pending_and_is_idempotent() {
 }
 
 #[tokio::test]
+async fn human_reply_resumes_recovery_but_model_reply_does_not() {
+    for human_reply in [true, false] {
+        let (_root, store) = fixture().await;
+        let model = Origin {
+            instance_id: "fixture".into(),
+            thread_id: "sender".into(),
+            run_id: "sender-origin-run".into(),
+            turn_id: "sender-origin-turn".into(),
+            execution_id: "sender-shell".into(),
+            token: "synthetic".into(),
+        };
+        let accepted = store
+            .execute(request(send(true)), Some(model.clone()))
+            .await
+            .unwrap()
+            .result;
+        let id = accepted["message_id"].as_str().unwrap().to_owned();
+        let message = id.clone();
+        store.database.call(move |db| {
+            db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&message])?;
+            db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('sender-run','sender','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('sender-turn','sender','sender-run','recovery_wait','now','{}');")?;
+            Ok(())
+        }).await.unwrap();
+        let caller = (!human_reply).then(|| Origin {
+            thread_id: "recipient".into(),
+            ..model
+        });
+        let result = store
+            .execute(
+                request(Command::MessageReply(MessageReplyArgs {
+                    message_id: id,
+                    text: "synthetic answer".into(),
+                    sender_label: None,
+                })),
+                caller,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            result["delivery"]["delivery_status"],
+            if human_reply { "accepted" } else { "held" }
+        );
+        let reply_message = store
+            .execute(
+                request(Command::MessageGet(MessageTarget {
+                    message_id: result["message_id"].as_str().unwrap().to_owned(),
+                })),
+                None,
+            )
+            .await
+            .unwrap()
+            .result;
+        assert_eq!(
+            reply_message["sender"]["kind"],
+            if human_reply { "human" } else { "model" }
+        );
+        let state = store
+            .database
+            .call(|db| {
+                Ok(
+                    db.query_row("SELECT state FROM turn WHERE id='sender-turn'", [], |row| {
+                        row.get::<_, String>(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            state,
+            if human_reply {
+                "preparing"
+            } else {
+                "recovery_wait"
+            }
+        );
+        store.database.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
 async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
     for admitted in [false, true] {
         let (_root, store) = fixture().await;

@@ -2009,7 +2009,7 @@ fn assign_message(
                             tx,
                             id,
                             "recovery_resumed",
-                            actor(caller),
+                            recovery_resume_actor(caller, human, resume_recovery),
                             json!({"run_id":run_id,"turn_id":turn_id}),
                             now,
                         )
@@ -2106,6 +2106,16 @@ fn assign_message(
 
 fn actor(caller: Option<&Origin>) -> Value {
     caller.map(|value|json!({"kind":"shell","thread_id":value.thread_id,"run_id":value.run_id,"execution_id":value.execution_id,"turn_id":value.turn_id})).unwrap_or_else(||json!({"kind":"human"}))
+}
+
+fn recovery_resume_actor(caller: Option<&Origin>, human: bool, explicit: bool) -> Value {
+    if caller.is_some() || human {
+        actor(caller)
+    } else if explicit {
+        json!({"kind":"external_cli"})
+    } else {
+        actor(caller)
+    }
 }
 
 fn queue_compact_tx(

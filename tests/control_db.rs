@@ -563,6 +563,50 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
 }
 
 #[tokio::test]
+async fn external_cli_explicit_recovery_resume_is_not_recorded_as_human() {
+    let (_directory, store) = store().await;
+    let thread = create(&store, None).await;
+    let (accepted, _) = send(&store, &thread.thread_id, "initial").await;
+    let run = accepted.run_id.unwrap();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE turn SET state='recovery_wait',recovery_reason_json='{}' WHERE run_id=?1",
+                [&run],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let result = store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                human: false,
+                resume_recovery: true,
+                expect_reply: false,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(thread.thread_id.clone()),
+                text: "explicit CLI recovery".into(),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(result["delivery_status"], "accepted");
+    let actor = store.database.call(|db| {
+        Ok(db.query_row("SELECT source_json FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' ORDER BY rowid DESC LIMIT 1", [], |row| row.get::<_, String>(0))?)
+    }).await.unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&actor).unwrap()["kind"],
+        "external_cli"
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let (_directory, store) = store().await;
     let parent = create(&store, None).await;
