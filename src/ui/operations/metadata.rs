@@ -108,6 +108,7 @@ impl Form {
             "space" => FieldId::Space,
             "threads" => FieldId::Threads,
             "sources" => FieldId::Sources,
+            "index_kinds" => FieldId::IndexKinds,
             "dimensions" => FieldId::Dimensions,
             "category" => FieldId::Category,
             "schema" => FieldId::Schema,
@@ -1132,6 +1133,11 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "索引対象source node ID",
             "Source node IDs to index"
         ),
+        FieldId::IndexKinds => local!(
+            language,
+            "追加する種類（空=設定の自動索引対象）",
+            "Kinds to add (empty = configured automatic kinds)"
+        ),
         FieldId::Dimensions => local!(
             language,
             "要求する埋め込み次元",
@@ -1522,6 +1528,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "索引元の保存node IDを指定します。CLIは--sourceを繰り返します。",
             "Specify saved source node IDs. CLI repeats --source."
+        ),
+        FieldId::IndexKinds => local!(
+            language,
+            "設定の自動索引対象に加えて索引化する種類です。CLIは--kindを繰り返します。",
+            "Kinds to index in addition to the configured automatic kinds. CLI repeats --kind."
         ),
         FieldId::Dimensions => local!(
             language,

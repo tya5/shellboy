@@ -352,6 +352,7 @@ impl Compactor {
             .iter()
             .map(|(index, payload)| (*index, payload.clone()))
             .collect();
+        let config = self.config.clone();
         self.database.call(move |db| {
             let tx = db.transaction()?;
             if cancel.is_cancelled() { return Err(StorageError::from(invalid("Context edit cancelled before adoption"))); }
@@ -366,7 +367,7 @@ impl Compactor {
             if omitted_attachments!=expected_omitted || changed_attachments!=expected_changed {
                 return Err(StorageError::from(invalid("Context edit attachment selection changed; original path retained")));
             }
-            let marker = plan.marker.as_ref().map(|payload| store_replacement(&tx, &snapshot, &sources, payload, "context-trim-v1")).transpose()?;
+            let marker = plan.marker.as_ref().map(|payload| store_replacement(&tx, &config, &snapshot, &sources, payload, "context-trim-v1")).transpose()?;
             let mut path = Vec::new();
             let mut marked = false;
             let mut spilled = 0;
@@ -375,7 +376,7 @@ impl Compactor {
                 if plan.omitted.contains(&index) {
                     if !marked { if let Some(marker) = &marker { path.push(marker.clone()); } marked = true; }
                 } else if let Some(payload) = spill_payloads.get(&index) {
-                    path.push(store_replacement(&tx, &snapshot, &group.sources, payload, "spill-v1")?);
+                    path.push(store_replacement(&tx, &config, &snapshot, &group.sources, payload, "spill-v1")?);
                     spilled += 1;
                     original_ids.extend(group.sources.iter().map(|source| source.id.clone()));
                 } else { path.extend(group.sources.iter().map(|source| source.id.clone())); }

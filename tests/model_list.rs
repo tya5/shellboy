@@ -552,6 +552,7 @@ async fn runtime_observations_keep_receipts_constant_and_release_raw_output_pins
         Command::StorageStatus(StorageArgs { category: None }),
         Command::IndexStatus(IndexArgs::default()),
         Command::IndexPreview(IndexArgs {
+            kinds: Vec::new(),
             dimensions: None,
             scope: Some(IndexScope::All),
             ..Default::default()

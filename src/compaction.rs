@@ -618,6 +618,7 @@ impl Compactor {
             original_node_ids: source_ids,
             ..Default::default()
         };
+        let config = self.config.clone();
         self.database
             .call(move |db| {
                 let tx = db.transaction()?;
@@ -630,8 +631,14 @@ impl Compactor {
                 let mut path = Vec::new();
                 for (ordinal, group) in snapshot.groups.iter().enumerate() {
                     if let Some((_, payload)) = replacements.iter().find(|(i, _)| *i == ordinal) {
-                        let node =
-                            store_replacement(&tx, &snapshot, &group.sources, payload, "spill-v1")?;
+                        let node = store_replacement(
+                            &tx,
+                            &config,
+                            &snapshot,
+                            &group.sources,
+                            payload,
+                            "spill-v1",
+                        )?;
                         path.push(node);
                     } else {
                         path.extend(group.sources.iter().map(|s| s.id.clone()));
@@ -1210,10 +1217,11 @@ impl Compactor {
                 ..Default::default()
             },
         };
+        let config = self.config.clone();
         self.database
             .call(move |db| {
                 let tx = db.transaction()?;
-                let result = adoption.adopt_tx(&tx, &cancel)?;
+                let result = adoption.adopt_tx(&tx, &config, &cancel)?;
                 tx.commit()?;
                 Ok(result)
             })
@@ -1449,6 +1457,7 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
 }
 fn store_replacement(
     tx: &rusqlite::Transaction<'_>,
+    config: &Config,
     s: &Snapshot,
     sources: &[Source],
     payload: &Value,
@@ -1475,6 +1484,9 @@ fn store_replacement(
             .map(|source| source.id.clone())
             .collect::<Vec<_>>(),
     )?;
+    // Summaries (and spills, when configured) join the automatic index like any
+    // other finalized node; `indexing.auto_kinds` decides, defaulting to summaries.
+    crate::index::authorize_new_nodes_for_config_tx(tx, config, std::slice::from_ref(&node))?;
     Ok(node)
 }
 fn summary_key(s: &Snapshot, sources: &[Source]) -> String {
@@ -2264,6 +2276,7 @@ mod tests {
                 validate(&tx, &snapshot)?;
                 store_replacement(
                     &tx,
+                    &Config::default(),
                     &snapshot,
                     &snapshot.groups[0].sources,
                     &json!({"text":"bad"}),
@@ -3893,6 +3906,7 @@ mod tests {
             validate(&tx, &snapshot)?;
             let node = store_replacement(
                 &tx,
+                &Config::default(),
                 &snapshot,
                 &snapshot.groups[0].sources,
                 &json!({"text":"summary"}),
@@ -3936,6 +3950,71 @@ mod tests {
         .unwrap();
         db.shutdown().await.unwrap();
     }
+    /// Count automatic index authorizations after storing one replacement.
+    async fn automatic_authorizations(auto_kinds: &[&str], format: &'static str) -> i64 {
+        let (_root, db) = database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            history::append_node(
+                &tx,
+                "t",
+                "source",
+                None,
+                "user",
+                &json!({"role":"user","content":"original"}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let mut config = Config::default();
+        config
+            .connections
+            .insert("embed".into(), crate::config::Connection::default());
+        config.embedding.connection = Some("embed".into());
+        config.embedding.model = Some("embedding-fixture".into());
+        config.indexing.auto_kinds = auto_kinds.iter().map(|k| k.to_string()).collect();
+        let config = Arc::new(config);
+        let snapshot = Compactor::new(db.clone(), config.clone())
+            .snapshot("t", true)
+            .await
+            .unwrap();
+        let count = db
+            .call(move |db| {
+                let tx = db.transaction()?;
+                validate(&tx, &snapshot)?;
+                store_replacement(
+                    &tx,
+                    &config,
+                    &snapshot,
+                    &snapshot.groups[0].sources,
+                    &json!({"text":"stored"}),
+                    format,
+                )?;
+                let count = tx.query_row(
+                    "SELECT COUNT(*) FROM app_meta WHERE key LIKE 'index.auto.%'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?;
+                tx.commit()?;
+                Ok(count)
+            })
+            .await
+            .unwrap();
+        db.shutdown().await.unwrap();
+        count
+    }
+    #[tokio::test]
+    async fn summaries_join_automatic_indexing_and_spills_only_when_configured() {
+        let default = crate::config::default_auto_kinds();
+        let default: Vec<&str> = default.iter().map(String::as_str).collect();
+        assert_eq!(automatic_authorizations(&default, FORMAT).await, 1);
+        assert_eq!(automatic_authorizations(&default, "spill-v1").await, 0);
+        assert_eq!(automatic_authorizations(&["spill"], "spill-v1").await, 1);
+        assert_eq!(automatic_authorizations(&["spill"], FORMAT).await, 0);
+    }
     #[tokio::test]
     async fn failed_path_adoption_rolls_back_binary_exclusion_and_replacement_nodes() {
         let (_root, db) = database().await;
@@ -3948,6 +4027,7 @@ mod tests {
                 validate(&tx, &snapshot)?;
                 let node = store_replacement(
                     &tx,
+                    &Config::default(),
                     &snapshot,
                     &snapshot.groups[0].sources,
                     &json!({"text":"spill"}),

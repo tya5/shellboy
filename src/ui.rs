@@ -5593,15 +5593,18 @@ impl UiState {
         let mut selection = match parts {
             [] | ["status"] => None,
             ["all"] => Some(IndexArgs {
+                kinds: Vec::new(),
                 scope: Some(IndexScope::All),
                 ..Default::default()
             }),
             ["threads", ids @ ..] if !ids.is_empty() => Some(IndexArgs {
+                kinds: Vec::new(),
                 scope: Some(IndexScope::Threads),
                 thread_ids: ids.iter().map(|id| (*id).into()).collect(),
                 ..Default::default()
             }),
             ["thread"] => self.view().thread_id.clone().map(|id| IndexArgs {
+                kinds: Vec::new(),
                 scope: Some(IndexScope::Threads),
                 thread_ids: vec![id],
                 ..Default::default()

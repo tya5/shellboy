@@ -131,6 +131,7 @@ pub(super) fn report_in(language: UiLanguage, value: Value, budget: usize) -> Re
             "/management/definitions",
             "/management/status",
             "/management/auto_history",
+            "/management/auto_kinds",
             "/management/automatic_history_reason",
             "/management/spaces",
             "/blockers/live_run_count",
@@ -662,6 +663,20 @@ fn index_preview_text_in(language: UiLanguage, value: &Value) -> String {
             .unwrap_or_else(|| i18n::local!(language, "未取得", "Not retrieved").into());
         lines.push(format!("{label}: {count}"));
     }
+    if let Some(excluded) = value
+        .get("excluded_sources")
+        .and_then(Value::as_u64)
+        .filter(|n| *n > 0)
+    {
+        lines.push(format!(
+            "{}: {excluded}",
+            i18n::local!(
+                language,
+                "対象外の種類の資料数",
+                "Sources of other kinds not included"
+            )
+        ));
+    }
     lines.push(
         match language {
             UiLanguage::Ja => crate::ui::text_width::glyphs::select(
@@ -787,6 +802,17 @@ pub(super) fn detail_page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preview_text_names_sources_of_other_kinds_only_when_present() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let none = serde_json::json!({"sources":1,"segments":1,"characters":1,"already_indexed":0,"unavailable":0,"excluded_sources":0});
+            let some = serde_json::json!({"sources":1,"segments":1,"characters":1,"already_indexed":0,"unavailable":0,"excluded_sources":7});
+            let before = index_preview_text_in(language, &none);
+            let after = index_preview_text_in(language, &some);
+            assert_eq!(after.lines().count(), before.lines().count() + 1);
+            assert!(after.contains(": 7") && !before.contains(": 7"));
+        }
+    }
     #[test]
     fn localized_ui_projection_keeps_raw_details_ids_and_captured_time() {
         let captured = chrono::DateTime::parse_from_rfc3339("2026-11-01T12:34:56.789Z")

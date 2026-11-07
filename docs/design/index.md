@@ -278,6 +278,51 @@ missing, even for empty results. History-scoped semantic/hybrid RAG similarly
 warns via its existing degraded/scope_status fields. Keyword search is unchanged.
 
 
+## Automatic indexing targets by node kind (#254)
+
+Verified before design (code and a read-only count of a production database):
+sources are whole `node` rows; embeddable text comes from
+`history::search_bodies(kind, payload)` plus `attachment_paths`, and a tool
+result with retained raw output adds a `tool_raw` body. Searchable node kinds are
+`user`, `summary`, `assistant_response`, `tool_result`, `spill` and `event`
+(`assistant`/`reasoning` are legacy names the extractor still accepts; every other
+kind has no body). Body kinds do not map one to one onto node kinds: an
+assistant_response yields `answer:N` and `reasoning:N` bodies, `tool_raw` belongs
+to tool_result nodes, and `attachment_paths` rides on user and event nodes. The
+filter therefore acts on the node kind, before any body is read. Before #254 the
+automatic path (`authorize_new_tx`) was called for user messages, attachment
+`event` nodes, tool results and assistant responses; summaries and spills were
+created by compaction without ever being authorized, so they were reachable only
+by explicit backfill.
+
+`[indexing] auto_kinds` (strings from the six kinds above, default
+`["user","summary"]`, immutable until owner restart like `auto_history`) is the
+only new setting. It is applied at three points and nowhere else:
+
+1. `authorize_new_tx` writes the `index.auto.*` record only when the node's kind
+   is listed (one primary-key lookup of `node.kind` inside the finalizing
+   transaction). Compaction's `store_replacement` now calls the same function for
+   the summary/spill node it inserts, which is what makes `summary` automatic.
+2. `enqueue` with a `new-finalized*` authorization skips a source whose kind is
+   not listed. This only matters for records written before the owner restarted
+   with a different list; the record is consumed through the normal path, so it
+   neither leaves a pending record nor blocks `maybe_activate_candidate`.
+3. Thread and `--scope all` selections of preview/backfill/rebuild and the
+   status coverage read select `node.kind IN (auto_kinds + --kind words)`.
+   Explicit `--source` IDs and `retry` are never filtered. The skipped count is
+   `excluded_sources` in the result, computed from the kind index without
+   reading payloads.
+
+Deliberately not done: held or filtered jobs. Jobs already in `embedding_job`
+or `index.bootstrap.*` were authorized under an earlier list and run to completion;
+holding them by kind would leave pending jobs that never finish, which keeps a
+candidate space from activating and makes coverage look perpetually incomplete.
+Coverage and activation count jobs that exist, and filtered kinds never create
+jobs, so no completeness rule changes. Existing vectors are untouched. `rebuild`
+keeps its meaning (a new space from exactly the selected sources); it does not
+copy vectors of unselected kinds, which the docs state. No table, queue, worker
+or schema change is added.
+
 ## Held automatic work visibility (#71 review)
 
 Index status separates `held_auto_history` from `pending` when auto_history is

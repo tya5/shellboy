@@ -210,6 +210,14 @@ fn prioritize_index(
             ),
         ),
         (
+            "/management/auto_kinds",
+            crate::ui::i18n::local!(
+                language,
+                "索引 › 自動索引する種類",
+                "Index > Kinds indexed automatically"
+            ),
+        ),
+        (
             "/management/automatic_history_reason",
             crate::ui::i18n::local!(
                 language,

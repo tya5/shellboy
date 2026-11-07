@@ -1960,8 +1960,10 @@ async fn history_semantic_streams_large_raw_spans_and_preserves_valid_hits() {
         c.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES('large',0,'stdout',0,?1,'now')",["NEAR あ境界".as_bytes()])?;
         Ok(())
     }).await.unwrap();
-    let config =
+    let mut config =
         Config::parse(&std::fs::read_to_string(root.join("config.toml")).unwrap()).unwrap();
+    // This test indexes a tool result, which is not an automatic kind by default.
+    config.indexing.auto_kinds = vec!["user".into(), "tool_result".into()];
     let service = IndexService::new(db.clone(), Arc::new(config));
     service
         .enqueue_new(&["large".into(), "normal".into()])

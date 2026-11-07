@@ -315,7 +315,8 @@ pub enum IndexCommand {
     Preview(IndexOptions),
     /// Start paid indexing of explicitly selected history. Check preview first.
     Backfill(IndexOptions),
-    Retry(IndexOptions),
+    /// Resume failed work that was already authorized; takes no --kind.
+    Retry(IndexRetryOptions),
     /// Build a candidate index; embedding API costs may apply. Check preview first.
     Rebuild(IndexRebuildOptions),
     /// Send one fixed embedding input (may incur charges) and retain its result.
@@ -821,6 +822,34 @@ pub struct IndexOptions {
     pub thread_ids: Vec<String>,
     #[arg(long = "source")]
     pub source_ids: Vec<String>,
+    /// Also take in these kinds from the selected Threads or all history
+    /// (user, summary, assistant_response, tool_result, spill, event, or all).
+    /// Repeat to add several; they add to `indexing.auto_kinds` for this command.
+    #[arg(long = "kind")]
+    pub kinds: Vec<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct IndexRetryOptions {
+    #[arg(long, value_enum)]
+    pub scope: Option<Scope>,
+    #[arg(long = "space")]
+    pub space_id: Option<String>,
+    #[arg(long = "thread")]
+    pub thread_ids: Vec<String>,
+    #[arg(long = "source")]
+    pub source_ids: Vec<String>,
+}
+impl From<IndexRetryOptions> for wire::IndexArgs {
+    fn from(value: IndexRetryOptions) -> Self {
+        Self {
+            dimensions: None,
+            scope: value.scope,
+            space_id: value.space_id,
+            thread_ids: value.thread_ids,
+            source_ids: value.source_ids,
+            kinds: Vec::new(),
+        }
+    }
 }
 #[derive(Debug, Clone, Args)]
 pub struct IndexRebuildOptions {
@@ -850,6 +879,7 @@ impl From<IndexOptions> for wire::IndexArgs {
             space_id: value.space_id,
             thread_ids: value.thread_ids,
             source_ids: value.source_ids,
+            kinds: value.kinds,
         }
     }
 }

@@ -978,6 +978,7 @@ mod tests {
     fn index_inspection_preserves_cost_actions_and_ctrl_r_does_not_replace_plain_rebuild() {
         let (mut ui, context) = setup();
         let args = IndexArgs {
+            kinds: Vec::new(),
             scope: Some(IndexScope::All),
             ..Default::default()
         };
@@ -1030,6 +1031,7 @@ mod tests {
     fn index_next_window_uses_current_scope_and_request_only_when_next_fact_exists() {
         let (mut ui, context) = setup();
         let args = IndexArgs {
+            kinds: Vec::new(),
             thread_ids: vec!["target".into()],
             ..Default::default()
         };
@@ -1182,10 +1184,12 @@ mod tests {
     fn index_scope_change_cannot_pair_new_cost_preview_with_old_pending_command() {
         let (mut ui, context) = setup();
         let a = IndexArgs {
+            kinds: Vec::new(),
             thread_ids: vec!["scope-a".into()],
             ..Default::default()
         };
         let b = IndexArgs {
+            kinds: Vec::new(),
             thread_ids: vec!["scope-b".into()],
             ..Default::default()
         };

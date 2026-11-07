@@ -41,6 +41,35 @@ Queued-input cancel (`/queue` D/A, held rows) no longer asks for Y: the text is 
 restorable with `/restore`, and the status line reports each outcome. A reply duty is not
 restored (documented in the TUI guide). Agent Guide is unaffected: the model-side
 `message cancel` CLI is unchanged. Reconfirm if mis-key cancellations are reported as lost work.
+## Automatic indexing kinds (#254, 2026-11-07)
+
+Basis: sources are node rows; the real mapping is node kind to bodies (not one to
+one: assistant_response gives `answer:N`/`reasoning:N`, tool_result adds `tool_raw`,
+`attachment_paths` rides on user/event). Before the change `authorize_new_tx` ran for
+user, attachment `event`, tool_result and assistant_response nodes; summary and
+spill nodes created by compaction were never authorized. Chosen:
+
+- One setting, `indexing.auto_kinds`, using the node-kind words `history search --kind`
+  already shows (no new vocabulary, no expert knob); default user + summary.
+- The filter is on the node kind at three places only: registration, draining a
+  stale registration, and Thread/all selection of explicit commands. `--source` is an
+  explicit choice and unfiltered; `retry` acts on already-authorized work and is unfiltered.
+- Queued jobs are not held or deleted when the list changes. A held job stays pending
+  forever and would keep a candidate space from activating and make coverage look
+  incomplete; since coverage and activation count existing jobs only, filtered kinds
+  (which never create jobs) cannot do that. Cost: work authorized under the older
+  list finishes. Re-check if users ask to cancel queued tool-output work.
+- Summaries are registered at creation by calling the same function from
+  `store_replacement` (small: 8 MB total in the measured DB). This is new automatic
+  spending, covered by the issue's default. Spills/trim markers use the same call
+  and are only registered if `spill` is listed.
+- Explicit commands default to the configured list plus `--kind`, not to everything:
+  `backfill --scope all` stays cheap. Consequence stated in the docs: `rebuild` builds
+  a space from the selected sources only, so a default-kinds `rebuild --scope all` does
+  not copy tool-output vectors; use `--kind all`. Not guarded by code (rebuild already
+  meant "exactly the selected sources"); re-check if someone loses vectors this way.
+- TUI keeps the configured kinds and shows a line when sources of other kinds are
+  excluded; picking kinds there is not added (CLI only).
 
 ## Search speed: single KNN scan and two-stage visibility (#240, 2026-11-06)
 

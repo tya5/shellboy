@@ -369,6 +369,13 @@ validation rather than parsing reasoning as an answer.
 
 ## History-index policy visibility (#71)
 
+#254: `IndexArgs.kinds` (optional repeatable words: the six node kinds or `all`) adds
+kinds to `indexing.auto_kinds` for that command's Thread/all selection;
+`FeePreview` gains `excluded_sources` and `kinds`; `IndexStatus` gains
+`auto_kinds`; history `scope_status` gains `auto_kinds` and
+`kinds_not_auto_indexed`. These are additive fields without serde defaults on
+responses (owner and client are the same build). `index retry` rejects `kinds`.
+
 HistorySearch now returns `{items, auto_history, degraded, scope_status}` instead
 of a bare hit array. Disabled automatic ingestion is an explicit partial-coverage
 warning, not a claim of measured missing counts. Existing IndexHit provenance and

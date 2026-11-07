@@ -10,12 +10,19 @@ impl IndexService {
     ) -> Result<Value, ApiError> {
         let items = self.search_filtered_cancellable(args, cancel).await?;
         let automatic = self.config.indexing.auto_history;
+        let omitted = self.config.indexing.kinds_not_auto_indexed();
+        let kinds_note = if omitted.is_empty() {
+            ""
+        } else {
+            ". Kinds not indexed automatically (listed in kinds_not_auto_indexed) are found only if explicitly backfilled; use `rag search --mode keyword` to search originals of every kind, or ask before a paid index backfill"
+        };
         Ok(
             json!({"items":items,"auto_history":automatic,"degraded":!automatic,
             "scope_status":[{"scope":args.thread_id.as_ref().map_or_else(||"history".to_owned(),|id|format!("history:{id}")),
             "coverage":"indexed_sources_only","auto_history":automatic,
+            "auto_kinds":self.config.indexing.auto_kinds,"kinds_not_auto_indexed":omitted,
             "reason":if automatic {None} else {Some("auto_history_disabled")},
-            "message":if automatic {"Only retained indexed sources are searched; coverage is not guaranteed complete"} else {"Automatic history indexing is off; newer sources may be missing. Only retained indexed sources are searched; explicitly backfill or use keyword search"}}]}),
+            "message":format!("{}{kinds_note}",if automatic {"Only retained indexed sources are searched; coverage is not guaranteed complete"} else {"Automatic history indexing is off; newer sources may be missing. Only retained indexed sources are searched; explicitly backfill or use keyword search"})}]}),
         )
     }
     pub async fn search(&self, query: &str, limit: u32) -> Result<Vec<SearchMatch>, ApiError> {

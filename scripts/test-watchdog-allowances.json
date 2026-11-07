@@ -762,7 +762,7 @@
   {
     "file": "tests/index.rs",
     "rule": "raw-timeout",
-    "fingerprint": "47c54fadaed3c6c3ed4800b717c7a36b2883678627db7a1b3a2f4a623342df95",
+    "fingerprint": "4269618267483505a76269d3618defbcfb7a208c629c6c16421ba980c2458e6d",
     "function": "auto_history_status_separates_held_admissions_bootstrap_and_jobs",
     "count": 1,
     "reason": "Deferred #41/shared-read: existing auto_history_status_separates_held_admissions_bootstrap_and_jobs test occurrence only; migrate on #41 integration, no file-wide exemption."

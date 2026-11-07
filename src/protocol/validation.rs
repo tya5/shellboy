@@ -510,6 +510,15 @@ impl IndexArgs {
         for id in self.thread_ids.iter().chain(self.source_ids.iter()) {
             nonempty(id, "index target")?;
         }
+        if self
+            .kinds
+            .iter()
+            .any(|kind| kind != "all" && !crate::config::INDEXABLE_KINDS.contains(&kind.as_str()))
+        {
+            return Err(invalid(
+                "index kind must be all, user, summary, assistant_response, tool_result, spill or event",
+            ));
+        }
         Ok(())
     }
 }

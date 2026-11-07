@@ -247,6 +247,7 @@ pub(crate) enum FieldId {
     Space,
     Threads,
     Sources,
+    IndexKinds,
     Dimensions,
     Category,
     Schema,
@@ -920,6 +921,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         discovery: Discovery::HistoryList,
     },
     FieldSpec {
+        id: FieldId::IndexKinds,
+        default_origin: DefaultOrigin::None,
+        label: "追加する種類（空=設定の自動索引対象）",
+        help: "設定の自動索引対象に加えて索引化する種類です。CLIは--kindを繰り返します。",
+        kind: FieldType::Text,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
         id: FieldId::Dimensions,
         default_origin: DefaultOrigin::ConfiguredEmbedding,
         label: "要求する埋め込み次元",
@@ -1584,6 +1593,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Space,
             FieldId::Threads,
             FieldId::Sources,
+            FieldId::IndexKinds,
         ],
     },
     OperationSpec {
@@ -1598,6 +1608,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Space,
             FieldId::Threads,
             FieldId::Sources,
+            FieldId::IndexKinds,
         ],
     },
     OperationSpec {
@@ -1612,6 +1623,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Space,
             FieldId::Threads,
             FieldId::Sources,
+            FieldId::IndexKinds,
         ],
     },
     OperationSpec {
@@ -1640,6 +1652,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Space,
             FieldId::Threads,
             FieldId::Sources,
+            FieldId::IndexKinds,
             FieldId::Dimensions,
         ],
     },

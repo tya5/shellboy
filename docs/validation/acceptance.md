@@ -48,6 +48,60 @@ Verified on macOS only (local test runs): the integration test above, the paint 
 Windows runs (the test uses a PowerShell loop on Windows; CI results are in the branch report), a real
 terminal, a real provider, an owner restart with the shell live, Watch painted from this fixture. No
 wall-clock bound is asserted; the wait timeout is only an input.
+## Automatic indexing kinds (#254)
+
+Not yet run on CI at the time of writing; see the final report for the tip SHA and run IDs.
+Tests (temporary DBs, local mock embedding server, no paid API): `tests/index.rs`
+`automatic_indexing_takes_only_user_messages_and_summaries_by_default`,
+`configured_auto_kinds_choose_what_is_registered`,
+`explicit_kinds_add_to_preview_and_backfill_exactly`,
+`explicit_source_ids_are_never_filtered_by_kind`,
+`invalid_kind_is_rejected_and_retry_takes_no_kind`,
+`queued_authorization_of_a_now_excluded_kind_is_consumed_without_blocking_activation`,
+`scope_status_names_kinds_that_are_not_indexed_automatically`,
+`index_status_reports_auto_kinds`; `tests/config.rs`
+`indexing_auto_kinds_default_to_user_and_summary_and_reject_unknown_kinds`;
+`src/compaction.rs` `summaries_join_automatic_indexing_and_spills_only_when_configured`.
+
+Measurements, 2026-11-07, macOS Darwin 25.3 arm64, debug test build, the owner's
+database at schema 31 while the owner was running, other builds running on the machine.
+No owner was started on it and nothing was written to it or to its embedding data.
+
+Characters that would be embedded (canonical bodies from `search_bodies`, split at
+2,000 characters; retained raw tool output (`tool_raw`) is not included and was not
+measured), nodes from 2026-11-01 on that have no done embedding job, read with
+`mode=ro`:
+
+| kind | nodes | characters | segments |
+| --- | --- | --- | --- |
+| user | 4,014 | 2,038,940 | 4,071 |
+| summary | 800 | 3,077,094 | 2,170 |
+| event | 11,786 | 4,308,608 | 11,889 |
+| assistant_response | 61,618 | 1,029,056 | 5,105 |
+| tool_result | 60,030 | 236,827,812 | 147,522 |
+| spill | 36,367 | 39,236,611 | 41,963 |
+
+Default (user + summary): 5,116,034 characters, 6,241 segments. Before this change the
+automatic set (user, event, tool_result, assistant_response; summaries and spills were
+never automatic): 244,204,416 characters, 168,587 segments. That is about 1/48 of the
+characters and 1/27 of the segments (user alone against the old set is about 1/120
+of the characters); the issue's estimate was about 1/70. Whole database, all kinds,
+whether indexed or not: tool_result 66,026 nodes and 266,372,732 characters, spill
+36,706 nodes and 39,886,948, summary 843 and 3,863,867.
+
+Keyword search speed (`rag::history::keyword`, the code behind `rag search --mode keyword`),
+on a `.backup` copy of the same database (read through `mode=ro`; migration 0032 applied to the
+copy only because the original is at schema 31 and the reader requires 32; the copy was
+deleted afterwards): a term that is absent from the whole history visited all 199,354
+nodes in 179.8 s (about 0.9 ms per node, about 100 calls of the 2,000-node limit,
+roughly 0.9 to 1.3 s each in the first run). A frequent term returned 20 hits within 36
+visited nodes in 142 ms (first, cold page), then 28 ms and 32 ms. One run each, copy
+without concurrent writes, warm page cache; not repeated, so treat the figures as
+indicative. Keyword search is independent of `auto_kinds`.
+
+Not verified: behavior of the real owner with the new default (not restarted), the TUI
+index panel line for excluded sources beyond its unit test, Windows/Linux (CI), any
+real embedding endpoint.
 
 ## Chat on events.wait (#243 stage C)
 

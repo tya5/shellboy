@@ -309,7 +309,7 @@ pub async fn execute(
         .hint(NEXT)
         .details(with_setup_ui_language(
             &config,
-            json!({"auto_history":config.indexing.auto_history,"setup":setup}),
+            json!({"auto_history":config.indexing.auto_history,"auto_kinds":config.indexing.auto_kinds,"setup":setup}),
         )));
     }
     let name = config
@@ -324,7 +324,7 @@ pub async fn execute(
             )
             .details(with_setup_ui_language(
                 &config,
-                json!({"auto_history":config.indexing.auto_history,"setup":setup}),
+                json!({"auto_history":config.indexing.auto_history,"auto_kinds":config.indexing.auto_kinds,"setup":setup}),
             ))
         })?;
     let models = client.models(CancellationToken::new()).await.map_err(|error| {
@@ -333,7 +333,7 @@ pub async fn execute(
             .hint(if error.status == Some(404) { ROOT_HINT } else { "Check the configured endpoint, credential environment variable and network; no conversation request was sent" })
             .details(with_setup_ui_language(
                 &config,
-                json!({"auto_history":config.indexing.auto_history,"setup":setup,"http_status":error.status,"failure_kind":error.kind,"request":"GET model catalog only"}),
+                json!({"auto_history":config.indexing.auto_history,"auto_kinds":config.indexing.auto_kinds,"setup":setup,"http_status":error.status,"failure_kind":error.kind,"request":"GET model catalog only"}),
             ))
     })?;
     let model = config.default_model.as_deref().expect("reported model");
@@ -346,7 +346,7 @@ pub async fn execute(
         ]
     };
     Ok(
-        json!({"setup":setup,"auto_history":config.indexing.auto_history,"connection":name,"api":config.connections[name].api.as_str(),"unavailable_features":config.connections[name].api.unavailable_features(),"model":model,"model_advertised":advertised,"compaction":config.compaction,"warnings":warnings,"model_count":models.len(),"request":"GET model catalog only","message":"Configuration and model catalog checked; no conversation request sent"}),
+        json!({"setup":setup,"auto_history":config.indexing.auto_history,"auto_kinds":config.indexing.auto_kinds,"connection":name,"api":config.connections[name].api.as_str(),"unavailable_features":config.connections[name].api.unavailable_features(),"model":model,"model_advertised":advertised,"compaction":config.compaction,"warnings":warnings,"model_count":models.len(),"request":"GET model catalog only","message":"Configuration and model catalog checked; no conversation request sent"}),
     )
 }
 

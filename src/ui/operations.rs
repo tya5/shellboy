@@ -1082,7 +1082,7 @@ impl Form {
             ]
         };
         let index_fields = |operation: OpKind| {
-            vec![
+            let mut fields = vec![
                 f(
                     "scope",
                     "対象（空=未指定）",
@@ -1096,7 +1096,18 @@ impl Form {
                 f("space", "索引領域ID（空=現在）", String::new(), Text),
                 f("threads", "会話ID（空白区切り）", c.thread.clone(), Text),
                 f("sources", "出典node ID（空白区切り）", String::new(), Text),
-            ]
+                f(
+                    "index_kinds",
+                    "追加する種類（空白区切り・空=設定どおり）",
+                    String::new(),
+                    Text,
+                ),
+            ];
+            // Retry resumes work that was already authorized; it takes no kinds.
+            if operation == OpKind::IndexRetry {
+                fields.retain(|field| field.name != "index_kinds");
+            }
+            fields
         };
         let (fields, build): (Vec<Field>, BuildCommand) = match operation {
             OpKind::Exec
@@ -2240,6 +2251,14 @@ impl Form {
     }
     fn index_args(&self) -> Result<IndexArgs, String> {
         Ok(IndexArgs {
+            kinds: if self.operation == OpKind::IndexRetry {
+                Vec::new()
+            } else {
+                self.value("index_kinds")?
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect()
+            },
             dimensions: if self.operation == OpKind::IndexRebuild {
                 self.optional_number("dimensions")?
             } else {

@@ -68,7 +68,7 @@ impl Fixture {
         std::fs::write(
             &config,
             format!(
-                "{}\n[ui]\nlanguage=\"{}\"\n",
+                "{}\n[indexing]\nauto_kinds=[\"user\",\"summary\",\"assistant_response\"]\n[ui]\nlanguage=\"{}\"\n",
                 std::fs::read_to_string(&config).unwrap(),
                 if language == shellboy::config::UiLanguage::Ja {
                     "ja"

@@ -80,6 +80,7 @@ pub(crate) struct RawIndexSaved {
     args: IndexArgs,
     configured: bool,
     auto_history: bool,
+    auto_kinds: Vec<String>,
     active: Option<String>,
     selected: Option<String>,
     spaces: Vec<SpaceRow>,
@@ -317,6 +318,7 @@ impl IndexService {
             args: args.clone(),
             configured: self.profile_key.is_some(),
             auto_history: self.config.indexing.auto_history,
+            auto_kinds: self.config.indexing.auto_kinds.clone(),
             active,
             selected,
             spaces,
@@ -578,7 +580,7 @@ pub(crate) fn prepare_saved(raw: RawIndexSaved) -> Value {
                     serde_json::from_str::<crate::protocol::IndexProbeObservation>(v).is_ok()
                 })
         });
-    json!({"kind":"saved_index_observation","limits":{"saved_value_body_max_bytes":131072,"scalar_cell_bytes":SCALAR_CELL_BYTES,"scalar_channel_max_bytes":SCALAR_CHANNEL_BYTES},"read_at":raw.read_at,"scope":raw.args,"active_space":raw.active,"selected_space":raw.selected,"auto_history":raw.auto_history,"automatic_history_reason":if raw.auto_history{None}else{Some("Automatic history indexing is disabled; existing vectors and explicitly authorized index work remain available")},"status":{"counts":counts,"paused":if !metadata_limited||paused{Some(paused)}else{None},"pause_known":!metadata_limited,"reason":reason,"paused_at":pause_at,"pause_id":pause_id},"spaces":spaces,"preparation":preparation,"candidate":candidate,"candidate_known":candidate_known,"spaces_count":count(raw.spaces.len()as u64,!raw.spaces_more),"probes":probes,"probes_complete":probes_complete,"unknown_work_records":unknown,"metadata_limited":metadata_limited,"complete":complete&&!raw.spaces_more&&!raw.chunks_more&&probes_complete,"coverage":{"state":"requires_current_source_window","current":false},"continuation":{"full_cli":"shellboy index status","notice":"Counts marked lower_bound are not exact totals. Read the current source coverage window; full CLI inspection preserves the complete result."}})
+    json!({"kind":"saved_index_observation","limits":{"saved_value_body_max_bytes":131072,"scalar_cell_bytes":SCALAR_CELL_BYTES,"scalar_channel_max_bytes":SCALAR_CHANNEL_BYTES},"read_at":raw.read_at,"scope":raw.args,"active_space":raw.active,"selected_space":raw.selected,"auto_history":raw.auto_history,"auto_kinds":raw.auto_kinds,"automatic_history_reason":if raw.auto_history{None}else{Some("Automatic history indexing is disabled; existing vectors and explicitly authorized index work remain available")},"status":{"counts":counts,"paused":if !metadata_limited||paused{Some(paused)}else{None},"pause_known":!metadata_limited,"reason":reason,"paused_at":pause_at,"pause_id":pause_id},"spaces":spaces,"preparation":preparation,"candidate":candidate,"candidate_known":candidate_known,"spaces_count":count(raw.spaces.len()as u64,!raw.spaces_more),"probes":probes,"probes_complete":probes_complete,"unknown_work_records":unknown,"metadata_limited":metadata_limited,"complete":complete&&!raw.spaces_more&&!raw.chunks_more&&probes_complete,"coverage":{"state":"requires_current_source_window","current":false},"continuation":{"full_cli":"shellboy index status","notice":"Counts marked lower_bound are not exact totals. Read the current source coverage window; full CLI inspection preserves the complete result."}})
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1629,6 +1631,7 @@ mod tests {
             &db,
             service,
             IndexArgs {
+                kinds: Vec::new(),
                 source_ids: vec!["source-0000".into()],
                 ..Default::default()
             },
@@ -1649,6 +1652,7 @@ mod tests {
         seed(&db, 3).await;
         db.call(|db|{db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('live','/','','fixture','synthetic','now'),('empty','/','','fixture','synthetic','now')",[])?;for(i,ordinal)in[0,10,100].into_iter().enumerate(){db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('live',?1,?2)",params![ordinal,format!("source-{i:04}")])?;}Ok(())}).await.unwrap();
         let args = IndexArgs {
+            kinds: Vec::new(),
             thread_ids: vec!["empty".into(), "live".into()],
             ..Default::default()
         };
@@ -1822,14 +1826,17 @@ mod tests {
         );
         for args in [
             IndexArgs {
+                kinds: Vec::new(),
                 source_ids: vec!["source".into(); 129],
                 ..Default::default()
             },
             IndexArgs {
+                kinds: Vec::new(),
                 thread_ids: vec!["t".repeat(4097)],
                 ..Default::default()
             },
             IndexArgs {
+                kinds: Vec::new(),
                 space_id: Some("s".repeat(4097)),
                 ..Default::default()
             },
@@ -1865,6 +1872,7 @@ mod tests {
             ..Default::default()
         };
         let args = IndexArgs {
+            kinds: Vec::new(),
             source_ids: vec![
                 "source-0002".into(),
                 "source-0000".into(),
