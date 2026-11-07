@@ -801,3 +801,27 @@ fn width_cache_fake_terminal_benchmark() {
     );
     eprintln!("{}", String::from_utf8_lossy(&output.stdout));
 }
+
+#[test]
+fn protocol_schema_is_standalone_and_matches_the_generated_contract() {
+    let output = Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .args(["protocol", "schema"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let schema: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        schema["protocol_version"],
+        shellboy::protocol::PROTOCOL_VERSION
+    );
+    assert!(schema["definitions"]["Request"].is_object());
+    assert!(schema["definitions"]["Response"].is_object());
+
+    let rejected = Command::new(env!("CARGO_BIN_EXE_shellboy"))
+        .args(["--operation-id", "not-applicable", "protocol", "schema"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    let error: Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert_eq!(error["error"]["code"], "invalid_argument");
+}

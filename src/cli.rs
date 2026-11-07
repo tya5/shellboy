@@ -31,6 +31,11 @@ pub struct Cli {
 pub enum CliCommand {
     /// Start an owner without a terminal; requires an explicit --data-dir.
     Serve,
+    /// Inspect versioned RPC contracts and generated schemas.
+    Protocol {
+        #[command(subcommand)]
+        command: ProtocolCommand,
+    },
     /// Ask a terminal-free owner to shut down; requires an explicit --data-dir.
     Shutdown,
     /// Talk to a conversation line by line through a running owner; see docs for input and exit rules.
@@ -135,6 +140,12 @@ pub enum CliCommand {
         command: StorageCommand,
     },
 }
+#[derive(Debug, Clone, Subcommand)]
+pub enum ProtocolCommand {
+    /// Write the current protocol JSON Schema to standard output.
+    Schema,
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum CredentialsCommand {
     /// Store the API key read from standard input for a connection (never from an argument).
@@ -1232,6 +1243,7 @@ impl Cli {
             | CliCommand::Chat(_)
             | CliCommand::Exec(_)
             | CliCommand::Docs { .. }
+            | CliCommand::Protocol { .. }
             | CliCommand::Startup(_)
             | CliCommand::Rag(_)
             | CliCommand::Config {

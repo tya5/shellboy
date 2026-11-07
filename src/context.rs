@@ -1,13 +1,14 @@
 //! Read-only projections of recorded lifecycle and ownership information.
 use chrono::DateTime;
 use rusqlite::{Connection, OptionalExtension};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::protocol::{ApiError, ErrorCode};
 
 /// Missing fields mean unrecorded or inapplicable, never inferred execution facts.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ExecutionContext {
     pub state: String,

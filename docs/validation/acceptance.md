@@ -10733,3 +10733,11 @@ SQL boundary deterministically instead of relying on a timing threshold. Focused
 ### #272 model-grouped bounded usage
 
 - Model-grouped saved-attempt requests/cache ratio aggregate by persisted `model_id` using the existing bounded rowid candidate scan and page cursor. Summary records have no model attribution and are not read or assigned; summary fields report null/unknown. Synthetic regression and `EXPLAIN QUERY PLAN` check pending. Thread shell outcome aggregation is outside this stage.
+## External RPC contract and schema export (#244 A2/D)
+
+Environment: local macOS, synthetic tests only. `cargo fmt --all --check`,
+`cargo check --locked --tests`, the 62-operation coverage test, exact schema drift
+test, local `$ref` resolution test, and protocol-3 handshake test passed. The
+language audit passed for 416 files. The generated Draft 2020-12 artifact contains
+62 operation mappings (excluding `events.wait`) and all 1,532 local references
+resolve. Cross-OS CI remains pending. No real API or user data used.

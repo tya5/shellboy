@@ -22,16 +22,16 @@ pub use server::LocalServer;
 
 const FRAME_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Hello {
-    protocol_version: u32,
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Hello {
+    pub protocol_version: u32,
 }
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Welcome {
-    protocol_version: u32,
-    instance_id: String,
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Welcome {
+    pub protocol_version: u32,
+    pub instance_id: String,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 pub struct Invocation {
     pub(crate) reply_completed: Option<CancellationToken>,
@@ -89,6 +89,10 @@ async fn serve_connection<S: AsyncRead + AsyncWrite + Unpin>(
             &mut stream,
             &Welcome {
                 protocol_version: PROTOCOL_VERSION,
+                capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                    .iter()
+                    .map(|s| (*s).to_owned())
+                    .collect(),
                 instance_id: instance,
             },
         )
@@ -349,6 +353,16 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
             welcome.protocol_version,
         ));
     }
+    if welcome
+        .capabilities
+        .iter()
+        .any(|capability| !crate::protocol::PROTOCOL_CAPABILITIES.contains(&capability.as_str()))
+    {
+        return Err(ApiError::new(
+            ErrorCode::ProtocolMismatch,
+            "owner advertises an unknown RPC capability",
+        ));
+    }
     if welcome.instance_id != endpoint.instance_id {
         return Err(endpoint_mismatch());
     }
@@ -484,6 +498,10 @@ mod frame_delivery_tests {
                 &mut peer,
                 &Welcome {
                     protocol_version: PROTOCOL_VERSION,
+                    capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
                     instance_id: "instance".into(),
                 },
             )
@@ -518,6 +536,10 @@ mod frame_delivery_tests {
                 &mut peer,
                 &Welcome {
                     protocol_version: PROTOCOL_VERSION,
+                    capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
                     instance_id: "instance".into(),
                 },
             )
@@ -581,6 +603,10 @@ mod frame_delivery_tests {
                     &mut peer,
                     &Welcome {
                         protocol_version: PROTOCOL_VERSION,
+                        capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                            .iter()
+                            .map(|s| (*s).to_owned())
+                            .collect(),
                         instance_id: "instance".into(),
                     },
                 )
@@ -656,6 +682,10 @@ mod frame_delivery_tests {
                 &mut peer,
                 &Welcome {
                     protocol_version: PROTOCOL_VERSION,
+                    capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
                     instance_id: "replacement-instance".into(),
                 },
             )
@@ -688,6 +718,10 @@ mod frame_delivery_tests {
                 &mut peer,
                 &Welcome {
                     protocol_version: PROTOCOL_VERSION,
+                    capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
                     instance_id: "instance".into(),
                 },
             )
@@ -742,6 +776,7 @@ mod frame_delivery_tests {
                 &mut peer,
                 &Welcome {
                     protocol_version: PROTOCOL_VERSION - 1,
+                    capabilities: Vec::new(),
                     instance_id: "instance".into(),
                 },
             )
@@ -934,6 +969,10 @@ mod frame_delivery_tests {
                 &mut peer,
                 &Welcome {
                     protocol_version: PROTOCOL_VERSION,
+                    capabilities: crate::protocol::PROTOCOL_CAPABILITIES
+                        .iter()
+                        .map(|s| (*s).to_owned())
+                        .collect(),
                     instance_id: "instance".into(),
                 },
             )

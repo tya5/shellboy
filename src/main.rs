@@ -185,6 +185,7 @@ fn main() -> ExitCode {
             cli.command,
             Some(
                 CliCommand::Docs { .. }
+                    | CliCommand::Protocol { .. }
                     | CliCommand::Startup(_)
                     | CliCommand::Storage {
                         command: shellboy::cli::StorageCommand::Check
@@ -203,7 +204,7 @@ fn main() -> ExitCode {
         return print_error(
             ApiError::new(
                 ErrorCode::InvalidArgument,
-                "--operation-id applies to owner RPCs; docs, startup, rag, config init, config check and thread request are standalone commands",
+                "--operation-id applies to owner RPCs; docs, protocol schema, startup, rag, config init, config check and thread request are standalone commands",
             ),
             cli.operation_id,
         );
@@ -371,6 +372,12 @@ fn main() -> ExitCode {
                 ),
                 Err(error) => print_error(error, None),
             }
+        }
+        Some(CliCommand::Protocol {
+            command: shellboy::cli::ProtocolCommand::Schema,
+        }) => {
+            println!("{}", shellboy::protocol::schema_json());
+            ExitCode::SUCCESS
         }
         Some(CliCommand::Docs { command }) => standalone_response(docs_response(command)),
         Some(CliCommand::Startup(options)) => standalone_response(runtime.block_on(

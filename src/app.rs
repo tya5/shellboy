@@ -125,8 +125,7 @@ impl OwnerLock {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Endpoint {
     pub protocol_version: u32,
     pub instance_id: String,
