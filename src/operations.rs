@@ -18,6 +18,8 @@ pub(crate) enum OperationId {
     ThreadRewind,
     ThreadArchive,
     ThreadUnarchive,
+    ThreadTag,
+    ThreadTags,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -224,6 +226,9 @@ pub(crate) enum FieldId {
     Title,
     Descendants,
     Archived,
+    Tags,
+    AddTags,
+    RemoveTags,
     SenderLabel,
     ExpectReply,
     Deliver,
@@ -646,7 +651,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::Cwd,
         default_origin: DefaultOrigin::TargetThreadSettings,
         label: "作業フォルダ",
-        help: "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。",
+        help: "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。一覧では保存cwdと完全に一致するThreadだけに絞ります（相対パスは起動場所から解決）。",
         kind: FieldType::Path,
         discovery: Discovery::Filesystem,
     },
@@ -720,6 +725,30 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         label: "アーカイブの扱い",
         help: "空は既定（アーカイブ済みを隠す）。includeは両方、onlyはアーカイブ済みだけを一覧します。",
         kind: FieldType::Choice,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::Tags,
+        default_origin: DefaultOrigin::None,
+        label: "タグで絞り込み",
+        help: "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。",
+        kind: FieldType::TextList,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::AddTags,
+        default_origin: DefaultOrigin::None,
+        label: "付けるタグ",
+        help: "対象Threadへ付けるタグです（最大64個、1つは128文字以内の1行）。CLIは--addを繰り返し、フォームはコンマ区切りです。",
+        kind: FieldType::TextList,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::RemoveTags,
+        default_origin: DefaultOrigin::None,
+        label: "外すタグ",
+        help: "対象Threadから外すタグです（最大64個）。付けるタグと同じ値は指定できません。CLIは--removeを繰り返し、フォームはコンマ区切りです。",
+        kind: FieldType::TextList,
         discovery: Discovery::None,
     },
     FieldSpec {
@@ -1248,6 +1277,8 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Cursor,
             FieldId::Query,
             FieldId::Archived,
+            FieldId::Tags,
+            FieldId::Cwd,
         ],
     },
     OperationSpec {
@@ -1356,6 +1387,24 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         confirmation: Confirmation::None,
         route: Route::Owner,
         fields: &[FieldId::Thread, FieldId::Descendants],
+    },
+    OperationSpec {
+        id: OperationId::ThreadTag,
+        label: "会話 · タグ",
+        meaning: "指定Threadへタグを付け外しします。置き場所や切り口を表す自由なラベルで、履歴・検索・使用量・受信・一覧の順序は変わりません。",
+        effect: Effect::SavedMutation,
+        confirmation: Confirmation::None,
+        route: Route::Owner,
+        fields: &[FieldId::Thread, FieldId::AddTags, FieldId::RemoveTags],
+    },
+    OperationSpec {
+        id: OperationId::ThreadTags,
+        label: "会話 · タグ一覧",
+        meaning: "使われているタグ名を重複なく、バイト順に表示します。件数は数えません。",
+        effect: Effect::Inspect,
+        confirmation: Confirmation::None,
+        route: Route::Owner,
+        fields: &[FieldId::Limit, FieldId::Cursor],
     },
     OperationSpec {
         id: OperationId::ThreadSet,
@@ -1987,6 +2036,8 @@ impl OperationId {
         Self::ThreadRewind,
         Self::ThreadArchive,
         Self::ThreadUnarchive,
+        Self::ThreadTag,
+        Self::ThreadTags,
         Self::ThreadSet,
         Self::MessageSend,
         Self::MessageReply,
@@ -2064,6 +2115,8 @@ impl OperationId {
             Command::ThreadRewind(_) => Self::ThreadRewind,
             Command::ThreadArchive(_) => Self::ThreadArchive,
             Command::ThreadUnarchive(_) => Self::ThreadUnarchive,
+            Command::ThreadTag(_) => Self::ThreadTag,
+            Command::ThreadTags(_) => Self::ThreadTags,
             Command::ThreadSet(_) => Self::ThreadSet,
             Command::MessageReply(_) => Self::MessageReply,
             Command::MessageSend(_) => Self::MessageSend,
@@ -2165,7 +2218,10 @@ impl OperationSpec {
         } else if id == FieldId::CompactAction {
             Some("deferred")
         } else if id == FieldId::Limit
-            && matches!(self.id, OperationId::ThreadList | OperationId::HistoryList)
+            && matches!(
+                self.id,
+                OperationId::ThreadList | OperationId::ThreadTags | OperationId::HistoryList
+            )
         {
             Some("20")
         } else {
@@ -2182,6 +2238,7 @@ impl OperationSpec {
             ) => DefaultOrigin::ParentOrOwnerDefaults,
             (OperationId::Exec, FieldId::Cwd) => DefaultOrigin::ProcessCwd,
             (OperationId::HistorySearch, FieldId::Thread) => DefaultOrigin::None,
+            (OperationId::ThreadList, FieldId::Cwd) => DefaultOrigin::None,
             (OperationId::ShellRead, FieldId::Encoding) => DefaultOrigin::SavedShellEncoding,
             (OperationId::Wait, FieldId::Conditions) => DefaultOrigin::SelectedTurn,
             _ => field.default_origin,

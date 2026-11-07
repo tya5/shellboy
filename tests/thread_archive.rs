@@ -100,6 +100,8 @@ async fn list(
             cursor,
             query: None,
             archived,
+            tags: Vec::new(),
+            cwd: None,
         }),
     )
     .await
@@ -418,6 +420,8 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
             cursor: None,
             query: Some(child.clone()),
             archived: ArchivedFilter::Include,
+            tags: Vec::new(),
+            cwd: None,
         }),
     )
     .await

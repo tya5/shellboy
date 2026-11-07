@@ -62,7 +62,7 @@ named_jobs! {
     CompactList => compact_list, CompactPreview => compact_preview, ShellList => shell_list,
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
-    ThreadUnarchive => thread_unarchive, ThreadSet => thread_set,
+    ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadSet => thread_set,
     MessageSend => message_send, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
@@ -107,6 +107,7 @@ impl Kind {
         match self {
             Kind::Status
             | Kind::ThreadList
+            | Kind::ThreadTags
             | Kind::ThreadGet
             | Kind::ThreadBranches
             | Kind::UsageGet
@@ -130,7 +131,8 @@ impl Kind {
             | Kind::ThreadPrune
             | Kind::ThreadRewind
             | Kind::ThreadArchive
-            | Kind::ThreadUnarchive => MutationDeclaredBound,
+            | Kind::ThreadUnarchive
+            | Kind::ThreadTag => MutationDeclaredBound,
             Kind::OwnerShutdown
             | Kind::ThreadCreate
             | Kind::ThreadFork
@@ -199,7 +201,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            57,
+            59,
             "classify new kinds and update this ratchet"
         );
     }
@@ -212,6 +214,7 @@ mod tests {
             Kind::ThreadRewind,
             Kind::ThreadArchive,
             Kind::ThreadUnarchive,
+            Kind::ThreadTag,
             Kind::OwnerShutdown,
             Kind::ThreadCreate,
             Kind::ThreadFork,

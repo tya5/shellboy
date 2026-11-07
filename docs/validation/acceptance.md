@@ -10422,6 +10422,48 @@ runs (CI is recorded with the final SHA), a real terminal (no PTY capture of the
 clients receiving the three hints from a running owner (the change set is asserted on the store result),
 retry after a move (there is no authority check since #256, and retry itself was not exercised), the
 full F8 submit-to-screen flow, and moves in very large real databases.
+
+## Thread tags and cwd filter (#222 stage 3)
+
+macOS ARM64 through `rust-slot`, disposable DBs, no provider. Store tests (`tests/thread_tags.rs`) cover tag
+and untag (result keys, `updated_at` unchanged, `revision` advanced only for a change, `changed_threads` = the
+changed Threads, a no-op publishing nothing, case-sensitive names, trimming), tag text bounds (blank, newline,
+tab and U+2028 refused; 128 multi-byte scalars accepted and 129 refused), call bounds (201 IDs, 65 tags to
+add, 65 to remove and 65 filters are `input_limit`; exactly 200 IDs are accepted with the missing ones in
+`not_found`; a tag in both lists, or neither list, is `invalid_argument`), the 64-tags-per-Thread limit
+(64 accepted, a 65th refused with another Thread in the same call left untagged, removal in the same call
+making room, re-adding an existing tag at the limit not counting), missing and deleted targets, replay of
+the same operation ID after a later change, the AND filter over 8 Threads with 1, 2 and 3 tags in either
+order (repeats and spaces normalized), paging by 2 without skips or repeats in `exclude`, `only` and
+`include` archived modes, cursors refused (`cursor_expired`) when the tags, cwd or archived mode differ and
+accepted when only the tag order differs, the exact cwd filter (a parent path is not a match) combined with
+tags, the text query and the archived modes, `tags` in `thread list` and `thread get` (omitted when empty),
+no inheritance by `thread create --parent`, removal of a Thread's tags (and of a tag name nobody else uses)
+by `thread delete --descendants`, and `thread tags` ordering by bytes, paging, the 1..=200 limit bounds, a
+cursor from another listing refused, and a 200-name page with a next cursor. Unit tests in
+`src/control/db.rs` read `EXPLAIN QUERY PLAN` and VM steps of the real page statement. Plans:
+
+- `--tag A --tag B`: `SEARCH g0 USING COVERING INDEX thread_tag_by_tag (tag=?)`, `SEARCH t USING INDEX
+  sqlite_autoindex_thread_1 (id=?)`, `SEARCH g1 EXISTS USING PRIMARY KEY (thread_id=? AND tag=?)`,
+  `USE TEMP B-TREE FOR ORDER BY`; no `SCAN` of a Thread or tag table in any archived mode.
+- `--cwd`: `SEARCH t USING INDEX threads_cwd_updated (cwd=?)`, no sort.
+- One filtered page of 21 rows from 40 tagged Threads (VM steps) with 50 and with 6,000 unrelated Threads of
+  another cwd: one tag 5,673 and 5,673; two tags 5,186 and 5,186; cwd alone 2,566 and 2,566; two tags and cwd
+  5,267 and 5,267. The step count does not depend on the number of unrelated Threads; it does depend on the
+  first tag's membership (all members are read and the top `limit + 1` kept), which is not asserted.
+- Tags of a 50-Thread page in one statement: 667 VM steps with 200 and with 8,000 stored Threads. 40 name
+  seeks of `thread tags`: 480 VM steps with 200 and with 8,000 stored Threads (members per name differ by 40x).
+
+The release-upgrade checker tests cover schema 33 to 34 (empty `thread_tag`, both indexes, rows preserved)
+and the new default (public v0.9.0 to schema 34); `tests/storage*.rs`, `src/storage/migrate.rs` and the
+historical downgrade fixtures drop the new table and index first. The operation catalogue, CLI bindings and
+operation palette tests cover `thread.tag` and `thread.tags` (68 operations). Not verified: Windows/Linux
+local runs (CI is recorded with the final SHA), a real terminal (no PTY capture of the palette forms), tag
+filters on a very large real database or a tag with hundreds of thousands of members, concurrent tagging
+while an owner serves a Web UI, `events.wait` clients receiving the changed-Thread hints from a running
+owner (the change set is asserted on the store result), a tag change through the operation palette form
+end to end, tags on fork and rewind results (not inherited by construction, only `create --parent` is tested),
+and the real upgrade of a user database from schema 33 to 34 (only the synthetic checker fixture).
 ## Int8 index conversion (#253)
 
 macOS ARM64 through `rust-slot`, temporary databases, local counting mock for embeddings, no real API. `src/index/shrink_tests.rs` covers: sqlite-vec 0.1.9 int8 KNN, rowid IN, `vec_distance_L2`, delete and refusal of an untyped query; zero embedding requests through a whole conversion with the old space serving until the switch; rank agreement on synthetic clusters (98.72% top 10); query quantization with the saved scale and integer `distance` through the real read-only search path; resume at the cursor after closing and reopening the database, with every stored byte checked; a failed unit keeping the old space, recorded in status, and explicit resume; saturation of an out-of-scale embedding and query; exact fallback with more than 4096 chunks of one node and a Thread filter on int8; a source deleted and a vector adopted during the copy, including row ID reuse behind the cursor; unfinished jobs moved after the switch, a running claim holding the switch, GC waiting for the sweep; logical byte counter equal to its oracle after conversion and collection; paused state carried over; cancel, already int8, empty, no active index, a leftover rebuild marker not blocking, and abandonment when the source stops being active; every unit within the step budget at 3,072 dimensions; crossing the conversion's room limit with no pause, no discarded job, capacity free after collection, and a later run completing; a failed run released when its source stops being active; shrink never removing a space, `index remove` doing only what its dry run lists and refusing the active index; rebuild activation plus a real maintenance pass and `storage collect` keeping the old vectors; revert switching back with the missing count, re-queued admission, moved jobs returned and zero embedding requests; revert queuing nothing with automatic indexing off or paused; a second `index rebuild` keeping the replaced candidate's vectors as partial, unselectable, and collecting a replaced candidate with no vectors; a revert target protected from collection and a switch refusing a missing target; a resume rechecking room; the committed logical total staying under the limit after every unit; `low_room` refusing before any change; a sweep dropping a job the new space already holds, refusing cancel and surviving a reopen; resume during the scale pass; `rag_hits` on int8; a real budget interrupt with a foreground request waiting, saving no error; and the command through `Control` with started workers and zero embedding requests. The release-upgrade checker tests cover schema 32 to 33.

@@ -185,6 +185,8 @@ mod thread_prune;
 mod thread_reparent;
 #[path = "../thread_rewind.rs"]
 mod thread_rewind;
+#[path = "../thread_tags.rs"]
+mod thread_tags;
 #[path = "../thread_titles.rs"]
 mod thread_titles;
 #[path = "../tool_cancel_reasons.rs"]

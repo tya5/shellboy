@@ -139,6 +139,8 @@ async fn performance_native_wait_and_thread_page_indexes() {
                     cursor: None,
                     query: None,
                     archived: Default::default(),
+                    tags: Vec::new(),
+                    cwd: None,
                 }),
             )
             .await;

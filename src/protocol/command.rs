@@ -36,6 +36,8 @@ impl Command {
             Self::ThreadRewind(_) => ("thread.rewind", CommandRoute::Database),
             Self::ThreadArchive(_) => ("thread.archive", CommandRoute::Database),
             Self::ThreadUnarchive(_) => ("thread.unarchive", CommandRoute::Database),
+            Self::ThreadTag(_) => ("thread.tag", CommandRoute::Database),
+            Self::ThreadTags(_) => ("thread.tags", CommandRoute::Database),
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
             Self::MessageReply(_) => ("message.reply", CommandRoute::Database),
             Self::MessageSend(_) => ("message.send", CommandRoute::Database),
@@ -112,6 +114,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ThreadTags(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -123,6 +126,7 @@ impl Command {
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
             | Self::ThreadArchive(_)
+            | Self::ThreadTag(_)
             | Self::ThreadUnarchive(_)
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
@@ -161,6 +165,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ThreadTags(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -172,6 +177,7 @@ impl Command {
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
             | Self::ThreadArchive(_)
+            | Self::ThreadTag(_)
             | Self::ThreadUnarchive(_)
             | Self::ThreadSet(_)
             | Self::MessageReply(_)
@@ -230,6 +236,7 @@ impl Command {
             | Self::ContextEdit(_)
             | Self::ThreadRewind(_)
             | Self::ThreadArchive(_)
+            | Self::ThreadTag(_)
             | Self::ThreadUnarchive(_) => true,
             Self::OwnerShutdown(_)
             | Self::Status(_)
@@ -237,6 +244,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ThreadTags(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -282,6 +290,7 @@ impl Command {
             | Self::ThreadList(_)
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
+            | Self::ThreadTags(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -311,6 +320,7 @@ impl Command {
             | Self::ThreadPrune(_)
             | Self::ThreadRewind(_)
             | Self::ThreadArchive(_)
+            | Self::ThreadTag(_)
             | Self::ThreadUnarchive(_)
             | Self::ThreadSet(_)
             | Self::MessageReply(_)

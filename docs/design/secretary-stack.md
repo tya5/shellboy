@@ -32,7 +32,7 @@ lower stack; section 6 is the outline for the on-site part.
 | No caller-based refusals | Core | #256, #259 | Stop, retry, shell done; rest not on main |
 | Disk guard | Core | Capacity gate plus volume floor (#261) | Logical limit only |
 | Thread cleanup | Core + CLI | `thread archive` (#222 stage 1) | Exists |
-| Tags, re-parent | Core + CLI | #222 stages 2-3 | Not started |
+| Tags, re-parent | Core + CLI | #222 stages 2-3 | Re-parent on main; tags and cwd filter on branch issue-222/tags-2 |
 | Knowledge | CLI + files | `rag`, `history search`, plain files | Exists |
 | Cheaper index | Core | #253, #254 | Not on main |
 | Web UI | Bridge (separate repo `shellboy-studio`) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Not usable yet per its README |
@@ -65,7 +65,7 @@ Run; retry by generation CAS; one reply per message; reply only after applicatio
 
 | Issue | On main | Not on main |
 |---|---|---|
-| #222 | Stage 1: `thread archive`, `thread unarchive`, `thread list --archived`, TUI keys | Re-parent, tags, cwd grouping. Pin dropped |
+| #222 | Stage 1: `thread archive`, `thread unarchive`, `thread list --archived`, TUI keys. Stage 2: `thread set --parent` | Stage 3 (`thread tag`, `thread tags`, `thread list --tag/--cwd`) is on branch issue-222/tags. Pin dropped |
 | #243 | Stages B, C: `events wait`, chat on hints | Live text deltas (E3) |
 | #244 | A1: typed `invalid_argument` for unknown commands and fields | A2 (protocol 3, capabilities), D (`protocol schema`). [Its design](events-and-external-protocol.md) requires both before `shellboy-studio` depends on the RPC |
 | #247 | Nothing. `serve` guide: "A TUI cannot be attached later" | All |

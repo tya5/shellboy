@@ -4455,6 +4455,7 @@ impl UiState {
                 state: i18n::local!(self.config.ui.language, "未保存", "Not saved").into(),
                 updated_at: String::new(),
                 archived_at: None,
+                tags: Vec::new(),
                 excerpt: view.draft.text.chars().take(80).collect(),
             })
             .filter(|thread| {
@@ -8776,6 +8777,7 @@ mod tool_refresh_tests {
     fn details() -> ThreadDetails {
         ThreadDetails {
             archived_at: None,
+            tags: Vec::new(),
             auto_compact_at: None,
             effective_auto_compact_at: None,
             segment_chars: None,
