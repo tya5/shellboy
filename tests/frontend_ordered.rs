@@ -344,7 +344,6 @@ async fn human_chips_keep_source_positions_through_followups_edit_restore_and_ow
             connection: None,
             model: None,
             effort: None,
-            confirmed_run_id: None,
         })
         .await
         .unwrap();

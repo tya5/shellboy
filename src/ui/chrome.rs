@@ -1519,7 +1519,7 @@ mod tests {
             assert!(shown.contains(expected), "{expected}: {shown}");
         }
         ui.active_view_mut().draft.text = "hello".into();
-        ui.send_current(None);
+        ui.send_current();
         let (&revision, pending) = ui.view().pending.iter().next().unwrap();
         let draft_id = pending.snapshot.draft_id.clone();
         ui.apply(UiUpdate::Receipt {

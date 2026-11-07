@@ -718,7 +718,6 @@ pub enum UiAction {
         connection: Option<String>,
         model: Option<String>,
         effort: Option<String>,
-        confirmed_run_id: Option<String>,
     },
     ReloadAttachments {
         thread_id: String,
@@ -1282,11 +1281,6 @@ pub enum UiUpdate {
         attachments: Vec<UiAttachment>,
         run_id: Option<String>,
     },
-    EditConfirmationRequired {
-        draft_id: String,
-        revision: u64,
-        run_id: String,
-    },
     Management {
         title: String,
         text: String,
@@ -1345,11 +1339,6 @@ enum Confirmation {
     Rewind {
         args: ThreadRewindArgs,
         facts: rewind::RewindFacts,
-    },
-    EditStop {
-        draft_id: String,
-        revision: u64,
-        run_id: String,
     },
     Index {
         command: Command,
@@ -3787,44 +3776,6 @@ impl UiState {
                     draft_id: self.view().draft.draft_id.clone(),
                 });
             }
-            UiUpdate::EditConfirmationRequired {
-                draft_id,
-                revision,
-                run_id,
-            } => {
-                let active = self.view().draft.draft_id == draft_id;
-                if let Some(view) = self.views.values_mut().find(|v| {
-                    v.pending.get(&revision).is_some_and(|pending| {
-                        pending.snapshot.draft_id == draft_id && pending.snapshot.edit.is_some()
-                    })
-                }) && view.on_receipt(
-                    draft_id.clone(),
-                    revision,
-                    None,
-                    ReceiptStatus::Failed,
-                    Some(
-                        i18n::local!(
-                            self.config.ui.language,
-                            "旧作業停止の確認が必要です",
-                            "Confirm stopping the previous run"
-                        )
-                        .into(),
-                    ),
-                ) && view.pending[&revision].restored_revision == Some(view.draft.revision)
-                {
-                    if let Some(edit) = &mut view.draft.edit {
-                        edit.run_id = Some(run_id.clone());
-                    }
-                    let restored_revision = view.draft.revision;
-                    if active {
-                        self.set_confirmation(Confirmation::EditStop {
-                            draft_id,
-                            revision: restored_revision,
-                            run_id,
-                        });
-                    }
-                }
-            }
             UiUpdate::IndexPreviewFailed {
                 args,
                 attempt,
@@ -4751,17 +4702,7 @@ impl UiState {
             }
             return actions;
         }
-        if let Some(edit) = &self.view().draft.edit
-            && let Some(run_id) = &edit.run_id
-        {
-            self.set_confirmation(Confirmation::EditStop {
-                draft_id: self.view().draft.draft_id.clone(),
-                revision: self.view().draft.revision,
-                run_id: run_id.clone(),
-            });
-            return vec![];
-        }
-        self.send_current(None)
+        self.send_current()
     }
     fn submit_reply(&mut self) -> Vec<UiAction> {
         let language = self.config.ui.language;
@@ -4816,7 +4757,7 @@ impl UiState {
             ))),
         }]
     }
-    fn send_current(&mut self, confirmed_run_id: Option<String>) -> Vec<UiAction> {
+    fn send_current(&mut self) -> Vec<UiAction> {
         // The next submission ends the "right after the rewind" undo offer.
         self.rewind_undo = None;
         if self.view().composer.reply.is_some() {
@@ -4912,7 +4853,6 @@ impl UiState {
                 connection: view.connection.clone(),
                 model: view.model.clone(),
                 effort: view.effort.clone(),
-                confirmed_run_id,
             }];
         }
         vec![UiAction::Send {
@@ -5997,24 +5937,6 @@ impl UiState {
                     );
                     vec![]
                 }
-            }
-            Some(Confirmation::EditStop {
-                draft_id,
-                revision,
-                run_id,
-            }) => {
-                if self.view().draft.draft_id != draft_id || self.view().draft.revision != revision
-                {
-                    let language = self.config.ui.language;
-                    self.active_view_mut().status = i18n::local!(
-                        language,
-                        "下書きが変更されたため確認を取り消しました。再送してください",
-                        "The draft changed, so confirmation was cancelled. Send again"
-                    )
-                    .into();
-                    return vec![];
-                }
-                self.send_current(Some(run_id))
             }
             Some(Confirmation::Index {
                 command, attempt, ..

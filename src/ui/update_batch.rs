@@ -79,7 +79,6 @@ impl UiUpdate {
             | Self::Status { .. }
             | Self::ClipboardAttachment { .. }
             | Self::Progress { .. }
-            | Self::EditConfirmationRequired { .. }
             | Self::Management { .. }
             | Self::IndexPreviewReady { .. }
             | Self::IndexPreviewFailed { .. }

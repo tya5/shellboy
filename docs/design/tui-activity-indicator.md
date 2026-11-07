@@ -190,7 +190,4 @@ Draft-image retention follows both local owners: attachment release declarations
 include the current composer and pending send snapshots. Deleting/clearing the
 next input cannot unpin an image needed by a delayed or failed send's restore.
 This reuses the existing draft-image leases, with no new queue or DB request.
-A late edited-send stop-confirmation is likewise matched to the pending request,
-not the next composer's revision. Restore the unchanged composer first and bind
-the confirmation to that restored revision. If newer input exists, keep it and
-the failed snapshot, without opening a confirmation for unrelated text.
+A refused edited send follows normal failed-receipt restoration; newer composer input and the failed snapshot are preserved.

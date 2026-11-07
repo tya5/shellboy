@@ -146,7 +146,7 @@ async fn completed_shell_cannot_be_backgrounded_while_excerpt_is_loading() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
+async fn in_process_edit_refuses_running_run_without_waiting() {
     let (_root, owner, control, mut requests, server) = fixture().await;
     assert_eq!(control.store.config.io.self_reply_grace_ms, 60_000);
     let thread = start(&control).await;
@@ -154,7 +154,7 @@ async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
     // that needs a response before this UI-only edit stops its old Run.
     let (_, old_reply) = incoming(&mut requests).await;
     let target = thread.clone();
-    let (run,node) = control.store.database.call(move|db| {
+    let (_run,node) = control.store.database.call(move|db| {
         Ok(db.query_row("SELECT r.id,n.id FROM run r JOIN receipt x ON x.run_id=r.id JOIN node n ON n.id=x.message_node_id WHERE r.thread_id=?1 AND r.state='live' ORDER BY x.rowid LIMIT 1",[target],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?)
     }).await.unwrap();
     let edited = control.clone();
@@ -165,7 +165,6 @@ async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
                 operation,
                 thread,
                 node,
-                Some(run),
                 crate::attachments::DraftContent::appended("edited retained input".into(), 0),
                 vec![],
                 ThreadCreateArgs {
@@ -199,5 +198,5 @@ async fn in_process_edit_does_not_wait_for_a_shell_caller_reply_grace() {
         success.is_some(),
         "in-process edit must not need shell self-reply grace"
     );
-    assert!(success.unwrap().is_ok());
+    assert!(success.unwrap().is_err());
 }
