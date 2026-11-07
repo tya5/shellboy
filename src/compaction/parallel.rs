@@ -212,13 +212,30 @@ impl Compactor {
                 .call(move |db| CachedPart::load(db, &lookup))
                 .await
                 .map_err(storage_error)?;
-            if let Some(part) = cached.filter(|part| {
-                part.reusable()
-                    && job
-                        .cached_max_chars
-                        .is_none_or(|limit| part.text.chars().count() as u64 <= limit)
-            }) {
-                return Ok(Some((job.path, part)));
+            if let Some(part) = cached.filter(CachedPart::reusable) {
+                if let Some(limit) = job.cached_max_chars
+                    && part.text.chars().count() as u64 > limit
+                {
+                    // Reserve before sending: a crash or cancellation must not
+                    // permit repeated paid retries for the same cache witness.
+                    let marker = format!("{}.oversize-retry.{limit}", job.cache_key);
+                    let marker_value = json!({"sources": job.sources}).to_string();
+                    let reserved = self
+                        .database
+                        .call(move |db| {
+                            Ok(db.execute(
+                                "INSERT OR IGNORE INTO app_meta(key,value) VALUES(?1,?2)",
+                                rusqlite::params![marker, marker_value],
+                            )? == 1)
+                        })
+                        .await
+                        .map_err(storage_error)?;
+                    if !reserved {
+                        return Err(budget.error("Oversized summary retry already used for this selection; original path retained"));
+                    }
+                } else {
+                    return Ok(Some((job.path, part)));
+                }
             }
         }
         ctx.ensure_slot(budget)?;
