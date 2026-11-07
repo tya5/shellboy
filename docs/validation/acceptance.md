@@ -10587,3 +10587,10 @@ and identical indexed and unindexed query plans. The history-window module
 passed 7 tests; `cargo check --tests`, formatting, test layout, and language audit
 passed. Linux and Windows validation is pending CI; no real Web UI or user data
 was used.
+
+## #269 stage C: live connection validation (2026-11-07)
+
+Validation pending. Intended evidence: deterministic loopback request barrier across swap/removal, real owner
+`config.set`/`credentials.set` concurrency, live defaults and TUI snapshots, unchanged embedding identity and client,
+restart-only embedding field differences, default/embedding deletion rejection and strict non-live response flags.
+No live provider or user data will be used; final tip default/all-OS CI must be recorded separately.

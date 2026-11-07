@@ -49,11 +49,8 @@ pub(super) async fn prepare_attempt(
     snapshot: &mut Snapshot,
     slot: &DriverSlot,
     instruction_body: Option<&Arc<str>>,
+    client: HttpModelClient,
 ) -> Result<Option<AdmittedRequest>, ApiError> {
-    let client = match model_client(control, snapshot) {
-        Ok(client) => client,
-        Err(error) => return fail_turn(control, snapshot, error).await,
-    };
     let mut prepared = match control
         .attachments
         .prepare_at_revision(
@@ -107,13 +104,14 @@ pub(super) async fn prepare_attempt(
     }
     let prepared = Arc::new(prepared);
     let attempt = id();
-    let started = match admit_attempt(
+    let started = match admit_attempt_with_digest(
         control,
         snapshot,
         &attempt,
         prepared.clone(),
         input_characters,
         history_characters,
+        client.extra_digest(),
     )
     .await
     {
@@ -135,12 +133,8 @@ pub(super) fn model_client(
     control: &Control,
     snapshot: &Snapshot,
 ) -> Result<HttpModelClient, ApiError> {
-    if !control
-        .store
-        .config
-        .connections
-        .contains_key(&snapshot.profile)
-    {
+    let clients = control.store.clients.snapshot();
+    if !clients.connections.contains_key(&snapshot.profile) {
         let error = ApiError::new(
             ErrorCode::ConfigInvalid,
             "Model connection is not configured",
@@ -152,7 +146,7 @@ pub(super) fn model_client(
         let error = ApiError::new(ErrorCode::ConfigInvalid, "Thread model is not configured");
         return Err(error);
     }
-    let client = match control.store.clients.get(&snapshot.profile) {
+    let client = match clients.get(&snapshot.profile) {
         Ok(client) => client,
         Err(error) => {
             let error = ApiError::new(ErrorCode::ConfigInvalid, error.to_string());

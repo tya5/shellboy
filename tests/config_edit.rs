@@ -150,7 +150,7 @@ fn every_value_that_could_hold_a_secret_is_redacted_and_names_remain() {
     assert_eq!(result["differs"], false);
     assert_eq!(result["differing_fields"], json!([]));
     assert!(result["loaded"]["content_hash"].is_string());
-    assert_eq!(result["restart"]["all_fields_require_restart"], true);
+    assert_eq!(result["restart"]["all_fields_require_restart"], false);
 }
 
 #[test]
@@ -967,14 +967,14 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
             Some("changed")
         );
 
-        // The running owner keeps what it loaded and reports the difference.
+        // Only the shell setting remains pending; the default model is live.
         let got = request(&control, Command::ConfigGet(ConfigGetArgs {})).await;
         assert_eq!(got["differs"], true);
-        assert_eq!(got["loaded"]["values"]["default_model"], "fixture");
+        assert_eq!(got["loaded"]["values"]["default_model"], "changed");
         assert_eq!(got["file"]["values"]["default_model"], "changed");
         assert_eq!(
             got["differing_fields"],
-            json!(["default_model", "shell.env.OWNER_VAR"])
+            json!(["shell.env.OWNER_VAR"])
         );
         assert_eq!(got["file"]["content_hash"], first["content_hash"]);
         assert!(!got.to_string().contains("owner-secret-value"));

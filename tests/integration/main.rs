@@ -91,6 +91,8 @@ mod input_history_backend;
 mod inspection_lists;
 #[path = "../instructions.rs"]
 mod instructions;
+#[path = "../live_connections.rs"]
+mod live_connections;
 #[path = "../message_recovery.rs"]
 mod message_recovery;
 #[path = "../model.rs"]

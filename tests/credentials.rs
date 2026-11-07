@@ -1372,3 +1372,36 @@ fn with_no_owner_the_cli_changes_nothing_and_says_so() {
     }
     assert!(!root.path().join("credentials.toml").exists());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_connections_concurrent_definition_and_key_reach_the_next_http_request() {
+    crate::test_watchdog::watchdog("live config and key HTTP", async {
+        let root = tempfile::tempdir().unwrap();
+        let mock = mock().await;
+        mock.require(Some(KEY));
+        write_config(root.path(), &format!("default_connection='proxy'\ndefault_model='model-a'\n[connections.proxy]\nbase_url={:?}\n", mock.url));
+        let (owner, control) = start(root.path()).await;
+        let got = call(&control, Command::ConfigGet(ConfigGetArgs {})).await.unwrap();
+        let config = call(&control, Command::ConfigSet(ConfigSetArgs {
+            expected_hash: got["file"]["content_hash"].as_str().unwrap().into(),
+            changes: vec![shellboy::protocol::ConfigChange {
+                field:"connections.proxy.request_timeout_ms".into(), value:Some(json!(12345)),
+            }],
+        }));
+        let key = call(&control, set("proxy", KEY));
+        let (config, key) = tokio::join!(config, key);
+        assert_eq!(config.unwrap()["applied_to_running_owner"], true);
+        assert!(!mentions(&key.unwrap().to_string()));
+        let target = thread(&control).await;
+        crate::runtime_features::send(&control, &target, "first send without restart").await;
+        settled(&control, &target).await;
+        let posts: Vec<_> = mock.seen().into_iter().filter(|s| s.method == "POST").collect();
+        assert_eq!(posts.len(), 1);
+        assert_eq!(posts[0].authorization.as_deref(), Some(format!("Bearer {KEY}").as_str()));
+        let id = target;
+        let state: String = control.store.database.call(move |db| Ok(db.query_row(
+            "SELECT state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1", [id], |r|r.get(0))?)).await.unwrap();
+        assert_eq!(state,"completed");
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}

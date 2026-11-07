@@ -22,6 +22,7 @@ pub struct ThreadView {
     pub(super) selecting_agents: Option<String>,
     pub connection: Option<String>,
     pub model: Option<String>,
+    pub(super) explicit_model: bool,
     /// Latest saved provider-reported usage; replaced only by an adopted snapshot.
     pub(super) context_usage: ContextUsage,
     pub effort: Option<String>,
@@ -327,6 +328,7 @@ impl ThreadView {
         self.navigation.on_event(NavEvent::TailRequested);
     }
     pub(super) fn new(config: &Config, cwd: PathBuf) -> Self {
+        let config = &config.current();
         let mut live_work = super::live_work::LiveWorkView::default();
         live_work.set_language(config.ui.language);
         Self {
@@ -345,6 +347,7 @@ impl ThreadView {
             cwd,
             connection: config.default_connection.clone(),
             model: config.default_model.clone(),
+            explicit_model: false,
             effort: config
                 .default_connection
                 .as_ref()

@@ -61,22 +61,44 @@ fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidState, message)
 }
 
+#[cfg(test)]
 async fn admit_attempt(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+    attempt: &str,
+    attachments: Arc<crate::attachments::PreparedAttachments>,
+    input: u64,
+    history: u64,
+) -> Result<bool, ApiError> {
+    let digest = control
+        .store
+        .clients
+        .get(&snapshot.profile)
+        .ok()
+        .and_then(|c| c.extra_digest());
+    admit_attempt_with_digest(
+        control,
+        snapshot,
+        attempt,
+        attachments,
+        input,
+        history,
+        digest,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn admit_attempt_with_digest(
     control: &Arc<Control>,
     snapshot: &Snapshot,
     attempt: &str,
     attempt_attachments: Arc<crate::attachments::PreparedAttachments>,
     input_characters: u64,
     history_characters: u64,
+    extra_digest: Option<String>,
 ) -> Result<bool, ApiError> {
     let current = snapshot.clone();
-    // Hash only; the configured extra fields stay in the user's config file.
-    let extra_digest = control
-        .store
-        .config
-        .connections
-        .get(&snapshot.profile)
-        .and_then(crate::config::Connection::extra_digest);
     let attempt_id = attempt.to_owned();
     let result = control
         .store
@@ -260,8 +282,14 @@ pub(super) async fn drive(
                 (refreshed, boundary_guard, lease, admission_wait_ms)
             }
         };
-        let admitted =
-            prepare_attempt(&control, &mut snapshot, &request_slot, instructions.body()).await;
+        let admitted = prepare_attempt(
+            &control,
+            &mut snapshot,
+            &request_slot,
+            instructions.body(),
+            rate_client,
+        )
+        .await;
         if turn_binding.cancel.is_cancelled() {
             continue;
         }
@@ -528,7 +556,7 @@ async fn next(control: &Arc<Control>, thread: &str, run_id: &str) -> Result<Next
     let run_id = run_target.clone();
     let index = control.index.clone();
     let replay = control.replay.clone();
-    let config = control.store.config.clone();
+    let config = control.store.config.current();
     let shutting_down = control.shell.start_gate();
     let wakes = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let committed_wakes = wakes.clone();

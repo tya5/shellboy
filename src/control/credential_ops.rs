@@ -197,14 +197,19 @@ fn known_connection(
     if let Some(saved) = crate::config_edit::saved_connection(config_path, name)? {
         return Ok(saved);
     }
-    loaded.connections.get(name).cloned().ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::InvalidArgument,
-            "The connection is not in the configuration file",
-        )
-        .hint("Add it with shellboy config set first")
-        .details(json!({"field":"connection","written":false}))
-    })
+    loaded
+        .current()
+        .connections
+        .get(name)
+        .cloned()
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidArgument,
+                "The connection is not in the configuration file",
+            )
+            .hint("Add it with shellboy config set first")
+            .details(json!({"field":"connection","written":false}))
+        })
 }
 
 /// Why a request did not give a catalog. A fact about the exchange, never "the key is

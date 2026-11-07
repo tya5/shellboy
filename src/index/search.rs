@@ -107,7 +107,10 @@ impl IndexService {
                 ));
             }
         }
-        let config = self.config.clone();
+        let clients = self.clients.snapshot();
+        // Query identity validation and the HTTP client must describe one generation.
+        let mut config = (*self.config).clone();
+        config.connections = clients.connections.clone();
         let space = self
             .database
             .call(move |db| {
@@ -134,14 +137,13 @@ impl IndexService {
         let Some(space) = space else {
             return Ok(Vec::new());
         };
-        self.config.connections.get(&space.profile).ok_or_else(|| {
+        clients.connections.get(&space.profile).ok_or_else(|| {
             err(
                 ErrorCode::ConfigInvalid,
                 "Selected index space connection is not configured",
             )
         })?;
-        let client = self
-            .clients
+        let client = clients
             .get(&space.profile)
             .map_err(|error| err(ErrorCode::IoFailed, error.to_string()))?;
         let lease = client.acquire_rate(&cancel).await.map_err(|error| {
