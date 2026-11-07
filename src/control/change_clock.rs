@@ -504,7 +504,11 @@ mod tests {
             let late = format!("t{MAX_LIVE_TEXT_ATTEMPTS:02}");
             assert!(!attempts.iter().any(|a| a.thread_id == late));
             // The first read joins at offset 0; every later one is continuous.
-            assert!(attempts.iter().all(|a| !a.gap && a.deltas[0].offset == round));
+            assert!(
+                attempts
+                    .iter()
+                    .all(|a| !a.gap && a.deltas[0].offset == round)
+            );
         }
         // An ending attempt makes room: the refused one enters with an explicit gap.
         drop(clock.live_text_guard("t00", "a"));
@@ -611,17 +615,20 @@ mod tests {
         assert!(text.as_mut().now_or_never().is_some());
         // A whole text poll completes, returning that delta: still no wake for `changed`.
         let reply = control
-            .request(Request::new(uuid::Uuid::new_v4().to_string(), command(None)))
+            .request(Request::new(
+                uuid::Uuid::new_v4().to_string(),
+                command(None),
+            ))
             .await;
         assert_eq!(reply.result.unwrap()["status"], "baseline");
         assert!(changed.as_mut().now_or_never().is_none());
         // Once admission is closed a finishing poll wakes the drain, like any other request.
         let open = control.admit_request(&command(None)).unwrap();
         let closing = control.admit_request(&command(None)).unwrap();
-        drop(open);
         let quiet = control.changed.notified();
         tokio::pin!(quiet);
         quiet.as_mut().enable();
+        drop(open);
         assert!(quiet.as_mut().now_or_never().is_none());
         control.freeze_owner_admission();
         let drain = control.changed.notified();

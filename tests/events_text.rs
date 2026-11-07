@@ -5,7 +5,7 @@ use crate::test_watchdog::watchdog;
 use serde_json::{Value, json};
 use shellboy::{
     control::Control,
-    protocol::{Command, EventsWaitArgs, HistoryListArgs, Request, ThreadSetArgs},
+    protocol::{Command, EventsWaitArgs, HistoryListArgs, Request, RunTarget, ThreadSetArgs},
 };
 use std::{sync::Arc, time::Duration};
 use tokio::{
