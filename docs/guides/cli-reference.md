@@ -198,7 +198,7 @@ Root cwd defaults to owner startup cwd; child cwd to the parent's. Relative cwd 
 
 | Operation and all specific flags | Main result and conditions |
 |---|---|
-| `message send [--thread THREAD] [--deliver now\|complete] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. `--sender-label` is a self-asserted name (not verified); when present on a non-human message, the recipient's model request gets a `sender_label` notice right after the message text, and the saved text is unchanged. `--expect-reply` is rejected for a model sending to its own Thread or when the recipient already has 128 pending reply duties (`input_limit`). Active work takes additions at safe boundaries; stopping can yield held/pending. Ordinary machine messages never silently resume recovery_wait |
+| `message send [--thread THREAD] [--deliver now\|complete] [--resume-recovery] [--expect-reply] [--sender-label TEXT] (--text TEXT | --text-stdin)` | message_id/thread_id/delivery_status/assignment/run_id/turn_id, plus `deliver` when not the default; acceptance differs from completion. `--sender-label` is a self-asserted name (not verified); when present on a non-human message, the recipient's model request gets a `sender_label` notice right after the message text, and the saved text is unchanged. `--expect-reply` is rejected for a model sending to its own Thread or when the recipient already has 128 pending reply duties (`input_limit`). Active work takes additions at safe boundaries; stopping can yield held/pending. Non-human messages are held at recovery_wait by default. `--resume-recovery` explicitly resumes regardless of caller; the `recovery_resumed` event records the caller actor. Human TUI/chat input and `message reply` retain their explicit resume behavior |
 | `message reply --message MESSAGE (--text TEXT | --text-stdin) [--sender-label TEXT]` | Reply once to an applied pending reply request; returns `reply_to`/reply message ID and optional delivery |
 | `message get --message MESSAGE` | Original immutable assignment, current delivery_status, sender facts, and `expect_reply`, `reply` state/node, or `reply_to` when applicable; `end_message_node_id` remains available when present |
 | `message cancel --message MESSAGE [--message MESSAGE ...]` | Cancel 1..128 fixed message IDs. Queued input can be archived; an admitted pending reply duty returns `reply_cancelled` without removing history. Other outcomes are `cancelled`/`already_cancelled`/`already_admitted`/`not_found`/`forbidden`/`unavailable`. Does not wake the model |
@@ -210,7 +210,7 @@ When an expected-reply message is admitted, the recipient gets a `reply_expected
 `--deliver complete` waits while the recipient Run is live. At normal completion,
 waiting messages are delivered together in send order as one new Turn. If that Run
 stops, is shut down, or enters recovery wait instead, each waiting message is
-released as ordinary held input and follows the usual resume/retry rules. Later
+released as ordinary held input and follows the usual resume/retry rules. At live `recovery_wait`, non-human messages stay held unless `--resume-recovery` is given; `run retry` releases held recovery receipts. Later
 default or `--deliver now` messages overtake waiting `complete` messages.
 
 `message get` returns `sender.kind`: `model` with verified credential-free

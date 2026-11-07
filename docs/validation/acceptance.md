@@ -10666,3 +10666,17 @@ correctly retain the removed connection; the test then waited for a nonexistent 
 live-connection regressions now subscribe before querying Run state and wait for Run completion notifications,
 without a fixed sleep. Recovery-path waits still use the original Turn helper. This preserves the Run-pinning
 contract and checks an actually new Run. The failed CI is retained; a new tip requires new CI evidence.
+
+## Recovery-wait message sends (#263)
+
+Verified by focused tests: ordinary external CLI and model-origin message sends to a
+live recovery-wait Turn are held with no wake; `run retry` reaccepts an external CLI
+held message; `--resume-recovery` resumes from a model origin and records the shell
+Origin as the recovery actor; human input still resumes; CLI default/flag mapping and
+optional wire decoding are checked.
+
+Not yet verified: the final Rust focused test/build and default/all-OS CI have not run
+on the final tip. The language inventory audit completed; its existing 13 pending
+Japanese source literals remain outside this change. A live TUI/chat terminal was not
+manually driven; the preserved `human` flag path is covered through the same Control
+send transaction.

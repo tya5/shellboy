@@ -126,6 +126,7 @@ async fn upload_recovery(auto_trim: bool) {
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -300,6 +301,7 @@ async fn refused_proxy_connections_keep_retrying_beyond_two_and_recover_when_it_
         request(
             &control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,

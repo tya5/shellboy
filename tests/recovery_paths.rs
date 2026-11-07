@@ -169,6 +169,7 @@ async fn connection_loss_preserves_auto_operation_id_and_does_not_resend() {
         ipc::call(
             &directory,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -240,6 +241,7 @@ async fn mismatched_reply_keeps_the_requested_id_for_receipt_lookup() {
         ipc::call(
             &directory,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,

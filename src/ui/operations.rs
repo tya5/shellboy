@@ -1500,6 +1500,12 @@ impl Form {
                 vec![
                     thread(),
                     f("expect_reply", "返信を依頼", "false".into(), Boolean),
+                    f(
+                        "resume_recovery",
+                        "明示的に復旧待ちを再開",
+                        "false".into(),
+                        Boolean,
+                    ),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
                         "sender_label",
@@ -1517,6 +1523,7 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::MessageSend(MessageSendArgs {
                         human: false,
+                        resume_recovery: form.boolean("resume_recovery")?,
                         expect_reply: form.boolean("expect_reply")?,
                         sender_label: form.optional("sender_label")?,
                         deliver: form
@@ -2606,7 +2613,7 @@ mod tests {
             (
                 OpKind::MessageSend,
                 "message.send",
-                json!({"thread_id":id(1),"text":"synthetic text"}),
+                json!({"thread_id":id(1),"text":"synthetic text","resume_recovery":true}),
             ),
             (
                 OpKind::MessageReply,

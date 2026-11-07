@@ -119,6 +119,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
         .request(Request::new(
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,

@@ -55,6 +55,7 @@ async fn fixture_with_policy(
             Request::new(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -1676,6 +1677,8 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
                 Request::new(
                     format!("{}:expected", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
+                        resume_recovery: false,
+
                         human: false,
                         expect_reply: true,
                         sender_label: None,

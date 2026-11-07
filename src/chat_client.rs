@@ -228,6 +228,7 @@ impl<W: Write> Chat<'_, W> {
         self.baseline().await?;
         let accepted: MessageAccepted = self
             .call(Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: self.human,
                 expect_reply: self.until == ResultMode::Reply,
                 sender_label: None,

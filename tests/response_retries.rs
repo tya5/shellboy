@@ -235,6 +235,7 @@ impl Fixture {
             request(
                 &control,
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -1495,6 +1496,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
         request(
             &f.control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: Some("leader".into()),
@@ -1755,6 +1757,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
         request(
             &f.control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -2059,6 +2062,7 @@ async fn concurrent_threads_record_independent_429_observations() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -2174,6 +2178,7 @@ async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -2239,6 +2244,7 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -2508,6 +2514,7 @@ async fn shared_connection_wait_is_recorded_on_successful_attempt() {
         request(
             &fixture.control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -2689,6 +2696,8 @@ async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
     request(
         &control,
         Command::MessageSend(MessageSendArgs {
+            resume_recovery: false,
+
             human: false,
             expect_reply: false,
             sender_label: None,
@@ -2740,6 +2749,7 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
             request(
                 &fixture.control,
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,

@@ -4156,3 +4156,15 @@ column, worker, table or queue is added. Manual operations and TUI readers retai
 The TUI model command and context threshold use live lookup. A regression covers adding a connection, selecting it,
 changing its warning threshold and removing it without rebuilding UiState; deleted definitions cannot leak through
 a startup fallback. This supersedes earlier stage C wording that only promised one request's lifetime.
+## Recovery-wait message send policy (#263, 2026-11-07)
+
+Human TUI/chat input and `message reply` remain explicit recovery actions. All
+non-human `message send` calls are held on a live `recovery_wait` Turn by default,
+regardless of whether they have a model Origin. `--resume-recovery` is the explicit
+per-message opt-in, including for a model sending from another Thread; its
+`recovery_resumed` event records the caller actor (human or shell Origin); the
+message receipt also retains authenticated sender provenance. Existing generation CAS and
+receipt-scope checks remain the authority for what can be resumed. This avoids
+automatic scheduler/CLI restart while allowing deliberate automation. Revisit if
+callers need a narrower authority boundary or if external CLI callers use the flag
+without treating recovery as an explicit decision.

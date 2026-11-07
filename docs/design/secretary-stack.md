@@ -188,10 +188,11 @@ shellboy message send --thread "$S" --operation-id "job-$ITEM" \
   --sender-label scheduler --text-stdin < fields.json
 ```
 
-Check `thread get --thread "$S"` first. A message from an external CLI **resumes** a
-Thread in `recovery_wait`, like a human instruction (`src/control/db.rs`); do not let a
-schedule do that unreviewed. If a human or model is using the Thread, add
-`--deliver complete`.
+Check `thread get --thread "$S"` first. An external CLI message now stays held
+when the Thread is in `recovery_wait`; `run retry` is the default explicit recovery
+action. `--resume-recovery` deliberately resumes with the message, so a schedule must
+never add that flag without an independently reviewed decision. If a human or model
+is using the Thread, add `--deliver complete`.
 
 **5. Draft-only output.** The model writes a draft file to an outbox. The script, or the
 human, turns it into a draft in the mail system with draft-only access if the system
@@ -248,7 +249,7 @@ binary. Until the last row below lands, hand it to the on-site Shellboy as a fil
 | Where | Says | Actual |
 |---|---|---|
 | `docs/design/effective-spec.md` (list of what is not adopted) | "web UI, archive" not adopted | Archive is on main; the Web UI is a separate adopted project |
-| `docs/guides/cli-reference.md` (`message send`) | "Ordinary machine messages never silently resume recovery_wait" | An external CLI message does resume it (`src/control/db.rs`); only a model's is held |
+| `docs/guides/cli-reference.md` (`message send`) | Ordinary machine messages are held at `recovery_wait`; `--resume-recovery` is explicit | Updated for #263 |
 | #262 issue body | `message list --awaiting-human` | Superseded by its later comment and D4 |
 | `docs/design/README.md` | Reply-expected "adopted, not implemented" | Implemented |
 | `docs/development/status.md` | #256 and others "on branch, CI pending" | On main |

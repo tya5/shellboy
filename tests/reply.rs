@@ -21,6 +21,8 @@ fn request(command: Command) -> Request {
 }
 fn send(expected: bool) -> Command {
     Command::MessageSend(MessageSendArgs {
+        resume_recovery: false,
+
         human: false,
         expect_reply: expected,
         sender_label: None,

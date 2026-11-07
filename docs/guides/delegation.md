@@ -110,6 +110,12 @@ Preview with `shellboy thread delete-preview --thread CHILD_THREAD_ID` (optional
 Deletion removes access to that child's conversation and excludes deleted Threads from usage totals (required shared sources may remain); retain children needed for audits or later cost checks.
 
 ## Deciding recovery
+Ordinary external or model `message send` input stays held when the target Run is in
+`recovery_wait`. Inspect `run get` / `thread get` and use `run retry` for the explicit
+recovery boundary. Only pass `--resume-recovery` when the message itself is the reviewed
+resume instruction; the `recovery_resumed` event records the caller actor. Human TUI/chat input and an
+answer through `message reply` remain explicit resume actions.
+
 
 ```bash
 shellboy run get --run CHILD_RUN_ID

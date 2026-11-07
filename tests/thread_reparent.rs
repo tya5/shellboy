@@ -91,6 +91,8 @@ async fn revision(store: &Store, id: &str) -> i64 {
 }
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
+        resume_recovery: false,
+
         human: false,
         expect_reply: false,
         sender_label: None,
@@ -466,6 +468,7 @@ async fn a_pending_reply_is_delivered_to_its_sender_after_the_recipient_moves() 
     let asked = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: true,
                 sender_label: None,

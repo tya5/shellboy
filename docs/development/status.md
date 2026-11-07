@@ -1,5 +1,15 @@
 # Development status
 
+## Recovery-wait external CLI messages (#263; branch issue-263/resume-recovery)
+
+Non-human `message send` inputs now remain held at a live `recovery_wait` Turn by
+default; `--resume-recovery` explicitly resumes the same Turn. The message receipt
+records caller identity. TUI/chat human input and `message reply` preserve explicit
+resume behavior.
+Tests: `tests/control_db.rs`, `tests/cli.rs`, `tests/protocol.rs`, and TUI form mapping (run pending).
+Docs: CLI reference/design, delegation, Agent Guide, secretary recipe, Control design.
+Resume: finish local focused checks, then default and all-OS CI on the pushed tip.
+
 ## Secretary stack memo (docs only; on branch doc/secretary-stack)
 
 [Secretary stack](../design/secretary-stack.md) records the user's 2026-11-07 decisions, where
