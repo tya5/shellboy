@@ -279,7 +279,7 @@ pub(crate) mod tests {
                     std::hint::black_box(crate::gc::usage::logical_usage(db).unwrap());
                 });
                 let gate = time(&|| {
-                    std::hint::black_box(crate::gc::require_capacity_tx(db, &config).unwrap());
+                    crate::gc::require_capacity_tx(db, &config).unwrap();
                 });
                 Ok((free, counters, gate))
             })
