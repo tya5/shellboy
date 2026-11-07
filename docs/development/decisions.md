@@ -4113,3 +4113,15 @@ Revisit when the owner explicitly authorizes a bounded, privacy-reviewed
 measurement and supplies representative evidence; until then the observed
 production rate is unknown. This decision is not evidence that rejections are
 rare or that the current behavior is optimal.
+
+### D-251: Reject oversized final reduce cache entries
+
+An otherwise reusable final reduce entry exceeding the current summary character
+limit is regenerated on a later explicit or permitted automatic attempt. Map and
+intermediate reduce caches remain reusable; each regeneration consumes the
+existing reduce-request budget and all size, progress, cancellation, provenance
+and adoption checks remain in force. This avoids deterministically replaying an
+unacceptable cached final answer without creating an unbounded retry. Revisit if
+provider measurements show repeated oversized results or a stricter shared
+cache invalidation policy is adopted. No production frequency is inferred from
+synthetic fixtures.
