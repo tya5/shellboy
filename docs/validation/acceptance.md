@@ -10657,3 +10657,12 @@ Run lifetime here means the current in-memory driver activation. Owner restart r
 startup configuration; no connection generation is persisted for crash recovery. Performance, real-provider behavior
 and exhaustive concurrency schedules remain unverified. Full normal/all-OS CI results at the final source tip are
 reported separately; no historical CI is reused as proof of these review fixes.
+
+### #269 review CI: distinguish Turn completion from Run completion
+
+Normal CI `42385503244` on `ee01cd6ff5` exposed a real fixture race: its generic `settled` helper waits for Turn
+completion, not for the Run's final idle boundary. A subsequent message could therefore join the existing Run and
+correctly retain the removed connection; the test then waited for a nonexistent new-Run recovery. Success-path
+live-connection regressions now subscribe before querying Run state and wait for Run completion notifications,
+without a fixed sleep. Recovery-path waits still use the original Turn helper. This preserves the Run-pinning
+contract and checks an actually new Run. The failed CI is retained; a new tip requires new CI evidence.
