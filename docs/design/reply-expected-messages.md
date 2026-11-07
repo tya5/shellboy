@@ -11,8 +11,8 @@ user did not decide explicitly are marked **Judgement** and are also in the
 
 ## Summary
 
-A sender can mark a message `--expect-reply`. The recipient Thread's model (or a
-human) answers it once with `shellboy message reply --message ID`. The reply is
+A sender can mark a message `--expect-reply`. Any model Thread or a human
+answers it once with `shellboy message reply --message ID`. The reply is
 attached to the original message for every sender kind and, when the sender is
 a model, is also delivered to the sender's Thread as an ordinary message.
 `wait` gains one condition, `reply_received`. A Run that tries to complete with
@@ -30,7 +30,7 @@ what it returns with `--result reply|turn-end|run-end` (default `reply`).
 | D1 | Wake once at Run end; on the second detection record "ignored" as a stored notice, release waits, notify the sender | [Run-end rule](#run-end-rule) |
 | D2 | `message send --expect-reply`, combinable with `--deliver now\|complete` | [CLI](#cli) |
 | D3 | One reply per message; replying clears the pending state; progress uses ordinary messages | [Reply operation](#message-reply) |
-| D4 | The recipient Thread's model replies; a human may also reply from the TUI if that is simpler | [Who may reply](#authority), [Human reply](#human-reply) |
+| D4 | Any model or human may reply after application | [Who may reply](#authority), [Human reply](#human-reply) |
 | D5 | Recipient Thread deleted: release waits and notify the sender | [Outcomes](#outcomes) |
 | D6 | External senders wait with `wait reply_received`; four release reasons; `--timeout-ms` bounds only that call; pending replies have no deadline; `exec` and "thread request" become expect-reply + `reply_received` | [Wait](#wait-condition-reply_received), [exec](#exec) |
 | D7 | Delegation is unified onto this mechanism | [Delegation mapping](#delegation-mapping) |
@@ -89,8 +89,9 @@ These correct or sharpen assumptions in the issue thread.
    assistant message and has its own cursor scope. Today it fails with
    `target_unavailable` when the node holds no such message.
 9. **Error codes.** `ErrorCode` has no `forbidden` or `not_found`; unknown
-   wait targets and unknown messages are `target_unavailable`. `forbidden` and
-   `not_found` exist only as `message cancel` per-item outcomes.
+   wait targets and unknown messages are `target_unavailable`. `message cancel`
+   has `not_found` only for an unknown per-item target; it has no forbidden
+   outcome because caller identity does not restrict cancellation.
 10. **exec waits on IDs fixed at send.** It reads `MessageAccepted.run_id` /
     `turn_id`; an unassigned send is exit 4 `held`. `thread_settled` without a
     cursor reports current settled states, so it would match an earlier Run of
@@ -206,8 +207,7 @@ message send [--thread THREAD] [--deliver now|complete] [--expect-reply]
 
 - Combines freely with every `--deliver` timing; admission timing and the
   reply state are independent.
-- Rejected (`invalid_argument`) when a model targets its own Thread: it would
-  wait on itself.
+- Self-targeting is allowed; `--expect-reply` never waits inside `message send`.
 - Rejected (`input_limit`) at the cap above.
 - The result adds `"expect_reply": true`; everything else is unchanged.
 - Without the flag, behaviour is exactly today's.
@@ -222,11 +222,7 @@ One transaction:
 
 1. Load the original receipt. Unknown ID → `target_unavailable` (as
    `message get`). No `expect_reply` → `invalid_argument`.
-2. Authority (see [Authority](#authority)); failure → `invalid_state` with
-   `details.reason = "not_recipient"`. No new error code is added: the
-   `ErrorCode` set has no `forbidden`/`not_found` (those exist only as
-   `message cancel` per-item outcomes).
-3. `receipt.state` must be `applied` (the recipient has received it), else
+2. `receipt.state` must be `applied` (the message has been admitted), else
    `invalid_state` with `details.delivery_status`.
 4. `reply.state` must be `pending`, else `invalid_state` with
    `details.reply_state` (covers double replies, cancelled, ignored and deleted).
@@ -289,9 +285,8 @@ Unchanged for ordinary messages. For a reply-expected message with
   `already_admitted`). History is untouched; `reply.state` becomes `cancelled`
   and the recipient gets a notice.
 
-Authority is the existing cancel rule: a model may cancel only messages sent by
-its own Thread; a human may cancel any. Cancellation still never wakes the
-recipient.
+Cancellation is available to any model or human caller in the target Thread;
+it still never wakes the recipient.
 
 ### `wait` condition `reply_received`
 
@@ -565,9 +560,9 @@ for callers that want it.
 
 | Action | Model caller | Human / external CLI (no Origin) |
 |---|---|---|
-| `--expect-reply` send | ordinary send authority; not to its own Thread | ordinary send authority |
-| `message reply` | only when its Thread is the original's target Thread (any Run of it). A parent cannot reply for its child; a fork cannot reply for its source | any message |
-| cancel the pending reply | only messages its own Thread sent (existing rule) | any message |
+| `--expect-reply` send | ordinary send rules; self-target allowed | ordinary send rules |
+| `message reply` | any applied pending message | any applied pending message |
+| cancel the pending reply | any message in the target Thread | any message |
 | `wait reply_received` | any message, cycle-checked | any message |
 
 ## Delegation mapping
@@ -626,8 +621,8 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G9 | Forks (`thread fork`) | Decided | receipts stay with the original target Thread; the fork shares the node but cannot reply and has no reminder (Q13) |
 | G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history get` still work; the model regains IDs from `awaiting_reply` and the reminder |
 | G11 | Attachments in replies | Decided | text only, like `message send`; a human can send attachments as an ordinary message (Q8) |
-| G12 | Who may reply | Decided | recipient model (D4) and humans; parent-for-child not allowed (Q5) |
-| G13 | Who may cancel | Decided | sender may cancel (decided); authority reuses the existing cancel rule |
+| G12 | Who may reply | Changed by #259 | any model or human may reply after application |
+| G13 | Who may cancel | Changed by #259 | any model or human caller may cancel queued input or its pending reply duty |
 | G14 | Human reply in TUI | Decided | CLI works at once; TUI reply mode in this issue, last step (Q7) |
 | G15 | Receipt GC and capacity pressure | Design | message receipts are not collected (fact 1); reply node rooted by receipt or Turn; operation-outcome expiry handled by G2; reply bodies count toward logical history like any message |
 | G16 | Recipient Thread deleted | Decided | `recipient_deleted` in the deletion transaction, waits released, model sender notified (D5) |
@@ -646,7 +641,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G29 | Messages sent without `--expect-reply` | Design | unchanged except `message get` drops `answer_node_id` |
 | G30 | Wait `interrupted` from an arriving receipt | Design | `satisfied` wins when the arriving receipt is the awaited reply |
 | G31 | Wait cycles | Design | Thread → live Run edge, as in `thread_settled` |
-| G32 | Model sending `--expect-reply` to its own Thread | Decided | rejected (Q16) |
+| G32 | Model sending `--expect-reply` to its own Thread | Changed by #259 | allowed; ordinary admission and cap rules apply |
 | G33 | `child_turn_completed` wake plus reply message | Design | both still arrive; they usually land in one parent Turn. Not changed here |
 | G34 | Thread title derived from first user body | Design | a reply node on a sender Thread is a user node like any message; no special case |
 | G35 | `thread request` debug command | Decided | unchanged; it shows the new notice nodes in rebuilt requests (Q1) |
@@ -716,7 +711,7 @@ message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
 `context_changed` notice, `thread get` `awaiting_reply`, the admission notices
-(`reply_expected`, `reply`), the 128 cap, and model-self-target rejection.
+(`reply_expected`, `reply`), the 128 cap; self-target messages are allowed by #259.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
 - Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
@@ -834,9 +829,9 @@ this request" becomes a saved fact instead of an inference from Turn text.
 ## Verification plan
 
 Integration tests on temporary stores with the local HTTP mock: send with each
-`--deliver` timing; reply by the recipient model through the shell CLI; reply by
-a human (no Origin); delivery to a model sender (new Run, existing Turn, held);
-rejection paths (double reply, not applied, foreign Thread, fork, self target,
+`--deliver` timing; reply by any model Thread through the shell CLI; reply by
+a human (no Origin); cross-Thread reply and self-target; delivery to a model sender (new Run, existing Turn, held);
+rejection paths (double reply, not applied,
 cap 128/129); Run-end reminder then `ignored` with sender notice and wait
 release; ordering with waiting `complete` messages; cancel before and after
 admission; recipient deletion; restart with a pending wait; multiple waiters;
@@ -859,7 +854,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q2 | Stopped or stuck recipient | User: messages stay awaiting reply when the recipient's work stops (Ctrl+C, `run stop`, app exit) or waits for recovery. The recipient may reply after resuming; the sender may cancel |
 | Q3 | Late reply after `ignored` / `cancelled` | Rejected with `details.reply_state`; the model can send an ordinary message instead |
 | Q4 | Sender's Thread deleted | Its pending messages become `cancelled` (`cancel_reason: sender_deleted`) and recipients that already received them are notified |
-| Q5 | Who may reply | Only the receiving Thread's model, or a human. A parent cannot reply for its child |
+| Q5 | Who may reply | Superseded by #259: any model or human may reply to an applied pending request |
 | Q6 | `ignored` when the asking model is idle | Notice only; it is seen at the asker's next Turn and starts no work |
 | Q7 | TUI reply mode | Included in this issue (`/replies`, composer reply mode). **Judgement:** the memo asked "now or later" without a recommendation; the mode is in scope but lands last (step 6), after the CLI path that humans can already use |
 | Q8 | Attachments | Replies are text only |
@@ -867,10 +862,10 @@ the memo gave no single recommendation, the choice made here is marked
 | Q10 | Names | Public names `end_message_node_id`, `last_end_message`. **Judgement:** the TUI assistant row label `回答` is unchanged (the memo gave no recommendation; UI wording is not changed without approval). The detail field label `回答node ID` follows its field to `終了メッセージnode ID` |
 | Q11 | Esc | User: after Esc ends a Turn, an unanswered message is still reminded once at Run end. The reminder is once per message, so a second Esc lets the Run end; the TUI shows that a reminder is running |
 | Q12 | Remove `history get --final-answer-only` | **Judgement:** not removed. The recommendation assumed exec would stop using it, but the user's Q14 answer (`--result turn-end\|run-end`) needs the end-message projection. It is renamed `--end-message-only` with the rest of the "answer" vocabulary |
-| Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
+| Q13 | Forks | A fork does not inherit the duty to reply; any model or human may reply to the original request |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
 | Q15 | Cap | 128 pending reply-expected messages per receiving Thread; the 129th send is refused with `input_limit` |
-| Q16 | Asking yourself | A model cannot send a reply-expected message to its own Thread |
+| Q16 | Asking yourself | Superseded by #259: a model may send a reply-expected message to its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
 | D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
 | D11 | Turn ended by Esc, no end message (user, correcting an earlier judgement) | Not the same as empty: no result, treated like a stopped Turn, exit 4 |
@@ -886,8 +881,7 @@ Other judgements made while finalizing (not covered by a user answer):
   the wait.
 - **Usage diagnostics per mode** (Turn usage, Run usage, observed Run usage).
 - **Error codes** follow the existing set: unknown targets are
-  `target_unavailable`, authority failures `invalid_state` with
-  `details.reason`; no `forbidden`/`not_found` error code is added.
+  `target_unavailable`, mutation-state failures remain `invalid_state`; caller identity does not restrict reply/cancel.
 
 ### Recovery queue units after integration with main (2026-11-03)
 

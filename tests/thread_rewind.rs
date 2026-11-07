@@ -223,19 +223,23 @@ async fn refused_while_the_thread_has_live_work_and_nothing_changes() {
     let error = f.rewind(Some("T"), "n2", None).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidState);
     assert!(error.message.contains("live Run"), "{}", error.message);
-    // A queued message is live work too.
+    // A definitely unadmitted message can be delivered after rewinding.
     f.query(|db| {
-        db.execute_batch("UPDATE run SET state='completed' WHERE id='live'; INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES('rc','op','{\"kind\":\"human\"}','T','n4','accepted','now');").unwrap();
+        db.execute_batch("UPDATE run SET state='completed' WHERE id='live'; INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,path_admission)VALUES('rc','op','{\"kind\":\"human\"}','T','n4','accepted','now','unadmitted');").unwrap();
     })
     .await;
-    let error = f.rewind(Some("T"), "n2", None).await.unwrap_err();
+    f.rewind(Some("T"), "n2", None).await.unwrap();
+    f.query(|db| {
+        assert_eq!(ids(db, "T"), ["n1", "n2"]);
+        assert_eq!(scalar(db, "SELECT count(*) FROM thread").unwrap(), 2);
+    })
+    .await;
+    let uncertain = Fixture::new([plain(4), n_path(4),
+        "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,path_admission)VALUES('unknown','unknown-op','{\"kind\":\"human\"}','T','n4','held','now','unknown');".into(),
+    ].concat()).await;
+    let error = uncertain.rewind(Some("T"), "n2", None).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidState);
-    assert!(error.message.contains("queued"), "{}", error.message);
-    f.query(|db| {
-        assert_eq!(ids(db, "T").len(), 4);
-        assert_eq!(scalar(db, "SELECT count(*) FROM thread").unwrap(), 1);
-    })
-    .await;
+    assert!(error.message.contains("unknown path admission"));
 }
 
 #[tokio::test]

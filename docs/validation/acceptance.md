@@ -10666,3 +10666,6 @@ correctly retain the removed connection; the test then waited for a nonexistent 
 live-connection regressions now subscribe before querying Run state and wait for Run completion notifications,
 without a fixed sleep. Recovery-path waits still use the original Turn helper. This preserves the Run-pinning
 contract and checks an actually new Run. The failed CI is retained; a new tip requires new CI evidence.
+## #259 small non-boundary restrictions (validation pending)
+
+Planned synthetic coverage: any model can cancel another sender's queued input; any model can reply to any applied pending request; self-target expected replies are accepted; a moved child accepts a new-parent send while its existing Run retains its original `owner_run_id`; rewind proceeds with known-unadmitted queued input but refuses when admission is unknown or the target has a live Run; unknown shell keys warn-and-ignore without a strict policy setting; exec shares the 8 MiB CLI stdin bound. No real API or user data. Commands/results and CI run IDs to be appended after validation.

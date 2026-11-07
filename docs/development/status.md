@@ -5245,3 +5245,7 @@ added. Focused local checks and exact-tip CI are pending. Earlier successful sta
 Run-pinned admission/body/summary/retry and TUI model/threshold regressions passed (6 lib + 8 integration), along
 with 21 proactive fault and 11 model-picker cases, check-tests, strict clippy and language audit. See acceptance for
 fixture corrections and shared-target evidence limits. Exact-tip normal and all-OS CI remain the handoff gate.
+
+## #259 remove small non-boundary restrictions (in progress, branch issue-259/remove-constraints)
+
+Removed caller/recipient-based guards in reply/cancel, the self-target `--expect-reply` gate, and the new-parent send refusal for a still-owned live child Run (ownership remains unchanged). Rewind now allows definitely unadmitted queued input but keeps the live-Run and unknown-admission safety guards. Removed configurable strict unknown-shell-key rejection; unknown keys are ignored with bounded warnings, while duplicate and malformed arguments remain rejected. `exec` input now shares the CLI 8 MiB stdin frame bound instead of 128 KiB. Focused checks pending.

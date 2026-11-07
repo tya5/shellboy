@@ -208,43 +208,78 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
 }
 
 #[tokio::test]
-async fn models_cannot_request_their_own_reply_or_reply_for_another_thread() {
+async fn models_can_request_and_reply_across_threads_including_their_own() {
     let (_root, store) = fixture().await;
     let origin = Origin {
         instance_id: "fixture".into(),
-        thread_id: "recipient".into(),
+        thread_id: "sender".into(),
         run_id: "run".into(),
         turn_id: "turn".into(),
         execution_id: "shell".into(),
         token: "synthetic".into(),
     };
-    let error = store
-        .execute(request(send(true)), Some(origin.clone()))
+    let mut self_send = match send(true) {
+        Command::MessageSend(args) => args,
+        _ => unreachable!(),
+    };
+    self_send.thread_id = Some("sender".into());
+    let accepted = store
+        .execute(
+            request(Command::MessageSend(self_send)),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(accepted["expect_reply"], true);
+    let message_id = accepted["message_id"].as_str().unwrap().to_owned();
+    let not_applied = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: message_id.clone(),
+                text: "self".into(),
+                sender_label: None,
+            })),
+            Some(origin.clone()),
+        )
         .await
         .unwrap_err();
-    assert_eq!(error.code, ErrorCode::InvalidArgument);
-    let accepted = store
+    assert_eq!(not_applied.code, ErrorCode::InvalidState);
+    store.database.call({ let id = message_id.clone(); move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&id])?; Ok(()) } }).await.unwrap();
+    let reply = store
+        .execute(
+            request(Command::MessageReply(MessageReplyArgs {
+                message_id: message_id.clone(),
+                text: "self reply".into(),
+                sender_label: None,
+            })),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.result["reply_to"], message_id);
+    let foreign = store
         .execute(request(send(true)), None)
         .await
         .unwrap()
         .result;
-    let id = accepted["message_id"].as_str().unwrap().to_owned();
-    let wrong = Origin {
-        thread_id: "sender".into(),
-        ..origin
-    };
-    let error = store
+    let foreign_id = foreign["message_id"].as_str().unwrap().to_owned();
+    store.database.call({ let id = foreign_id.clone(); move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [&id])?; Ok(()) } }).await.unwrap();
+    let cross_thread = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
-                message_id: id,
-                text: "unauthorized".into(),
+                message_id: foreign_id.clone(),
+                text: "cross-thread".into(),
                 sender_label: None,
             })),
-            Some(wrong),
+            Some(Origin {
+                thread_id: "sender".into(),
+                ..origin
+            }),
         )
         .await
-        .unwrap_err();
-    assert_eq!(error.details.as_ref().unwrap()["reason"], "not_recipient");
+        .unwrap();
+    assert_eq!(cross_thread.result["reply_to"], foreign_id);
     store.database.shutdown().await.unwrap();
 }
 

@@ -619,7 +619,6 @@ states!(MessageCancelOutcome {
     AlreadyCancelled,
     AlreadyAdmitted,
     NotFound,
-    Forbidden,
     Unavailable
 });
 args!(MessageCancelItem { message_id: String, outcome: MessageCancelOutcome,

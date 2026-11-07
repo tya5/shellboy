@@ -106,14 +106,14 @@ fn rewind_inner(
     }
     let queued: i64 = tx
         .query_row(
-            "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')",
+            "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held') AND path_admission='unknown'",
             [thread],
             |r| r.get(0),
         )
         .map_err(sql_error)?;
     if queued > 0 {
         return Err(invalid_state(
-            "Thread has queued messages not yet applied; wait for them or cancel them (message cancel) before rewinding",
+            "Thread has messages with unknown path admission; resolve them before rewinding",
         )
         .details(json!({"queued_messages": queued})));
     }

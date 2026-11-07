@@ -1839,12 +1839,6 @@ impl Store {
         }
         let id = target(args.thread_id.as_deref(), caller)?;
         if args.expect_reply {
-            if caller.is_some_and(|origin| origin.thread_id == id) {
-                return Err(error(
-                    ErrorCode::InvalidArgument,
-                    "a model cannot expect a reply from its own Thread",
-                ));
-            }
             let pending: i64 = tx.query_row("SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'", [&id], |row| row.get(0)).map_err(sql_error)?;
             if pending >= 128 {
                 return Err(error(ErrorCode::InputLimit, "too many pending replies"));
@@ -1938,7 +1932,14 @@ fn assign_message(
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| error(ErrorCode::ThreadNotFound, "target Thread not found"))?;
-    let run:Option<(String,String,Option<String>)>=tx.query_row("SELECT id,state,owner_run_id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",[id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(sql_error)?;
+    let run: Option<(String, String)> = tx
+        .query_row(
+            "SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sql_error)?;
     let mut assigned_run = None;
     let mut assigned_turn = None;
     let mut assignment = Assignment::Pending;
@@ -1946,16 +1947,7 @@ fn assign_message(
     let mut reason = None;
     let mut wake = false;
     let mut owner_changed = None;
-    if let Some((run_id, state, owner)) = run {
-        if let Some(caller) = caller
-            && parent.as_deref() == Some(&caller.thread_id)
-            && owner.as_deref().is_some_and(|owner| owner != caller.run_id)
-        {
-            return Err(error(
-                ErrorCode::InvalidState,
-                "child Run is owned by another live parent Run",
-            ));
-        }
+    if let Some((run_id, state)) = run {
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
             .query_row(
@@ -4500,7 +4492,7 @@ mod agents_reference_tests {
         );
         let mut foreign = origin.clone();
         foreign.thread_id = "different-thread".into();
-        let denied = store
+        let cancelled_by_other_thread = store
             .execute(
                 req(Command::MessageCancel(MessageCancelArgs {
                     message_ids: vec![model_id.clone()],
@@ -4510,7 +4502,10 @@ mod agents_reference_tests {
             .await
             .unwrap()
             .result;
-        assert_eq!(denied["items"][0]["outcome"], "forbidden");
+        assert_eq!(
+            cancelled_by_other_thread["items"][0]["outcome"],
+            "cancelled"
+        );
         // A model claiming 'human' still cannot resume a recovery-wait Turn.
         let target_id = target.clone();
         store

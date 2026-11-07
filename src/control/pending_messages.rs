@@ -32,38 +32,19 @@ pub(crate) fn cancel_tx(
     let mut items = Vec::with_capacity(args.message_ids.len());
     let mut changed = Vec::new();
     for message in &args.message_ids {
-        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.sender_json,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,bool>(8)?,r.get::<_,String>(9)?))).optional()?;
+        let row = tx.query_row("SELECT r.id,r.target_thread_id,r.state,r.path_admission,r.client_operation_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id),EXISTS(SELECT 1 FROM thread t WHERE t.id=r.target_thread_id AND t.deleted_at IS NULL),EXISTS(SELECT 1 FROM node n WHERE n.id=r.message_node_id AND n.payload_json IS NOT NULL AND n.deleted_reason IS NULL),r.created_at FROM receipt r WHERE r.message_node_id=?1",[message],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,bool>(5)?,r.get::<_,bool>(6)?,r.get::<_,bool>(7)?,r.get::<_,String>(8)?))).optional()?;
         let mut item = MessageCancelItem {
             message_id: message.clone(),
             outcome: NotFound,
             thread_id: None,
             archive_draft_id: None,
         };
-        let Some((
-            receipt,
-            thread,
-            sender,
-            state,
-            admission,
-            operation,
-            selected,
-            live,
-            body,
-            created,
-        )) = row
+        let Some((receipt, thread, state, admission, operation, selected, live, body, created)) =
+            row
         else {
             items.push(item);
             continue;
         };
-        let sender: Value = serde_json::from_str(&sender)
-            .map_err(|_| StorageError::Schema("Saved message sender is malformed".into()))?;
-        if caller.is_some_and(|origin| {
-            sender.get("thread_id").and_then(Value::as_str) != Some(origin.thread_id.as_str())
-        }) {
-            item.outcome = Forbidden;
-            items.push(item);
-            continue;
-        }
         item.thread_id = Some(thread.clone());
         let archive = archive_id(message);
         if state == "cancelled" {
@@ -104,7 +85,7 @@ pub(crate) fn cancel_tx(
             continue;
         }
         tx.execute("INSERT INTO draft(id,thread_id,revision,body_json,state,updated_at)VALUES(?1,?2,0,?3,'archived',?4)",params![archive,thread,archived,at])?;
-        tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_sender"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
+        tx.execute("UPDATE receipt SET state='cancelled',hold_reason=?2,updated_at=?3,result_json=json_set(COALESCE(result_json,'{}'),'$.cancellation',json(?4)) WHERE id=?1",params![receipt,if caller.is_none(){"cancelled_by_human"}else{"cancelled_by_model"},at,json!({"actor":actor,"at":at,"archive_draft_id":archive}).to_string()])?;
         super::reply::cancel_reply_tx(tx, &thread, message, at, &actor, false)?;
         super::submission_retention::collect_operation(tx, &operation)?;
         item.outcome = Cancelled;

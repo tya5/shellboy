@@ -423,7 +423,7 @@ fn inspect(
                     }
                     let reply = &saved["reply"];
                     let state = reply["state"].as_str().unwrap_or("pending");
-                    snapshots.push(json!({"type":"reply","message_id":message_id,"state":state,"reply_node_id":reply["node_id"],"at":reply["at"]}));
+                    snapshots.push(json!({"type":"reply","message_id":message_id,"state":state,"reply_node_id":reply["node_id"],"at":reply["at"],"by":reply["by"]}));
                     if state != "pending" {
                         observation.matched.push(condition.clone());
                     } else {
@@ -1772,13 +1772,17 @@ mod reply_received_tests {
         );
         for state in ["replied", "ignored", "cancelled", "recipient_deleted"] {
             db.execute(
-                "UPDATE receipt SET result_json=json_set(result_json,'$.reply.state',?1)",
+                "UPDATE receipt SET result_json=json_set(result_json,'$.reply.state',?1,'$.reply.by',json('{\"kind\":\"model\",\"thread_id\":\"responder\"}'))",
                 [state],
             )
             .unwrap();
             let terminal = inspect(&db, &args, None, true).unwrap();
             assert_eq!(terminal.matched, args.conditions);
             assert_eq!(terminal.snapshot["conditions"][0]["state"], state);
+            assert_eq!(
+                terminal.snapshot["conditions"][0]["by"]["thread_id"],
+                "responder"
+            );
             assert_eq!(
                 outcome(&args, &terminal, Some(WaitStatus::Interrupted))
                     .unwrap()

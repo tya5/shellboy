@@ -396,12 +396,16 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
         old_run["run_id"].as_str(),
         "ownership of a live Run is never transferred"
     );
-    // The new parent is refused until that Run ends; stopping stays open to any caller.
-    let refused = store
+    // The new parent may send while the old live Run keeps its stored owner.
+    let accepted = store
         .execute(request(send(&child, "from new")), Some(new_origin.clone()))
         .await
-        .unwrap_err();
-    assert_eq!(refused.code, ErrorCode::InvalidState);
+        .unwrap();
+    assert_eq!(accepted.result["assignment"], json!("existing_turn"));
+    assert_eq!(
+        owner(&store, child_run.clone()).await.as_deref(),
+        old_run["run_id"].as_str()
+    );
     // Stopping the old owner's Run cascades to the child Run it still owns, although the
     // child no longer has it as parent.
     let stopped = store
