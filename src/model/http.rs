@@ -315,7 +315,10 @@ impl HttpModelClient {
         let Some(path) = self.connection.credentials_file.as_deref() else {
             return Ok(None);
         };
-        if env_supplies || !self.connection.stored_key_allowed() {
+        if env_supplies
+            || !self.connection.stored_key_allowed()
+            || !self.connection.stored_keys.contains(&self.connection_name)
+        {
             return Ok(None);
         }
         crate::credential_store::read_key(path, &self.connection_name)

@@ -319,6 +319,9 @@ fn prepare_test(
             None => (false, None),
         };
         connection.credentials_file = credentials;
+        // A private registry: a clone of the loaded connection must not share the owner's.
+        connection.stored_keys = crate::config::StoredKeys::default();
+        connection.stored_keys.set(name, present);
         let source = source_name(connection.key_source(env_value, present));
         return Ok(Test::new(
             Some(name.clone()),

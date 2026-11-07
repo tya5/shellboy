@@ -309,8 +309,11 @@ those messages are dropped.
 
 **Lookup.** Per request, in `HttpModelClient::headers`: the variable named by `api_key_env` if it has a non-blank value,
 else the stored key of this connection name, else the old `MissingCredential` error (same text). The file is opened
-only when the environment supplies nothing, with `tokio::fs` and a 64 KiB bound, so a new or replaced key applies to
-the next request with no restart. The key goes in the same header as before (`api_key_header` or `Authorization:
+only when the environment supplies nothing **and** `Config::stored_keys` (shared with every `Connection`) lists the
+connection, with `tokio::fs` and a 64 KiB bound, so a new or replaced key applies to the next request with no restart,
+while a connection without a stored key adds no file read or scheduling point to its requests. (An extra hop per
+request reordered concurrent summary requests in `response_retries::overflow_trim_keeps_every_user_input_of_the_active_turn`
+on the macOS runner.) The key goes in the same header as before (`api_key_header` or `Authorization:
 Bearer`). A connection without `api_key_env` can use a stored key too, unless `headers` already defines
 `Authorization`: the explicit header wins and `credentials.set` refuses (`stored_key_allowed`). `api_key_header`
 no longer requires `api_key_env` (D-269): a header-only connection takes a stored key in that header, and a request
@@ -332,7 +335,7 @@ standard input and refuses a terminal; there is no argument that carries it.
 It states presence, never validity, value or length. `credentials_file` gives `path`, `present`, `valid` and an
 `error` that names no content. `config.get` reads the file each time; the in-memory `Config::stored_keys` (names only,
 shared by clones) feeds `config_setup::report` so the setup hints on the UI thread need no file I/O. It starts from the
-file at load and follows `credentials.set` / `credentials.clear`; a hand edit shows only after a restart.
+file at load and follows `credentials.set` / `credentials.clear`; a hand edit of `credentials.toml` is seen by `config.get` at once but used by requests and the hints only after a restart.
 
 **`connection.test`.** Read-only (no receipt), cancellable. It takes either a saved connection name or a candidate
 (`base_url`, `api`, `api_key` or `api_key_env`, `api_key_header`, `ssl_verify`). A saved name is resolved from the
