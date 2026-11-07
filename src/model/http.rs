@@ -100,10 +100,11 @@ pub struct HttpModelClient {
     diagnostics: Arc<std::sync::OnceLock<crate::diagnostics::Diagnostics>>,
 }
 impl HttpModelClient {
-    /// Count the actual dialect input, not discarded Responses-only replay items.
+    /// The manifest witness belongs to this client's immutable definition.
     pub(crate) fn extra_digest(&self) -> Option<String> {
         self.connection.extra_digest()
     }
+    /// Count the actual dialect input, not discarded Responses-only replay items.
     pub(crate) fn input_characters(&self, request: &Value) -> Result<u64, ModelError> {
         if self.connection.api == crate::config::Api::Responses {
             return Ok(request["input"].to_string().chars().count() as u64);

@@ -626,10 +626,12 @@ mod language_rendering_tests {
             },
         );
         config.default_connection = Some("new".into());
+        config.connections.get_mut("new").unwrap().default_effort = Some("high".into());
         clients.adopt(&config, None);
         ui.open_models("");
         assert_eq!(ui.models.as_ref().unwrap().connection, "new");
         assert_eq!(ui.view().connection.as_deref(), Some("new"));
+        assert_eq!(ui.view().effort.as_deref(), Some("high"));
         ui.models = None;
         ui.open_models("old");
         assert!(ui.models.is_none());
@@ -641,6 +643,12 @@ mod language_rendering_tests {
         clients.adopt(&config, None);
         ui.refresh_connection_defaults();
         assert_eq!(ui.view().model.as_deref(), Some("chosen"));
+        ui.view_mut().explicit_model = false;
+        ui.view_mut().explicit_effort = true;
+        ui.view_mut().effort = Some("low".into());
+        ui.refresh_connection_defaults();
+        assert_eq!(ui.view().model.as_deref(), Some("later-default"));
+        assert_eq!(ui.view().effort.as_deref(), Some("low"));
     }
 
     #[test]

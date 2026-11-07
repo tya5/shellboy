@@ -217,7 +217,7 @@ pub enum ConfigCliCommand {
         after_help = "Needs a running owner; --config does not select the file. Use the returned file.content_hash as --expected-hash for config set."
     )]
     Get,
-    /// Change named fields in the owner's configuration file; takes effect after an owner restart.
+    /// Change named configuration fields; connections/defaults apply live, except the embedding connection.
     #[command(
         after_help = "Needs a running owner; --config does not select the file.\n  shellboy config set --expected-hash HASH --set default_model=my-model --set ui.bell=false --unset compaction.segment_chars\n\nFIELD is a TOML dotted key, e.g. connections.proxy.base_url or connections.\"my.proxy\".base_url. VALUE is JSON when it parses as JSON and a plain string otherwise; write '\"123\"' for the string 123. Credentials stay in the environment: api_key_env takes a variable name."
     )]
