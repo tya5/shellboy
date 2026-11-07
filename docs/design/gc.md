@@ -20,6 +20,8 @@ SSDが満杯になるのは致命的なので、論理量とは別に、デー�
 
 空きは `Connection::path()` の親（DBファイルのあるdirectory）に対する `fs2::available_space` を呼び出しごとに読む。cacheを持たないので、古い値で満杯を許すことも、空きが戻った後に保留し続けることもない。symlinkのdata directoryはOSが解決した先のボリュームを見る。1回はstatvfs相当の1 syscallで、同じ関門が読む論理量counter（O(1)）と同程度の小さな費用である（実測は[検証状況](../validation/acceptance.md)）。新しいworker・queue・threadは追加しない。UIのmain OS threadは呼ばない。取得できないとき（in-memory接続・FS非対応）は保留せず、`storage status` の `disk_free_state` を `unknown` にして事実を示す。下限の2倍を切ると `warning`、下限を切ると `held`。TUIのstorage表示は物理sampleの `disk_guard` に同じ状態を載せ、新しい記号は足さない。
 
+索引workerは `disk_free_low` では停止（pause）を保存せず、queueも破棄しない。取得済みclaimを未送信のまま戻し（`defer_before_send`）、30秒ごと（またはwake時）に再確認して、空きが戻れば通常の流れで再開する。論理上限は従来どおりpauseを保存する。保留中の理由は `storage status` の `disk_free_state` で見え、`index status` には出ない（pauseが無いため）。
+
 モデルのshellが実行するコマンド自身の書込みは止められない。止めるのは新しい作業だけで、実行中のコマンドは止めない。空きが戻れば、保留されたTurnは既存の明示retryで再開する。
 
 logical bytesの採用定義は保存本文（nodeと監査outputの重複を含む）、snapshot/draft/attempt/event/receipt本文、pipe原文、managed raw_size、vec float32要素、`app_meta` の `index.*` 入力/preview/bootstrap/auto payloadの合計。SQLiteのB-tree/索引page overheadとは別の値とする。`reclaimable_bytes` はrawから確実に回収できる下限であり、会話GCやmanaged候補の未確定見積りを加算しない。詳細応答の `reclaimable_is_lower_bound` をtrueとし、quotaはこの見積りではなくlogical live合計で判定する。索引workerも同じ `require_capacity_tx` を利用する。
