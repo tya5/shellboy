@@ -747,3 +747,8 @@ The reviewed registry initially marks only migrations25-27 as `IndexOnly` and
 migration14 as `Tables([turn, draft])` (turn-column addition and draft indexes).
 Migration30 (#229) and migration31 (#231) are also `IndexOnly`: a nullable `ADD COLUMN` without a foreign key whose existing rows are all NULL changes no relation, so no scan is needed. Migration34 (#222 stage 3) creates the new, empty `thread_tag` table (primary key `(thread_id, tag)`, foreign key to `thread`, index `(tag, thread_id)`) and the partial `threads_cwd_updated` index; it is also `IndexOnly` because no existing row can violate a constraint of an empty table. Tags are metadata: `thread delete` removes a Thread's rows in its own transaction, and the table is not a GC root. Other historical entries remain unclassified/full. Ledger/version writes are
 inherent migration bookkeeping, not application-table changes requiring a scan.
+
+
+## Storage capacity thresholds in status (#265)
+
+`storage.status` reports the configured logical data warning threshold as `warning_bytes` and the admission limit as `limit_bytes`, alongside the existing observed live-byte total and `warning` / `limit_reached` booleans. These are the active owner's configured byte values, not measurements or estimates. The read adds two scalar fields and performs no extra database work; the UI can draw a meter only when both observed value and configured limit are reported. The separate filesystem free-space guard remains `disk_free_min_bytes` / `disk_free_state`.

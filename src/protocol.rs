@@ -1355,7 +1355,7 @@ args!(
     }
 );
 args!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
-args!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64> });
+args!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
 args!(Accepted { accepted: bool });
 
 #[cfg(test)]

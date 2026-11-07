@@ -10686,3 +10686,9 @@ send transaction.
 - Caller-less human `message reply` routed back to its model sender is marked `human: true` and resumes that sender's live recovery-wait Turn. An authenticated model-origin reply stays non-human and is held. Covered end to end in `tests/reply.rs`.
 - A caller-less explicit `message send --resume-recovery` records actor kind `external_cli`, not `human`; shell-origin resumes retain their authenticated shell actor. Covered by `tests/control_db.rs`.
 - Verified locally with `cargo test --locked --test integration reply::human_reply_resumes_recovery_but_model_reply_does_not` and `cargo test --locked --test integration control_db::external_cli_explicit_recovery_resume_is_not_recorded_as_human`; CI pending on branch tip. Studio and real-provider behavior not exercised.
+
+
+### #265 storage threshold read
+
+- Verified configured `limits.data_warning_bytes` and `limits.data_max_bytes` are serialized by `storage.status` as `warning_bytes` and `limit_bytes`; existing measured totals, booleans and disk-free fields remain distinct. `tests/gc.rs::logical_capacity_and_physical_database_space_are_reported_separately` asserts threshold values and serialized response.
+- Focused integration test `gc::logical_capacity_and_physical_database_space_are_reported_separately` passed on macOS. The read-only language inventory scanned 416 files; its fail-on-pending mode reports 16 pre-existing pending literals in unrelated files. Full test type-check and both CI variants are pending on the final branch tip. Studio UI meter rendering, external consumers and non-macOS platforms remain unverified.

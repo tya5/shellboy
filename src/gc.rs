@@ -331,6 +331,8 @@ impl GcService {
                 managed_bytes: physical.2,
                 log_bytes: physical.3,
                 filesystem_free_bytes: physical.4,
+                warning_bytes: self.config.limits.data_warning_bytes,
+                limit_bytes: self.config.limits.data_max_bytes,
             },
             database_reusable_bytes: logical.reusable,
             logical_history_bytes: logical.history,
