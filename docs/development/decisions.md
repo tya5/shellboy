@@ -4054,14 +4054,16 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   within the instance still matches. Recheck if receipts ever need to be compared across owner instances.
 - **`connection.test` is a read (no receipt, cancellable).** It sends one GET with a credential to a URL the caller
   chooses. A model shell could point a candidate at another host with `api_key_env`, but a model shell can already read
-  the environment and `credentials.toml` (same OS user, no authority check, #256), so no new exposure was added. It is
-  not hidden from models; the Agent Guide says to use it only when asked. Recheck when #256 introduces authority.
+  the environment and `credentials.toml` (same OS user, no authority check, #256), so no new exposure was added. Models may
+  run it on a saved connection to diagnose (it is a cost-free GET to the configured host); a candidate with
+  `api_key_env`, a replaced key or a clear only when asked, which is what the Agent Guide says. Recheck when #256
+  introduces authority.
 - **Failure classes are fixed words, never provider text.** Providers echo part of a refused key in 401 bodies; the
   reply carries `http_status` and the class only. 401/403 `auth`, 404 `url`, 429 `rate_limited`, 5xx `server`, other
   `http_status`; `timeout` and `unreachable` come from the transport error kind (TLS errors are `unreachable`: reqwest
   gives no stable TLS marker, and guessing from text was rejected). `ok` means a catalog answered.
-- **The reply caps `models` at 1000 ids and 256 KiB** (`model_count` is complete, `models_truncated` says so); both
-  numbers are chosen bounds, not measured limits. The catalog client already bounds the response at 2 MiB/10,000 ids.
+- **The reply returns the whole catalogue.** The client already bounds it (2 MiB, 10,000 ids); truncating a sorted list
+  would drop models from the picker (review of `issue-269/connection-setup-2`, which removed `models_truncated`).
 - **A saved name is tested from the file, not from the loaded config**, so a connection just added with `config.set`
   can be checked before the restart that stage C removes. If the file is invalid the call fails with `config_invalid`.
 - **`Config::stored_keys` (names only, shared by clones) feeds the setup hints.** `config_setup::report` runs on the UI
@@ -4089,3 +4091,13 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   `Arc` clone under a short read lock, no I/O) or gets an event. No schema, table, worker or queue is needed.
   Tests: swap during an in-flight request, removal during a Run, concurrent `config.set` and `credentials.set`,
   unchanged index identity.
+- **Review changes on `issue-269/connection-setup-3`.** (1) The temporary `credentials.toml` is `0600` from creation and
+  never takes the old file's mode (`FileState::inherit_mode`); a test reads the temporary file's mode before the replace.
+  (2) `connection.test` keeps the HTTP status when a 2xx body is not a catalog (`CatalogFailure`); `null` means no
+  response. (3) The key must be printable ASCII with no spaces, so an invisible character fails at save. (4) The inline
+  test key is a masked header of the candidate connection, which removed the client's `inline_key` and `with_inline_key`;
+  a candidate never reads `credentials.toml`. (5) `base_url` failures are typed (`Connection::endpoint`), not matched by
+  message text. (6) `sent` stays and is documented as "attempted"; renaming it was judged a larger wire change than the
+  confusion it removes. (7) The credential read runs inside `wait_headers`, so cancel and the header deadline apply to it.
+  (8) A header-only connection with no key is reported by the setup hints. (9) The `credentials.set` replay limit across an
+  owner restart is documented and the conflict hint explains it.

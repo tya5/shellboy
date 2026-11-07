@@ -66,12 +66,20 @@ pub fn report(
     let credential_env = connection.and_then(|connection| connection.api_key_env.clone());
     // A stored key (#269) satisfies the connection even when its variable is unset.
     let stored = connection_name.is_some_and(|name| config.stored_keys.contains(name));
-    let credential_set = credential_env.as_deref().map(|name| env(name) || stored);
+    let credential_set = credential_env
+        .as_deref()
+        .map(|name| env(name) || stored)
+        // A header-only connection (no variable) is complete only with a stored key.
+        .or_else(|| {
+            connection
+                .is_some_and(|c| c.api_key_header.is_some())
+                .then_some(stored)
+        });
     if credential_set == Some(false) {
-        missing.push(format!(
-            "API key environment variable {} (missing or empty)",
-            credential_env.as_deref().unwrap_or_default()
-        ));
+        missing.push(match credential_env.as_deref() {
+            Some(name) => format!("API key environment variable {name} (missing or empty)"),
+            None => "API key (api_key_header is set, but there is no api_key_env variable and no stored key)".into(),
+        });
     }
     SetupReport {
         config_path: config
@@ -120,7 +128,16 @@ impl SetupReport {
                 .to_owned(),
             );
         }
-        if self.credential_set == Some(false) {
+        if self.credential_set == Some(false) && self.credential_env.is_none() {
+            facts.push(
+                crate::ui::i18n::local!(
+                    language,
+                    "API key が未設定です（api_key_header は指定済みですが、環境変数も保存キーもありません）",
+                    "No API key: api_key_header is set, but there is no api_key_env variable and no stored key"
+                )
+                .to_owned(),
+            );
+        } else if self.credential_set == Some(false) {
             let name = self.credential_env.as_deref().unwrap_or_default();
             facts.push(match language {
                 UiLanguage::Ja => {

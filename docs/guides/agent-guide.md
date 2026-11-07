@@ -390,11 +390,11 @@ reads the key from standard input, so run it only when the user asked you to sto
 purpose (for example `printf %s "$KEY" | shellboy credentials set --connection NAME`, with the key taken from a
 file or variable the user named); never ask the user to paste one into the conversation. The file is plain text and
 no command returns the value. `shellboy config get` shows only where each key comes from
-(`loaded.credential_source`: `env`, `stored` or `none`). `shellboy connection test --connection NAME` sends one
+(`loaded.credential_source`: `env`, `stored` or `none`). `shellboy connection test --connection NAME` (fine for diagnosing a saved connection) sends one
 model-catalog GET and reports `http_status`, `failure` and `models`; treat `ok: true` as "the endpoint answered with a
 catalog", never as proof the key is valid, and `failure: "auth"` as "the endpoint refused the credential" without
 guessing why. A stored key applies to the next request; a new or changed connection still needs an owner restart.
-Do not run `credentials clear` or replace a key unless asked. Your identity is recorded with the change.
+Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`clear` only when asked. The credentials file is readable by any process of the user, including your shell, so never print or copy it. Your identity is recorded with the change.
 
 ## Operation tracking, saved context, and deletion preview
 

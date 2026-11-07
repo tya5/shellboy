@@ -128,12 +128,19 @@ async fn mock() -> Mock {
                     )
                 } else if path.ends_with("/missing/models") {
                     (404, json!({"error":"not found"}))
+                } else if path.ends_with("/html/models") {
+                    (200, Value::String("<html>wrong page</html>".into()))
+                } else if path.ends_with("/nodata/models") {
+                    (200, json!({"object":"list"}))
                 } else if method == "GET" && path.ends_with("/models") {
                     (200, json!({"data":[{"id":"model-b"},{"id":"model-a"}]}))
                 } else {
                     (200, answer("ok"))
                 };
-                let body = body.to_string();
+                let body = match body {
+                    Value::String(raw) => raw,
+                    other => other.to_string(),
+                };
                 let _ = stream
                     .write_all(
                         format!(
@@ -481,6 +488,18 @@ async fn the_stored_file_is_private_replaced_atomically_and_keeps_other_entries(
         assert!(text.contains(KEY) && text.contains(OTHER_KEY));
         assert!(text.starts_with("# Shellboy stored API keys. Plain text"));
 
+        // A loose existing file never makes the new key readable: the temporary file is
+        // 0600 when the replace starts, not only after it.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let seen = std::cell::Cell::new(0);
+        credential_store::set_with(&file, "second", KEY, |temporary| {
+            seen.set(mode(temporary));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(seen.get(), 0o600);
+        assert_eq!(mode(&file), 0o600);
+
         // Replacing leaves the other entry and a single file in the directory.
         let third = call(&control, set("proxy", OTHER_KEY)).await.unwrap();
         assert_eq!(third["replaced"], true);
@@ -526,6 +545,9 @@ async fn set_refuses_an_unknown_connection_a_bad_value_and_an_invalid_file_witho
             "line\nbreak",
             " leading",
             "trailing ",
+            "zero\u{200b}width",
+            "inner space",
+            "caf\u{e9}",
             &"k".repeat(5000),
         ] {
             let error = call(&control, set("proxy", bad)).await.unwrap_err();
@@ -785,7 +807,6 @@ async fn a_saved_connection_is_tested_with_one_catalog_request_and_facts_only() 
         assert_eq!(after["http_status"], 200);
         assert_eq!(after["models"], json!(["model-a", "model-b"]));
         assert_eq!(after["model_count"], 2);
-        assert_eq!(after["models_truncated"], false);
         assert_eq!(after["failure"], Value::Null);
         assert_eq!(after["credential"]["source"], "stored");
         assert_eq!(after["request"], "GET model catalog only");
@@ -1043,6 +1064,114 @@ async fn from_an_empty_configuration_to_a_first_send_using_only_owner_operations
             posts[0].authorization.as_deref(),
             Some(format!("Bearer {KEY}").as_str())
         );
+        control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_response_that_is_not_a_catalog_keeps_its_status() {
+    crate::test_watchdog::watchdog("not a catalog", async {
+        let root = tempfile::tempdir().unwrap();
+        let mock = mock().await;
+        write_config(root.path(), "");
+        let (_owner, control) = start(root.path()).await;
+        for page in ["html", "nodata"] {
+            let reply = call(
+                &control,
+                Command::ConnectionTest(candidate(&format!("{}/{page}", mock.url))),
+            )
+            .await
+            .unwrap();
+            assert_eq!(reply["ok"], false, "{page}");
+            assert_eq!(reply["failure"], "response", "{page}");
+            // A response arrived, so the status is known and null stays "no response".
+            assert_eq!(reply["http_status"], 200, "{page}");
+            assert_eq!(reply["sent"], true);
+        }
+        let down = call(
+            &control,
+            Command::ConnectionTest(candidate("http://127.0.0.1:1/v1")),
+        )
+        .await
+        .unwrap();
+        assert_eq!(down["http_status"], Value::Null);
+        control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_candidate_never_reads_the_credentials_file() {
+    crate::test_watchdog::watchdog("candidate ignores file", async {
+        let root = tempfile::tempdir().unwrap();
+        let mock = mock().await;
+        write_config(root.path(), "");
+        std::fs::write(root.path().join("credentials.toml"), "not toml [[[").unwrap();
+        let (_owner, control) = start(root.path()).await;
+        let reply = call(&control, Command::ConnectionTest(candidate(&mock.url)))
+            .await
+            .unwrap();
+        assert_eq!(reply["ok"], true);
+        assert_eq!(reply["credential"]["credentials_file_error"], Value::Null);
+        control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_header_only_connection_without_a_key_is_reported_missing() {
+    crate::test_watchdog::watchdog("header only setup", async {
+        let root = tempfile::tempdir().unwrap();
+        write_config(
+            root.path(),
+            &proxy_config("http://127.0.0.1:1/v1", "api_key_header=\"x-api-key\"\n"),
+        );
+        let (_owner, control) = start(root.path()).await;
+        let config = control.store.config.clone();
+        let report = |config: &shellboy::config::Config| {
+            shellboy::config_setup::report(config, Some("proxy"), Some("model-a"), |_| false)
+        };
+        let missing = report(&config).missing;
+        assert_eq!(missing.len(), 1, "{missing:?}");
+        assert!(missing[0].contains("api_key_header"));
+        assert!(
+            report(&config)
+                .render(shellboy::config::UiLanguage::En, false)
+                .contains("api_key_header")
+        );
+        call(&control, set("proxy", KEY)).await.unwrap();
+        assert!(report(&config).missing.is_empty());
+        control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_conflicting_stored_key_retry_explains_the_per_process_salt() {
+    crate::test_watchdog::watchdog("conflict hint", async {
+        let root = tempfile::tempdir().unwrap();
+        let mock = mock().await;
+        write_config(root.path(), &proxy_config(&mock.url, ""));
+        let (_owner, control) = start(root.path()).await;
+        let operation = format!("{}:retry-1", control.store.instance_id);
+        let first = control
+            .request(Request::new(operation.clone(), set("proxy", KEY)))
+            .await;
+        assert!(first.ok);
+        // The fingerprint is salted per owner process, so after a restart even the same key
+        // cannot match; a different key conflicts here for the same reason. Both say so.
+        let error = control
+            .request(Request::new(operation, set("proxy", OTHER_KEY)))
+            .await
+            .error
+            .unwrap();
+        assert_eq!(error.code, ErrorCode::OperationConflict);
+        assert!(error.hint.unwrap().contains("new operation ID"));
         control.shutdown().await.unwrap();
     })
     .await
