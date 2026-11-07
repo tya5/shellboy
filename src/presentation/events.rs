@@ -11,9 +11,8 @@ pub(super) fn event_title(kind: &str) -> &str {
         "app_shutdown" => "終了時の保存記録",
         "turn_started" => "応答処理を開始",
         "run_started" => "作業開始",
-        "thread_settings" | "connection_changed" | "model_changed" | "settings_changed" => {
-            "接続・設定変更"
-        }
+        "thread_settings" | "thread_parent" | "connection_changed" | "model_changed"
+        | "settings_changed" => "接続・設定変更",
         "instructions_observed" | "instruction_changed" | "agents_changed" | "agents_reference" => {
             "指示ファイル更新"
         }
@@ -331,7 +330,9 @@ pub(super) fn changes(value: &serde_json::Value) -> Vec<String> {
         _ => "詳細参照".into(),
     };
     let keys: &[(&str, &str)] = match kind {
-        "thread_settings" | "settings_changed" | "connection_changed" | "model_changed" => &[
+        "thread_settings" | "thread_parent" | "settings_changed" | "connection_changed"
+        | "model_changed" => &[
+            ("parent_id", "親会話"),
             ("connection", "接続"),
             ("model", "モデル"),
             ("cwd", "作業場所"),

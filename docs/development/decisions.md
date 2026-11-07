@@ -3795,3 +3795,25 @@ Prompt-cache note: on the #248 Thread the active stage was never reached, so its
 unknown; with the block, an active spill (reasoning-epoch bump) can still run at every
 boundary after the rejections. That cost is unmeasured. Recheck when: a real Turn shows
 more than one rejected attempt per stage, or finding 2a is fixed.
+
+## D-222-2: Re-parenting wire shape, bounds and conservative choices (2026-11-07)
+
+Decision: re-parenting is the optional `parent_id` field of `thread.set` (`""` detaches), not a
+new command; it combines with other `thread set` fields in one transaction. The ancestor walk is
+bounded at 1,024 steps (`input_limit` beyond, which also ends a stored cycle); it follows
+primary keys through deleted ancestors too. Moving a Thread never touches `run.owner_run_id`, so
+a live Run keeps its owner; the result reports the Thread's live Run and owner in
+`parent_change`. A no-op (same parent) changes and publishes nothing. `updated_at` is not
+changed by a move alone (a move plus another field follows that field's existing rule, so
+title/settings still bump it). The change is recorded as a `thread_parent` context entry shown with the
+settings glyph. Open product points resolved conservatively: (1) no new TUI key or drag, only
+the F8 settings field; (2) an archived Thread may be a parent (its children then show the
+existing "not in this list" marker); (3) no caller restriction, as the study found a model can
+already delete a stopped Thread; (4) no ownership transfer and no retry-authority change;
+(5) the Thread's own settings are not copied from the new parent; (6) one Thread per call.
+Reason: the study shows every reader recomputes from the current column; the smallest change is
+one validated UPDATE with a cycle check, and anything touching live ownership has no safe
+single-transaction story. Impact: `parent_change` is an optional additional field of
+`ThreadDetails`. Recheck when: users need to move many Threads at once (a bulk form), a TUI
+move key is asked for, models re-parent Threads they do not own in practice (a caller rule would
+then be reconsidered), or trees deeper than 1,024 appear.

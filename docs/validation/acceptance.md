@@ -10270,3 +10270,23 @@ recorded with the final SHA), a real terminal (no PTY capture of the archived li
 an archived Thread through the semantic index (no code path reads `archived_at` outside the list, summary
 and archive code), and archive of very large real databases.
 
+
+## Thread re-parenting (#222 stage 2)
+
+macOS ARM64 through `rust-slot`, disposable DBs, no provider. Store tests (`tests/thread_reparent.rs`, 7)
+cover attach, move and detach (only `parent_thread_id` and `revision` change, `updated_at` untouched,
+`changed_threads` = moved Thread, old parent, new parent in that order, `parent_change` in the result),
+the same-parent no-op (nothing published, no second `thread_parent` entry), replay of the same operation ID
+after another move (saved result returned, no second move), refusal of self, child, grandchild and unknown
+or deleted parents with nothing changed, a subtree moving as a unit, the 1,024-step ancestor bound (a
+1,000-deep chain is accepted, 1,100 is `input_limit`) and a stored cycle above the parent ending in
+`input_limit`, a live child Run keeping its owner after the move (the old owner's stop reaches it; the new
+parent's send is refused until the Run ends, then its send owns the next Run), a pending reply
+staying pending for its recorded sender after the recipient moved, and move + title in one call with a
+failing move rolling the title back. `tests/thread_browser.rs` checks that a patched row with a new
+`parent_id` re-projects the subtree in the list tree. Not verified: Windows/Linux local runs (CI is recorded
+with the final SHA), a real terminal (no PTY capture of the F8 form), the full F8 form flow end to end
+(only the form-to-command mapping is covered by existing form tests), `events.wait` clients receiving the three
+hints from a running owner (the change set is asserted on the store result), retry authority after a move
+(retry itself was not exercised; its rule is unchanged and reads `owner_run_id`), and moves in very large
+real databases.

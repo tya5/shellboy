@@ -981,6 +981,9 @@ fn english_field_label(label: &str) -> &str {
         "モデル（空=継承）" => "Model (empty = inherit)",
         "推論強度（none=解除）" => "Reasoning effort (none = clear)",
         "親会話（空=独立）" => "Parent thread (empty = independent)",
+        "親会話（空=変更なし/none=親なし）" => {
+            "Parent thread (empty = unchanged, none = no parent)"
+        }
         "作業場所（空=継承）" => "Working directory (empty = inherit)",
         "AGENTS参照（空=継承）" => "AGENTS references (empty = inherit)",
         "タイトル操作" => "Title action",
@@ -1385,6 +1388,12 @@ impl Form {
                         String::new(),
                         Text,
                     ),
+                    f(
+                        "parent",
+                        "親会話（空=変更なし/none=親なし）",
+                        String::new(),
+                        Text,
+                    ),
                 ],
                 |form, cwd| {
                     Ok(Command::ThreadSet(Box::new(ThreadSetArgs {
@@ -1410,6 +1419,7 @@ impl Form {
                         auto_compact_at: form.clearable("auto_compact_at")?,
                         segment_chars: form.clearable("segment_chars")?,
                         reduce_rounds: form.clearable("reduce_rounds")?,
+                        parent_id: form.clearable("parent")?,
                     })))
                 },
             ),

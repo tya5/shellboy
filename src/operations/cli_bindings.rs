@@ -197,6 +197,7 @@ const MEANINGS: &[Meaning] = &[
             ("auto_compact_at", FieldId::AutoCompactAt),
             ("segment_chars", FieldId::SegmentChars),
             ("reduce_rounds", FieldId::ReduceRounds),
+            ("parent_id", FieldId::Parent),
             ("agents", FieldId::Agents),
         ],
         None,

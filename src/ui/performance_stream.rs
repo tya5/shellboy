@@ -234,6 +234,7 @@ async fn stream_input_layout_and_db_fairness() {
                                 auto_compact_at: None,
                                 segment_chars: None,
                                 reduce_rounds: None,
+                                parent_id: None,
                             })),
                         ))
                         .await;

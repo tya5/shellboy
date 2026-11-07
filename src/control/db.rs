@@ -1,6 +1,7 @@
 //! Durable Control operations. Runtime effects are returned only after commit.
 mod archive;
 mod execute_kind;
+mod reparent;
 mod run_action;
 pub(crate) mod thread_summary;
 use crate::digest::sha256_hex as hash;
@@ -1022,7 +1023,7 @@ impl Store {
                 if path.pop().as_deref()!=Some(&node){return Err(error(ErrorCode::InvalidState,"Edit fork boundary changed"));}
                 tx.execute("DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT id FROM attachment_ref WHERE source_node_id=?2)",params![fork,node]).map_err(sql_error)?;
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
-                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,segment_chars:None,reduce_rounds:None},None,&now)?;}
+                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,segment_chars:None,reduce_rounds:None, parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs { human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
@@ -1342,8 +1343,8 @@ impl Store {
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadSet(args) => {
                 let mut result = self.set_thread(tx, args, caller, now)?;
-                if let Some(thread) = result.changed_threads.first() {
-                    let details = thread_details(tx, thread)?;
+                if let Some(thread) = result.result["thread_id"].as_str().map(str::to_owned) {
+                    let details = thread_details(tx, &thread)?;
                     let mut details = details;
                     self.fill_effective(&mut details);
                     result.result["effective_auto_compact_at"] =
@@ -1718,6 +1719,11 @@ impl Store {
         let id = target(args.thread_id.as_deref(), caller)?;
         let current = thread_details(tx, &id)?;
         let title = args.title.as_deref().map(str::trim);
+        // Parent first, in the same transaction: a later failure rolls the move back.
+        let moved = match args.parent_id.as_deref() {
+            Some(requested) => reparent::apply(tx, &id, requested, caller, now)?,
+            None => None,
+        };
         if let Some(value) = &args.auto_compact_at {
             let value = crate::protocol::validation::parse_auto_compact_at(value)?;
             tx.execute(
@@ -1742,6 +1748,25 @@ impl Store {
             )
             .map_err(sql_error)?;
         }
+        // A move alone is organization: no updated_at change, so the list does not jump.
+        let moved_only = args.parent_id.is_some()
+            && title.is_none()
+            && args.connection.is_none()
+            && args.model.is_none()
+            && args.cwd.is_none()
+            && args.effort.is_none()
+            && args.agents.is_none()
+            && args.auto_compact_at.is_none()
+            && args.segment_chars.is_none()
+            && args.reduce_rounds.is_none();
+        if moved_only {
+            let mut result = MutationResult::value(thread_details(tx, &id)?)?;
+            if let Some(moved) = &moved {
+                reparent::add_changed(&mut result, &id, moved);
+                reparent::annotate(tx, &mut result, &id, moved)?;
+            }
+            return Ok(result);
+        }
         if args.connection.is_none()
             && args.model.is_none()
             && args.cwd.is_none()
@@ -1750,7 +1775,11 @@ impl Store {
         {
             tx.execute("UPDATE thread SET title=COALESCE(?2,title),revision=revision+1,updated_at=?3 WHERE id=?1",params![id,title,now]).map_err(sql_error)?;
             let mut result = MutationResult::value(thread_details(tx, &id)?)?;
-            result.changed_threads.push(id);
+            result.changed_threads.push(id.clone());
+            if let Some(moved) = &moved {
+                reparent::add_changed(&mut result, &id, moved);
+                reparent::annotate(tx, &mut result, &id, moved)?;
+            }
             return Ok(result);
         }
         let profile = args.connection.as_deref().unwrap_or(&current.connection);
@@ -1787,7 +1816,11 @@ impl Store {
             super::context::record(tx,&id,"thread_settings",actor(caller),json!({"before":{"cwd":current.cwd,"connection":current.connection,"model":current.model,"effort":current.effort},"after":{"cwd":after.cwd,"connection":after.connection,"model":after.model,"effort":after.effort}}),now).map_err(sql_error)?;
         }
         let mut result = MutationResult::value(after)?;
-        result.changed_threads.push(id);
+        result.changed_threads.push(id.clone());
+        if let Some(moved) = &moved {
+            reparent::add_changed(&mut result, &id, moved);
+            reparent::annotate(tx, &mut result, &id, moved)?;
+        }
         Ok(result)
     }
 
@@ -2137,7 +2170,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;

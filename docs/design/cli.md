@@ -18,7 +18,7 @@ shellboy thread rewind [--thread ID] --node NODE
 shellboy thread branches [--thread ID] [--limit 50] [--cursor TOKEN]
 shellboy thread archive [--thread ID]... [--descendants]
 shellboy thread unarchive [--thread ID]... [--descendants]
-shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--segment-chars N|''] [--reduce-rounds N|'']
+shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--segment-chars N|''] [--reduce-rounds N|''] [--parent ID|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
 shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)
 shellboy message get --message ID

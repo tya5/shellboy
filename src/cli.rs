@@ -570,6 +570,9 @@ pub struct ThreadSetOptions {
     /// Maximum summary reduce rounds for this Thread (1..=16); an empty string restores the connection value.
     #[arg(long, allow_hyphen_values = true)]
     pub reduce_rounds: Option<String>,
+    /// Move this Thread under another live Thread; an empty string detaches it (no parent). Live Runs keep their owner.
+    #[arg(long = "parent")]
+    pub parent_id: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 #[group(required = true, multiple = false)]
@@ -1014,6 +1017,7 @@ impl Cli {
                     auto_compact_at: a.auto_compact_at,
                     segment_chars: a.segment_chars,
                     reduce_rounds: a.reduce_rounds,
+                    parent_id: a.parent_id,
                 })),
             },
             CliCommand::Message { command } => match command {

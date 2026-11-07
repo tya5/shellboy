@@ -482,6 +482,7 @@ fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> 
         model: model.map(Into::into),
         effort: None,
         title: title.map(Into::into),
+        parent_id: None,
     }))
 }
 

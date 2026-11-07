@@ -212,6 +212,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
                 cwd: Some("nested/..".into()),
                 model: Some(model.into()),
                 effort: None,
+                parent_id: None,
             })),
         )
         .await;
@@ -868,6 +869,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: None,
             effort: Some("high".into()),
             cwd: None,
+            parent_id: None,
         })),
     )
     .await;
@@ -885,6 +887,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: Some("next-model".into()),
             effort: None,
             cwd: None,
+            parent_id: None,
         })),
     )
     .await;
@@ -902,6 +905,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             model: None,
             effort: Some(String::new()),
             cwd: None,
+            parent_id: None,
         })),
     )
     .await;

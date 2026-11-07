@@ -2130,6 +2130,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
             connection: None,
             model: None,
             effort: Some("low".into()),
+            parent_id: None,
         })),
     )
     .await;
