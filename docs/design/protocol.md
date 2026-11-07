@@ -343,6 +343,7 @@ keep the top-level `thread_id` used by queued-message cancellation unchanged.
 No schema/table/migration is added. Input cannot select a sender kind or IDs;
 Control derives them from the authenticated Origin or the trusted internal send
 entry point. Cross-data-dir CLI still strips Origin, retaining only the label.
+When a non-empty label is saved for a non-human sender, admission appends one `sender_label` context notice (message id, label, "self-asserted, not verified") after the message node, through the same append-only admission-notice path as `reply_expected`; message text is not changed and earlier nodes are not rewritten.
 
 TUI sender display is confined to F6 message details (including the original
 page), fetched on demand through existing bounded original reads. It labels a
