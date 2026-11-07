@@ -856,7 +856,7 @@ pub(super) async fn maybe_compact(
     };
     let pending_target = if adopted {
         target_plan.map(|plan| {
-            let scope = if observation["summary"]["summary_node_id"].is_string() { summary_scope } else { "spill" };
+            let scope = if observation["cancelled"] == true || observation["summary"]["summary_node_id"].is_string() { summary_scope } else { "spill" };
             let mut value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":scope,"turn":snapshot.turn,"marks":baseline});
             if value.to_string().len() > 1_048_576 {
                 value["marks"] = Value::Null;
