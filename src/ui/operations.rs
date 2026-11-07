@@ -2822,7 +2822,7 @@ mod tests {
                 if field.value.is_empty() {
                     field.value = match field.name {
                         "text" | "query" => "synthetic text".into(),
-                        "resume_recovery" => "true".into(),
+                        "resume_recovery" => "false".into(),
                         "space" => "space-id".into(),
                         "path" => "synthetic.txt".into(),
                         "attachment" => id(9),
@@ -3384,6 +3384,11 @@ mod tests {
             .find(|field| field.name == "text")
             .unwrap()
             .value = "one\n日本語 second\nlast".into();
+        form.fields
+            .iter_mut()
+            .find(|field| field.name == "resume_recovery")
+            .unwrap()
+            .value = "false".into();
         let before = form
             .fields
             .iter()

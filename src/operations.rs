@@ -773,7 +773,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::ResumeRecovery,
         default_origin: DefaultOrigin::None,
         label: "復旧待ちを再開",
-        help: "外部送信者がrecovery_waitを明示的に解除します。通常の人間入力は常に再開します。",
+        help: "通常の会話入力は復旧待ちを再開します。この操作は外部送信者の復旧再開を明示して許可します。",
         kind: FieldType::Boolean,
         discovery: Discovery::None,
     },
