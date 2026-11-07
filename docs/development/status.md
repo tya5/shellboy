@@ -1,16 +1,5 @@
-## Storage status capacity thresholds (#265; branch issue-265/storage-threshold-read)
-
-`storage.status` now reports configured logical capacity `warning_bytes` and
-`limit_bytes` alongside the existing measured bytes and threshold booleans. These
-two scalar values let external clients display the capacity meter without a DB
-scan. Focused integration regression passed. The read-only language inventory
-scanned 416 files; it reports 16 pre-existing pending literals in unrelated
-files (the fail-on-pending gate remains red). Full test type-check and default/all-OS
-CI are pending. Per-Thread storage and usage-by-model remain outside this bounded
-change. Studio's pinned v0.10.0 copy still labels config reads unsupported;
-current Shellboy main has `config.get`.
-
 # Development status
+
 
 ## Recovery-wait external CLI messages (#263; branch issue-263/review-fixes-1)
 
@@ -5271,3 +5260,14 @@ fixture corrections and shared-target evidence limits. Exact-tip normal and all-
 ## #259 remove small non-boundary restrictions (in progress, branch issue-259/remove-constraints)
 
 Removed caller/recipient-based guards in reply/cancel, the self-target `--expect-reply` gate, and the new-parent send refusal for a still-owned live child Run (ownership remains unchanged). Rewind now allows definitely unadmitted queued input but keeps the live-Run and unknown-admission safety guards. Removed configurable strict unknown-shell-key rejection; unknown keys are ignored with bounded warnings, while duplicate and malformed arguments remain rejected. `exec` input now shares the CLI 8 MiB stdin frame bound instead of 128 KiB. Focused checks pending.
+## Storage status capacity thresholds (#265; branch issue-265/storage-threshold-read)
+
+`storage.status` now reports configured logical capacity `warning_bytes` and
+`limit_bytes` alongside the existing measured bytes and threshold booleans. These
+two scalar values let external clients display the capacity meter without a DB
+scan. Focused integration regression passed. The read-only language inventory
+scanned 416 files; it reports 16 pre-existing pending literals in unrelated
+files (the fail-on-pending gate remains red). Full test type-check and default/all-OS
+CI are pending. Per-Thread storage and usage-by-model remain outside this bounded
+change. Studio's pinned v0.10.0 copy still labels config reads unsupported;
+current Shellboy main has `config.get`.
