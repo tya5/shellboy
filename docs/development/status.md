@@ -5186,4 +5186,4 @@ Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).
 `src/config_edit.rs`, `src/control/config_ops.rs`, new dependency `toml_edit` (D-266). No field is hot-applied;
 every changed field reports that it needs a restart. There is no
 standalone edit path and no TUI form. Independent review fixes are on `issue-266/config-rw-2`. Resume point: exact-tip default and all-OS CI, then integration. The #265
-`config.get` item is covered by this. shellboy-web has not been changed to use it.
+`config.get` item is covered by this. shellboy-studio has not been changed to use it.

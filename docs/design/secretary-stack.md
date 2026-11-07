@@ -35,7 +35,7 @@ lower stack; section 6 is the outline for the on-site part.
 | Tags, re-parent | Core + CLI | #222 stages 2-3 | Not started |
 | Knowledge | CLI + files | `rag`, `history search`, plain files | Exists |
 | Cheaper index | Core | #253, #254 | Not on main |
-| Web UI | Bridge (separate repo `shellboy-web`) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Not usable yet per its README |
+| Web UI | Bridge (separate repo `shellboy-studio`) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Not usable yet per its README |
 | TUI on a running owner | Core | #247 | Study only; not a prerequisite |
 | Spend limit | External | Provider or LiteLLM budget | No spend limit in Shellboy |
 | Liveness, failure alerts | External | Scheduler history, on-site monitor | Not Shellboy's |
@@ -67,7 +67,7 @@ Run; retry by generation CAS; one reply per message; reply only after applicatio
 |---|---|---|
 | #222 | Stage 1: `thread archive`, `thread unarchive`, `thread list --archived`, TUI keys | Re-parent, tags, cwd grouping. Pin dropped |
 | #243 | Stages B, C: `events wait`, chat on hints | Live text deltas (E3) |
-| #244 | A1: typed `invalid_argument` for unknown commands and fields | A2 (protocol 3, capabilities), D (`protocol schema`). [Its design](events-and-external-protocol.md) requires both before `shellboy-web` depends on the RPC |
+| #244 | A1: typed `invalid_argument` for unknown commands and fields | A2 (protocol 3, capabilities), D (`protocol schema`). [Its design](events-and-external-protocol.md) requires both before `shellboy-studio` depends on the RPC |
 | #247 | Nothing. `serve` guide: "A TUI cannot be attached later" | All |
 | #253 | Nothing; no int8 code | All |
 | #254 | Only the on/off switch `indexing.auto_history` | Target selection and its default |

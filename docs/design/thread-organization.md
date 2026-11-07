@@ -9,7 +9,7 @@ Scope: #222 (relax child-Thread restrictions, change a Thread's parent freely)
 extended by the user on 2026-11-06 with grouping: folders/groups, pin, and
 **archive** (hide from the list without deleting). The user rated archive as
 high priority: at work Threads are mass-produced and finished ones must leave
-the list without being deleted. The future Web UI (`shellboy-web`, separate
+the list without being deleted. The future Web UI (`shellboy-studio`, separate
 project, see [events and external protocol](events-and-external-protocol.md))
 wants drag-and-drop organization through data-layer operations, and the model
 must be able to do the same through the `shellboy` CLI.
@@ -302,7 +302,7 @@ updated. No new table, worker, queue or event kind; changes publish the existing
 
 ## 5. CLI, data layer and TUI
 
-Data layer (shared by CLI, TUI and `shellboy-web` through the existing local IPC):
+Data layer (shared by CLI, TUI and `shellboy-studio` through the existing local IPC):
 
 | Web UI gesture | Operation |
 |---|---|
