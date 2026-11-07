@@ -1180,9 +1180,12 @@ fn held_input_rows_have_independent_strict_bounds() {
 }
 
 #[test]
-fn indexing_auto_kinds_default_to_user_and_summary_and_reject_unknown_kinds() {
+fn indexing_auto_kinds_default_to_user_summary_and_assistant_response_and_reject_unknown_kinds() {
     let config = Config::parse("").unwrap();
-    assert_eq!(config.indexing.auto_kinds, ["user", "summary"]);
+    assert_eq!(
+        config.indexing.auto_kinds,
+        ["user", "summary", "assistant_response"]
+    );
     let config =
         Config::parse("[indexing]\nauto_kinds=[\"user\",\"summary\",\"tool_result\"]\n").unwrap();
     assert!(

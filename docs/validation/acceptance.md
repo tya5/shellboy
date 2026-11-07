@@ -50,58 +50,71 @@ terminal, a real provider, an owner restart with the shell live, Watch painted f
 wall-clock bound is asserted; the wait timeout is only an input.
 ## Automatic indexing kinds (#254)
 
-Not yet run on CI at the time of writing; see the final report for the tip SHA and run IDs.
+CI results are the Actions runs on the branch tip (listed in the hand-off report, not in this file).
 Tests (temporary DBs, local mock embedding server, no paid API): `tests/index.rs`
-`automatic_indexing_takes_only_user_messages_and_summaries_by_default`,
+`automatic_indexing_takes_user_summary_and_assistant_response_by_default`,
 `configured_auto_kinds_choose_what_is_registered`,
 `explicit_kinds_add_to_preview_and_backfill_exactly`,
 `explicit_source_ids_are_never_filtered_by_kind`,
-`invalid_kind_is_rejected_and_retry_takes_no_kind`,
+`invalid_kind_is_rejected_and_retry_takes_no_kind`, `kinds_need_a_thread_or_all_selection`,
+`full_rebuild_that_would_drop_indexed_kinds_is_refused_and_previewed`,
 `queued_authorization_of_a_now_excluded_kind_is_consumed_without_blocking_activation`,
 `scope_status_names_kinds_that_are_not_indexed_automatically`,
 `index_status_reports_auto_kinds`; `tests/config.rs`
-`indexing_auto_kinds_default_to_user_and_summary_and_reject_unknown_kinds`;
-`src/compaction.rs` `summaries_join_automatic_indexing_and_spills_only_when_configured`.
+`indexing_auto_kinds_default_to_user_summary_and_assistant_response_and_reject_unknown_kinds`;
+`src/compaction.rs` `summaries_join_automatic_indexing_and_spills_only_when_configured`;
+`src/frontend/management.rs` `preview_text_names_sources_of_other_kinds_only_when_present`.
 
 Measurements, 2026-11-07, macOS Darwin 25.3 arm64, debug test build, the owner's
 database at schema 31 while the owner was running, other builds running on the machine.
-No owner was started on it and nothing was written to it or to its embedding data.
+No owner was started on it and nothing was written to it or to its embedding data. Read with `mode=ro`.
 
-Characters that would be embedded (canonical bodies from `search_bodies`, split at
-2,000 characters; retained raw tool output (`tool_raw`) is not included and was not
-measured), nodes from 2026-11-01 on that have no done embedding job, read with
-`mode=ro`:
+Characters that would be embedded (canonical bodies from `search_bodies`, split at 2,000
+characters; retained raw tool output (`tool_raw`) is not included and was not measured), nodes
+from 2026-11-01 on that have no done embedding job:
 
-| kind | nodes | characters | segments |
+| kind | bodies | characters | segments |
 | --- | --- | --- | --- |
 | user | 4,014 | 2,038,940 | 4,071 |
 | summary | 800 | 3,077,094 | 2,170 |
-| event | 11,786 | 4,308,608 | 11,889 |
-| assistant_response | 61,618 | 1,029,056 | 5,105 |
+| assistant_response: answer text (`answer:N`) | 5,099 | 1,029,056 | 5,105 |
+| assistant_response: displayable reasoning (`reasoning:N`) | 0 | 0 | 0 |
 | tool_result | 60,030 | 236,827,812 | 147,522 |
+| event (all are Shellboy bookkeeping notices) | 11,786 | 4,308,608 | 11,889 |
 | spill | 36,367 | 39,236,611 | 41,963 |
 
-Default (user + summary): 5,116,034 characters, 6,241 segments. Before this change the
-automatic set (user, event, tool_result, assistant_response; summaries and spills were
-never automatic): 244,204,416 characters, 168,587 segments. That is about 1/48 of the
-characters and 1/27 of the segments (user alone against the old set is about 1/120
-of the characters); the issue's estimate was about 1/70. Whole database, all kinds,
-whether indexed or not: tool_result 66,026 nodes and 266,372,732 characters, spill
-36,706 nodes and 39,886,948, summary 843 and 3,863,867.
+`assistant_response` yields an `answer:N` body per message item and a `reasoning:N` body per
+reasoning item that has visible text or summary; encrypted and opaque reasoning is never embedded.
+Both would be embedded, but this database holds no displayable reasoning text, so the 1,029,056
+characters are all answer text. Whole-database `assistant_response` is 1,341,569 characters in
+5,959 segments (answer text).
+
+Default (user + summary + assistant_response): 6,145,090 characters, 11,346 segments. The automatic
+set before this change (user, attachment-addition events, tool_result, assistant_response;
+summaries and spills were never automatic) over the same nodes: 239,895,808 characters, 156,698
+segments (`attachment_delivery` has 4 rows and none yielded an embeddable body in this measurement;
+the 11,786 event nodes above are not automatic). That is about 1/39 of the characters and 1/14 of the
+segments (the issue's estimate for user + summary alone was about 1/70; user + summary alone is
+5,116,034 characters, 1/47). Whole database, all kinds, indexed or not: tool_result 66,026 nodes and
+266,372,732 characters, spill 36,706 and 39,886,948, summary 843 and 3,863,867.
 
 Keyword search speed (`rag::history::keyword`, the code behind `rag search --mode keyword`),
 on a `.backup` copy of the same database (read through `mode=ro`; migration 0032 applied to the
 copy only because the original is at schema 31 and the reader requires 32; the copy was
-deleted afterwards): a term that is absent from the whole history visited all 199,354
+deleted afterwards): a term absent from the whole history visited all 199,354
 nodes in 179.8 s (about 0.9 ms per node, about 100 calls of the 2,000-node limit,
 roughly 0.9 to 1.3 s each in the first run). A frequent term returned 20 hits within 36
 visited nodes in 142 ms (first, cold page), then 28 ms and 32 ms. One run each, copy
 without concurrent writes, warm page cache; not repeated, so treat the figures as
-indicative. Keyword search is independent of `auto_kinds`.
+indicative. Keyword search is independent of `auto_kinds`. (Measured before the default
+gained assistant_response; the scan does not depend on it.)
 
-Not verified: behavior of the real owner with the new default (not restarted), the TUI
-index panel line for excluded sources beyond its unit test, Windows/Linux (CI), any
-real embedding endpoint.
+The pagination loop in the Agent Guide was run against a mock `shellboy` that prints compact and
+pretty-printed JSON pages (cursor passed, followed, stopped at `null`); it was not run against a
+real owner.
+
+Not verified: behavior of a real owner with the new default (not restarted), Windows/Linux outside CI,
+any real embedding endpoint, the loop against real `rag search` output.
 
 ## Chat on events.wait (#243 stage C)
 

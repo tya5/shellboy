@@ -156,7 +156,7 @@ History-scoped semantic/hybrid queries still search retained vectors, but report
 `degraded=true` and `scope_status.reason=auto_history_disabled` because newer
 conversation nodes may be absent. Keyword history retrieval remains available, subject to the limit below.
 
-Semantic history coverage also depends on `indexing.auto_kinds` (default: user messages and summaries). History-scoped semantic/hybrid results then carry a `history_kinds_not_indexed` warning and `scope_status.kinds_not_auto_indexed`; `--mode keyword` searches the originals of every kind. See [History and search](history-and-search.md#choosing-which-kinds-are-indexed).
+Semantic history coverage also depends on `indexing.auto_kinds` (default: user messages, summaries and model replies). History-scoped semantic/hybrid results then carry a `history_kinds_not_indexed` warning and `scope_status.kinds_not_auto_indexed`; `--mode keyword` searches the originals of every kind. See [History and search](history-and-search.md#choosing-which-kinds-are-indexed).
 
 History keyword search processes at most 2,000 nodes per call across all history
 scopes. Unvisited scopes get a start cursor. If a scope is

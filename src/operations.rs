@@ -1593,7 +1593,6 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Space,
             FieldId::Threads,
             FieldId::Sources,
-            FieldId::IndexKinds,
         ],
     },
     OperationSpec {

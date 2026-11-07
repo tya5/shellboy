@@ -310,13 +310,14 @@ pub enum AttachmentCommand {
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum IndexCommand {
-    Status(IndexOptions),
+    /// Job counts, spaces and pause state; takes no --kind.
+    Status(IndexTargetOptions),
     /// Inspect candidate counts without embedding requests or starting jobs.
     Preview(IndexOptions),
     /// Start paid indexing of explicitly selected history. Check preview first.
     Backfill(IndexOptions),
     /// Resume failed work that was already authorized; takes no --kind.
-    Retry(IndexRetryOptions),
+    Retry(IndexTargetOptions),
     /// Build a candidate index; embedding API costs may apply. Check preview first.
     Rebuild(IndexRebuildOptions),
     /// Send one fixed embedding input (may incur charges) and retain its result.
@@ -829,7 +830,7 @@ pub struct IndexOptions {
     pub kinds: Vec<String>,
 }
 #[derive(Debug, Clone, Args)]
-pub struct IndexRetryOptions {
+pub struct IndexTargetOptions {
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
     #[arg(long = "space")]
@@ -839,8 +840,8 @@ pub struct IndexRetryOptions {
     #[arg(long = "source")]
     pub source_ids: Vec<String>,
 }
-impl From<IndexRetryOptions> for wire::IndexArgs {
-    fn from(value: IndexRetryOptions) -> Self {
+impl From<IndexTargetOptions> for wire::IndexArgs {
+    fn from(value: IndexTargetOptions) -> Self {
         Self {
             dimensions: None,
             scope: value.scope,

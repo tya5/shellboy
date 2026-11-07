@@ -423,7 +423,6 @@ const MEANINGS: &[Meaning] = &[
             ("space_id", FieldId::Space),
             ("thread_ids", FieldId::Threads),
             ("source_ids", FieldId::Sources),
-            ("kinds", FieldId::IndexKinds),
         ],
         None,
     ),

@@ -371,7 +371,7 @@ validation rather than parsing reasoning as an answer.
 
 #254: `IndexArgs.kinds` (optional repeatable words: the six node kinds or `all`) adds
 kinds to `indexing.auto_kinds` for that command's Thread/all selection;
-`FeePreview` gains `excluded_sources` and `kinds`; `IndexStatus` gains
+`FeePreview` gains `excluded_sources` (approximate: sources of other kinds in the selection, deduplicated across selected Threads), `kinds` and `indexed_outside_selection` (kind -> sources the active space holds that a `--scope all` rebuild would drop; that rebuild is refused without `--kind`); `IndexStatus` gains
 `auto_kinds`; history `scope_status` gains `auto_kinds` and
 `kinds_not_auto_indexed`. These are additive fields without serde defaults on
 responses (owner and client are the same build). `index retry` rejects `kinds`.

@@ -153,7 +153,7 @@ impl Fixture {
         config.indexing.auto_kinds = shellboy::config::INDEXABLE_KINDS.map(String::from).to_vec();
         Self::with_request_timeout(config, 60_000).await
     }
-    /// The configuration exactly as given (the real default is user + summary).
+    /// The configuration exactly as given (the real default is user + summary + assistant_response).
     async fn new_exact(config: Config) -> Self {
         Self::with_request_timeout(config, 60_000).await
     }
@@ -3640,16 +3640,20 @@ fn requested_inputs(f: &Fixture) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn automatic_indexing_takes_only_user_messages_and_summaries_by_default() {
+async fn automatic_indexing_takes_user_summary_and_assistant_response_by_default() {
     let f = Fixture::new_exact(Config::default()).await;
     seed_kinds(&f).await;
     let mut registered = authorize(&f, &["u", "s", "t", "a", "p"]).await;
     registered.sort();
-    assert_eq!(registered, ["s", "u"]);
+    assert_eq!(registered, ["a", "s", "u"]);
     f.drain().await;
     let inputs = requested_inputs(&f).join("\n");
-    assert!(inputs.contains("user cat message") && inputs.contains("summary dog text"));
-    for omitted in ["zebra", "yak", "gnu"] {
+    assert!(
+        inputs.contains("user cat message")
+            && inputs.contains("summary dog text")
+            && inputs.contains("assistant answer yak")
+    );
+    for omitted in ["zebra", "gnu"] {
         assert!(
             !inputs.contains(omitted),
             "{omitted} must not be embedded automatically"
@@ -3678,13 +3682,15 @@ async fn explicit_kinds_add_to_preview_and_backfill_exactly() {
         scope: Some(IndexScope::All),
         ..args()
     };
-    // Default selection: user + summary only; the other three kinds are reported, not counted.
+    // Default selection: user, summary, assistant_response; the other two kinds are reported, not counted.
     let preview = f.service.preview(all.clone()).await.unwrap();
-    assert_eq!((preview.sources, preview.excluded_sources), (2, 3));
-    assert_eq!(preview.kinds, ["user", "summary"]);
+    assert_eq!((preview.sources, preview.excluded_sources), (3, 2));
+    assert_eq!(preview.kinds, ["user", "summary", "assistant_response"]);
     assert_eq!(
         preview.characters,
-        "user cat message".len() as u64 + "summary dog text".len() as u64
+        "user cat message".len() as u64
+            + "summary dog text".len() as u64
+            + "assistant answer yak".len() as u64
     );
     assert_eq!(
         f.proxy.count(),
@@ -3697,8 +3703,8 @@ async fn explicit_kinds_add_to_preview_and_backfill_exactly() {
         ..all.clone()
     };
     let preview = f.service.preview(with_tool.clone()).await.unwrap();
-    assert_eq!((preview.sources, preview.excluded_sources), (3, 2));
-    assert_eq!(preview.segments, 3);
+    assert_eq!((preview.sources, preview.excluded_sources), (4, 1));
+    assert_eq!(preview.segments, 4);
     assert_eq!(f.proxy.count(), 0);
     let admitted = f.service.backfill(with_tool).await.unwrap();
     assert_eq!(
@@ -3707,12 +3713,12 @@ async fn explicit_kinds_add_to_preview_and_backfill_exactly() {
             admitted.segments,
             admitted.excluded_sources
         ),
-        (3, 3, 2)
+        (4, 4, 1)
     );
     f.drain().await;
     let inputs = requested_inputs(&f).join("\n");
     assert!(inputs.contains("tool output zebra"));
-    assert!(!inputs.contains("yak") && !inputs.contains("gnu"));
+    assert!(!inputs.contains("gnu"));
     // Everything that was embedded is now counted as already indexed; nothing is embedded twice.
     let again = f
         .service
@@ -3852,10 +3858,13 @@ async fn scope_status_names_kinds_that_are_not_indexed_automatically() {
         .await
         .unwrap();
     let status = &report["scope_status"][0];
-    assert_eq!(status["auto_kinds"], json!(["user", "summary"]));
+    assert_eq!(
+        status["auto_kinds"],
+        json!(["user", "summary", "assistant_response"])
+    );
     assert_eq!(
         status["kinds_not_auto_indexed"],
-        json!(["assistant_response", "tool_result", "spill", "event"])
+        json!(["tool_result", "spill", "event"])
     );
     assert!(
         status["message"]
@@ -3871,7 +3880,66 @@ async fn index_status_reports_auto_kinds() {
     let f = Fixture::new_exact(Config::default()).await;
     assert_eq!(
         f.service.status(args()).await.unwrap().auto_kinds,
-        ["user", "summary"]
+        ["user", "summary", "assistant_response"]
     );
     f.close().await;
+}
+
+#[tokio::test]
+async fn full_rebuild_that_would_drop_indexed_kinds_is_refused_and_previewed() {
+    let f = Fixture::new_exact(Config::default()).await;
+    seed_kinds(&f).await;
+    f.service
+        .backfill(IndexArgs {
+            source_ids: vec!["t".into(), "u".into()],
+            ..args()
+        })
+        .await
+        .unwrap();
+    f.drain().await;
+    let all = IndexArgs {
+        scope: Some(IndexScope::All),
+        ..args()
+    };
+    // The same count is visible before anything is charged.
+    let preview = f.service.preview(all.clone()).await.unwrap();
+    assert_eq!(
+        preview.indexed_outside_selection,
+        std::collections::BTreeMap::from([("tool_result".to_string(), 1)])
+    );
+    let requests = f.proxy.count();
+    let refused = f.service.rebuild(all.clone()).await.unwrap_err();
+    assert_eq!(refused.code, shellboy::protocol::ErrorCode::InvalidArgument);
+    assert!(refused.message.contains("tool_result: 1") && refused.message.contains("--kind all"));
+    assert_eq!(f.proxy.count(), requests, "refusal must not embed anything");
+    // Keeping every kind is accepted, and so is naming the kinds to keep explicitly.
+    let kept = f
+        .service
+        .rebuild(IndexArgs {
+            kinds: vec!["all".into()],
+            ..all
+        })
+        .await
+        .unwrap();
+    assert_eq!(kept.sources, 5);
+    f.close().await;
+}
+
+#[test]
+fn kinds_need_a_thread_or_all_selection() {
+    use shellboy::protocol::Command;
+    let with = |scope, threads: Vec<String>, sources: Vec<String>| {
+        Command::IndexPreview(IndexArgs {
+            kinds: vec!["tool_result".into()],
+            scope,
+            thread_ids: threads,
+            source_ids: sources,
+            ..args()
+        })
+        .validate()
+    };
+    assert!(with(None, vec![], vec![]).is_err());
+    assert!(with(None, vec![], vec!["n".into()]).is_err());
+    assert!(with(Some(IndexScope::All), vec![], vec![]).is_ok());
+    assert!(with(None, vec!["t".into()], vec![]).is_ok());
 }

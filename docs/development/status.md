@@ -34,21 +34,26 @@ omitted when empty) from saved state. No new mechanism, glyph or automatic stop.
 panel already showed the row, state and elapsed time; a paint test now pins that. Agent Guide, shell,
 CLI reference and delegation guides updated. Details and the by-surface table: acceptance.md. Resume:
 CI on the exact tip, all OSes.
-## Automatic indexing kinds (#254; on branch issue-254/index-targets, CI pending)
+## Automatic indexing kinds (#254; branch issue-254/index-targets-2)
 
-New `[indexing] auto_kinds` (default `["user","summary"]`; words `user`, `summary`,
+New `[indexing] auto_kinds` (default `["user","summary","assistant_response"]`; words `user`, `summary`,
 `assistant_response`, `tool_result`, `spill`, `event`; restart to change; reported by
 `index status` and `config check`). Only listed kinds are registered when finalized;
-summaries are now registered automatically (they never were before), tool results,
-replies and attachment notices no longer are by default. `index preview|backfill|rebuild|status`
-take repeatable `--kind` (or `all`) to add kinds for Thread/`--scope all` selections;
-`--source` is never filtered, `retry` rejects `--kind`. Results carry `kinds` and
-`excluded_sources`. Search `scope_status` lists `auto_kinds` / `kinds_not_auto_indexed`
-and says keyword search covers every kind; Agent Guide says when to use keyword search
-and to ask before paid backfill. No schema, table, queue or worker change. Existing
-vectors and already-queued jobs are untouched. Measurements are in
-docs/validation/acceptance.md. Resume: CI on the final SHA, then owner review; the
-owner decides when to restart with the new default and whether to backfill anything.
+summaries are now registered automatically (they never were before); tool results and
+event notices no longer are by default. `index preview|backfill|rebuild` take repeatable
+`--kind` (or `all`) to add kinds for `--thread` / `--scope all` selections (rejected with only
+`--source` or no selection; `--source` is never filtered; `status` and `retry` take no
+`--kind`). The TUI has the same: `/index all kinds all`, `/index thread kinds tool_result`, and a
+"kinds" form field. Results carry `kinds`, `excluded_sources` and, for `--scope all`,
+`indexed_outside_selection`: a full `rebuild --scope all` without `--kind` is refused when the
+active space holds other kinds (they would be dropped on activation). The TUI coverage view
+follows the same kind selection. Search `scope_status` lists `auto_kinds` /
+`kinds_not_auto_indexed` and says keyword search covers every kind; the Agent Guide covers
+`shell list --command-contains`, `next_cursor` meaning and a pagination loop. No schema, table,
+queue or worker change; existing vectors and already-queued jobs are untouched. Measurements:
+docs/validation/acceptance.md. CI results are the Actions runs on the branch tip. Resume:
+owner review; the owner decides when to restart with the new default and whether to backfill
+anything. After #253 lands, regenerate `scripts/dev/language-classifications.json` on rebase.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 

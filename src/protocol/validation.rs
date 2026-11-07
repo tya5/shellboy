@@ -510,6 +510,14 @@ impl IndexArgs {
         for id in self.thread_ids.iter().chain(self.source_ids.iter()) {
             nonempty(id, "index target")?;
         }
+        if !self.kinds.is_empty()
+            && self.scope != Some(IndexScope::All)
+            && self.thread_ids.is_empty()
+        {
+            return Err(invalid(
+                "--kind applies to --thread or --scope all selections; --source IDs are never filtered by kind",
+            ));
+        }
         if self
             .kinds
             .iter()

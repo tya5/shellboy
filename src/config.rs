@@ -511,7 +511,7 @@ pub const INDEXABLE_KINDS: [&str; 6] = [
 ];
 /// Kinds that automatic indexing takes in unless `indexing.auto_kinds` says otherwise.
 pub fn default_auto_kinds() -> Vec<String> {
-    vec!["user".into(), "summary".into()]
+    vec!["user".into(), "summary".into(), "assistant_response".into()]
 }
 section!(Indexing { auto_history: bool = true, auto_kinds: Vec<String> = default_auto_kinds(), concurrency: usize = 1, split_chars: usize = 2_000, retries: usize = 2, common_failure_pause_count: usize = 3, retry_delays_ms: Vec<u64> = vec![1_000, 4_000] });
 impl Indexing {

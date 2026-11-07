@@ -607,12 +607,15 @@ support failures are owner/capability errors6, not input2. This is detection onl
 not an old-Core format shim or automatic legacy-protocol downgrade.
 
 
-`index status` and `config check` include `auto_kinds` (default `["user","summary"]`),
-the kinds automatic indexing takes in. `index preview`, `backfill`, `rebuild` and
-`status` accept repeatable `--kind user|summary|assistant_response|tool_result|spill|event|all`
+`index status` and `config check` include `auto_kinds` (default `["user","summary","assistant_response"]`),
+the kinds automatic indexing takes in. `index preview`, `backfill` and `rebuild` accept repeatable `--kind user|summary|assistant_response|tool_result|spill|event|all`
 which adds kinds to `auto_kinds` for that command's `--thread` / `--scope all`
-selection; `--source` is never filtered and `retry` rejects `--kind`. Preview and
-backfill results include `kinds` and `excluded_sources`. See
+selection. `--kind` needs `--thread` or `--scope all` (it is rejected with only `--source`
+or no selection); `--source` is never filtered, and `status` and `retry` take no `--kind`.
+Preview and backfill results include `kinds` and `excluded_sources` (an approximate
+count: sources of other kinds in the selection). A `--scope all` preview also reports
+`indexed_outside_selection`, the active space's indexed sources per kind that a rebuild
+with the same arguments would drop; such a rebuild is refused unless `--kind` is given. See
 [History and search](history-and-search.md#choosing-which-kinds-are-indexed).
 
 `index status` and `config check` include `auto_history` (default true). Setting

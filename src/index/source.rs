@@ -67,6 +67,7 @@ impl IndexService {
             .call(move |db| {
                 // Source IDs are an explicit choice and are never filtered by kind.
                 let mut ids = args.source_ids;
+                let mut excluded_ids = HashSet::new();
                 let mut excluded = 0u64;
                 for thread in args.thread_ids {
                     let mut statement = db.prepare("SELECT p.node_id FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND t.deleted_at IS NULL AND n.kind IN (SELECT value FROM json_each(?2)) ORDER BY p.ordinal")?;
@@ -75,7 +76,12 @@ impl IndexService {
                             .query_map(params![thread, kinds], |r| r.get::<_, String>(0))?
                             .collect::<Result<Vec<_>, _>>()?,
                     );
-                    excluded += db.query_row("SELECT count(*) FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND t.deleted_at IS NULL AND n.kind IN (SELECT value FROM json_each(?3)) AND n.kind NOT IN (SELECT value FROM json_each(?2))", params![thread, kinds, all], |r| r.get::<_, i64>(0))? as u64;
+                    let mut statement = db.prepare("SELECT p.node_id FROM thread_path p JOIN thread t ON t.id=p.thread_id JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND t.deleted_at IS NULL AND n.kind IN (SELECT value FROM json_each(?3)) AND n.kind NOT IN (SELECT value FROM json_each(?2))")?;
+                    excluded_ids.extend(
+                        statement
+                            .query_map(params![thread, kinds, all], |r| r.get::<_, String>(0))?
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
                 }
                 if args.scope == Some(IndexScope::All) {
                     let mut statement = db.prepare(
@@ -86,10 +92,13 @@ impl IndexService {
                             .query_map([&kinds], |r| r.get::<_, String>(0))?
                             .collect::<Result<Vec<_>, _>>()?,
                     );
-                    excluded += db.query_row("SELECT count(*) FROM node WHERE kind IN (SELECT value FROM json_each(?2)) AND kind NOT IN (SELECT value FROM json_each(?1))", params![kinds, all], |r| r.get::<_, i64>(0))? as u64;
+                    // Every excluded node of a selected Thread is also in the full history.
+                    excluded_ids.clear();
+                    excluded = db.query_row("SELECT count(*) FROM node WHERE kind IN (SELECT value FROM json_each(?2)) AND kind NOT IN (SELECT value FROM json_each(?1))", params![kinds, all], |r| r.get::<_, i64>(0))? as u64;
                 }
                 let mut seen = HashSet::new();
                 ids.retain(|id| seen.insert(id.clone()));
+                let excluded = excluded + excluded_ids.len() as u64;
                 Ok(Selection { ids, excluded })
             })
             .await

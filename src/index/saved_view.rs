@@ -930,6 +930,21 @@ impl IndexService {
         let inspected = members.len();
         let mut seen = HashSet::new();
         members.retain(|id| seen.insert(id.clone()));
+        // Thread and full-history members follow the same kind selection as
+        // preview/backfill, so kinds that are not indexed on purpose do not make
+        // the space look incomplete. Explicit source IDs are never filtered.
+        if !direct_phase {
+            let kinds = self.selected_kinds(args);
+            let mut statement = db.prepare("SELECT kind FROM node WHERE id=?1")?;
+            let mut kept = Vec::with_capacity(members.len());
+            for id in members {
+                let kind: Option<String> = statement.query_row([&id], |r| r.get(0)).optional()?;
+                if kind.is_none_or(|kind| kinds.contains(&kind)) {
+                    kept.push(id);
+                }
+            }
+            members = kept;
+        }
         // Explicit-source lane JSON is prepared off-worker. Dynamic membership
         // IDs come from this transaction and are bounded to32 saved identities.
         let dynamic_ids;

@@ -148,7 +148,7 @@ Changing connection or model advances the outgoing reasoning epoch and excludes 
 
 ## Search requires a separate index
 
-After configuring an embedding connection/model, newly finalized conversation content of the kinds listed in `indexing.auto_kinds` (default: your messages and summaries) is registered for automatic indexing when `indexing.auto_history=true` (default). Tool output, model replies and other kinds are not indexed automatically; see [Choosing which kinds are indexed](#choosing-which-kinds-are-indexed). Startup or configuration changes alone do not automatically backfill all history. Search results are not automatically injected into every model input either.
+After configuring an embedding connection/model, newly finalized conversation content of the kinds listed in `indexing.auto_kinds` (default: user messages, summaries and the model's replies) is registered for automatic indexing when `indexing.auto_history=true` (default). Tool output, model replies and other kinds are not indexed automatically; see [Choosing which kinds are indexed](#choosing-which-kinds-are-indexed). Startup or configuration changes alone do not automatically backfill all history. Search results are not automatically injected into every model input either.
 
 ```text
 /search error handling for the current task
@@ -172,7 +172,7 @@ shellboy history search --query 'error handling for the current task' --thread T
 
 Result provenance identifies origin and current original-content revision. Span start/end values are Unicode scalar positions `[start,end)` in the body extracted for each body_kind. They identify semantically selected chunk ranges, not search-term match positions. Use source_revision/content_hash too to identify the original. Distance is L2; no distance threshold option exists. Chunks are grouped by node, but distinct nodes with identical content are not merged. Only Thread-scoped searches return thread_scope: on_current_path=true means the current adopted path; false means a completed replacement source included in the scope. Global search omits thread_scope and does not infer membership. See [CLI reference](cli-reference.md) for fields and limits.
 
-Conversation bodies, displayable reasoning, and tool results are indexed as distinct kinds; retained intermediate shell raw output can also be searched. Attachment binaries and encrypted opaque data are not sent to embedding. Reclaiming raw output also invalidates its derived vectors; late results cannot revive reclaimed content.
+Which of these are indexed automatically depends on `indexing.auto_kinds` (below). Model replies are indexed as separate answer and displayable-reasoning bodies, and tool results (with retained shell raw output) as their own kind; each can be searched once its kind is indexed, and all of them by keyword search. Attachment binaries and encrypted opaque data are not sent to embedding. Reclaiming raw output also invalidates its derived vectors; late results cannot revive reclaimed content.
 
 ## Index management and cost previews
 
@@ -205,7 +205,7 @@ shellboy index status
 shellboy index preview --scope threads --thread THREAD_ID
 shellboy index backfill --scope threads --thread THREAD_ID
 shellboy index retry --scope threads --thread THREAD_ID
-shellboy index rebuild --scope all
+shellboy index rebuild --scope all --kind all
 ```
 
 Select targets with `--scope all`, `--scope threads --thread ID`, `--source NODE_ID`, and `--space SPACE_ID`. A space alone does not substitute for historical scope selection in backfill/rebuild. CLI `index retry` also accepts omitted targets, resuming failed jobs and similar work in that connection's active/candidate spaces. To limit targets, explicitly provide Thread/source as above. Omitting the scope on CLI `index preview` previews that retry-eligible work without sending an API request. The TUI performs this read before its retry confirmation. See [CLI reference](cli-reference.md) for detailed conditions.
@@ -216,7 +216,7 @@ A pause notice in conversation history is a saved **stop record**, not a current
 
 ### Inspecting and explicitly changing embedding dimensions
 
-Read `shellboy index status` first. Each retained space reports its connection/model, measured `dimension`, optional `requested_dimensions`, resident segment count and `vector_payload_bytes`. The latter is only `segments × dimension × 4` bytes of float32 vector payload. It is not the SQLite file, WAL, allocation, reclaimable capacity, or an exact disk-space saving. Candidate rebuilds temporarily coexist with the active space. Old vectors remain until explicit GC is permitted; a smaller dimension may reduce search quality.
+Read `shellboy index status` first. Each retained space reports its connection/model, measured `dimension`, optional `requested_dimensions`, resident segment count and `vector_payload_bytes`. The latter is only `segments × dimension × 4` bytes of float32 vector payload. It is not the SQLite file, WAL, allocation, reclaimable capacity, or an exact disk-space saving. Candidate rebuilds temporarily coexist with the active space. Old vectors are kept until you ask for them to be removed (paid indexes are never collected automatically); a smaller dimension may reduce search quality.
 
 If the user authorizes a support test, run one explicit probe:
 
@@ -246,7 +246,7 @@ Relations cursors exclude relationships added after the first page but do not re
 
 ## Choosing which kinds are indexed
 
-Tool output is about 96% of an index built from everything, so automatic indexing takes in only the kinds named by `indexing.auto_kinds`: by default `user` and `summary`. The words are the node kinds that `history search --kind` already uses: `user`, `summary`, `assistant_response`, `tool_result` (shell results, including retained full output), `spill` and `event`. Other node kinds carry no searchable text. The setting is read at owner start (restart to change it) and appears as `auto_kinds` in `index status` and `config check`.
+Tool output is about 96% of an index built from everything, so automatic indexing takes in only the kinds named by `indexing.auto_kinds`: by default `user`, `summary` and `assistant_response`. The words are the node kinds that `history search --kind` already uses: `user`, `summary`, `assistant_response`, `tool_result` (shell results, including retained full output), `spill` and `event`. Other node kinds carry no searchable text. The setting is read at owner start (restart to change it) and appears as `auto_kinds` in `index status` and `config check`.
 
 Summaries are registered when they are created, like your messages. Verified against the code for #254: before this change summaries and spills were never registered automatically, and tool results, model replies and attachment notices always were.
 
@@ -254,14 +254,14 @@ What the setting does and does not do:
 
 - It changes only what is registered from now on. Vectors that exist are never removed, and jobs already queued keep running; a registration written before a restart that no longer matches the list is dropped without embedding when its turn comes, and does not keep a rebuild candidate from becoming active.
 - Search still finds the other kinds, without embeddings: `shellboy rag search --scope history --mode keyword --query TEXT` reads the retained originals of every kind. Semantic and hybrid results from `history search` / `rag search` say in `scope_status` (`auto_kinds`, `kinds_not_auto_indexed`) that those kinds can be missing; they never claim complete coverage.
-- Explicit commands add kinds for the Threads you choose. `index preview`, `backfill`, `rebuild` and `index status` accept `--kind WORD` (repeatable; `all` means every searchable kind) in addition to `--scope`/`--thread`/`--source`. A Thread or `--scope all` selection takes in `auto_kinds` plus the `--kind` words and nothing else; the preview counts exactly that selection and reports `kinds` and `excluded_sources` (sources of other kinds that were left out). `--source NODE_ID` names a node explicitly and is never filtered. `retry` resumes work that was already authorized and does not take `--kind`.
+- Explicit commands add kinds for the Threads you choose. `index preview`, `backfill` and `rebuild` accept `--kind WORD` (repeatable; `all` means every searchable kind) in addition to `--scope`/`--thread`/`--source`. `--kind` needs `--thread` or `--scope all` (with only `--source`, or no selection, it is rejected). A Thread or `--scope all` selection takes in `auto_kinds` plus the `--kind` words and nothing else; the preview counts exactly that selection and reports `kinds` and `excluded_sources` (approximate: sources of other kinds that were left out). `--source NODE_ID` names a node explicitly and is never filtered. `index status` and `retry` take no `--kind` (`retry` resumes work that was already authorized).
 
 ```sh
 shellboy index preview --scope threads --thread THREAD_ID --kind tool_result
 shellboy index backfill --scope threads --thread THREAD_ID --kind tool_result
 ```
 
-Backfill into the active space only adds missing parts; segments already indexed show as `already_indexed`. `rebuild` builds a new space from the selected sources only, so `rebuild --scope all` with the default kinds does not carry over tool-output vectors that the old space holds: add `--kind all` (or the kinds you want to keep) before rebuilding. The old space keeps its vectors until storage cleanup removes it. The TUI index panel uses the configured kinds and shows a line for sources of other kinds that were not included; choosing extra kinds is a CLI option.
+Backfill into the active space only adds missing parts; segments already indexed show as `already_indexed`. `rebuild` builds a new space from the selected sources only, and activating it retires the old space, so a full rebuild must not silently lose vectors of kinds it does not take in. `index rebuild --scope all` without `--kind` is therefore refused (`invalid_argument`) when the active space holds vectors for sources of other kinds; the message gives the count per kind. Choose: `--kind all` keeps everything, or name the kinds you want with `--kind` to accept dropping the rest. `index preview` with the same arguments shows the same counts as `indexed_outside_selection` before anything is charged. The retired space itself is kept until you ask for it to be removed (paid indexes are not collected automatically). To change the stored precision without re-embedding anything, `index shrink` converts in place and keeps every kind; it is the safe route when you only want a smaller index (see [Index management](#index-management-and-cost-previews)). In the TUI, `/index all kinds all` then `r` rebuilds with every kind, `/index thread kinds tool_result` adds a kind for one conversation, and the index form has a "kinds" field; a refused rebuild is explained in the panel.
 
 ## Concurrent searches and reader recovery
 

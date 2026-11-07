@@ -81,10 +81,10 @@ clean_redraw = false
 auto_history = true
 # Which kinds of conversation content automatic indexing takes in (restart to change):
 #   user, summary, assistant_response, tool_result, spill, event
-# The default keeps the index small: your messages and summaries. Tool output is
-# most of the volume; add "tool_result" or "assistant_response" to index them too,
+# The default keeps the index small: messages, summaries and the model's replies.
+# Tool output is most of the volume; add "tool_result" to index it too,
 # or pick Threads with `shellboy index backfill --kind tool_result --thread ID`.
-auto_kinds = ["user", "summary"]
+auto_kinds = ["user", "summary", "assistant_response"]
 
 # Explicit compact --summary limits; either key may be used alone in this section.
 # The smaller limit wins, with an effective floor of 2000 Unicode characters.

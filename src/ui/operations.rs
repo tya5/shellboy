@@ -1103,8 +1103,8 @@ impl Form {
                     Text,
                 ),
             ];
-            // Retry resumes work that was already authorized; it takes no kinds.
-            if operation == OpKind::IndexRetry {
+            // Retry resumes already-authorized work and status counts jobs; neither takes kinds.
+            if matches!(operation, OpKind::IndexRetry | OpKind::IndexStatus) {
                 fields.retain(|field| field.name != "index_kinds");
             }
             fields
@@ -2251,7 +2251,7 @@ impl Form {
     }
     fn index_args(&self) -> Result<IndexArgs, String> {
         Ok(IndexArgs {
-            kinds: if self.operation == OpKind::IndexRetry {
+            kinds: if matches!(self.operation, OpKind::IndexRetry | OpKind::IndexStatus) {
                 Vec::new()
             } else {
                 self.value("index_kinds")?

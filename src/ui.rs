@@ -5590,6 +5590,11 @@ impl UiState {
         } else {
             (None, words.as_slice())
         };
+        // `/index all kinds all`: kinds to add for this selection.
+        let (parts, kinds) = match parts.iter().position(|word| *word == "kinds") {
+            Some(at) => (&parts[..at], parts[at + 1..].to_vec()),
+            None => (parts, Vec::new()),
+        };
         let mut selection = match parts {
             [] | ["status"] => None,
             ["all"] => Some(IndexArgs {
@@ -5612,11 +5617,14 @@ impl UiState {
             _ => {
                 return self.command_error(i18n::local!(
                     self.config.ui.language,
-                    "/index [status|all|thread|threads THREAD-ID ...] を指定してください",
-                    "Specify /index [status|all|thread|threads THREAD-ID ...]."
+                    "/index [status|all|thread|threads THREAD-ID ...] [kinds KIND ...] を指定してください",
+                    "Specify /index [status|all|thread|threads THREAD-ID ...] [kinds KIND ...]."
                 ));
             }
         };
+        if let Some(selection) = selection.as_mut() {
+            selection.kinds = kinds.iter().map(|kind| (*kind).to_owned()).collect();
+        }
         if parts == ["thread"] && selection.is_none() {
             return self.command_error(i18n::local!(
                 self.config.ui.language,

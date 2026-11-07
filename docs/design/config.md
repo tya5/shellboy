@@ -171,7 +171,7 @@ remain available. Restart the owner to change the immutable runtime setting.
 ## Automatic indexing kinds (#254)
 
 `indexing.auto_kinds` is an array of node-kind words, default
-`["user","summary"]`, each one of `user`, `summary`, `assistant_response`,
+`["user","summary","assistant_response"]`, each one of `user`, `summary`, `assistant_response`,
 `tool_result`, `spill`, `event`; unknown words are `ConfigInvalid` with key
 `indexing.auto_kinds`, an empty list is valid. It is read at owner start. The
 words are the node kinds `history search --kind` already accepts, so a typical

@@ -64,12 +64,23 @@ spill nodes created by compaction were never authorized. Chosen:
   spending, covered by the issue's default. Spills/trim markers use the same call
   and are only registered if `spill` is listed.
 - Explicit commands default to the configured list plus `--kind`, not to everything:
-  `backfill --scope all` stays cheap. Consequence stated in the docs: `rebuild` builds
-  a space from the selected sources only, so a default-kinds `rebuild --scope all` does
-  not copy tool-output vectors; use `--kind all`. Not guarded by code (rebuild already
-  meant "exactly the selected sources"); re-check if someone loses vectors this way.
-- TUI keeps the configured kinds and shows a line when sources of other kinds are
-  excluded; picking kinds there is not added (CLI only).
+  `backfill --scope all` stays cheap. Review changed an earlier choice: activation of a
+  rebuilt space retires the old one, so a default-kinds `rebuild --scope all` would silently
+  drop tool-output vectors. It is now refused (`InvalidArgument`, per-kind count) when the
+  active space holds chunks of kinds outside the selection and no `--kind` is given; `--kind all`
+  keeps them, an explicit `--kind` accepts the loss. `index preview` shows the same count
+  (`indexed_outside_selection`) before anything is charged. Retired spaces are kept until the
+  user asks for removal (paid indexes are not collected automatically; #253).
+- `--kind` is accepted only with `--thread` or `--scope all` (rejected with only `--source`, or
+  with no selection where it would turn into the retry preview); `index status` and `retry`
+  take none. The TUI gets kinds through `/index ... kinds KIND...` and a form field; the TUI
+  coverage view filters by the same selection so excluded kinds are not shown as not indexed.
+- Default (user decision): `assistant_response` joins user and summary. An assistant_response
+  yields `answer:N` bodies and `reasoning:N` bodies (visible reasoning text only; encrypted and
+  opaque reasoning are never embedded); both are embedded. Measured split in acceptance.md.
+- A summary or spill stored by compaction is registered at adoption but does not wake the index
+  worker; the record is drained at the next wake (any later message, tool result or reply) or
+  at owner start. Accepted: no extra wiring for a small, delay-tolerant item.
 
 ## Search speed: single KNN scan and two-stage visibility (#240, 2026-11-06)
 

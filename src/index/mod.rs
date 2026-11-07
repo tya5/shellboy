@@ -96,6 +96,10 @@ pub struct FeePreview {
     pub excluded_sources: u64,
     /// Kinds a Thread/all-history selection took in for this operation.
     pub kinds: Vec<String>,
+    /// For `--scope all` without a space: sources per kind that the active space
+    /// holds vectors for but this selection leaves out. A rebuild into a new
+    /// space would not carry them over (kind -> sources).
+    pub indexed_outside_selection: std::collections::BTreeMap<String, u64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SourceSpan {
@@ -699,6 +703,7 @@ impl IndexService {
         let ids = selection.ids;
         let mut result = FeePreview {
             excluded_sources: selection.excluded,
+            indexed_outside_selection: self.indexed_outside_selection(&args, &kinds).await?,
             kinds,
             ..FeePreview::default()
         };
@@ -852,6 +857,34 @@ impl IndexService {
         }
         Ok(())
     }
+    /// Sources per kind that the active space holds done vectors for although the
+    /// selection (full-history shape only) does not take their kind in.
+    pub(super) async fn indexed_outside_selection(
+        &self,
+        args: &IndexArgs,
+        kinds: &[String],
+    ) -> Result<std::collections::BTreeMap<String, u64>, ApiError> {
+        if args.scope != Some(IndexScope::All) || args.space_id.is_some() {
+            return Ok(Default::default());
+        }
+        let kinds = serde_json::to_string(kinds)
+            .map_err(|_| err(ErrorCode::InvalidArgument, "Invalid kinds"))?;
+        self.database
+            .call(move |db| {
+                let Some(space) = meta(db, IndexKeys::ACTIVE_SPACE)? else {
+                    return Ok(Default::default());
+                };
+                let mut statement = db.prepare("SELECT n.kind,COUNT(DISTINCT c.source_node_id) FROM embedding_chunk c JOIN node n ON n.id=c.source_node_id WHERE c.space_id=?1 AND n.kind NOT IN (SELECT value FROM json_each(?2)) GROUP BY n.kind")?;
+                let rows = statement
+                    .query_map(params![space, kinds], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<Result<_, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(db_error)
+    }
     pub async fn backfill(&self, args: IndexArgs) -> Result<FeePreview, ApiError> {
         self.key()?;
         self.write_space(&args).await?;
@@ -886,9 +919,25 @@ impl IndexService {
             .select_sources(&args, source::KindFilter::Selected)
             .await?;
         let (ids, excluded) = (selection.ids, selection.excluded);
+        let outside = self.indexed_outside_selection(&args, &kinds).await?;
+        if full_rebuild && args.kinds.is_empty() && !outside.is_empty() {
+            let total: u64 = outside.values().sum();
+            let detail = outside
+                .iter()
+                .map(|(kind, n)| format!("{kind}: {n}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(err(
+                ErrorCode::InvalidArgument,
+                format!(
+                    "The active index space holds vectors for {total} sources of kinds this rebuild would not take in ({detail}); activating the new space would drop them from the active index. Add --kind all to keep them, or name the kinds you want with --kind to accept dropping the rest. `index preview` with the same arguments shows these counts."
+                ),
+            ));
+        }
         if ids.is_empty() {
             return Ok(FeePreview {
                 excluded_sources: excluded,
+                indexed_outside_selection: outside,
                 kinds,
                 ..FeePreview::default()
             });
@@ -972,6 +1021,7 @@ impl IndexService {
         self.spaces_changed(); // the previous rebuild candidate may be inactive now
         let mut preview = self.enqueue(&ids, &group, "explicit-rebuild", None).await?;
         preview.excluded_sources = excluded;
+        preview.indexed_outside_selection = outside;
         preview.kinds = kinds;
         Ok(preview)
     }

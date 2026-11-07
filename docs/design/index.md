@@ -296,7 +296,7 @@ created by compaction without ever being authorized, so they were reachable only
 by explicit backfill.
 
 `[indexing] auto_kinds` (strings from the six kinds above, default
-`["user","summary"]`, immutable until owner restart like `auto_history`) is the
+`["user","summary","assistant_response"]`, immutable until owner restart like `auto_history`) is the
 only new setting. It is applied at three points and nowhere else:
 
 1. `authorize_new_tx` writes the `index.auto.*` record only when the node's kind
@@ -307,8 +307,11 @@ only new setting. It is applied at three points and nowhere else:
    not listed. This only matters for records written before the owner restarted
    with a different list; the record is consumed through the normal path, so it
    neither leaves a pending record nor blocks `maybe_activate_candidate`.
-3. Thread and `--scope all` selections of preview/backfill/rebuild and the
-   status coverage read select `node.kind IN (auto_kinds + --kind words)`.
+3. Thread and `--scope all` selections of preview/backfill/rebuild, and the
+   TUI index panel's coverage window (`read_coverage_inner`, applied to Thread
+   and full-history members only), use `node.kind IN (auto_kinds + --kind words)`,
+   so kinds left out on purpose are not reported as not indexed. CLI `index status`
+   reports job state only and takes no `--kind`.
    Explicit `--source` IDs and `retry` are never filtered. The skipped count is
    `excluded_sources` in the result, computed from the kind index without
    reading payloads.
@@ -320,7 +323,12 @@ candidate space from activating and makes coverage look perpetually incomplete.
 Coverage and activation count jobs that exist, and filtered kinds never create
 jobs, so no completeness rule changes. Existing vectors are untouched. `rebuild`
 keeps its meaning (a new space from exactly the selected sources); it does not
-copy vectors of unselected kinds, which the docs state. No table, queue, worker
+copy vectors of unselected kinds, which would silently drop them when activation
+retires the old space. A full rebuild (`--scope all`, no space) with no `--kind` is
+therefore refused with `InvalidArgument` and the per-kind count when the active
+space holds chunks of other kinds (`--kind all` keeps them; an explicit `--kind`
+accepts the loss), and `FeePreview.indexed_outside_selection` reports the same
+count in `index preview` before anything is charged. No table, queue, worker
 or schema change is added.
 
 ## Held automatic work visibility (#71 review)

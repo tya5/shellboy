@@ -466,6 +466,31 @@ async fn readonly_history_semantic_reuses_index_and_rejects_space_change_and_tom
     {}
     let found = search(root, "history", "NEAR", SearchMode::Semantic).await;
     assert_eq!(found["ok"], true, "{found}");
+    // Coverage is never claimed complete: the kinds left out are named and keyword search is pointed to.
+    let status = &found["result"]["scope_status"][0];
+    assert_eq!(status["coverage"], "indexed_sources_only", "{found}");
+    assert_eq!(
+        status["auto_kinds"],
+        json!(["user", "summary", "assistant_response"])
+    );
+    assert_eq!(
+        status["kinds_not_auto_indexed"],
+        json!(["tool_result", "spill", "event"])
+    );
+    assert_eq!(
+        status["keyword_covers_all_kinds"],
+        "rag search --mode keyword"
+    );
+    assert!(
+        found["result"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| {
+                w["code"] == "history_kinds_not_indexed"
+                    && w["message"].as_str().unwrap().contains("--mode keyword")
+            })
+    );
     assert_eq!(found["result"]["items"][0]["distance"], 0.0);
     assert_eq!(
         found["result"]["items"][0]["provenance"]["current_thread_paths"],

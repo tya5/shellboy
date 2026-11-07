@@ -363,7 +363,7 @@ worker or queue is added.
 ## Automatic indexing kinds (#254)
 
 Automatic indexing takes in the node kinds listed in `indexing.auto_kinds`
-(default user and summary) and no others; explicit commands add kinds for chosen
+(default user, summary and assistant_response) and no others; explicit commands add kinds for chosen
 Threads with `--kind`. Existing vectors and queued jobs are untouched, no table,
 queue or worker is added, and search reports the kinds that semantic coverage
 omits while `rag search --mode keyword` covers every kind. Details are in the
