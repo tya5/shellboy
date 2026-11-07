@@ -873,6 +873,14 @@ fn rag_conversion_backend_flags_are_no_longer_part_of_the_cli() {
 
 #[tokio::test]
 async fn message_delivery_timing_replaces_now_and_revisit_commands() {
+    assert!(matches!(
+        convert(&["message", "send", "--text", "x"]).await,
+        Command::MessageSend(args) if !args.resume_recovery
+    ));
+    assert!(matches!(
+        convert(&["message", "send", "--resume-recovery", "--text", "x"]).await,
+        Command::MessageSend(args) if args.resume_recovery
+    ));
     for (flag, deliver) in [
         (None, Deliver::Next),
         (Some("now"), Deliver::Now),
@@ -885,6 +893,7 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
         assert_eq!(
             convert(&args).await,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,

@@ -730,6 +730,8 @@ impl Store {
                     let result = store.send_content(
                         tx,
                         &MessageSendArgs {
+                            resume_recovery: false,
+
                             human: false,
                             expect_reply: false,
                             sender_label: None,
@@ -1035,7 +1037,7 @@ impl Store {
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
                 if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,segment_chars:None,reduce_rounds:None, parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
-                let mut result=store.send_content(&tx,&MessageSendArgs { human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
+                let mut result=store.send_content(&tx,&MessageSendArgs { resume_recovery: false, human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
                 let message=result.result.get("message_id").and_then(Value::as_str).ok_or_else(||error(ErrorCode::InvalidState,"Accepted edit has no source node"))?;
                 crate::attachments::add_tx(&tx,&crate::attachments::AddPlan{thread_id:result.result["thread_id"].as_str().unwrap().into(),selection_revision:revision,files},Some(message))?;
                 result.result["source_thread_id"]=json!(thread);result.result["replaced_request_id"]=json!(node);
@@ -1134,6 +1136,8 @@ impl Store {
                     store.send_content(
                         tx,
                         &MessageSendArgs {
+                            resume_recovery: false,
+
                             human: false,
                             expect_reply: false,
                             sender_label: None,
@@ -1895,7 +1899,15 @@ impl Store {
             reason,
             wake,
             owner_changed,
-        } = assign_message(tx, &id, caller, args.deliver, now)?;
+        } = assign_message(
+            tx,
+            &id,
+            caller,
+            args.deliver,
+            args.human,
+            args.resume_recovery,
+            now,
+        )?;
         let message_id = uuid::Uuid::new_v4().to_string();
         let payload = json!({"role":"user","content":content.elements});
         let body = payload.to_string();
@@ -1964,6 +1976,8 @@ fn assign_message(
     id: &str,
     caller: Option<&Origin>,
     deliver: Deliver,
+    human: bool,
+    resume_recovery: bool,
     now: &str,
 ) -> Result<MessageAssignment> {
     let parent: Option<String> = tx
@@ -2013,7 +2027,7 @@ fn assign_message(
             let turn:Option<(String,String,i64)>=tx.query_row("SELECT id,state,generation FROM turn WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[&run_id],|row| Ok((row.get(0)?,row.get(1)?,row.get(2)?))).optional().map_err(sql_error)?;
             if let Some((turn_id, state, generation)) = turn {
                 assignment = Assignment::ExistingTurn;
-                if state == "recovery_wait" && caller.is_some() {
+                if state == "recovery_wait" && !human && !resume_recovery {
                     status = DeliveryStatus::Held;
                     reason = Some("recovery_wait");
                 } else {
@@ -4434,6 +4448,8 @@ mod agents_reference_tests {
             let accepted = store
                 .execute(
                     req(Command::MessageSend(MessageSendArgs {
+                        resume_recovery: false,
+
                         human: false,
                         expect_reply: false,
                         thread_id: Some(target.clone()),
@@ -4564,6 +4580,7 @@ mod agents_reference_tests {
         let held = store
             .execute(
                 req(Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     thread_id: Some(target),
@@ -4665,8 +4682,16 @@ mod interrupted_message_assignment_tests {
                 token: "private-origin-token".into(),
             });
             let tx = db.transaction().unwrap();
-            let assigned =
-                assign_message(&tx, "child", caller.as_ref(), Deliver::Next, "resume").unwrap();
+            let assigned = assign_message(
+                &tx,
+                "child",
+                caller.as_ref(),
+                Deliver::Next,
+                false,
+                false,
+                "resume",
+            )
+            .unwrap();
             assert_eq!(assigned.assignment, Assignment::NewRun);
             let count: i64 = tx
                 .query_row(
@@ -4826,6 +4851,7 @@ mod message_acknowledgement_state_tests {
         let request = Request::new(
             "fixture:typed-ack",
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -5152,6 +5178,7 @@ mod owned_child_notification_tests {
             let request = Request::new(
                 "fixture:new-child",
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -5219,6 +5246,8 @@ mod owned_child_notification_tests {
                             Request::new(
                                 "fixture:existing-child",
                                 Command::MessageSend(MessageSendArgs {
+                                    resume_recovery: false,
+
                                     human: false,
                                     expect_reply: false,
                                     sender_label: None,

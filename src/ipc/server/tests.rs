@@ -95,6 +95,7 @@ impl Fixture {
         self.connect_command(
             number,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,

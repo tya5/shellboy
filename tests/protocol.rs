@@ -827,9 +827,29 @@ fn current_output_and_history_results_require_observation_fields() {
 }
 
 #[test]
+fn message_resume_recovery_is_optional_and_round_trips() {
+    let command = Command::MessageSend(MessageSendArgs {
+        human: false,
+        resume_recovery: true,
+        expect_reply: false,
+        sender_label: None,
+        thread_id: None,
+        text: "x".into(),
+        deliver: Deliver::Next,
+    });
+    let value = serde_json::to_value(&command).unwrap();
+    assert_eq!(value["args"]["resume_recovery"], true);
+    assert_eq!(serde_json::from_value::<Command>(value).unwrap(), command);
+    let old = serde_json::json!({"command":"message.send","args":{"text":"x"}});
+    let decoded: Command = serde_json::from_value(old).unwrap();
+    assert!(matches!(decoded, Command::MessageSend(args) if !args.resume_recovery));
+}
+
+#[test]
 fn message_delivery_timing_is_one_optional_wire_field() {
     let command = |deliver| {
         Command::MessageSend(MessageSendArgs {
+            resume_recovery: false,
             human: false,
             expect_reply: false,
             sender_label: None,

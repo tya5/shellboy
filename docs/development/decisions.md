@@ -4101,3 +4101,16 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   confusion it removes. (7) The credential read runs inside `wait_headers`, so cancel and the header deadline apply to it.
   (8) A header-only connection with no key is reported by the setup hints. (9) The `credentials.set` replay limit across an
   owner restart is documented and the conflict hint explains it.
+
+## Recovery-wait message send policy (#263, 2026-11-07)
+
+Human TUI/chat input and `message reply` remain explicit recovery actions. All
+non-human `message send` calls are held on a live `recovery_wait` Turn by default,
+regardless of whether they have a model Origin. `--resume-recovery` is the explicit
+per-message opt-in, including for a model sending from another Thread; its
+`recovery_resumed` event records the caller actor (human or shell Origin); the
+message receipt also retains authenticated sender provenance. Existing generation CAS and
+receipt-scope checks remain the authority for what can be resumed. This avoids
+automatic scheduler/CLI restart while allowing deliberate automation. Revisit if
+callers need a narrower authority boundary or if external CLI callers use the flag
+without treating recovery as an explicit decision.

@@ -282,6 +282,7 @@ impl Fixture {
             .request(Request::new(
                 format!("{}:{}", self.owner.instance_id, uuid::Uuid::new_v4()),
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -887,6 +888,7 @@ async fn run_end_selects_last_turn_after_processing_turn() {
         .request(Request::new(
             format!("{}:{}", fixture.owner.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 thread_id: Some(accepted.thread_id.clone()),

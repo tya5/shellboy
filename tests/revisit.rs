@@ -115,6 +115,7 @@ async fn send(
         request(
             control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,

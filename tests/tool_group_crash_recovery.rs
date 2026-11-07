@@ -109,6 +109,7 @@ async fn send_and_complete(control: &Arc<Control>, thread: &str, marker: &str) {
         rpc(
             control,
             Command::MessageSend(MessageSendArgs {
+                resume_recovery: false,
                 human: false,
                 expect_reply: false,
                 sender_label: None,
@@ -345,6 +346,8 @@ async fn real_result_write_failure_is_repaired_after_storage_is_restored() {
     rpc(
         &control,
         Command::MessageSend(MessageSendArgs {
+            resume_recovery: false,
+
             human: false,
             expect_reply: false,
             sender_label: None,
@@ -549,6 +552,8 @@ async fn sigkill_real_owner_during_native_shell_then_first_post_has_adjacent_pai
     let response = shellboy::ipc::call(
         &directory,
         Command::MessageSend(MessageSendArgs {
+            resume_recovery: false,
+
             human: false,
             expect_reply: false,
             sender_label: None,

@@ -250,6 +250,7 @@ impl super::db::Store {
             let result = self.send(
                 tx,
                 &MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: args.sender_label.clone(),

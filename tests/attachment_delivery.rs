@@ -371,6 +371,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
             Request::new(
                 "instance:before",
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -390,6 +391,7 @@ async fn earlier_human_receipt_precedes_cli_source_and_later_human_stays_pending
             Request::new(
                 "instance:after",
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -441,6 +443,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
             Request::new(
                 "instance:initial",
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -482,6 +485,7 @@ async fn stopped_run_held_attachment_does_not_move_to_or_block_a_new_run() {
             Request::new(
                 "instance:new-run",
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
@@ -535,6 +539,7 @@ async fn terminated_foreign_origin_incomplete_group_does_not_block_live_target()
             Request::new(
                 "instance:target-start",
                 Command::MessageSend(MessageSendArgs {
+                    resume_recovery: false,
                     human: false,
                     expect_reply: false,
                     sender_label: None,
