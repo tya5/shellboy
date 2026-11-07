@@ -1,7 +1,8 @@
 //! Credential-free sender facts. Labels never participate in authorization.
 use super::*;
+use schemars::JsonSchema;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SenderKind {
     Model,
@@ -11,7 +12,7 @@ pub enum SenderKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MessageSender {
     #[serde(default)]
     pub kind: SenderKind,

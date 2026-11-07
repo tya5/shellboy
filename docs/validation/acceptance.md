@@ -10741,3 +10741,11 @@ SQL boundary deterministically instead of relying on a timing threshold. Focused
 - [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
 - [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
 - [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.
+## External RPC contract and schema export (#244 A2/D)
+
+Environment: local macOS, synthetic tests only. `cargo fmt --all --check`,
+`cargo check --locked --tests`, the 62-operation coverage test, exact schema drift
+test, local `$ref` resolution test, and protocol-3 handshake test passed. The
+language audit passed for 416 files. The generated Draft 2020-12 artifact contains
+62 operation mappings (excluding `events.wait`) and all 1,532 local references
+resolve. Cross-OS CI remains pending. No real API or user data used.

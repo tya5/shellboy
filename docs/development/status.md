@@ -190,15 +190,14 @@ coverage and keeps them through active-only adoptions (D-248-1), with an integra
 regression test and a guard unit test. Open: 2a (over-limit cached reduce
 output, no code change) is reported in the validation record. Resume: land after CI.
 
-## Typed reply for unknown command/field (#244 A1; on branch issue-244/typed-unknown, CI pending)
+## External RPC contract and schema export (#244 A1/A2/D; branch issue-244/rpc-contract-a2d)
 
-The owner now answers a decodable request with an unknown command, unknown
-top-level/args field or wrong argument type with `invalid_argument` carrying the
-request's own operation ID (`details.reason`, `command`, `name`,
-`request_may_have_been_applied=false`) instead of closing; the client therefore
-no longer reports it as an uncertain mutation. Parsing precedes dispatch, so
-nothing runs. No protocol version change. Tests in `src/ipc.rs`. Remaining #244
-stages (A2, B, D) are not started.
+Main contains A1 typed pre-execution rejection and #243 B/C/E3 plan A. This
+branch implements the adopted A2 protocol-3 handshake/capability policy, strict
+request versus tolerant result records, and D's generated command/result schema
+with exact drift test. Dynamic JSON results stay opaque; `events.wait` is not in
+the schema map. Focused checks and CI evidence are tracked in the validation
+ledger; no completion claim until both CI workflows pass.
 
 ## Documentation-only CI skip (#245; on branch issue-245/docs-only-ci, not yet landed)
 

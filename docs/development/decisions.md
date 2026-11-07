@@ -4186,3 +4186,22 @@ the decision transaction. Per-unit row budgets do not promise a fixed wall-clock
 Decision: models use `message ask` for a human decision, one question per message. The default `ui.awaiting_human_rows` is 1. Human questions share the per-Thread pending-reply receipt cap and `thread.get.awaiting_replies` projection, but carry a durable recipient-kind discriminator: they do not wake a model while pending and do not become Run-end reminders or `ignored` outcomes. The answer is a human message in the asking Thread and resumes ordinary admission. Existing thread-scoped replies retain their recipient and lifecycle rules. The visible inbox is scoped to the displayed Thread; there is no cross-Thread inbox endpoint. `events.wait --thread` is a change hint and clients reread that Thread. No new table, migration, worker or queue is introduced.
 
 Recheck when: the receipt query plan changes, either recipient kind starts sharing notification behavior, or the UI adds a cross-Thread inbox.
+## D-244-2: Protocol 3 external-client contract and generated schema (2026-11-07)
+
+The Web UI is an independent RPC client. Keep request argument records strict so
+unknown input cannot be silently ignored, while adding a distinct tolerant
+`record!` macro for output records so future additive result fields are ignored.
+`Hello`/`Welcome`/`Endpoint` also ignore additive metadata; protocol versions
+must still match exactly. Protocol 3 adds `Welcome.capabilities`, and starts empty (all current operations are the v3 baseline). Future additive
+request features must be gated by an advertised capability. No protocol-2 downgrade
+or guessed compatibility from parseability.
+
+Use Schemars 1.0.4 (exact pin; MIT/Apache-2.0) to derive JSON Schema from the
+serde wire types. It adds `schemars_derive`, `serde_derive_internals`,
+`dyn-clone`, and `ref-cast` to the lock; generation is a CLI-only operation and
+the test is an exact comparison against the committed artifact. The schema
+maps the 62 published operations to result schemas (excluding `events.wait`);
+genuinely dynamic `Value` results stay
+opaque rather than encoding observed examples as guarantees. Follow-up issues
+may type result families actually used by the external client. Recheck the
+mapping whenever a command or response type changes.
