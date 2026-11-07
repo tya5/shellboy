@@ -8,7 +8,13 @@ impl IndexService {
         mut claims: Vec<Claimed>,
         cancel: CancellationToken,
     ) -> Result<(), ApiError> {
-        if !self.capacity_allowed(key).await? {
+        let gate = self.capacity_allowed(key).await?;
+        if gate == Gate::DiskLow {
+            // Transient: release the claims unpaused and unspent; they are
+            // claimed again on the next wake or retry period.
+            return self.defer_before_send(claims, "disk_free_low").await;
+        }
+        if gate != Gate::Open {
             return self
                 .fail_claims(
                     key,
@@ -117,8 +123,10 @@ impl IndexService {
         let Some(first) = claims.first() else {
             return Ok(());
         };
-        if !self.capacity_allowed(key).await? {
-            return self.defer_before_send(claims, "storage_limit").await;
+        match self.capacity_allowed(key).await? {
+            Gate::Open => {}
+            Gate::DiskLow => return self.defer_before_send(claims, "disk_free_low").await,
+            Gate::Paused => return self.defer_before_send(claims, "storage_limit").await,
         }
         if cancel.is_cancelled() {
             return self.defer_before_send(claims, "cancelled").await;

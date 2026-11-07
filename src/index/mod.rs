@@ -153,6 +153,8 @@ pub struct IndexService {
     profile_key: Option<String>,
     endpoint_family_key: Option<String>,
     started: AtomicBool,
+    /// Last capacity check held new work for low disk (no pause is saved).
+    disk_held: AtomicBool,
     storage_diagnostic_stop: OnceLock<StorageDiagnosticStop>,
     diagnostics: OnceLock<crate::diagnostics::Diagnostics>,
     reader: ShellOutputReader,
@@ -216,6 +218,19 @@ pub(crate) fn authorize_new_nodes_for_config_tx(
         Some(key) => authorize_new_nodes_tx(tx, config, &key, node_ids),
         None => Ok(()),
     }
+}
+/// Outcome of the shared capacity gate for the index worker. Only the logical
+/// limit saves a pause; a low-disk hold is transient and saves nothing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Gate {
+    Open,
+    Paused,
+    DiskLow,
+}
+/// Retry period while held for low disk; the gate is one cheap OS read.
+const DISK_RETRY: Duration = Duration::from_secs(30);
+fn disk_low(error: &ApiError) -> bool {
+    error.details.as_ref().and_then(|d| d["reason"].as_str()) == Some("disk_free_low")
 }
 /// Declared bound of one index scheduling unit (single-row or batch claims).
 const SCHEDULE_UNIT: std::num::NonZeroU32 = std::num::NonZeroU32::new(128).unwrap();
@@ -352,6 +367,7 @@ impl IndexService {
             database,
             config,
             notify: Arc::new(Notify::new()),
+            disk_held: AtomicBool::new(false),
             saved_changed: Arc::new(Notify::new()),
             pause_changed: Arc::new(Notify::new()),
             profile_key,
@@ -483,10 +499,13 @@ impl IndexService {
             // No work without progress (#171): sleep only until a scheduled
             // retry; with nothing scheduled or while paused, wait for a wake
             // (enqueue, authorization, retry, select_space) instead of a timer.
-            let delay = self
-                .next_delay()
-                .await
-                .unwrap_or(Some(Duration::from_secs(30)));
+            let delay = if self.disk_held.load(Ordering::Relaxed) {
+                Some(DISK_RETRY)
+            } else {
+                self.next_delay()
+                    .await
+                    .unwrap_or(Some(Duration::from_secs(30)))
+            };
             tokio::select! {
                 _ = token.cancelled() => break,
                 _ = self.notify.notified() => {},
@@ -1222,17 +1241,21 @@ impl IndexService {
         self.wake();
         Ok(preview)
     }
-    async fn capacity_allowed(&self, key: &str) -> Result<bool, ApiError> {
+    async fn capacity_allowed(&self, key: &str) -> Result<Gate, ApiError> {
         let key = key.to_owned();
         let config = self.config.clone();
-        let (allowed, changed) = self
+        let (gate, changed) = self
             .database
             .call(move |db| {
                 let tx = db.transaction()?;
                 match crate::gc::require_capacity_tx(&tx, &config) {
                     Ok(()) => {
                         tx.commit()?;
-                        Ok((true, false))
+                        Ok((Gate::Open, false))
+                    }
+                    Err(error) if error.code == ErrorCode::StorageLimit && disk_low(&error) => {
+                        tx.commit()?;
+                        Ok((Gate::DiskLow, false))
                     }
                     Err(error) if error.code == ErrorCode::StorageLimit => {
                         let changed = pause::save(
@@ -1241,28 +1264,34 @@ impl IndexService {
                             &serde_json::to_value(&error).map_err(|_| serde_error())?,
                         )?;
                         tx.commit()?;
-                        Ok((false, changed))
+                        Ok((Gate::Paused, changed))
                     }
                     Err(error) => Err(StorageError::from(error)),
                 }
             })
             .await
             .map_err(db_error)?;
+        self.disk_held
+            .store(gate == Gate::DiskLow, Ordering::Relaxed);
         self.publish_saved(changed);
         self.publish_pause(changed);
-        Ok(allowed)
+        Ok(gate)
     }
     /// Worker scheduling check on the background lane; `None` when deferred.
-    async fn capacity_allowed_background(&self, key: &str) -> Result<Option<bool>, ApiError> {
+    async fn capacity_allowed_background(&self, key: &str) -> Result<Option<Gate>, ApiError> {
         let key = key.to_owned();
         let config = self.config.clone();
-        let Some((allowed, changed)) = self
+        let Some((gate, changed)) = self
             .background_unit(SCHEDULE_UNIT, move |db, _| {
                 let tx = db.transaction()?;
                 match crate::gc::require_capacity_tx(&tx, &config) {
                     Ok(()) => {
                         tx.commit()?;
-                        Ok((true, false))
+                        Ok((Gate::Open, false))
+                    }
+                    Err(error) if error.code == ErrorCode::StorageLimit && disk_low(&error) => {
+                        tx.commit()?;
+                        Ok((Gate::DiskLow, false))
                     }
                     Err(error) if error.code == ErrorCode::StorageLimit => {
                         let changed = pause::save(
@@ -1271,7 +1300,7 @@ impl IndexService {
                             &serde_json::to_value(&error).map_err(|_| serde_error())?,
                         )?;
                         tx.commit()?;
-                        Ok((false, changed))
+                        Ok((Gate::Paused, changed))
                     }
                     Err(error) => Err(StorageError::from(error)),
                 }
@@ -1280,8 +1309,10 @@ impl IndexService {
         else {
             return Ok(None);
         };
+        self.disk_held
+            .store(gate == Gate::DiskLow, Ordering::Relaxed);
         self.publish_saved(changed);
-        Ok(Some(allowed))
+        Ok(Some(gate))
     }
     pub async fn process_one(&self, cancel: CancellationToken) -> Result<bool, ApiError> {
         let outcome = self.process_one_inner(cancel).await;
@@ -1362,8 +1393,8 @@ impl IndexService {
             return Ok(progress);
         }
         match self.capacity_allowed_background(&key).await? {
-            Some(true) => {}
-            Some(false) => return Ok(false),
+            Some(Gate::Open) => {}
+            Some(Gate::Paused | Gate::DiskLow) => return Ok(false),
             None => return Ok(true), // Deferred: retry next round.
         }
         if self.drain_authorization(&key).await? {
