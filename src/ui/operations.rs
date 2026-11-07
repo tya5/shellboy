@@ -3517,10 +3517,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 69);
+        assert_eq!(rows.len(), 70);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            69
+            70
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3532,7 +3532,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 69);
+        assert_eq!(operations.rows().len(), 70);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));
