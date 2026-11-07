@@ -335,7 +335,7 @@ shellboy history list    --thread T --branch B         # stage 4: read/compare
 ```
 - Wire names: `thread.rewind`, `thread.branches`, `thread.prune`.
 - All use idempotent operation receipts, like the other commands.
-- The model cannot rewind its own Thread while its Run is live, because the refusal applies. It can prune itself and can rewind idle Threads.
+- Rewind still refuses while any target Thread has a live Run. #259 removes only the separate queued-input refusal for definitely unadmitted messages; unknown path admission remains a safety stop.
 
 ## 7. Risks
 

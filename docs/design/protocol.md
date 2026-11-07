@@ -308,10 +308,9 @@ boundary. Neither mode cancels response generation.
 
 `message.cancel` is a receipt-backed database mutation with `message_ids`, a fixed
 list of1..128 distinct nonempty IDs. Its `items` retain each ID and typed outcome
-(cancelled, already_cancelled, already_admitted, not_found, forbidden, unavailable),
+(cancelled, already_cancelled, already_admitted, not_found, unavailable),
 with optional thread_id/archive_draft_id. Per-ID domain failures permit partial
-success; a storage failure rolls back the transaction. Models can cancel only
-their sender Thread's input; humans can cancel any sender. Admission/path facts
+success; a storage failure rolls back the transaction. Any model or human caller can cancel queued input in the target Thread. Admission/path facts
 are checked in that transaction. Replay returns the original saved result.
 Internal receipt metadata is projected by its saved assignment fields, without
 relaxing public DTO unknown-field rejection or losing the immutable assignment.
@@ -556,7 +555,7 @@ The adopted [reply design](reply-expected-messages.md) adds `expect_reply` to
 `reply`, and `reply_to`. `thread.get` exposes up to 128 `awaiting_reply` entries.
 Reply eligibility, authority, body creation, delivery, and terminal-state CAS
 commit atomically. Operation replay returns the saved result, not a second
-reply. Only the recipient model or a human may reply after application.
+reply. Any model or human may reply after application.
 
 ## Change hints `events.wait` (#243 stage B)
 

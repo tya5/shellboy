@@ -381,7 +381,6 @@ pub(super) async fn cancel(
             MessageCancelOutcome::ReplyCancelled => "返信依頼の取消",
             MessageCancelOutcome::AlreadyAdmitted => "すでに会話へ反映済み",
             MessageCancelOutcome::NotFound => "見つかりません",
-            MessageCancelOutcome::Forbidden => "権限なし",
             MessageCancelOutcome::Unavailable => "対象を利用できません",
         };
         counts.entry(label).or_insert((item.outcome, 0)).1 += 1;
@@ -429,7 +428,6 @@ fn cancelled_summary(outcome: MessageCancelOutcome, count: usize) -> String {
             format!("{count} {noun} already applied to the conversation")
         }
         MessageCancelOutcome::NotFound => format!("{count} {noun} not found"),
-        MessageCancelOutcome::Forbidden => format!("{count} {noun} not permitted"),
         MessageCancelOutcome::Unavailable => format!("{count} {noun} unavailable"),
     }
 }
@@ -492,7 +490,6 @@ mod tests {
                 "already applied to the conversation",
             ),
             (MessageCancelOutcome::NotFound, "not found"),
-            (MessageCancelOutcome::Forbidden, "not permitted"),
             (MessageCancelOutcome::Unavailable, "unavailable"),
         ];
         for (outcome, text) in cases {

@@ -10579,3 +10579,7 @@ the header wait and has no test of its own; a real provider, real keys or a real
 file worker; the Studio screen; a key that a provider rejects for reasons other than the header (only the mock's 401 is
 exercised); TLS failures (`ssl_verify`, certificate errors) have no test and classify as `unreachable`. Stage C is
 planned in D-269 and was not built or tested.
+
+## #259 small non-boundary restrictions (validation pending)
+
+Planned synthetic coverage: any model can cancel another sender's queued input; any model can reply to any applied pending request; self-target expected replies are accepted; a moved child accepts a new-parent send while its existing Run retains its original `owner_run_id`; rewind proceeds with known-unadmitted queued input but refuses when admission is unknown or the target has a live Run; unknown shell keys warn-and-ignore without a strict policy setting; exec shares the 8 MiB CLI stdin bound. No real API or user data. Commands/results and CI run IDs to be appended after validation.

@@ -5213,3 +5213,8 @@ Branch `issue-269/connection-setup-4` (rebased on origin/main after #243 E3; `ap
 integration, then the Studio screen against the shapes in the protocol design.
 Not claimed: Windows behaviour (permissions, `ReplaceFileW` on `credentials.toml`), a real terminal refusing a typed
 key, a real provider, shellboy-web/Studio use.
+
+
+## #259 remove small non-boundary restrictions (in progress, branch issue-259/remove-constraints)
+
+Removed caller/recipient-based guards in reply/cancel, the self-target `--expect-reply` gate, and the new-parent send refusal for a still-owned live child Run (ownership remains unchanged). Rewind now allows definitely unadmitted queued input but keeps the live-Run and unknown-admission safety guards. Removed configurable strict unknown-shell-key rejection; unknown keys are ignored with bounded warnings, while duplicate and malformed arguments remain rejected. `exec` input now shares the CLI 8 MiB stdin frame bound instead of 128 KiB. Focused checks pending.

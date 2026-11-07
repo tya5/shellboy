@@ -64,7 +64,12 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
         for i in 0..128 {
             let id=format!("message-{i:03}");
             db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",[&id])?;
-            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,'t',?1,'applied','admitted','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",params![id,json!({"kind":"external_cli","label":format!("sender-{i}")}).to_string()])?;
+            let sender = if i == 0 {
+                json!({"kind":"model","thread_id":"t"})
+            } else {
+                json!({"kind":"external_cli","label":format!("sender-{i}")})
+            };
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,'t',?1,'applied','admitted','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",params![id,sender.to_string()])?;
         }
         Ok(())
     }).await.unwrap();
@@ -127,7 +132,11 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
             assert_eq!(value["messages"].as_array().unwrap().len(), 128);
             for (i, row) in value["messages"].as_array().unwrap().iter().enumerate() {
                 assert_eq!(row["message_id"], format!("message-{i:03}"));
-                assert_eq!(row["sender"]["label"], format!("sender-{i}"));
+                if i == 0 {
+                    assert_eq!(row["sender"]["kind"], "unknown");
+                } else {
+                    assert_eq!(row["sender"]["label"], format!("sender-{i}"));
+                }
             }
             assert!(
                 payload.len() < 65536,

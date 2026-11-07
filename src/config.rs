@@ -502,19 +502,10 @@ pub enum ShellKind {
     Bash,
     Powershell,
 }
-#[derive(Clone, Copy, Debug, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum UnknownArguments {
-    #[default]
-    Warn,
-    Strict,
-}
-
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Shell {
     pub describe_calls: bool,
-    pub unknown_arguments: UnknownArguments,
     pub kind: ShellKind,
     pub executable: Option<PathBuf>,
     pub env: BTreeMap<String, String>,
@@ -523,7 +514,6 @@ impl Default for Shell {
     fn default() -> Self {
         Self {
             describe_calls: true,
-            unknown_arguments: UnknownArguments::Warn,
             kind: if cfg!(windows) {
                 ShellKind::Powershell
             } else {
@@ -540,7 +530,6 @@ impl fmt::Debug for Shell {
             .field("kind", &self.kind)
             .field("executable", &self.executable)
             .field("describe_calls", &self.describe_calls)
-            .field("unknown_arguments", &self.unknown_arguments)
             .field("env", &"[redacted]")
             .finish()
     }

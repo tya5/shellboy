@@ -40,7 +40,6 @@ pub enum DiagnosticEvent {
     MessageSend,
     ShellFailure,
     ShellUnknownArgumentsIgnored,
-    ShellUnknownArgumentsRejected,
     /// `config.set` replaced the file; records field names, never values.
     ConfigChanged,
     StorageLimit,
@@ -1842,11 +1841,6 @@ mod shell_unknown_parameter_tests {
             DiagnosticIds::default(),
             "timeout",
         );
-        diagnostics.record_shell_unknown_parameter(
-            DiagnosticEvent::ShellUnknownArgumentsRejected,
-            DiagnosticIds::default(),
-            &"x".repeat(100),
-        );
         diagnostics.shutdown().await;
         let body = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
         let rows: Vec<serde_json::Value> = body
@@ -1854,10 +1848,6 @@ mod shell_unknown_parameter_tests {
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
         assert_eq!(rows[0]["shell_unknown_parameter"], "timeout");
-        assert_eq!(
-            rows[1]["shell_unknown_parameter"].as_str().unwrap().len(),
-            64
-        );
         assert!(rows.iter().all(|row| row.get("value").is_none()));
     }
 }

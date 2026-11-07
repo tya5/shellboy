@@ -202,13 +202,11 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
 fn shell_fields(out: &mut Fields, shell: &Shell) {
     let Shell {
         describe_calls,
-        unknown_arguments,
         kind,
         executable,
         env,
     } = shell;
     out.plain(&["shell", "describe_calls"], describe_calls);
-    out.plain(&["shell", "unknown_arguments"], unknown_arguments);
     out.plain(&["shell", "kind"], kind);
     out.plain(&["shell", "executable"], executable);
     out.secret_map(&["shell", "env"], strings(env));
