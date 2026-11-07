@@ -4769,7 +4769,9 @@ impl UiState {
         view.connection = config.default_connection.clone();
         view.model = config.default_model.clone();
         if !view.explicit_effort {
-            view.effort = config.default_connection.as_ref()
+            view.effort = config
+                .default_connection
+                .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|connection| connection.default_effort.clone());
         }

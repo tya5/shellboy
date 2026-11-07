@@ -757,7 +757,9 @@ mod tests {
         let old_family = endpoint_family_key(&config).unwrap();
         let db = next_delay_db();
         add_space(&db, "stage_c_saved_space", "active", &old_profile);
-        set_meta(&db, IndexKeys::ACTIVE_SPACE, "stage_c_saved_space").unwrap();
+        let tx = db.unchecked_transaction().unwrap();
+        set_meta(&tx, IndexKeys::ACTIVE_SPACE, "stage_c_saved_space").unwrap();
+        tx.commit().unwrap();
         let write_space = || {
             let key = profile_key(&config.current()).unwrap();
             read_write_space(&db, None, Some(IndexKeys::new(&key).splitter())).unwrap()
@@ -801,7 +803,10 @@ mod tests {
         assert_eq!(profile_key(&config.current()).unwrap(), old_profile);
         assert_eq!(endpoint_family_key(&config.current()).unwrap(), old_family);
         assert_eq!(write_space().as_deref(), Some("stage_c_saved_space"));
-        assert_eq!(meta(&db, IndexKeys::ACTIVE_SPACE).unwrap().as_deref(), Some("stage_c_saved_space"));
+        assert_eq!(
+            meta(&db, IndexKeys::ACTIVE_SPACE).unwrap().as_deref(),
+            Some("stage_c_saved_space")
+        );
         // A retained client remains usable as a value; no embedding request is sent by editing.
         assert_eq!(
             old_client.extra_digest(),
