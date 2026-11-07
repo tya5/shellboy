@@ -68,6 +68,21 @@ Resume point: all-OS CI on the final SHA, then owner review.
 ## Int8 index conversion (#253; on branch issue-253/int8-index-4, CI pending)
 
 `shellboy index shrink [--dry-run|--cancel]` (`index.shrink`) converts the active float32 space to a new int8 space without any API call, through the existing candidate lifecycle and index workers (`src/index/shrink.rs`, durable record `index.shrink.<space>`). Migration 33: nullable `index_space.int8_scale`, logical bytes by element size, index `chunks_job`. New embeddings and queries in that space use the saved scale and saturate at ±127. Shrink never deletes; old spaces with vectors, after a conversion or a rebuild, stay until `index remove --space ID`, and maintenance and `storage collect` take only discarded int8 candidates and empty spaces; a replaced rebuild candidate is kept as `partial` and cannot be selected. `index shrink --revert` switches back. Measurements: 1/4 scan bytes, 98.77% top-10 agreement on real vectors with chunks as proxy queries. The user's real database was read only (`mode=ro`) and not converted; the conversion there is the user's decision. Migration number may need renumbering if #222 stage 2 lands first. Not done: `/index` screen key, cold-cache timing, real-query quality. Resume: exact-tip default and all-OS CI.
+## Free-space guard and 50 GiB data limit (#261; on branch issue-261/disk-guard, CI pending)
+
+`limits.data_warning_bytes` / `data_max_bytes` default to 40 / 50 GiB. New `limits.disk_free_min_bytes`
+(default 5 GiB, positive; no relation to the data limits) holds new work in the same gate
+(`require_capacity_tx`, now also `require_capacity_with(db, config, free)`) when the volume holding
+`shellboy.db` has less free space: `storage_limit` with `details.reason = disk_free_low`
+(`logical_limit` for the data limit; the logical limit wins when both apply). The free value is read
+from the OS on every call (`src/gc/disk.rs`), no cache, no worker/queue. Unknown free space never
+holds. `storage status` adds `disk_free_min_bytes` and `disk_free_state` (`ok|warning|held|unknown`,
+warning below 2x the minimum); the TUI storage view carries the same as `physical_observation.sample.disk_guard`
+(no new glyph). Stop, terminal records, observation, GC and `storage collect` stay un-gated. Not
+stopped: commands a model's shell already runs. `src/control/driver.rs:1` comment fixed. Tests:
+`gc::disk::tests::*`, `low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns`,
+`disk_free_minimum_defaults_and_old_data_limits_still_load`. Cost and checks are in
+docs/validation/acceptance.md. Resume: exact-tip default and all-OS CI.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 

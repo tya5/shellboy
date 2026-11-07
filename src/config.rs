@@ -475,8 +475,9 @@ section!(positive "limits", Limits {
     tool_excerpt_bytes: u64 = 16 * 1024,
     shell_stdin_bytes: u64 = MIB,
     draft_bytes: u64 = MIB,
-    data_warning_bytes: u64 = 8 * GIB,
-    data_max_bytes: u64 = 10 * GIB
+    data_warning_bytes: u64 = 40 * GIB,
+    data_max_bytes: u64 = 50 * GIB,
+    disk_free_min_bytes: u64 = 5 * GIB
 });
 section!(Cache {
     body_bytes: u64 = 32 * MIB,

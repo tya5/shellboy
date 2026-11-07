@@ -3873,3 +3873,17 @@ single-transaction story. Impact: `parent_change` is an optional additional fiel
 `ThreadDetails`. Recheck when: users need to move many Threads at once (a bulk form), a TUI
 move key is asked for, models re-parent Threads they do not own in practice (a caller rule would
 then be reconsidered), or trees deeper than 1,024 appear.
+## D-261-1: Free-space gate reads the OS on every check (2026-11-07)
+
+Decision: `require_capacity_tx` calls `fs2::available_space` on the directory of the connection's
+database file every time, with no cached or sampled value. Why: measured in release on an empty
+temporary store (loaded machine), one call was 2.2 us against 6.5 us for the logical counters and
+15.1 us for the whole gate, so a cache buys nothing and a stale value could either let the disk fill
+or keep holding after space returned. Where it runs: the DB lane, per model/shell/child/summary/index
+start and index scheduling, never the UI thread. Accepted risk: on a hung network filesystem the
+call blocks the DB lane (same exposure as the existing `storage status` call, which has a worker
+deadline); local volumes are the supported case. Reason is `details.reason` on `storage_limit`, not a
+new error code, so every existing hold, pause and GC-signal path applies unchanged. Warning is
+twice the minimum, shown on storage surfaces only (no new TUI element). The 5 GiB default is a
+judgement, not a measurement; it is user-settable. Recheck when: a network-filesystem user reports
+DB-lane stalls, or free space reads are shown to be slow on a supported OS.

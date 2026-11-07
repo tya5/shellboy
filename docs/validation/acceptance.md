@@ -10370,3 +10370,20 @@ macOS ARM64 through `rust-slot`, temporary databases, local counting mock for em
 Real-vector measurements (read with `mode=ro` from the user's database into a temporary copy, deleted afterwards): [search and relations](../design/search-and-relations.md#int8-conversion-253). Those used the manual test `measure_conversion_on_a_vector_file` and a throwaway rank script that is not in the repository; rank agreement used exact in-memory L2 in NumPy, with the same quantization formula, not sqlite-vec. Reported through the `mode=ro` read: 44,038 chunks, all jobs done, active space state `paused`.
 
 Not verified: the user's real database (not converted, by instruction); real query vectors (chunks stood in for queries, so query saturation and real-query rank quality are unknown); cold-cache search time; the operation against a running owner on real data; Windows and Linux beyond CI (recorded with the final SHA); a real terminal for the operations screen entry.
+## Free-space guard (#261)
+
+Environment: macOS 26 arm64 (Darwin 25.3.0), Rust via rust-slot, a busy machine (two build slots).
+Free space is injected per temporary data directory in unit tests; no disk was filled and no user data
+or paid API was touched. Verified locally: gate holds below the minimum, passes at exactly the minimum,
+passes when free space is unknown, and returns distinct `reason` values (logical wins when both);
+`GcService::details` reports `ok`/`warning`/`held`/`unknown` and omits `filesystem_free_bytes` when unknown;
+the physical observation sample carries `disk_guard`; `collect` (raw and history) and observation work
+while held; a Turn held by the gate persists `disk_free_low` in its failure reason, an explicit `RunRetry`
+after space returns makes the same Turn runnable and the gate passes; a database opened through a symlinked
+directory resolves a volume; config defaults 40/50/5 GiB, old 8/10 GiB values still load, data_warning >=
+data_max and `disk_free_min_bytes=0` are rejected, 1 MiB is accepted. Cost (release, empty temporary store,
+mean of 20,000 calls, a single run on a loaded machine; the counter table has four rows regardless of data
+size): statvfs 2.2 us, logical counters 6.5 us, whole gate 15.1 us. Not verified: a real full or nearly full
+disk; a symlink onto a different volume (the test uses one volume); network filesystems; Windows and Linux
+local runs (CI is recorded with the final SHA); the TUI rendering of `disk_guard` in a real terminal (only
+the sample content is tested); real user data sizes.
