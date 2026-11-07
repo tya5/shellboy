@@ -44,6 +44,23 @@ async fn named_thread(control: &Arc<Control>, name: &str) -> String {
         .unwrap()
         .into()
 }
+// A completed Turn may still belong to a live Run until the driver's final boundary.
+// Subscribe before observing SQL so a fast Run-end notification cannot be lost.
+async fn completed_run(control: &Arc<Control>, thread: &str) {
+    settled(control, thread).await;
+    let mut events = control.subscribe();
+    loop {
+        let target = thread.to_owned();
+        let complete = control.store.database.call(move |db| Ok(db.query_row(
+            "SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state IN ('live','stopping'))",
+            [target], |r|r.get::<_,bool>(0))?)).await.unwrap();
+        if complete { return; }
+        match events.recv().await {
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+            Err(error) => panic!("Run completion stream closed: {error}"),
+        }
+    }
+}
 async fn recovery(control: &Arc<Control>, thread: &str) -> Value {
     settled(control, thread).await;
     let target = thread.to_owned();
@@ -87,7 +104,7 @@ async fn live_connections_swap_during_request_and_defaults_apply_without_restart
             .reply
             .send((200, answer("old client completed")))
             .unwrap();
-        settled(&control, &existing).await;
+        completed_run(&control, &existing).await;
         // The existing Thread keeps its chosen model, but its next POST uses the new endpoint.
         send(&control, &existing, "new request").await;
         let next = incoming(&control, &mut new_receive).await;
@@ -96,7 +113,7 @@ async fn live_connections_swap_during_request_and_defaults_apply_without_restart
         next.reply
             .send((200, answer("new client completed")))
             .unwrap();
-        settled(&control, &existing).await;
+        completed_run(&control, &existing).await;
         let fresh = thread(&control).await;
         send(&control, &fresh, "new defaults").await;
         let next = incoming(&control, &mut new_receive).await;
@@ -104,7 +121,7 @@ async fn live_connections_swap_during_request_and_defaults_apply_without_restart
         next.reply
             .send((200, answer("new defaults completed")))
             .unwrap();
-        settled(&control, &fresh).await;
+        completed_run(&control, &fresh).await;
         let got = request(&control, Command::ConfigGet(ConfigGetArgs {})).await;
         assert_eq!(got["loaded"]["values"]["default_connection"], "next");
         assert_eq!(got["loaded"]["values"]["default_model"], "new-model");
@@ -145,7 +162,7 @@ async fn live_connections_removal_during_run_preserves_response_and_recovers_wit
                 let retry = incoming(&control, &mut receive).await;
                 retry.reply.send((200, answer("retained Run client completed"))).unwrap();
             }
-            settled(&control, &target).await;
+            completed_run(&control, &target).await;
             let id = target.clone();
             let state: String = control.store.database.call(move |db| Ok(db.query_row(
                 "SELECT state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1", [id], |r|r.get(0))?)).await.unwrap();
@@ -207,7 +224,7 @@ async fn live_connections_config_and_credentials_writes_are_serialized() {
         next.reply
             .send((200, answer("concurrent writes complete")))
             .unwrap();
-        settled(&control, &target).await;
+        completed_run(&control, &target).await;
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -366,13 +383,13 @@ async fn live_connections_run_keeps_endpoint_body_and_retry_policy_across_tool_l
         let retry = incoming(&control, &mut old_receive).await;
         assert_eq!(retry.body["synthetic_generation"], "old");
         retry.reply.send((200, answer("old Run finished"))).unwrap();
-        settled(&control, &target).await;
+        completed_run(&control, &target).await;
         assert!(new_receive.try_recv().is_err());
         send(&control, &target, "new Run gets new generation").await;
         let fresh = incoming(&control, &mut new_receive).await;
         assert_eq!(fresh.body["synthetic_generation"], "new");
         fresh.reply.send((200, answer("new Run finished"))).unwrap();
-        settled(&control, &target).await;
+        completed_run(&control, &target).await;
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         old_server.abort();
@@ -398,7 +415,7 @@ async fn live_connections_run_pins_proactive_threshold_and_summary_endpoint() {
             let mut done=answer("saved prefix");
             done["usage"]=json!({"input_tokens":50,"output_tokens":1});
             incoming(&control,&mut old_receive).await.reply.send((200,done)).unwrap();
-            settled(&control,&target).await;
+            completed_run(&control,&target).await;
         }
         send(&control,&target,"tool before proactive summary").await;
         let pending=incoming(&control,&mut old_receive).await;
@@ -421,7 +438,7 @@ async fn live_connections_run_pins_proactive_threshold_and_summary_endpoint() {
             }
         }
         assert!(summaries>0,"new threshold=0 must not suppress this Run's pinned summary");
-        settled(&control,&target).await;
+        completed_run(&control,&target).await;
         assert!(new_receive.try_recv().is_err());
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();old_server.abort();new_server.abort();
     }).await.unwrap();
