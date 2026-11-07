@@ -10712,3 +10712,11 @@ Rust slot. Python 206 tests passed after advancing strict schema readers to vers
 classification and append-only record checks passed. The initial quota fixture omitted index metadata bytes; the
 corrected oracle includes them and passed after reopen. Incorrect zero-match storage/shrink filters are not counted
 as validation. Exact-tip CI remains the full-suite and migration handoff gate.
+
+### #267 first full-CI feedback
+
+Normal CI `42411973098` on `bc0cbc2933` failed migration compatibility fixtures: these construct older versions by
+removing historical schema objects from a fresh database, leaving the new lookup indexes present. Migration 35 now
+creates its two indexes idempotently, matching the fresh schema, and the explicit cache-diagnostic schema assertion
+advances to 35. These are treated as real missing migration coverage, not flaky tests. Focused migration reruns and
+a new exact-tip CI pair are required; the failed CI remains evidence and is not rerun.
