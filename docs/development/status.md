@@ -5187,3 +5187,17 @@ Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).
 every changed field reports that it needs a restart. There is no
 standalone edit path and no TUI form. Independent review fixes are on `issue-266/config-rw-2`. Resume point: exact-tip default and all-OS CI, then integration. The #265
 `config.get` item is covered by this. shellboy-studio has not been changed to use it.
+`config.get` item is covered by this. shellboy-web has not been changed to use it.
+
+## #269 Connection setup, stages A and B
+
+Implemented through the owner: `credentials.set`, `credentials.clear`, `connection.test` and the CLI `credentials set|clear`,
+`connection test`; `config.get` gains `credential_source` and `credentials_file`. Stored keys live in
+`credentials.toml` beside `config.toml` (`src/credential_store.rs`, `src/control/credential_ops.rs`); the lookup is in
+`Connection::credentials_with` and `HttpModelClient::headers`. No schema change, migration, table, worker, event, queue
+or dependency (D-269). A key stored now applies to the next request; a new or changed connection still needs an owner
+restart. Stage C (applying `connections` without a restart) is investigated and planned in D-269, not implemented.
+Branch `issue-269/connection-setup`; not pushed to main, no PR. Resume point: exact-tip default and all-OS CI, then
+integration, then the Studio screen against the shapes in the protocol design.
+Not claimed: Windows behaviour (permissions, `ReplaceFileW` on `credentials.toml`), a real terminal refusing a typed
+key, a real provider, shellboy-web/Studio use.

@@ -2,6 +2,7 @@
 mod change_clock;
 mod compact;
 mod config_ops;
+mod credential_ops;
 mod foreground;
 pub(crate) mod interruption;
 mod live;

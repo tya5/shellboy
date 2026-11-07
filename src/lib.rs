@@ -12,6 +12,7 @@ pub mod config_edit;
 pub mod config_setup;
 pub mod context;
 pub mod control;
+pub mod credential_store;
 pub mod deletion;
 pub mod diagnostics;
 mod digest;

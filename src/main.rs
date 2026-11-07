@@ -448,7 +448,14 @@ fn standalone_response(response: serde_json::Value) -> ExitCode {
     }
 }
 async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
-    let settings = matches!(cli.command, Some(CliCommand::Config { .. }));
+    let settings = matches!(
+        cli.command,
+        Some(
+            CliCommand::Config { .. }
+                | CliCommand::Credentials { .. }
+                | CliCommand::Connection { .. }
+        )
+    );
     let result = async {
         let command = cli
             .clone()
@@ -483,7 +490,7 @@ async fn run_owner(cli: Cli, cwd: &Path) -> ExitCode {
         }
         // No standalone edit path: without an owner there is no receipt or record.
         Err(error) if settings && error.code == ErrorCode::AppNotRunning => print_error(
-            error.hint("config get and config set need a running owner of this --data-dir, and nothing was changed. Start it, or edit the file by hand and run shellboy config check"),
+            error.hint("config get, config set, credentials and connection test need a running owner of this --data-dir, and nothing was changed. Start it, or edit the files by hand and run shellboy config check"),
             cli.operation_id,
         ),
         Err(error) => print_error(error, cli.operation_id),

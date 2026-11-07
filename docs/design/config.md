@@ -281,3 +281,67 @@ fits a change that doesn't affect the running owner.
 **No owner.** `config get` and `config set` fail with `app_not_running`, and the hint names the alternative.
 There is no standalone edit path, since it would have no receipt or record. `--config` is refused on both,
 because the file is the one the owner loaded. `config init` and `config check` remain standalone.
+
+## Stored API keys and connection test (#269)
+
+Stage A and B of the owner-side connection setup. A client (the Studio first-run screen, the CLI) can store a key,
+check a connection and see where each key comes from without a hand-edited TOML file. No new worker, table, event or
+queue: the file work runs on `AttachmentService::control_files()` under `config_write`, the catalog request reuses
+`HttpModelClient::models`, and the key is read by the lazy credential lookup in `Connection::credentials_with`.
+
+**Storage.** `credentials.toml` sits beside the loaded `config.toml` (`credential_store::path_beside`):
+
+```toml
+[connections.proxy]
+api_key = "..."
+```
+
+It is a separate file so the rule "no key in `config.toml`" stays true and `config.get`'s `content_hash` never covers a
+key. The value is **plain text**: treat the file like a password in a dotfile. Unix creates it `0600` and a save
+corrects a looser mode (`permissions_tightened` says so). The save is a temporary file in the same directory, `sync_all`,
+then the replace used by `config.set` (`rename`; `ReplaceFileW` on Windows with the same interrupted-replace recovery).
+On Windows no mode bits exist and Shellboy changes no ACL: the file gets the directory's default permissions (the user
+profile's), and an existing file keeps its ACL through `ReplaceFileW`. This is stated as a fact from the API; the
+Windows branch has not been run for this change. There is no keychain integration (decided outside this issue).
+Unknown keys, a non-table `connections`, a file over 64 KiB or invalid UTF-8 make the file invalid: it is never
+rewritten, and the error names a line number only, because the TOML libraries quote source text in their messages and
+those messages are dropped.
+
+**Lookup.** Per request, in `HttpModelClient::headers`: the variable named by `api_key_env` if it has a non-blank value,
+else the stored key of this connection name, else the old `MissingCredential` error (same text). The file is opened
+only when the environment supplies nothing, with `tokio::fs` and a 64 KiB bound, so a new or replaced key applies to
+the next request with no restart. The key goes in the same header as before (`api_key_header` or `Authorization:
+Bearer`). A connection without `api_key_env` can use a stored key too, unless `headers` already defines
+`Authorization`: the explicit header wins and `credentials.set` refuses (`stored_key_allowed`). `api_key_header`
+still requires `api_key_env`, as validation says, so a preset that needs `x-api-key` sets both.
+
+**What leaves the owner.** `credentials.set` takes the value, and no operation returns it. `ConnectionTestArgs`,
+`CredentialsSetArgs` and `HttpModelClient` have hand-written `Debug`; `Connection` carries only the file's path. Errors
+are fixed strings and never carry a value, a line or a parser excerpt. The saved request hash of `credentials.set` uses a
+digest of the value salted with a per-process random string, so `operation_receipt` holds nothing an offline guess could
+confirm; the receipt result is the reply below. The diagnostic `config_changed` records `credentials.<connection>` as the
+field name. `HttpModelClient` adds the key to its `secrets` list, so a provider that echoes it in an error body is masked
+as for any other credential, and `connection.test` does not return provider text at all. The CLI reads the key from
+standard input and refuses a terminal; there is no argument that carries it.
+
+**Key source in `config.get`.** `loaded.credential_source` and `file.credential_source` map each connection name to
+`"env"` (the variable has a value in the owner's environment), `"stored"` (an entry exists and is usable) or `"none"`.
+It states presence, never validity, value or length. `credentials_file` gives `path`, `present`, `valid` and an
+`error` that names no content. `config.get` reads the file each time; the in-memory `Config::stored_keys` (names only,
+shared by clones) feeds `config_setup::report` so the setup hints on the UI thread need no file I/O. It starts from the
+file at load and follows `credentials.set` / `credentials.clear`; a hand edit shows only after a restart.
+
+**`connection.test`.** Read-only (no receipt), cancellable. It takes either a saved connection name or a candidate
+(`base_url`, `api`, `api_key` or `api_key_env`, `api_key_header`, `ssl_verify`). A saved name is resolved from the
+configuration **file** (what the next start will load, so a connection just added by `config.set` can be tested),
+falling back to the loaded one. It sends the same bounded model-catalog GET as `config check` once, through a fresh
+`HttpModelClient`, and nothing else. The reply holds facts: `sent`, `ok`, `http_status` (null when no response),
+`failure` (null, or one of `auth`, `url`, `rate_limited`, `server`, `http_status`, `timeout`, `unreachable`,
+`credential_missing`, `invalid_configuration`, `cancelled`, `response`), `models` (sorted, at most 1000 and 256 KiB;
+`model_count` is the full count and `models_truncated` says so), and `credential` (`source` env/stored/inline/none,
+`api_key_env`, `env_set`). Success means a catalog answered; it never says the key is valid. A 401 is `auth`, a 404 is
+`url` (the API root is probably wrong), and a variable that is unset in the owner is `credential_missing` without a
+request. An inline key replaces every other source for that one client and is kept nowhere.
+
+**Not here (stage C).** `connections` changes still need an owner restart; see the stage C plan in the issue and the
+decision record.

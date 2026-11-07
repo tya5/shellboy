@@ -1992,7 +1992,10 @@ impl OperationId {
             Command::OwnerShutdown(_)
             | Command::EventsWait(_)
             | Command::ConfigGet(_)
-            | Command::ConfigSet(_) => return None,
+            | Command::ConfigSet(_)
+            | Command::CredentialsSet(_)
+            | Command::CredentialsClear(_)
+            | Command::ConnectionTest(_) => return None,
             Command::Status(_) => Self::Status,
             Command::ModelList(_) => Self::ModelList,
             Command::ThreadList(_) => Self::ThreadList,
