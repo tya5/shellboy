@@ -157,11 +157,6 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     if cwd {
         extra(format!("t.cwd=?{}", 5 + tags));
     }
-    let predicate = if predicate.is_empty() {
-        String::new()
-    } else {
-        format!("{predicate} AND ")
-    };
     let window = "t.rowid<=?1
       AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
       ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4";
