@@ -62,6 +62,32 @@ async fn expected_reply_cap_is_128_and_replay_is_not_a_new_duty() {
 }
 
 #[tokio::test]
+async fn human_questions_share_the_128_pending_reply_cap() {
+    let (_root, store) = fixture().await;
+    for _ in 0..127 {
+        store.execute(request(send(true)), None).await.unwrap();
+    }
+    let origin = Origin {
+        instance_id: "fixture".into(),
+        thread_id: "sender".into(),
+        run_id: "run".into(),
+        turn_id: "turn".into(),
+        execution_id: "shell".into(),
+        token: "synthetic".into(),
+    };
+    let ask = || Command::MessageAsk(MessageAskArgs {
+        thread_id: None,
+        text: "Choose A or B".into(),
+    });
+    store.execute(request(ask()), Some(origin.clone())).await.unwrap();
+    assert_eq!(
+        store.execute(request(ask()), Some(origin)).await.unwrap_err().code,
+        ErrorCode::InputLimit
+    );
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn reply_requires_applied_pending_and_is_idempotent() {
     let (_root, store) = fixture().await;
     let accepted = store
