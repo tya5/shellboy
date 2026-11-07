@@ -368,6 +368,8 @@ async fn permanent_adoption_error_is_typed_recovers_and_leaves_no_partial_attemp
 async fn client_initialization_failure_recovers_once_instead_of_rekicking_preparation() {
     let (root, mut owner, old_control, accepted) = fixture("http://127.0.0.1:1/v1").await;
     drop(old_control);
+    // A fresh synthetic owner registry is needed: Control clones share its live registry.
+    owner.loaded.config.live_connections = Default::default();
     // Loaded production config is validated; inject a constructor failure
     // without changing a credential, process-global env, or live owner.
     owner
