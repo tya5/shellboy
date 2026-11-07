@@ -555,3 +555,32 @@ async fn failed_failure_marker_save_still_releases_enqueue_barrier() {
     .unwrap();
     db.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn low_disk_holds_indexing_without_a_pause_or_discarding_the_queue() {
+    let (root, db, service) = fixture("http://127.0.0.1:9/v1".into()).await;
+    assert_eq!(
+        service
+            .enqueue_new(&["source".into()])
+            .await
+            .unwrap()
+            .segments,
+        1
+    );
+    // Injected free space for this temporary directory; below the 5 GiB default.
+    crate::gc::force_free_for_test(root.path(), Some(1 << 30));
+    assert!(!service.process_one(CancellationToken::new()).await.unwrap());
+    assert!(service.capacity_allowed("k").await.unwrap() == Gate::DiskLow);
+    assert!(service.disk_held.load(Ordering::Relaxed));
+    let held = service.status(IndexArgs::default()).await.unwrap();
+    assert!(!held.paused, "a transient hold saves no pause");
+    assert_eq!((held.pending, held.running, held.failed), (1, 0, 0));
+    // Space returns: the gate opens, the queue is intact and nothing was discarded.
+    crate::gc::force_free_for_test(root.path(), Some(100 << 30));
+    assert!(service.capacity_allowed("k").await.unwrap() == Gate::Open);
+    assert!(!service.disk_held.load(Ordering::Relaxed));
+    let after = service.status(IndexArgs::default()).await.unwrap();
+    assert!(!after.paused);
+    assert_eq!((after.pending, after.failed), (1, 0));
+    db.shutdown().await.unwrap();
+}
