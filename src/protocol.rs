@@ -1686,7 +1686,7 @@ mod message_acknowledgement_tests {
     }
 
     #[test]
-    fn acknowledgement_delivery_mode_is_typed_defaults_next_and_keeps_unknown_field_rejection() {
+    fn acknowledgement_delivery_mode_is_typed_defaults_next_and_accepts_additive_fields() {
         let mut wire = serde_json::json!({"message_id":"message","thread_id":"thread","delivery_status":"accepted","assignment":"new_run","run_id":"run","turn_id":"turn","deliver":"now"});
         let accepted: MessageAccepted = serde_json::from_value(wire.clone()).unwrap();
         accepted.validate().unwrap();
@@ -1699,7 +1699,8 @@ mod message_acknowledgement_tests {
                 .deliver,
             Deliver::Next
         );
-        wire["unknown_delivery_flag"] = serde_json::json!(true);
-        assert!(serde_json::from_value::<MessageAccepted>(wire).is_err());
+        wire["future_delivery_flag"] = serde_json::json!(true);
+        let additive: MessageAccepted = serde_json::from_value(wire).unwrap();
+        assert_eq!(additive.deliver, Deliver::Next);
     }
 }
