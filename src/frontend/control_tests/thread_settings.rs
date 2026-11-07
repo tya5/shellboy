@@ -38,6 +38,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         auto_compact_at: None,
         segment_chars: None,
         reduce_rounds: None,
+        parent_id: None,
     };
     // Exercise both the title-only fast path and full settings path through
     // external requests, never the frontend's local ThreadSet success shortcut.

@@ -172,6 +172,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         run_id: row.get(8)?,
         turn_id: row.get(9)?,
         recovery_reason: row.get(10)?,
+        parent_change: None,
         children_count: row.get::<_, i64>(11)? as u64,
         shells_count: row.get::<_, i64>(12)? as u64,
         usage_totals: None,

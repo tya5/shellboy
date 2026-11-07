@@ -205,3 +205,7 @@ reason).
 - Ctrl+G: 一覧とアーカイブ一覧を切り替える。切替えで行を捨てて新しい世代で再取得し、選択は引き継がない。アーカイブ一覧の枠題は「アーカイブ済みの会話 / Archived conversations」とし、新しいglyphは使わず語で示す。`/threads`を開き直すと既定の一覧へ戻る。Watchはアーカイブを理由に隠さない（実行中の作業を見失わないため）。
 - 既存の割当てと衝突しない: 一覧が使う他のキーはEsc、矢印、Home/End、PgDn、Enter、F1、Tab、Delete/Ctrl+D、Ctrl+R、Watch内のCtrl+S、Alt+R、Alt+Oで、文字とBackspaceは絞込み、全体ではCtrl+Q、Ctrl+C、F2を保つ。
 - 変更通知: 実行結果は通常のchanged Threadで届き、既存のpatchが行を一覧から外す（または戻す）。patchはアーカイブmodeで所属を判定し、古いpageが外した行を戻さない既存のrow version規則に従う。Info（F1）は`archived_at`を表示する。
+
+## 親の付け替え（Issue #222 段階2）
+
+`thread.set`の`parent_id`（F8「会話 | 設定」の`親会話`、空=変更なし、`none`=親なし）で、Threadを部分木ごと別の親の下へ移す。専用キーは持たない。実行結果は移動したThread・旧親・新親の3件をchanged Threadとして届け、既存のpatchが行をrow versionで取り直し、lineage cacheは旧親側と新親側の両方を無効化する。一覧の木（▾/▸、├─/└─、欠けた親・循環の表示）は取得した行から毎回投影するため、移動後の木は再取得で正しくなる。アーカイブ済みの親の下へ移すと、子は一覧で既存の「この一覧にない親」の表示になる。新しいglyphは使わない。

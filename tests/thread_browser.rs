@@ -220,3 +220,60 @@ fn a_failed_new_filter_cannot_reuse_the_old_filter_cursor() {
     assert!(ui.threads_next_cursor().is_none());
     assert!(key(&mut ui, KeyCode::PageDown).is_empty());
 }
+
+#[test]
+fn a_patched_parent_moves_the_whole_subtree_in_the_tree() {
+    let mut ui = open();
+    page(
+        &mut ui,
+        None,
+        vec![
+            item("a", None),
+            item("b", None),
+            item("c", Some("a")),
+            item("d", Some("c")),
+        ],
+        None,
+    );
+    let order = |ui: &UiState| {
+        ui.threads()
+            .iter()
+            .map(|row| row.thread_id.clone())
+            .collect::<Vec<_>>()
+    };
+    let visible_before = order(&ui);
+    assert!(visible_before.contains(&"c".to_owned()));
+    // `thread set --parent b` on c: the patch carries c's new parent (a fresh read sequence).
+    let patch = shellboy::ui::thread_patch::BrowserPatch {
+        generation: ui.list_generation(),
+        read_sequence: 5,
+        rows: vec![item("c", Some("b"))],
+        display_times: vec![],
+        missing_ids: vec![],
+        limited_titles: vec![],
+        excerpt: None,
+        watch_summaries: vec![],
+    };
+    ui.apply(UiUpdate::BrowserPatch {
+        patch: Box::new(patch),
+    });
+    let parent_of = |ui: &UiState, id: &str| {
+        ui.threads()
+            .iter()
+            .find(|row| row.thread_id == id)
+            .and_then(|row| row.parent_id.clone())
+    };
+    assert_eq!(parent_of(&ui, "c").as_deref(), Some("b"));
+    assert_eq!(parent_of(&ui, "d").as_deref(), Some("c"));
+    // Walking the visible tree from `b` reaches the moved subtree; `a` has no children left.
+    key(&mut ui, KeyCode::Home);
+    let mut seen = vec![selected(&ui).to_owned()];
+    for _ in 0..3 {
+        key(&mut ui, KeyCode::Down);
+        seen.push(selected(&ui).to_owned());
+    }
+    let position = |id: &str| seen.iter().position(|s| s == id).unwrap();
+    assert_eq!(seen.len(), 4);
+    assert_eq!(position("c"), position("b") + 1, "{seen:?}");
+    assert_eq!(position("d"), position("c") + 1, "{seen:?}");
+}

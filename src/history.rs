@@ -104,6 +104,7 @@ impl History {
                             children_count: 0,
                             shells_count: 0,
                             recovery_reason: None,
+ parent_change: None,
                         })
                     },
                 )?;

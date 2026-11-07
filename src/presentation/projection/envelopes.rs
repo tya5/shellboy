@@ -88,6 +88,7 @@ fn event(
             | "child_report" => EventClass::Change,
             "index_state"
             | "thread_settings"
+            | "thread_parent"
             | "settings_changed"
             | "connection_changed"
             | "model_changed"

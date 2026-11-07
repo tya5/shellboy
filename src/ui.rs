@@ -8783,6 +8783,7 @@ mod tool_refresh_tests {
             children_count: 0,
             shells_count: 0,
             recovery_reason: None,
+            parent_change: None,
             context: None,
             context_usage: None,
             usage_totals: None,

@@ -483,6 +483,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
             model: Some("other-model".into()),
             effort: None,
             title: None,
+            parent_id: None,
         })),
     )
     .await;

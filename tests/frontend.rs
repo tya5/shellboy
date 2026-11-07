@@ -1099,6 +1099,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
                 model: None,
                 effort: None,
                 cwd: None,
+                parent_id: None,
             })),
         ))
         .await;
@@ -2687,6 +2688,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
                 model: None,
                 effort: None,
                 cwd: None,
+                parent_id: None,
             })),
         ))
         .await;

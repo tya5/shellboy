@@ -974,6 +974,7 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
             glyphs::WAIT
         }
         "thread_settings"
+        | "thread_parent"
         | "connection_changed"
         | "model_changed"
         | "settings_changed"

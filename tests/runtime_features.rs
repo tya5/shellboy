@@ -1085,6 +1085,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
             connection: None,
             model: Some("changed-model".into()),
             effort: Some("low".into()),
+            parent_id: None,
         })),
     )
     .await;
@@ -1152,6 +1153,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
                     model: Some(model.into()),
                     effort: None,
                     cwd: None,
+                    parent_id: None,
                 })),
             )
             .await;

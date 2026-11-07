@@ -779,8 +779,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::ThreadSet => local!(
             language,
-            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイルを変更します。",
-            "Change a Thread's display title, working folder, connection, model, reasoning effort, and instruction file."
+            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイル、親Threadを変更します。",
+            "Change a Thread's display title, working folder, connection, model, reasoning effort, instruction file, and parent Thread."
         ),
         OperationId::MessageReply => local!(
             language,
@@ -1246,8 +1246,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Parent => local!(
             language,
-            "新しい会話の親Threadです。省略時は親のない会話になります。",
-            "Parent Thread of the new conversation. Omit for a conversation without a parent."
+            "会話作成では新しい会話の親Threadです（省略時は親なし）。設定変更では付け替え先の親Threadで、空文字（フォームではnone）で親なしにします。実行中のRunの所有者は変わりません。",
+            "On create: the parent Thread of the new conversation (omit for none). On set: the Thread to move this one under; an empty string (none in the form) detaches it. Live Runs keep their owner."
         ),
         FieldId::Message => local!(
             language,

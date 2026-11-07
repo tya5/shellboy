@@ -1,7 +1,7 @@
 # Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
-Status: **study; stage 1 (archive) adopted and implemented** (2026-11-06, issue
-#222, migration 32). Stages 2-4 are not adopted: nothing in them changes the
+Status: **study; stage 1 (archive, migration 32) and stage 2 (re-parent, no schema
+change) adopted and implemented** (2026-11-06/07, issue #222). Stages 3-4 are not adopted: nothing in them changes the
 adopted design until the user accepts the stage. Code references are to
 `origin/main` at `cbd4c76edf`.
 
@@ -391,8 +391,42 @@ adopted design for stage 1; the sections above remain the study.
 - TUI: Ctrl+A archives (with descendants, no confirmation: reversible) or, in the
   archived list, unarchives; Ctrl+G toggles the archived list. See
   [thread browser](thread-browser.md). Watch is unaffected.
-- Not done: pin, tags, re-parent (stages 2-4), automatic archiving, archive state
+- Not done: pin, tags (stages 3-4), automatic archiving, archive state
   in `/branches`, and the archived marker in the TUI header.
+
+## Stage 2 as implemented (re-parent, no schema change)
+
+Follows §3 with these concrete choices (decision D-222-2).
+
+- Wire: `thread.set` gains `parent_id` (`ThreadSetArgs`, skipped on the wire when absent). A
+  Thread ID moves the Thread under that Thread; the empty string detaches it. CLI
+  `thread set --parent ID|''`; F8 `会話 | 設定` field `親会話` (empty = unchanged, `none` = no
+  parent). The field combines with the other `thread set` fields in one transaction (the
+  move runs first; any later failure rolls it back). No new command, table, worker or queue.
+- Checks run in the write transaction on the single DB worker (`src/control/db/reparent.rs`):
+  the Thread and the new parent exist and are not deleted (`thread_not_found`); a Thread cannot
+  be its own parent and the new parent cannot be inside the Thread's own subtree
+  (`invalid_state`); the ancestor walk from the new parent follows primary keys for at most
+  1,024 steps and a longer chain, including a stored cycle above the parent, is `input_limit`.
+  The walk passes through deleted ancestors too, so the check is conservative. Archived Threads
+  can be parents. There is no caller restriction (§2). Setting the current parent again is a
+  no-op: no revision bump, no context entry, nothing published.
+- Effects: `parent_thread_id` and `revision` change; `updated_at` does not. A
+  `thread_parent` context entry records `{before:{parent_id}, after:{parent_id}}` and is shown
+  like a settings change (same glyph, no new one). Inherited settings are not copied.
+- Live work: nothing is touched. `run.owner_run_id`, shells, waits and pending replies are
+  unchanged; replies follow the receipt's recorded sender, and wait cycles follow the owner
+  chain, neither reads `parent_id`. The result's `parent_change` reports the previous parent
+  and the Thread's live Run with its owner so the caller sees who still controls it. The new
+  parent is refused with "child Run is owned by another live parent Run" until that Run ends;
+  its later send then owns the next Run. The old owner keeps the notices and the stop cascade (any caller may stop or retry a Run).
+- Change hints: `changed_threads` is the moved Thread, the old parent and the new parent, in
+  that order (deduplicated), so lineage caches and `events.wait` clients refresh both sides.
+- Bounds: the walk (1,024 steps) is the only loop; one UPDATE and one context row per call;
+  `thread.set` stays in the writer-bound exemption list because the call is O(1,024) at most.
+- Not done: ownership transfer of live Runs, retry authority aligned with stop, a TUI move key
+  or drag gesture, moving several Threads in one call (use one call per Thread; the Web UI
+  can repeat it).
 
 ## Risks
 

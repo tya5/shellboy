@@ -323,6 +323,7 @@ impl ThreadSetArgs {
             && self.auto_compact_at.is_none()
             && self.segment_chars.is_none()
             && self.reduce_rounds.is_none()
+            && self.parent_id.is_none()
         {
             Err(invalid("thread.set requires a change"))
         } else {

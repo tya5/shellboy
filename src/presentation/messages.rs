@@ -894,9 +894,8 @@ pub fn event_title(kind: &str, language: UiLanguage) -> &str {
         "app_shutdown" => "Saved shutdown record",
         "turn_started" => "Turn started",
         "run_started" => "Run started",
-        "thread_settings" | "connection_changed" | "model_changed" | "settings_changed" => {
-            "Connection / settings changed"
-        }
+        "thread_settings" | "thread_parent" | "connection_changed" | "model_changed"
+        | "settings_changed" => "Connection / settings changed",
         "instructions_observed" | "instruction_changed" | "agents_changed" | "agents_reference" => {
             "Instruction files updated"
         }
@@ -946,6 +945,8 @@ fn field_label(field: &str, language: UiLanguage) -> &str {
         (UiLanguage::Ja, "cwd") => "作業場所",
         (UiLanguage::En, "effort") => "Reasoning effort",
         (UiLanguage::Ja, "effort") => "推論effort",
+        (UiLanguage::En, "parent_id") => "Parent Thread",
+        (UiLanguage::Ja, "parent_id") => "親会話",
         (UiLanguage::En, "title") => "Title",
         (UiLanguage::Ja, "title") => "件名",
         (UiLanguage::En, "path") => "Instruction file",

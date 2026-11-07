@@ -54,6 +54,16 @@ queue or worker change; existing vectors and already-queued jobs are untouched. 
 docs/validation/acceptance.md. CI results are the Actions runs on the branch tip. Resume:
 owner review; the owner decides when to restart with the new default and whether to backfill
 anything. After #253 lands, regenerate `scripts/dev/language-classifications.json` on rebase.
+## Thread re-parenting (#222 stage 2; on branch issue-222/reparent, CI pending)
+
+`thread set --parent ID|''` (wire `thread.set.parent_id`, F8 `親会話`) moves a Thread with its subtree
+under another live Thread or detaches it. No schema change. Cycle check by a bounded ancestor
+walk (1,024 steps) in the write transaction; live Runs keep their owner (no ownership transfer);
+`changed_threads` is the moved Thread, old parent and new parent; `updated_at` is untouched; a
+`thread_parent` context entry is recorded; the result carries `parent_change`. Docs: cli-reference,
+tui, thread-browser, protocol, delegation (retry wording), agent-guide, thread-organization
+"Stage 2 as implemented"; decision D-222-2. Not started: stage 3 (tags), stage 4 (pin).
+Resume point: all-OS CI on the final SHA, then owner review.
 
 ## Chat follows by change hints (#243 stage C; on branch issue-243/chat-events, CI pending)
 
