@@ -8,8 +8,8 @@ reads because saved summary records have no model ID; those counts/tokens are
 explicitly unknown rather than misattributed. `cargo check --locked --tests`, model
 aggregation/cursor and query-plan unit tests, CLI parser integration, and language
 audit passed (16 unrelated pre-existing pending literals). Default CI
-`42415912236` and all-OS CI `42415914964` passed on SHA
-`1f9479427ca7e3ced92fa722b9397e2113d59684`. Thread-level shell exit-code trends
+`42418119483` and all-OS CI `42418121708` passed on final SHA
+`e5ec97c09a3c71a0d5dca445d883063532596360`. Thread-level shell exit-code trends
 remain a separate stage.
 
 
