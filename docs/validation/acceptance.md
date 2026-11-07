@@ -10639,3 +10639,21 @@ regression now requires the current Run's retry to finish before the next Run re
 P2 is guarded by live TUI context resolution and a real `/model` event regression for addition, threshold change
 and removal. No real API, user database or OS clipboard is used. Passing results and exact-tip CI will be reported
 separately; this entry is a test/implementation record, not a claim of completed validation.
+
+### #269 W8 follow-up: focused results (2026-11-08 JST)
+
+At `c62571fda5` on macOS arm64, the shared-slot run rebuilt the crate roots and asserted the actual filtered test
+counts: lib live-connections 6 passed, integration live-connections 8 passed (including all five new review
+regressions), proactive fault boundaries 21 passed, model-picker 11 passed. `cargo check --locked --tests` and
+`cargo clippy --locked --all-targets -- -D warnings` passed. Python 206 tests, suite registration/watchdogs, language
+audit with existing classifications and append-only record checks passed. No real provider or user data was used.
+
+The retry fixtures initially waited for retries despite configuring zero retries; they now explicitly enable one
+old-generation retry and disable it in the replacement definition. A shared-target run reported zero matching live
+tests and is not counted as passing evidence. Rebuilding owned crate-root mtimes within the allocated slot and
+asserting 6/8 matching tests produced the passing results above. No unrelated source or artifact was removed.
+
+Run lifetime here means the current in-memory driver activation. Owner restart reconstructs a generation from the
+startup configuration; no connection generation is persisted for crash recovery. Performance, real-provider behavior
+and exhaustive concurrency schedules remain unverified. Full normal/all-OS CI results at the final source tip are
+reported separately; no historical CI is reused as proof of these review fixes.
