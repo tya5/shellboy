@@ -108,6 +108,10 @@ fn previously_missing_flags_have_typed_effects() {
     set(&mut send, "deliver", "now");
     set(&mut send, "expect_reply", "true");
     set(&mut send, "resume_recovery", "true");
+    assert!(matches!(
+        send.command(&c.cwd).unwrap(),
+        Command::MessageSend(args) if args.resume_recovery
+    ));
     assert!(
         matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.expect_reply&&args.resume_recovery&&args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
     );

@@ -1504,7 +1504,7 @@ impl Form {
                     f(
                         "resume_recovery",
                         "明示的に復旧待ちを再開",
-                        "false".into(),
+                        String::new(),
                         Boolean,
                     ),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
@@ -2614,7 +2614,7 @@ mod tests {
             (
                 OpKind::MessageSend,
                 "message.send",
-                json!({"thread_id":id(1),"text":"synthetic text","resume_recovery":true}),
+                json!({"thread_id":id(1),"text":"synthetic text"}),
             ),
             (
                 OpKind::MessageReply,
@@ -2822,6 +2822,7 @@ mod tests {
                 if field.value.is_empty() {
                     field.value = match field.name {
                         "text" | "query" => "synthetic text".into(),
+                        "resume_recovery" => "true".into(),
                         "space" => "space-id".into(),
                         "path" => "synthetic.txt".into(),
                         "attachment" => id(9),

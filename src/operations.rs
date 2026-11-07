@@ -770,6 +770,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         discovery: Discovery::None,
     },
     FieldSpec {
+        id: FieldId::ResumeRecovery,
+        default_origin: DefaultOrigin::None,
+        label: "復旧待ちを再開",
+        help: "外部送信者がrecovery_waitを明示的に解除します。通常の人間入力は常に再開します。",
+        kind: FieldType::Boolean,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
         id: FieldId::Deliver,
         default_origin: DefaultOrigin::None,
         label: "届けるとき",
@@ -1450,6 +1458,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::SenderLabel,
             FieldId::Deliver,
             FieldId::ExpectReply,
+            FieldId::ResumeRecovery,
             FieldId::Text,
         ],
     },
