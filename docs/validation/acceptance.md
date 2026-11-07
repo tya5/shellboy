@@ -10585,7 +10585,7 @@ On macOS, the synthetic temporary-database history execution-link test passed:
 list/window equality, unchanged existing fields, missing/invalid/sanitized labels,
 and identical indexed and unindexed query plans. The history-window module
 passed 7 tests; `cargo check --tests`, formatting, test layout, and language audit
-passed. Linux and Windows validation is pending CI; no real Web UI or user data
+passed. Linux and macOS validation is pending CI; no real Web UI or user data
 was used.
 
 ## #262 Human decisions
