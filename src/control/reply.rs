@@ -38,7 +38,15 @@ pub(crate) fn admission_notice_tx(
             json!({"kind":"reply","reply_to":original,"excerpt":excerpt.lines().next().unwrap_or("")}),
         )
     } else {
-        None
+        // A self-asserted label from a non-human sender, so a Thread can tell
+        // which front end sent the text. Never identity or authority.
+        let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
+        sender
+            .label
+            .filter(|label| !label.is_empty() && sender.kind != crate::protocol::SenderKind::Human)
+            .map(|label| {
+                json!({"kind":"sender_label","message_id":message,"label":label,"note":"label is self-asserted by the sender and not verified"})
+            })
     };
     if let Some(payload) = payload {
         append_notice_tx(
