@@ -5239,3 +5239,9 @@ claimed by this progress entry.
 Review identified mixed connection generations across a Run. The follow-up pins its start-time generation through
 admission, tool continuations, retry and automatic summaries; TUI current-generation threshold/model regressions are
 added. Focused local checks and exact-tip CI are pending. Earlier successful stage C CI did not establish this case.
+
+### #269 W8 follow-up focused validation (2026-11-08 JST)
+
+Run-pinned admission/body/summary/retry and TUI model/threshold regressions passed (6 lib + 8 integration), along
+with 21 proactive fault and 11 model-picker cases, check-tests, strict clippy and language audit. See acceptance for
+fixture corrections and shared-target evidence limits. Exact-tip normal and all-OS CI remain the handoff gate.
