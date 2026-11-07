@@ -288,6 +288,8 @@ mod tests {
                 cursor: None,
                 limit: 50,
                 archived: Default::default(),
+                tags: Vec::new(),
+                cwd: None,
             },
         )
         .unwrap();

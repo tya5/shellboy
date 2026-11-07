@@ -3,6 +3,7 @@ mod archive;
 mod execute_kind;
 mod reparent;
 mod run_action;
+mod tags;
 pub(crate) mod thread_summary;
 use crate::digest::sha256_hex as hash;
 use std::{
@@ -1341,6 +1342,7 @@ impl Store {
                 )?)
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
+            Command::ThreadTags(args) => MutationResult::value(tags::names(tx, args)?),
             Command::ThreadSet(args) => {
                 let mut result = self.set_thread(tx, args, caller, now)?;
                 if let Some(thread) = result.result["thread_id"].as_str().map(str::to_owned) {
@@ -1420,6 +1422,7 @@ impl Store {
             }
             Command::ThreadArchive(args) => archive::run(tx, args, caller, true, now),
             Command::ThreadUnarchive(args) => archive::run(tx, args, caller, false, now),
+            Command::ThreadTag(args) => tags::run(tx, args, caller),
             Command::ThreadDeletePreview(args) => {
                 MutationResult::value(crate::deletion::preview(tx, args)?)
             }
@@ -2170,7 +2173,8 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    details.tags = tags::for_thread(connection, id)?;
     details.context = Some(crate::context::for_thread(connection, id)?);
     details.last_end_message = crate::thread_observation::last_end_message(connection, id)?;
     details.last_input = crate::thread_observation::last_input(connection, id)?;
@@ -2323,13 +2327,17 @@ pub(crate) fn thread_list(
 ) -> Result<Page<ThreadSummary>> {
     let filter = args.query.as_deref().unwrap_or("");
     let needle = title_text(filter).to_lowercase();
+    // Tags and cwd narrow in SQL; the cursor is bound to them through a digest.
+    let tags = tags::normalize_all(&args.tags)?;
+    let cwd = args.cwd.as_deref();
+    let cursor_filter = list_cursor_filter(filter, &tags, cwd);
     let watermark: i64 = connection
         .query_row("SELECT COALESCE(MAX(rowid),0) FROM thread", [], |row| {
             row.get(0)
         })
         .map_err(sql_error)?;
     let (key, watermark) = if let Some(token) = &args.cursor {
-        let cursor = PageCursor::decode(token, list_scope(args.archived), filter, 0, None)?;
+        let cursor = PageCursor::decode(token, list_scope(args.archived), &cursor_filter, 0, None)?;
         (
             Some(cursor.last_sort_key),
             i64::try_from(cursor.watermark)
@@ -2347,20 +2355,21 @@ pub(crate) fn thread_list(
     // Filter against the same derived labels returned by ThreadGet/List. Keep
     // candidates as a cursor: a filtered miss scans without collecting history.
     let mut statement = connection
-        .prepare(&thread_summary::page_sql(args.archived))
+        .prepare(&thread_summary::page_sql(
+            args.archived,
+            tags.len(),
+            cwd.is_some(),
+        ))
         .map_err(sql_error)?;
-    let mut rows = statement
-        .query(params![
-            watermark,
-            last_time,
-            last_id,
-            if needle.is_empty() {
-                i64::from(args.limit) + 1
-            } else {
-                -1
-            }
-        ])
-        .map_err(sql_error)?;
+    let page_limit = if needle.is_empty() {
+        i64::from(args.limit) + 1
+    } else {
+        -1
+    };
+    let mut binds: Vec<&dyn rusqlite::ToSql> = vec![&watermark, &last_time, &last_id, &page_limit];
+    binds.extend(tags.iter().map(|tag| tag as &dyn rusqlite::ToSql));
+    binds.extend(cwd.iter().map(|path| path as &dyn rusqlite::ToSql));
+    let mut rows = statement.query(binds.as_slice()).map_err(sql_error)?;
     let mut items = Vec::new();
     while let Some(row) = rows.next().map_err(sql_error)? {
         let raw = thread_summary::decode(row).map_err(sql_error)?;
@@ -2386,7 +2395,7 @@ pub(crate) fn thread_list(
             PageCursor {
                 version: 1,
                 scope: list_scope(args.archived).into(),
-                filter: filter.into(),
+                filter: cursor_filter.clone(),
                 last_sort_key: serde_json::to_string(&(
                     last.updated_at.clone(),
                     last.thread_id.clone(),
@@ -2401,7 +2410,27 @@ pub(crate) fn thread_list(
     } else {
         None
     };
+    // One statement for the whole page: bounded by the page, not by the stored Threads.
+    let ids: Vec<String> = items.iter().map(|item| item.thread_id.clone()).collect();
+    let mut tagged = tags::for_threads(connection, &ids)?;
+    for item in &mut items {
+        item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
+    }
     Ok(Page { items, next_cursor })
+}
+
+/// The cursor's filter: the text query alone when nothing else narrows the list,
+/// otherwise the query plus a digest of the sorted tags and the cwd.
+fn list_cursor_filter(query: &str, tags: &[String], cwd: Option<&str>) -> String {
+    if tags.is_empty() && cwd.is_none() {
+        return query.to_owned();
+    }
+    let mut sorted = tags.to_vec();
+    sorted.sort();
+    format!(
+        "{query}\u{0}{}",
+        hash(json!({"tags": sorted, "cwd": cwd}).to_string().as_bytes())
+    )
 }
 
 pub fn message_details(connection: &Connection, id: &str) -> Result<MessageDetails> {
@@ -2715,6 +2744,9 @@ fn delete_thread(
             ],
         )
         .map_err(sql_error)?;
+        // Tags end with their Thread (#222): a deleted Thread leaves no tag name behind.
+        tx.execute("DELETE FROM thread_tag WHERE thread_id=?1", [id])
+            .map_err(sql_error)?;
         tx.execute("UPDATE attachment_delivery SET status='cancelled' WHERE thread_id=?1 AND status IN ('accepted','held')",[id]).map_err(sql_error)?;
         tx.execute("UPDATE receipt SET state='cancelled',hold_reason='target_unavailable',updated_at=?2 WHERE target_thread_id=?1 AND state IN ('accepted','held')",params![id,now]).map_err(sql_error)?;
     }
@@ -2972,7 +3004,7 @@ mod thread_list_plan_tests {
         let plans: Vec<String> = db
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                thread_summary::page_sql(ArchivedFilter::Exclude)
+                thread_summary::page_sql(ArchivedFilter::Exclude, 0, false)
             ))
             .unwrap()
             .query_map(params![100_i64, "", "", 50], |r| r.get(3))
@@ -3006,7 +3038,7 @@ mod thread_list_plan_tests {
     fn outer_plan(db: &Connection, mode: ArchivedFilter) -> Vec<String> {
         db.prepare(&format!(
             "EXPLAIN QUERY PLAN {}",
-            thread_summary::page_sql(mode)
+            thread_summary::page_sql(mode, 0, false)
         ))
         .unwrap()
         .query_map(params![100_i64, "", "", 50], |r| r.get(3))
@@ -3062,7 +3094,7 @@ mod thread_list_plan_tests {
             // Archived rows are the newest by `updated_at`: a residual filter would
             // have to walk past all of them before reaching one visible Thread.
             let mut statement = db
-                .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude))
+                .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude, 0, false))
                 .unwrap();
             let rows = statement
                 .query_map(params![1_000_000_i64, "", "", 50], |_| Ok(()))
@@ -3075,6 +3107,205 @@ mod thread_list_plan_tests {
         assert!(
             many < few + few / 4,
             "default page read grew with archived Threads: {few} -> {many} VM steps"
+        );
+    }
+
+    fn plan_of(db: &Connection, mode: ArchivedFilter, tags: usize, cwd: bool) -> Vec<String> {
+        let mut binds: Vec<rusqlite::types::Value> = vec![
+            100_i64.into(),
+            String::new().into(),
+            String::new().into(),
+            50_i64.into(),
+        ];
+        binds.extend((0..tags).map(|n| format!("tag{n}").into()));
+        if cwd {
+            binds.push("/work".to_owned().into());
+        }
+        db.prepare(&format!(
+            "EXPLAIN QUERY PLAN {}",
+            thread_summary::page_sql(mode, tags, cwd)
+        ))
+        .unwrap()
+        .query_map(rusqlite::params_from_iter(binds), |r| r.get(3))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap()
+    }
+
+    /// One filtered page in a database holding `unrelated` Threads of another cwd and
+    /// 40 tagged Threads (`tag0` on all, `tag1` on the first 30).
+    fn filtered_steps(unrelated: u32, tags: usize, cwd: bool) -> i32 {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(&format!(
+            "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{unrelated})
+             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+             SELECT printf('u%05d',x),'/other','','p','m',printf('2026-11-02T00:%02d:00Z',x%60) FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<40)
+             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+             SELECT printf('m%05d',x),'/work','','p','m',printf('2026-11-01T00:%02d:00Z',x) FROM n;
+             INSERT INTO thread_tag(thread_id,tag) SELECT id,'tag0' FROM thread WHERE id LIKE 'm%';
+             INSERT INTO thread_tag(thread_id,tag) SELECT id,'tag1' FROM thread WHERE id<='m00030' AND id LIKE 'm%';"
+        ))
+        .unwrap();
+        let mut binds: Vec<rusqlite::types::Value> = vec![
+            1_000_000_i64.into(),
+            String::new().into(),
+            String::new().into(),
+            21_i64.into(),
+        ];
+        binds.extend((0..tags).map(|n| format!("tag{n}").into()));
+        if cwd {
+            binds.push("/work".to_owned().into());
+        }
+        let mut statement = db
+            .prepare(&thread_summary::page_sql(
+                ArchivedFilter::Exclude,
+                tags,
+                cwd,
+            ))
+            .unwrap();
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(binds), |_| Ok(()))
+            .unwrap()
+            .count();
+        assert_eq!(rows, 21);
+        statement.get_status(rusqlite::StatementStatus::VmStep)
+    }
+
+    #[test]
+    fn tag_and_cwd_filters_read_their_own_index_never_the_whole_thread_table() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        for mode in [
+            ArchivedFilter::Exclude,
+            ArchivedFilter::Only,
+            ArchivedFilter::Include,
+        ] {
+            let plans = plan_of(&db, mode, 2, false);
+            if mode == ArchivedFilter::Exclude {
+                eprintln!(
+                    "EXPLAIN tags=2 exclude: {:#?}",
+                    plans
+                        .iter()
+                        .filter(|p| p.contains("g0")
+                            || p.contains("g1")
+                            || p.contains("SEARCH t ")
+                            || p.contains("TEMP B-TREE"))
+                        .collect::<Vec<_>>()
+                );
+                eprintln!(
+                    "EXPLAIN cwd exclude: {:#?}",
+                    plan_of(&db, mode, 0, true)
+                        .iter()
+                        .filter(|p| p.contains("SEARCH t ")
+                            || p.contains("SCAN t")
+                            || p.contains("TEMP B-TREE"))
+                        .collect::<Vec<_>>()
+                );
+            }
+            assert!(
+                plans
+                    .iter()
+                    .any(|p| p.contains("SEARCH g0") && p.contains("thread_tag_by_tag (tag=?)")),
+                "{mode:?} must start from the first tag's members: {plans:?}"
+            );
+            assert!(
+                plans
+                    .iter()
+                    .any(|p| p.contains("SEARCH t USING INDEX sqlite_autoindex_thread_1 (id=?)")),
+                "{mode:?} must reach each member by primary key: {plans:?}"
+            );
+            assert!(
+                plans
+                    .iter()
+                    .any(|p| p.contains("SEARCH g1") && p.contains("(thread_id=? AND tag=?)")),
+                "{mode:?} must probe each further tag by primary key: {plans:?}"
+            );
+            assert!(
+                !plans
+                    .iter()
+                    .any(|p| p.starts_with("SCAN t") || p.starts_with("SCAN g")),
+                "{mode:?} must not scan a Thread or tag table: {plans:?}"
+            );
+            let cwd = plan_of(&db, mode, 0, true);
+            assert!(
+                cwd.iter()
+                    .any(|p| p.contains("SEARCH t") && p.contains("threads_cwd_updated (cwd=?)")),
+                "{mode:?} must seek the cwd index: {cwd:?}"
+            );
+            assert!(
+                !cwd.iter()
+                    .any(|p| p.contains("TEMP B-TREE") || p.starts_with("SCAN t")),
+                "{mode:?} cwd page is already in list order: {cwd:?}"
+            );
+        }
+        let both = plan_of(&db, ArchivedFilter::Exclude, 1, true);
+        assert!(
+            both.iter().any(|p| p.contains("thread_tag_by_tag")),
+            "{both:?}"
+        );
+    }
+
+    #[test]
+    fn filtered_page_cost_does_not_grow_with_unrelated_threads() {
+        for (tags, cwd) in [(1, false), (2, false), (0, true), (2, true)] {
+            let (few, many) = (
+                filtered_steps(50, tags, cwd),
+                filtered_steps(6000, tags, cwd),
+            );
+            eprintln!(
+                "filtered page tags={tags} cwd={cwd}: 50 unrelated Threads {few} VM steps, 6000 unrelated Threads {many} VM steps"
+            );
+            assert!(
+                many < few + few / 10,
+                "tags={tags} cwd={cwd}: filtered page grew with unrelated Threads: {few} -> {many} VM steps"
+            );
+        }
+    }
+
+    #[test]
+    fn page_tags_and_name_pages_read_by_key_not_by_table_size() {
+        let measure = |unrelated: u32, members: u32| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{unrelated})
+                 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+                 SELECT printf('t%05d',x),'/','','p','m','2026-11-01T00:00:00Z' FROM n;
+                 INSERT INTO thread_tag(thread_id,tag) SELECT id,'x'||(rowid%64) FROM thread WHERE rowid<=50;
+                 WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{members})
+                 INSERT INTO thread_tag(thread_id,tag) SELECT printf('t%05d',x),'name'||printf('%02d',x%50) FROM n WHERE x>50;"
+            ))
+            .unwrap();
+            let ids: Vec<String> = (1..=50).map(|n| format!("t{n:05}")).collect();
+            let encoded = serde_json::to_string(&ids).unwrap();
+            let mut page = db.prepare(tags::FOR_THREADS_SQL).unwrap();
+            let rows = page.query_map([encoded], |_| Ok(())).unwrap().count();
+            assert_eq!(rows, 50);
+            let mut next = db.prepare(tags::NEXT_NAME_SQL).unwrap();
+            let mut after = String::new();
+            for _ in 0..40 {
+                after = next
+                    .query_row([&after], |row| row.get::<_, String>(0))
+                    .unwrap();
+            }
+            (
+                page.get_status(rusqlite::StatementStatus::VmStep),
+                next.get_status(rusqlite::StatementStatus::VmStep),
+            )
+        };
+        let (small, large) = (measure(200, 200), measure(8000, 8000));
+        eprintln!(
+            "page tags (50 Threads) / 40 name seeks: 200 Threads {small:?} VM steps, 8000 Threads {large:?} VM steps"
+        );
+        assert!(
+            large.0 < small.0 + small.0 / 10,
+            "page tags grew with stored Threads: {small:?} -> {large:?}"
+        );
+        assert!(
+            large.1 < small.1 + small.1 / 10,
+            "name page grew with tag membership: {small:?} -> {large:?}"
         );
     }
 }
@@ -3105,6 +3336,8 @@ mod activity_list_tests {
                     cursor,
                     query: None,
                     archived: Default::default(),
+                    tags: Vec::new(),
+                    cwd: None,
                 },
             )
             .unwrap();

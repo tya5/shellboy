@@ -3422,6 +3422,7 @@ mod tests {
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
             archived_at: None,
+            tags: Vec::new(),
             last_end_message: None,
             last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
@@ -4258,6 +4259,7 @@ mod tests {
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
             archived_at: None,
+            tags: Vec::new(),
             last_end_message: None,
             last_input: None,
             activity: crate::activity::ActivityPhase::Idle,
@@ -4502,6 +4504,7 @@ mod patch_tests {
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
             archived_at: None,
+            tags: Vec::new(),
             last_end_message: None,
             last_input: None,
             thread_id: id.into(),
@@ -5242,6 +5245,7 @@ mod archive_tests {
             revisit: None,
             updated_at: "2026-10-01".into(),
             archived_at: archived.then(|| "2026-11-06T00:00:00Z".into()),
+            tags: Vec::new(),
             excerpt: String::new(),
         }
     }
@@ -5536,6 +5540,7 @@ mod watch_integration_tests {
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
             archived_at: None,
+            tags: Vec::new(),
             last_end_message: None,
             last_input: None,
             thread_id: id.into(),
@@ -6257,6 +6262,7 @@ mod language_tests {
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
             archived_at: None,
+            tags: Vec::new(),
             last_end_message: None,
             last_input: None,
             revisit: None,

@@ -63,6 +63,10 @@ column and two partial list indexes; archive is organization metadata only. See
 Re-parenting (#222 stage 2, no schema change) lets `thread set --parent` move a Thread under another live
 Thread or detach it; live Run ownership is never transferred. See the same documents.
 
+Conversation schema34 (#222 stage 3) adds the `thread_tag` table, its `(tag, thread_id)` index and the partial
+`threads_cwd_updated` index: `thread tag`, `thread tags`, `thread list --tag/--cwd` and `tags` in `thread list`/`thread get`.
+Tags and the cwd filter are organization metadata only. See [thread organization](thread-organization.md).
+
 Conversation schema33 (#253) adds the nullable `index_space.int8_scale` column;
 logical index bytes follow the element size. Explicit, API-free conversion of the
 active space to int8: [search and relations](search-and-relations.md#int8-conversion-253).

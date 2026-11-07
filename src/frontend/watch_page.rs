@@ -699,6 +699,8 @@ mod tests {
                     cursor: cursor.clone(),
                     query: None,
                     archived: Default::default(),
+                    tags: Vec::new(),
+                    cwd: None,
                 },
             )
             .unwrap();

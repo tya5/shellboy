@@ -161,6 +161,8 @@ impl Session {
                     cursor: None,
                     query: None,
                     archived: Default::default(),
+                    tags: Vec::new(),
+                    cwd: None,
                 }),
                 None,
                 self.origin.clone(),

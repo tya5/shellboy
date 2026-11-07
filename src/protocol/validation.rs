@@ -56,7 +56,88 @@ impl ModelListArgs {
 impl ThreadListArgs {
     fn validate(&self) -> Result<(), ApiError> {
         limit(self.limit, MAX_LIST_LIMIT)?;
+        optional_nonempty(self.cursor.as_deref(), "cursor")?;
+        optional_nonempty(self.cwd.as_deref(), "cwd")?;
+        if self.tags.len() > MAX_THREAD_TAGS {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                format!("thread list accepts at most {MAX_THREAD_TAGS} tag filters"),
+            ));
+        }
+        for tag in &self.tags {
+            normalize_tag(tag)?;
+        }
+        Ok(())
+    }
+}
+
+impl ThreadTagsArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        limit(self.limit, MAX_LIST_LIMIT)?;
         optional_nonempty(self.cursor.as_deref(), "cursor")
+    }
+}
+
+/// Most tags one Thread may carry, and the most tags one call may add, remove or filter by.
+pub(crate) const MAX_THREAD_TAGS: usize = 64;
+/// Longest tag in Unicode scalar values.
+pub(crate) const MAX_TAG_CHARS: usize = 128;
+
+/// A tag is a title-like label: trimmed, one line, no control characters, 1..=128 scalars.
+pub(crate) fn normalize_tag(raw: &str) -> Result<String, ApiError> {
+    let tag = raw.trim();
+    if tag.is_empty() {
+        return Err(invalid("tag must not be empty"));
+    }
+    if tag
+        .chars()
+        .any(|ch| ch.is_control() || matches!(ch, '\u{2028}' | '\u{2029}'))
+    {
+        return Err(invalid("tag must be one line without control characters"));
+    }
+    if tag.chars().count() > MAX_TAG_CHARS {
+        return Err(invalid(format!(
+            "tag must not exceed {MAX_TAG_CHARS} Unicode characters"
+        )));
+    }
+    Ok(tag.to_owned())
+}
+
+impl ThreadTagArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        if self.thread_ids.len() > MAX_ARCHIVE_THREADS {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                format!("thread tag accepts at most {MAX_ARCHIVE_THREADS} Thread IDs"),
+            ));
+        }
+        for id in &self.thread_ids {
+            nonempty(id, "thread_id")?;
+        }
+        if self.add.is_empty() && self.remove.is_empty() {
+            return Err(invalid(
+                "thread.tag requires at least one tag to add or remove",
+            ));
+        }
+        if self.add.len() > MAX_THREAD_TAGS || self.remove.len() > MAX_THREAD_TAGS {
+            return Err(ApiError::new(
+                ErrorCode::InputLimit,
+                format!("thread tag accepts at most {MAX_THREAD_TAGS} tags to add and to remove"),
+            ));
+        }
+        let added = self
+            .add
+            .iter()
+            .map(|tag| normalize_tag(tag))
+            .collect::<Result<std::collections::HashSet<_>, _>>()?;
+        for tag in &self.remove {
+            if added.contains(&normalize_tag(tag)?) {
+                return Err(invalid(
+                    "a tag cannot be both added and removed in one call",
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -636,6 +717,8 @@ impl Command {
             Self::ThreadPrune(a) => a.validate(),
             Self::ThreadRewind(a) => a.validate(),
             Self::ThreadArchive(a) | Self::ThreadUnarchive(a) => a.validate(),
+            Self::ThreadTag(a) => a.validate(),
+            Self::ThreadTags(a) => a.validate(),
             Self::ThreadBranches(a) => a.validate(),
             Self::ThreadDelete(a) | Self::ThreadDeletePreview(a) => {
                 nonempty(&a.thread_id, "thread_id")?;

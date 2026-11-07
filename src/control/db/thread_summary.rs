@@ -112,31 +112,59 @@ pub(crate) struct SummaryIdentity {
 
 /// Every mode repeats its partial-index predicate literally so SQLite can use
 /// `threads_visible_updated` / `threads_archived_updated` (see the plan tests).
-pub(super) fn page_sql(mode: ArchivedFilter) -> String {
+pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     let columns_from = columns_from();
     // INDEXED BY pins the partial index: without table statistics the planner
     // prefers `threads_updated` plus a sort, which reads past every archived Thread.
-    let (predicate, columns_from) = match mode {
-        ArchivedFilter::Exclude => (
-            "t.deleted_at IS NULL AND t.archived_at IS NULL",
-            columns_from.replacen(
-                "FROM thread t ",
-                "FROM thread t INDEXED BY threads_visible_updated ",
-                1,
-            ),
-        ),
-        ArchivedFilter::Only => (
-            "t.deleted_at IS NULL AND t.archived_at IS NOT NULL",
-            columns_from.replacen(
-                "FROM thread t ",
-                "FROM thread t INDEXED BY threads_archived_updated ",
-                1,
-            ),
-        ),
-        ArchivedFilter::Include => ("t.deleted_at IS NULL", columns_from),
+    let archived = match mode {
+        ArchivedFilter::Exclude => " AND t.archived_at IS NULL",
+        ArchivedFilter::Only => " AND t.archived_at IS NOT NULL",
+        ArchivedFilter::Include => "",
     };
+    let (source, mut predicate) = if tags > 0 {
+        // Drive from the first tag's members (index `thread_tag_by_tag`); the cost is
+        // that tag's membership, never the number of unrelated Threads. The page is
+        // ordered by a bounded top-N sort; every further tag is a primary-key probe.
+        (
+            "FROM thread_tag g0 CROSS JOIN thread t ON t.id=g0.thread_id ".to_owned(),
+            "g0.tag=?5".to_owned(),
+        )
+    } else if cwd {
+        (
+            "FROM thread t INDEXED BY threads_cwd_updated ".to_owned(),
+            String::new(),
+        )
+    } else {
+        let index = match mode {
+            ArchivedFilter::Exclude => "INDEXED BY threads_visible_updated ",
+            ArchivedFilter::Only => "INDEXED BY threads_archived_updated ",
+            ArchivedFilter::Include => "",
+        };
+        (format!("FROM thread t {index}"), String::new())
+    };
+    let mut extra = |clause: String| {
+        if !predicate.is_empty() {
+            predicate.push_str(" AND ");
+        }
+        predicate.push_str(&clause);
+    };
+    for n in 1..tags {
+        extra(format!(
+            "EXISTS(SELECT 1 FROM thread_tag g{n} WHERE g{n}.thread_id=t.id AND g{n}.tag=?{})",
+            5 + n
+        ));
+    }
+    if cwd {
+        extra(format!("t.cwd=?{}", 5 + tags));
+    }
+    let predicate = if predicate.is_empty() {
+        String::new()
+    } else {
+        format!("{predicate} AND ")
+    };
+    let columns_from = columns_from.replacen("FROM thread t ", &source, 1);
     format!(
-        "{columns_from}WHERE {predicate} AND t.rowid<=?1
+        "{columns_from}WHERE {predicate}t.deleted_at IS NULL{archived} AND t.rowid<=?1
       AND (?2='' OR t.updated_at<?2 OR (t.updated_at=?2 AND t.id<?3))
       ORDER BY t.updated_at DESC,t.id DESC LIMIT ?4"
     )
@@ -180,6 +208,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         revisit: crate::control::revisit::summary(raw.revisit_pending, raw.revisit_delivered),
         updated_at: raw.updated_at,
         archived_at: raw.archived_at,
+        tags: Vec::new(),
         excerpt,
     }
 }

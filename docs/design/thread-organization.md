@@ -1,8 +1,8 @@
 # Thread Organization: Re-parenting, Archive, Tags, Pin (Study)
 
-Status: **study; stage 1 (archive, migration 32) and stage 2 (re-parent, no schema
-change) adopted and implemented** (2026-11-06/07, issue #222). Stages 3-4 are not adopted: nothing in them changes the
-adopted design until the user accepts the stage. Code references are to
+Status: **study; stage 1 (archive, migration 32), stage 2 (re-parent, no schema
+change) and stage 3 (tags and the cwd filter, migration 34) adopted and implemented**
+(2026-11-06/07, issue #222). Stage 4 (pin) was dropped by the user. Code references are to
 `origin/main` at `cbd4c76edf`.
 
 Scope: #222 (relax child-Thread restrictions, change a Thread's parent freely)
@@ -350,8 +350,8 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
    re-parent with a live owned Run (old owner keeps notices and the stop cascade, new parent
    refused until the Run ends, then owns the next Run), branch view divergence
    after a move, usage and delete following the current tree, preview_stale.
-3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above):
-   many tags per Thread, automatic grouping by cwd, TUI filter.
+3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above): done,
+   see "Stage 3 as implemented" (migration 34; TUI filter not added).
 4. Done (#256): no stop/retry authority check at all.
 
 Not recommended: ownership transfer of live Runs; folder Threads;
@@ -427,6 +427,41 @@ Follows §3 with these concrete choices (decision D-222-2).
 - Not done: ownership transfer of live Runs (stop/retry have no authority check since #256, so a move changes only notices and the stop cascade), a TUI move key
   or drag gesture, moving several Threads in one call (use one call per Thread; the Web UI
   can repeat it).
+
+## Stage 3 as implemented (tags and the cwd filter, migration 34)
+
+Follows "Tags and cwd grouping" above with these concrete choices (decision D-222-3). Migration 33
+belongs to #253, so this is `0034_thread_tags`.
+
+- Storage: `thread_tag(thread_id, tag)` (`WITHOUT ROWID`, primary key `(thread_id, tag)`, `tag` 1..=128
+  characters by CHECK), index `thread_tag_by_tag(tag, thread_id)`, and the partial index
+  `threads_cwd_updated(cwd, updated_at DESC, id DESC) WHERE deleted_at IS NULL`. No column on `thread`.
+- Tag text: trimmed, one line, no control characters or U+2028/2029, 1..=128 Unicode scalar values, case
+  sensitive, no other normalization. At most 64 tags per Thread.
+- Wire: `thread.tag {thread_ids: 0..=200, add: 0..=64, remove: 0..=64}` (empty IDs mean the calling Thread;
+  at least one tag; one tag in both lists is `invalid_argument`) returns `{changed, unchanged, not_found, add,
+  remove}`; none found is `thread_not_found`. `thread.tags {limit 1..=200, cursor}` returns distinct names in
+  byte order, one index seek per name, no counts. `thread.list` gains `tags` (0..=64, AND) and `cwd` (exact
+  match of the saved cwd string; the CLI resolves a relative path against the current directory). `ThreadSummary`
+  and `ThreadDetails` gain `tags` (sorted, omitted when empty). Two commands, not a field of `thread.set`:
+  one explicit-ID bulk write path like archive, no filter-driven write.
+- Effects: only `thread_tag` rows and `thread.revision` change; `updated_at` does not (list order stays).
+  A call that would give a Thread a 65th tag fails with `input_limit` and rolls back the whole call.
+  `changed_threads` is the Threads whose tags changed (nothing for a no-op or a replay). A replay with the same
+  operation ID returns the first result and publishes nothing. No caller restriction (as archive and re-parent).
+  Tags are not inherited by create, fork or rewind and are deleted with the Thread in the delete transaction.
+- Filter cost: without tags the list reads its partial index as before. With `--tag` the page starts from the
+  members of the first tag (`thread_tag_by_tag`), reaches each Thread by primary key, probes every further tag
+  by primary key and keeps the top `limit + 1` by `(updated_at, id)`: cost is the first tag's membership, not the
+  number of Threads, so name the narrowest tag first. With `--cwd` alone the page seeks `threads_cwd_updated`
+  in list order without a sort. The cursor scope is bound to a digest of the sorted tags and the cwd and to the
+  archived mode.
+- Item cost: tags of a page come from one statement over the page's IDs (bounded by 200 x 64 rows), tags of
+  `thread get` from one primary-key range. Measurements: [validation](../validation/acceptance.md).
+- TUI: none beyond the operation palette forms (no browser filter, no new glyph); see
+  [thread browser](thread-browser.md). The browser's rows do not carry `tags`.
+- Not done: tag rename or merge, OR filters, member counts, tag-filtered bulk writes, tag inheritance, tags
+  on other summary paths (browser, Watch), cwd grouping headings in the TUI or Web UI.
 
 ## Risks
 

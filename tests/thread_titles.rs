@@ -65,6 +65,8 @@ async fn list(
                 cursor,
                 query: query.map(Into::into),
                 archived: Default::default(),
+                tags: Vec::new(),
+                cwd: None,
             }),
         )
         .await,
@@ -357,6 +359,8 @@ async fn displayed_title_search_paginates_matches_and_retains_query_watermark() 
                 cursor: first.next_cursor,
                 query: Some("changed".into()),
                 archived: Default::default(),
+                tags: Vec::new(),
+                cwd: None,
             })),
             None,
         )

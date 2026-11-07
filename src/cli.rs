@@ -289,6 +289,16 @@ pub enum ThreadCommand {
         after_help = "  shellboy thread unarchive --thread ID [--thread ID ...] [--descendants]\n\nSame selection rules as `thread archive`. Result: unarchived, already, not_found. Find archived Threads with `shellboy thread list --archived only`."
     )]
     Unarchive(ThreadArchiveOptions),
+    /// Add or remove tags on Threads: free labels for placement and cross-cutting views.
+    #[command(
+        after_help = "Tags are organization only: history, search, usage and receiving messages are unchanged, and they never change updated_at. A Thread may carry at most 64 tags; a tag is one line of at most 128 characters without control characters (surrounding spaces are trimmed; case matters). Tags are not inherited by create, fork or rewind.\n  shellboy thread tag --thread ID [--thread ID ...] --add TAG [--add TAG ...] [--remove TAG ...]\n\nUp to 200 explicit IDs and up to 64 tags to add and to remove per call. Omitting --thread tags the calling Thread. Result: changed (Threads whose tags changed), unchanged, not_found. Find Threads with `shellboy thread list --tag TAG` (repeat for AND) and the names in use with `shellboy thread tags`. To archive everything with a tag, list first, then pass the IDs to `thread archive`."
+    )]
+    Tag(ThreadTagOptions),
+    /// List the distinct tag names in use, in byte order (names only, no counts).
+    #[command(
+        after_help = "  shellboy thread tags [--limit N] [--cursor CURSOR]\n\nPages of at most 200 names; pass next_cursor back as --cursor. Tags on deleted Threads are not listed."
+    )]
+    Tags(ThreadTagsOptions),
     Set(ThreadSetOptions),
     /// Debug: assemble a saved Thread's request without sending it; read-only, no owner.
     #[command(
@@ -417,6 +427,31 @@ pub struct ListOptions {
     /// Archived Threads: exclude (default, hidden), include, or only.
     #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
     pub archived: wire::ArchivedFilter,
+    /// Only Threads carrying this tag; repeat for AND (at most 64).
+    #[arg(long = "tag")]
+    pub tags: Vec<String>,
+    /// Only Threads whose working directory is exactly this path (relative paths resolve against the current directory).
+    #[arg(long)]
+    pub cwd: Option<PathBuf>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ThreadTagOptions {
+    /// Thread to change; repeat for up to 200. Omitted means the calling Thread.
+    #[arg(long = "thread")]
+    pub thread_ids: Vec<String>,
+    /// Tag to add; repeat for up to 64.
+    #[arg(long = "add")]
+    pub add: Vec<String>,
+    /// Tag to remove; repeat for up to 64.
+    #[arg(long = "remove")]
+    pub remove: Vec<String>,
+}
+#[derive(Debug, Clone, Args)]
+pub struct ThreadTagsOptions {
+    #[arg(long,default_value_t=wire::DEFAULT_LIST_LIMIT)]
+    pub limit: u32,
+    #[arg(long)]
+    pub cursor: Option<String>,
 }
 #[derive(Debug, Clone, Args)]
 pub struct ThreadArchiveOptions {
@@ -1089,6 +1124,20 @@ impl Cli {
                     cursor: a.cursor,
                     query: a.query,
                     archived: a.archived,
+                    tags: a.tags,
+                    cwd: a
+                        .cwd
+                        .map(|path| absolute_attachment(path, startup_cwd))
+                        .transpose()?,
+                }),
+                ThreadCommand::Tag(a) => C::ThreadTag(wire::ThreadTagArgs {
+                    thread_ids: a.thread_ids,
+                    add: a.add,
+                    remove: a.remove,
+                }),
+                ThreadCommand::Tags(a) => C::ThreadTags(wire::ThreadTagsArgs {
+                    limit: a.limit,
+                    cursor: a.cursor,
                 }),
                 ThreadCommand::Archive(a) => C::ThreadArchive(wire::ThreadArchiveArgs {
                     thread_ids: a.thread_ids,
