@@ -1201,3 +1201,18 @@ keep their `retrieve:` hint; fetching the original reports it as pruned. The
 summary node, its parts cache and summary text are not removed by the prune
 itself; cache entries whose sources the GC tombstones are collected by the
 existing summary-cache sweep. Compaction never reuses a pruned replacement.
+
+## Spill shortfall near the proactive threshold (#271)
+
+A successful spill advances the reasoning epoch. If a below-threshold verification
+shows that a spill-only stage did not reach the 80% target, defer further spill
+until the unchanged trigger threshold is reached again. A spill-only active-turn
+stage must not be classified as a summary: summary escalation retains its existing
+rules. This avoids rewriting the cache prefix on every subsequent tool request.
+
+A fake-provider seven-request tool-loop fixture, with reported usage 200001 twice
+then 190000 at a 200000 trigger, observed epochs `[0,0,1,2,3,4,5]` before
+and `[0,0,1,1,1,1,1]` after. A simplified serialized-input prefix/epoch cache
+model measured 134077 versus 111650 uncached bytes; these are synthetic modeled
+bytes, not provider-reported tokens or a real-world cost estimate. The fixture
+also verifies that spill resumes after crossing the same threshold.
