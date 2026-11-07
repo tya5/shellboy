@@ -10673,4 +10673,6 @@ contract and checks an actually new Run. The failed CI is retained; a new tip re
 - [x] `events.wait --thread` change hints allow a client to refresh only that Thread; `message.reply` answers through the existing path (reply integration test asserts the Thread change effect and answer correlation).
 - [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
 - [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
-- [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.
+- [x] Sender cancellation and recipient deletion preserve existing terminal semantics; human questions share the bounded 128-item receipt cap (reply integration suite, including mixed-duty cap regression).
+- [x] No schema migration is needed; configuration defaults and bounds are covered in `tests/config.rs`.
+- [x] Browser-facing inbox data is exposed through per-Thread `thread.list` counts and `thread.get.awaiting_replies`, and existing `message.reply`; the separate Studio presentation remains outside this repository and uses the public contract.
