@@ -1560,12 +1560,19 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
             .unwrap();
     };
     assert!(summaries >= 1, "the active-Turn summary ran");
-    // #182 B: across the map requests, the summarizer sees the messages where
-    // they occurred between the tool rounds.
-    let at = |text: &str| material.find(text).unwrap_or_else(|| panic!("{text}"));
-    assert!(at("EARLY-WORK") < at("MIDTURN_INSTRUCTION_0"));
-    assert!(at("MIDTURN_INSTRUCTION_0") < at("MIDDLE-WORK"));
-    assert!(at("MIDDLE-WORK") < at("MIDTURN_INSTRUCTION_1"));
+    // Map HTTP requests run concurrently, so arrival order is not source order.
+    // Every source must still be presented; durable provenance below checks chronology.
+    for marker in [
+        "EARLY-WORK",
+        "MIDTURN_INSTRUCTION_0",
+        "MIDDLE-WORK",
+        "MIDTURN_INSTRUCTION_1",
+    ] {
+        assert!(
+            material.contains(marker),
+            "summary map inputs omitted {marker}"
+        );
+    }
     let input = reduced.body["input"].as_array().unwrap().clone();
     let reduced_text = reduced.body.to_string();
     assert!(reduced_text.contains("TURN_REQUEST_MARKER"));
@@ -1631,6 +1638,15 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
                 })?,
                 1
             );
+            let summary_node: String = db.query_row("SELECT id FROM node WHERE kind='summary' ORDER BY rowid DESC LIMIT 1", [], |r| r.get(0))?;
+            let ordered_sources = db.prepare("SELECT n.payload_json FROM replacement r JOIN replacement_source s ON s.replacement_id=r.id JOIN node n ON n.id=s.source_node_id WHERE r.output_node_id=?1 ORDER BY s.ordinal")?
+                .query_map([summary_node], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let source_text = ordered_sources.join("\n");
+            let at = |marker: &str| source_text.find(marker).unwrap_or_else(|| panic!("missing source marker {marker}"));
+            assert!(at("EARLY-WORK") < at("MIDTURN_INSTRUCTION_0"));
+            assert!(at("MIDTURN_INSTRUCTION_0") < at("MIDDLE-WORK"));
+            assert!(at("MIDDLE-WORK") < at("MIDTURN_INSTRUCTION_1"));
             Ok(())
         })
         .await
@@ -2055,21 +2071,25 @@ async fn concurrent_threads_record_independent_429_observations() {
     )
     .unwrap();
     let second = fixture.incoming().await;
+    let turn1 = fixture.accepted.turn_id.clone().unwrap();
     first
         .reply
         .send(Reply::error(429, "Retry-After: 0\r\n"))
         .ok()
         .unwrap();
-    // Keep both requests in flight but serialize their log enqueue, because
-    // the owner logger deliberately drops events on concurrent lock contention.
+    // Let the first failure's diagnostic finish before the second response;
+    // the owner logger deliberately drops records on concurrent lock contention.
     let log = fixture.owner.loaded.data_dir.join("logs/shellboy.log");
-    crate::test_watchdog::watchdog("first 429 log event", async {
+    crate::test_watchdog::watchdog("first 429 failure diagnostic", async {
         loop {
             let body = std::fs::read_to_string(&log).unwrap_or_default();
             if body
                 .lines()
                 .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-                .any(|event| event["event"] == "model_rate_limited")
+                .any(|event| {
+                    event["event"] == "model_failure"
+                        && event["ids"]["turn_id"].as_str() == Some(turn1.as_str())
+                })
             {
                 break;
             }
@@ -2085,7 +2105,6 @@ async fn concurrent_threads_record_independent_429_observations() {
         )
     });
     second.reply.send(Reply::error(429, "")).ok().unwrap();
-    let turn1 = fixture.accepted.turn_id.clone().unwrap();
     let turn2 = second_accepted.turn_id.unwrap();
     let database = fixture.control.store.database.clone();
     crate::test_watchdog::watchdog("concurrent 429 observations", async {
