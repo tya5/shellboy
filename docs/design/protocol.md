@@ -669,8 +669,8 @@ receipt, cancelled when the caller disconnects. No value is returned by any of t
 [config](config.md#stored-api-keys-and-connection-test-269).
 
 ```jsonc
-// credentials.set: args. value is write-only; 1..4096 bytes, no control characters or line breaks,
-// no leading or trailing whitespace. connection must be in the configuration file (or loaded by this owner).
+// credentials.set: args. value is write-only; 1..4096 bytes, printable ASCII only
+// (no spaces, line breaks or invisible characters). connection must be in the configuration file (or loaded by this owner).
 {"connection": "proxy", "value": "<key>"}
 // result
 {"connection": "proxy", "stored": true,
@@ -700,13 +700,14 @@ receipt, cancelled when the caller disconnects. No value is returned by any of t
  "connection": "proxy",              // null for a candidate
  "candidate": false,
  "api": "responses",
- "sent": true,                       // false when nothing was sent (credential_missing, invalid_configuration, a URL that fails validation)
+ "sent": true,                       // a request was attempted; false when none was (credential_missing, invalid_configuration, a URL that fails validation).
+                                     // Not delivery: a refused connection is sent:true with http_status:null
  "ok": true,                         // a catalog came back; not a statement that the key is valid
- "http_status": 200,                 // null when no HTTP response arrived
+ "http_status": 200,                 // null only when no HTTP response arrived; a 200 that is not a catalog keeps it (failure: response)
  "failure": null,                    // auth | url | rate_limited | server | http_status | timeout | unreachable |
-                                     // credential_missing | invalid_configuration | cancelled | response
- "models": ["model-a", "model-b"],   // sorted; at most 1000 ids and 256 KiB
- "model_count": 2, "models_truncated": false,
+                                     // credential_missing | invalid_configuration | response
+ "models": ["model-a", "model-b"],   // sorted; the whole catalogue (the client bounds it at 2 MiB, 10,000 ids)
+ "model_count": 2,
  "credential": {"source": "stored",  // env | stored | inline | none
                 "api_key_env": "EXAMPLE_API_KEY",   // null if unset; a credential-looking name is refused, so it is never echoed
                 "env_set": true,                    // presence in the owner's environment; null without api_key_env
@@ -717,6 +718,13 @@ receipt, cancelled when the caller disconnects. No value is returned by any of t
  "file":   {"credential_source": {"proxy": "stored"} /* null when the file is invalid */, ...},
  "credentials_file": {"path": "...", "present": true, "valid": true, "error": null}}
 ```
+
+Replay limit of `credentials.set`: its saved request fingerprint uses a digest of the key salted with a value that
+lives only as long as the owner process. Within one owner run the same ID and key replay the saved result and another key
+is `operation_conflict`. After an owner restart the same ID can no longer be matched (the stored digest cannot be
+recomputed), so a retry gets `operation_conflict` even with the same key; the error's hint says to check
+`config.get` `credential_source` and repeat with a new operation ID. This is a deliberate cost of never storing a hash
+an offline guess could confirm.
 
 Errors: `invalid_argument` for a bad value or connection, an unknown connection (`details.field = "connection"`), a
 connection that defines its own `Authorization` header, both or neither of `connection` and `base_url`, both `api_key`

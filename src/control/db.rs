@@ -818,6 +818,7 @@ impl Store {
         );
         let preflight = super::receipt::runtime_preflight(&request).err();
         let admission = Admission::for_command(&request.command);
+        let stored_key = matches!(request.command, Command::CredentialsSet(_));
         self.reserve_hashed(
             request.operation_id,
             caller,
@@ -826,6 +827,14 @@ impl Store {
             admission,
         )
         .await
+        .map_err(|mut conflict| {
+            if stored_key && conflict.code == ErrorCode::OperationConflict {
+                // The fingerprint of a stored key is salted per owner process (see
+                // `fingerprint_body`), so after an owner restart the same retry cannot match.
+                conflict.hint = Some("If this operation ID was used before an owner restart, the saved request cannot be compared with the key you sent now. Read config get (credential_source) to see whether the key is stored, then repeat with a new operation ID".into());
+            }
+            conflict
+        })
     }
     pub async fn reserve_internal(
         &self,

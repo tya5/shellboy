@@ -4,15 +4,12 @@
 //! No value is returned, logged or put into an error by any of them.
 use super::*;
 use crate::{
-    config::{Connection, KeySource},
+    config::{ApiEndpoint, Connection, KeySource},
     credential_store,
+    model::http::HttpModelClient,
     protocol::{ConnectionTestArgs, CredentialsClearArgs, CredentialsSetArgs},
 };
 use std::path::Path;
-
-/// The reply carries ids only up to these bounds; `model_count` is always the full count.
-const MAX_TEST_MODELS: usize = 1_000;
-const MAX_TEST_MODEL_BYTES: usize = 256 * 1024;
 
 fn caller_ids(caller: Option<&Origin>) -> crate::diagnostics::DiagnosticIds {
     caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
@@ -155,46 +152,39 @@ impl Control {
         Ok(result)
     }
 
+    /// A read: `runtime_observation` already drops this future when the caller disconnects or
+    /// the owner shuts down, which also drops the HTTP request.
     pub(super) async fn connection_test(
         &self,
         args: ConnectionTestArgs,
         disconnected: CancellationToken,
     ) -> Result<Value, ApiError> {
         let config = self.store.config.clone();
-        let prepared = self
+        let test = self
             .attachments
             .control_files()
-            .execute(self.config_deadline(), disconnected.clone(), move || {
+            .execute(self.config_deadline(), disconnected, move || {
                 prepare_test(&config, &args)
             })
             .await?;
-        let facts = prepared.facts();
-        let client = match prepared.client() {
-            Ok(client) => client,
-            Err(error) => {
-                // Validation refused the connection before anything was sent.
-                let failure = if error.message.contains("base_url") {
-                    "url"
-                } else {
-                    "invalid_configuration"
-                };
-                return Ok(facts.failed(failure, None, false));
-            }
+        if test.url_invalid {
+            return Ok(test.failed("url", None, false));
+        }
+        let name = test.name.as_deref().unwrap_or("candidate");
+        let Ok(client) = HttpModelClient::for_connection(name, test.connection.clone()) else {
+            return Ok(test.failed("invalid_configuration", None, false));
         };
-        let fetch = client.models_with_status(self.stop.child_token());
-        // A read-only catalog request has no target work to keep alive on disconnect.
-        let outcome = tokio::select! { biased;
-            _ = disconnected.cancelled() => return Err(ApiError::new(ErrorCode::InvalidState, "Connection test caller disconnected")),
-            outcome = fetch => outcome,
-        };
-        Ok(match outcome {
-            Ok((status, models)) => facts.succeeded(status, models),
-            Err(error) => {
-                let failure = classify(&error);
-                let sent = !matches!(failure, "credential_missing" | "invalid_configuration");
-                facts.failed(failure, error.status, sent)
-            }
-        })
+        Ok(
+            match client.models_with_status(CancellationToken::new()).await {
+                Ok((status, models)) => test.succeeded(status, models),
+                Err(failure) => {
+                    let class = classify(&failure.error);
+                    let attempted =
+                        !matches!(class, "credential_missing" | "invalid_configuration");
+                    test.failed(class, failure.http_status, attempted)
+                }
+            },
+        )
     }
 }
 
@@ -230,61 +220,51 @@ fn classify(error: &crate::model::ModelError) -> &'static str {
         ("transport", _) => "unreachable",
         ("config_missing", _) => "credential_missing",
         ("config_invalid", _) => "invalid_configuration",
-        ("cancelled", _) => "cancelled",
         _ => "response",
     }
 }
 
-enum Key {
-    /// Given with the request; replaces every other source.
-    Inline(String),
-    /// Resolved the way a request resolves it: the environment, then the stored key.
-    Resolved,
-}
-struct Prepared {
+/// One `connection.test`: the connection to try and the facts the reply starts from.
+struct Test {
     name: Option<String>,
     connection: Connection,
-    key: Key,
     source: &'static str,
     env_name: Option<String>,
     env_set: Option<bool>,
     credentials_file_error: Option<String>,
+    /// `base_url` fails validation: nothing can be sent.
+    url_invalid: bool,
 }
-struct Facts {
-    name: Option<String>,
-    api: &'static str,
-    source: &'static str,
-    env_name: Option<String>,
-    env_set: Option<bool>,
-    credentials_file_error: Option<String>,
-}
-impl Prepared {
-    fn facts(&self) -> Facts {
-        Facts {
-            name: self.name.clone(),
-            api: self.connection.api.as_str(),
-            source: self.source,
-            env_name: self.env_name.clone(),
-            env_set: self.env_set,
-            credentials_file_error: self.credentials_file_error.clone(),
+impl Test {
+    fn new(
+        name: Option<String>,
+        connection: Connection,
+        source: &'static str,
+        credentials_file_error: Option<String>,
+    ) -> Self {
+        let env_name = connection
+            .api_key_env
+            .clone()
+            .filter(|name| !crate::config_edit::looks_like_credential(name));
+        let env_set = env_name
+            .as_deref()
+            .map(|var| env_value(var).is_some_and(|value| !value.trim().is_empty()));
+        Self {
+            url_invalid: connection.endpoint(ApiEndpoint::Models).is_err(),
+            name,
+            connection,
+            source,
+            env_name,
+            env_set,
+            credentials_file_error,
         }
     }
-    fn client(self) -> Result<crate::model::http::HttpModelClient, crate::model::ModelError> {
-        let name = self.name.as_deref().unwrap_or("candidate");
-        let client = crate::model::http::HttpModelClient::for_connection(name, self.connection)?;
-        Ok(match self.key {
-            Key::Inline(key) => client.with_inline_key(&key),
-            Key::Resolved => client,
-        })
-    }
-}
-impl Facts {
     fn base(&self) -> Value {
         json!({
             "request": "GET model catalog only",
             "connection": self.name,
             "candidate": self.name.is_none(),
-            "api": self.api,
+            "api": self.connection.api.as_str(),
             "credential": {
                 "source": self.source,
                 "api_key_env": self.env_name,
@@ -293,54 +273,37 @@ impl Facts {
             },
         })
     }
-    fn failed(&self, failure: &str, status: Option<u16>, sent: bool) -> Value {
+    /// `attempted` says a request was made, not that it was delivered: `http_status` is
+    /// non-null only when a response came back.
+    fn failed(&self, failure: &str, http_status: Option<u16>, attempted: bool) -> Value {
         let mut result = self.base();
-        result["sent"] = json!(sent);
+        result["sent"] = json!(attempted);
         result["ok"] = json!(false);
-        result["http_status"] = json!(status);
+        result["http_status"] = json!(http_status);
         result["failure"] = json!(failure);
         result["models"] = json!([]);
         result["model_count"] = json!(0);
-        result["models_truncated"] = json!(false);
         result
     }
     fn succeeded(&self, status: u16, models: Vec<String>) -> Value {
-        let mut bytes = 0;
-        let shown: Vec<&String> = models
-            .iter()
-            .take(MAX_TEST_MODELS)
-            .take_while(|id| {
-                bytes += id.len() + 4;
-                bytes <= MAX_TEST_MODEL_BYTES
-            })
-            .collect();
         let mut result = self.base();
         result["sent"] = json!(true);
         result["ok"] = json!(true);
         result["http_status"] = json!(status);
         result["failure"] = Value::Null;
-        result["models_truncated"] = json!(shown.len() < models.len());
         result["model_count"] = json!(models.len());
-        result["models"] = json!(shown);
+        result["models"] = json!(models);
         result
     }
 }
 
-/// Blocking: reads the saved file and the credentials file.
+/// Blocking: reads the saved file and, for a saved connection, the credentials file.
+/// A candidate never touches `credentials.toml`.
 fn prepare_test(
     loaded: &crate::config::Config,
     args: &ConnectionTestArgs,
-) -> Result<Prepared, ApiError> {
+) -> Result<Test, ApiError> {
     let config_path = loaded.source.as_ref().map(|source| source.path.as_path());
-    let credentials = config_path.map(credential_store::path_beside);
-    let stored = credentials
-        .as_deref()
-        .map(credential_store::stored_names)
-        .transpose();
-    let (stored_names, credentials_file_error) = match stored {
-        Ok(names) => (names.unwrap_or_default(), None),
-        Err(error) => (Default::default(), Some(error.to_string())),
-    };
     if let Some(name) = &args.connection {
         let mut connection = match config_path {
             Some(path) => known_connection(loaded, path, name)?,
@@ -348,25 +311,21 @@ fn prepare_test(
                 ApiError::new(ErrorCode::ConfigInvalid, "Connection is not configured")
             })?,
         };
+        let credentials = config_path.map(credential_store::path_beside);
+        let (present, file_error) = match credentials.as_deref().map(credential_store::stored_names)
+        {
+            Some(Ok(names)) => (names.contains(name), None),
+            Some(Err(error)) => (false, Some(error.to_string())),
+            None => (false, None),
+        };
         connection.credentials_file = credentials;
-        let present = stored_names.contains(name);
-        let key_source = connection.key_source(env_value, present);
-        let env_name = connection
-            .api_key_env
-            .clone()
-            .filter(|name| !crate::config_edit::looks_like_credential(name));
-        let env_set = env_name
-            .as_deref()
-            .map(|var| env_value(var).is_some_and(|value| !value.trim().is_empty()));
-        return Ok(Prepared {
-            name: Some(name.clone()),
+        let source = source_name(connection.key_source(env_value, present));
+        return Ok(Test::new(
+            Some(name.clone()),
             connection,
-            key: Key::Resolved,
-            source: source_name(key_source),
-            env_name,
-            env_set,
-            credentials_file_error,
-        });
+            source,
+            file_error,
+        ));
     }
     let refused = |field: &str| {
         ApiError::new(
@@ -376,22 +335,18 @@ fn prepare_test(
         .hint("Pass the key as api_key (from standard input in the CLI), and the variable's name as api_key_env")
         .details(json!({"reason":"credential_value_refused","field":field}))
     };
-    if args
-        .api_key_env
-        .as_deref()
-        .is_some_and(crate::config_edit::looks_like_credential)
-    {
-        return Err(refused("api_key_env"));
+    for (field, value) in [
+        ("api_key_env", &args.api_key_env),
+        ("api_key_header", &args.api_key_header),
+    ] {
+        if value
+            .as_deref()
+            .is_some_and(crate::config_edit::looks_like_credential)
+        {
+            return Err(refused(field));
+        }
     }
-    if args
-        .api_key_header
-        .as_deref()
-        .is_some_and(crate::config_edit::looks_like_credential)
-    {
-        return Err(refused("api_key_header"));
-    }
-    let inline = args.api_key.clone();
-    let connection = Connection {
+    let mut connection = Connection {
         api: args.api.unwrap_or_default(),
         base_url: args.base_url.clone().unwrap_or_default(),
         api_key_env: args.api_key_env.clone(),
@@ -399,24 +354,19 @@ fn prepare_test(
         ssl_verify: args.ssl_verify.unwrap_or(true),
         ..Connection::default()
     };
-    let env_name = args.api_key_env.clone();
-    let env_set = env_name
-        .as_deref()
-        .map(|var| env_value(var).is_some_and(|value| !value.trim().is_empty()));
-    let source = if inline.is_some() {
+    let source = if let Some(key) = &args.api_key {
+        // An inline key is only a header of this one connection value. Headers are masked
+        // in `Debug` and in error bodies like any credential, and nothing stores it.
+        let (header, value) = match connection.api_key_header.take() {
+            Some(header) => (header, key.clone()),
+            None => ("Authorization".to_owned(), format!("Bearer {key}")),
+        };
+        connection.headers.insert(header, value);
         "inline"
     } else {
         source_name(connection.key_source(env_value, false))
     };
-    Ok(Prepared {
-        name: None,
-        connection,
-        key: inline.map_or(Key::Resolved, Key::Inline),
-        source,
-        env_name,
-        env_set,
-        credentials_file_error,
-    })
+    Ok(Test::new(None, connection, source, None))
 }
 fn source_name(source: KeySource) -> &'static str {
     match source {
