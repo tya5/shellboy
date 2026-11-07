@@ -51,3 +51,15 @@ Changedはcommit後の再読のきっかけで、[activity projection](../../src
 ## SP8とW7の照合
 
 SP8の独自提案は全体revisionをThread単位へ単純置換する案であり、不採用を維持する。fork/source/ReadPinはThreadを横断するため、既存global revisionを残し、開始時horizon固定と破壊transaction内の現在root/逆出典再評価で進捗と保護を両立する。現在の確定順序は [GC実装](../../src/gc/history.rs)、root更新中の進捗・後発node・pin保護は [GC回帰](../../tests/gc.rs) と対応する。過去の10k/100k書込み継続測定を現sourceの再測定へ読み替えず、実行版・測定条件・未実施は [検証状況](../validation/acceptance.md) に分けて記録する。SP8を理由に別のcounter/schema/workerを追加しない。独立node中心の制御測定を、巨大出典DAGの最悪transaction時間や実UI性能の証明とはしない。
+
+## #269 stage C: connection generation boundary
+
+| Boundary | Existing owner / implementation | Representative regression |
+| --- | --- | --- |
+| File replacement then live adoption under shared guard | `control/config_ops.rs`, `config_edit.rs::apply_live`, `model/http/clients.rs::adopt`; credentials use the same `config_write` | `live_connections_config_and_credentials_writes_are_serialized`, `live_connections_concurrent_definition_and_key_reach_the_next_http_request` |
+| Start-time client survives definition replacement | `control/driver.rs`, `driver/request.rs::prepare_attempt` | `live_connections_swap_during_request_and_defaults_apply_without_restart` |
+| Removed connection at next request / failure recovery | `driver/request.rs::model_client`, `driver/retry.rs::retry_or_recover`; summary/catalog readers use generation `get` | `live_connections_removal_during_run_preserves_response_and_recovers_without_panic` |
+| Startup embedding identity and protected deletion | `config_edit.rs::apply_live`, registry embedding entry pin | `live_connections_embedding_edits_keep_the_index_identity_until_restart`, `live_connections_default_deletion_is_rejected_before_writing` |
+| TUI sees definitions/defaults without recreation | `Config::current`, `ui/models.rs`, `ui.rs::refresh_connection_defaults` | `live_connections_tui_reads_the_registry_without_recreating_its_state` |
+
+This map identifies test/code correspondence, not a passing result. Execution evidence is recorded in acceptance.
