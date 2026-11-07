@@ -24,7 +24,7 @@ through the real owner after an unrelated change, and `..._keeps_index_confirmat
 shows the owner's live-Run refusal on screen (the marker refusal `preview_stale` keeps its existing test and
 `tests/delete_marker.rs`). Queue cancel: `queue_cancel_uses_only_the_displayed_ids_without_confirmation`,
 `locale_does_not_expand_the_captured_cancellation_scope` (status line shows the outcome and /restore). Environment:
-macOS, temporary data dirs, local mock only; no paid API. Windows and Linux: CI only (see status for run IDs).
+macOS, temporary data dirs, local mock only; no paid API. After the rebase onto 5e140d30 the unrelated test `foreign_thread_latest_message_limits_keep_source_available_and_read_while_writer_is_held` failed on main too (solo run on ac3bbc50) because its fixed 2026-10-31 receipt date aged out of the 7-day receipt window on 2026-11-07; the fixture now uses times relative to now. Windows and Linux: CI only (see status for run IDs).
 
 ## Chat on events.wait (#243 stage C)
 
