@@ -160,6 +160,7 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         segment_chars,
         reduce_rounds,
         credentials_file: _,
+        stored_keys: _,
     } = connection;
     let at = |field| ["connections", name, field];
     out.plain(&at("api"), api);

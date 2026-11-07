@@ -202,6 +202,11 @@ pub struct Connection {
     /// accepted from TOML. `None` when the connection did not come from a file.
     #[serde(skip)]
     pub credentials_file: Option<PathBuf>,
+    /// Which connections have a stored key, shared with `Config::stored_keys`. A request opens
+    /// `credentials.toml` only when this lists its connection, so a connection without a stored key
+    /// pays no file read (and no extra scheduling point) per request.
+    #[serde(skip)]
+    pub stored_keys: StoredKeys,
 }
 impl Default for Connection {
     fn default() -> Self {
@@ -236,6 +241,7 @@ impl Default for Connection {
             segment_chars: None,
             reduce_rounds: None,
             credentials_file: None,
+            stored_keys: StoredKeys::default(),
         }
     }
 }
@@ -755,6 +761,7 @@ impl Config {
         let credentials_file = crate::credential_store::path_beside(&path);
         for connection in config.connections.values_mut() {
             connection.credentials_file = Some(credentials_file.clone());
+            connection.stored_keys = config.stored_keys.clone();
         }
         // An unreadable or invalid file is reported by `config get`; a request that
         // needs the key fails then, so the load itself ignores it.

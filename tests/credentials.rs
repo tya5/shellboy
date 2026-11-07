@@ -360,12 +360,13 @@ async fn a_header_only_connection_sends_its_stored_key_in_that_header_and_fails_
         let root = tempfile::tempdir().unwrap();
         let mock = mock().await;
         let file = root.path().join("credentials.toml");
-        let connection = Connection {
+        let mut connection = Connection {
             base_url: mock.url.clone(),
             api_key_header: Some("x-api-key".into()),
             credentials_file: Some(file.clone()),
             ..Connection::default()
         };
+        connection.stored_keys.set("proxy", true);
         let client = HttpModelClient::for_connection("proxy", connection).unwrap();
         // Loads fine; the request fails before sending, with a missing-credential error.
         let error = client.models(CancellationToken::new()).await.unwrap_err();
@@ -388,12 +389,13 @@ async fn a_client_reads_the_stored_key_when_each_request_starts() {
         let root = tempfile::tempdir().unwrap();
         let mock = mock().await;
         let file = root.path().join("credentials.toml");
-        let connection = Connection {
+        let mut connection = Connection {
             base_url: mock.url.clone(),
             api_key_env: Some("SHELLBOY_TEST_ENV_NEVER_SET_269".into()),
             credentials_file: Some(file.clone()),
             ..Connection::default()
         };
+        connection.stored_keys.set("proxy", true);
         let client = HttpModelClient::for_connection("proxy", connection).unwrap();
         // No file: the old error, and nothing reaches the server.
         let error = client.models(CancellationToken::new()).await.unwrap_err();
@@ -437,12 +439,13 @@ async fn an_invalid_credentials_file_fails_the_request_without_quoting_it() {
             format!("[connections.proxy]\napi_key = \"{KEY}\"\nsurprise = 1\n"),
         )
         .unwrap();
-        let connection = Connection {
+        let mut connection = Connection {
             base_url: "http://127.0.0.1:1/v1".into(),
             credentials_file: Some(file),
             api_key_env: Some("SHELLBOY_TEST_ENV_NEVER_SET_269".into()),
             ..Connection::default()
         };
+        connection.stored_keys.set("proxy", true);
         let client = HttpModelClient::for_connection("proxy", connection).unwrap();
         let error = client.models(CancellationToken::new()).await.unwrap_err();
         assert_eq!(error.kind, "config_invalid");
