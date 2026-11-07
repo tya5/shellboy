@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 84, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 85, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -135,6 +135,25 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .iter()
             .any(|binding| binding.path == ["thread", "request"]),
         "the debug client must not be offered as a TUI form"
+    );
+    // Protocol schema export is a standalone machine-readable CLI path.
+    let schema = leaves
+        .remove("protocol schema")
+        .expect("tracked standalone protocol schema path");
+    assert!(
+        schema.get_arguments().all(|arg| {
+            matches!(
+                arg.get_id().as_str(),
+                "help" | "version" | "data_dir" | "config" | "operation_id"
+            )
+        }),
+        "protocol schema export takes no operation-specific arguments"
+    );
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path == ["protocol", "schema"]),
+        "schema export must not be offered as a TUI form"
     );
     // The startup timing inspector is standalone and intentionally has no TUI operation binding.
     let startup = leaves.remove("startup").expect("tracked startup CLI path");
