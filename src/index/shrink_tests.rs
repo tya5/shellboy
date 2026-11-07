@@ -723,6 +723,13 @@ async fn unfinished_jobs_follow_the_switch_and_gc_waits_for_them() {
         })
         .await
         .unwrap();
+    assert_eq!(f.space(&source).await.unwrap().state, "removing");
+    f.db.call(|db| {
+        super::super::space_gc::collect_inactive_spaces(db)?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     assert!(f.space(&source).await.is_none());
     // Logical accounting follows one byte per element, and the old float bytes left.
     let (counter, oracle): (i64, i64) = f.db.call(|db| {
@@ -1383,6 +1390,17 @@ async fn shrink_never_removes_a_space_and_remove_does_only_what_it_previews() {
         .await
         .unwrap();
     assert_eq!(removed["removed"], true);
+    assert_eq!(removed["reclaim_pending"], true);
+    assert_eq!(removed["vector_payload_bytes_freed"], 0);
+    assert_eq!(removed["vector_payload_bytes_pending"], 40 * 8 * 4);
+    assert_eq!(f.space(&source).await.unwrap().state, "removing");
+    assert!(f.service.select_space(&source).await.is_err());
+    f.db.call(|db| {
+        super::super::space_gc::collect_inactive_spaces(db)?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     let after = snapshot(&f.db).await;
     assert_eq!(
         (after.0, after.1),
@@ -1650,7 +1668,14 @@ async fn a_second_rebuild_keeps_the_paid_vectors_of_the_replaced_candidate() {
     };
     let preview = f.service.remove_space(remove(true)).await.unwrap();
     assert_eq!(preview["partial"], true);
-    f.service.remove_space(remove(false)).await.unwrap();
+    let result = f.service.remove_space(remove(false)).await.unwrap();
+    assert_eq!(result["reclaim_pending"], true);
+    f.db.call(|db| {
+        super::super::space_gc::collect_inactive_spaces(db)?;
+        Ok(())
+    })
+    .await
+    .unwrap();
     let marker = IndexKeys::partial(&candidate);
     assert!(
         f.db.call(move |db| meta(db, &marker))

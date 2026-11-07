@@ -768,3 +768,22 @@ Stage C review clarification: `applied_to_running_owner` means adopted by the ow
 registry, while an already-active Run pins its start-time generation across tool continuations, admission refresh,
 automatic summaries and retries. It does not mean an active Run switches provider mid-conversation. Credential
 lookup remains next-request. The response shape and restart flag classification are unchanged by this clarification.
+
+## #267: removal decision and deferred reclamation
+
+`index.remove` without `dry_run` commits a durable removal decision and returns `removed: true`,
+`reclaim_pending: true`, and `state: "removing"`. This does not assert that bytes have already been freed.
+`vector_payload_bytes_freed` and `unfinished_jobs_deleted` are zero at this boundary; their previewed quantities are
+returned as `vector_payload_bytes_pending` and `unfinished_jobs_pending`. Dry-run retains its projected counts and
+never changes state. Removal remains irreversible and does not delete conversation history.
+
+The owner rechecks active/running/conversion/rebuild protection in the short transaction that marks removal. Once
+committed, the space cannot be selected, retried or reused by normal index operations. It is no longer a protected
+candidate: later metadata changes cannot make reclamation unsafe or revive it. Repeated removal while pending is
+idempotent. Once fully reclaimed, the ordinary unknown-space response applies.
+
+Existing maintenance and `storage.collect` reclaim at most the declared row budget per unit: chunk/vector/preview,
+then job/input, group pointers and orphan vector rows. Each successful unit commits independently; a failed unit
+rolls back only itself. Empty vec-table DROP and fixed per-space metadata removal finish reclamation. Remaining rows
+and the durable state are the restart cursor; no new worker, queue or epoch table is required. Database file size
+still requires explicit `storage vacuum` to shrink; logical usage decreases as chunks are reclaimed.

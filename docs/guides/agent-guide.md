@@ -436,7 +436,7 @@ Retained indexes hold paid vectors, including a partial one (`partial`) left by 
 1. After a conversion or rebuild succeeds, tell the user the old index is retained and its size (`retained_vector_payload_bytes` and `retained_remove_with` in `index status`).
 2. Suggest checking real searches first. `shellboy index shrink --revert --dry-run` shows the way back to the float32 index and how many segments would need indexing again. A revert can lead to charges for those segments: explain that and get consent, as for shrink.
 3. Explain that deleting frees that space for reuse inside the database (the file itself shrinks only with `storage vacuum`) and that recreating the index afterwards needs a paid rebuild. Ask.
-4. Only on the user's explicit yes, show `shellboy index remove --space SPACE_ID --dry-run`, then run it without `--dry-run`.
+4. Only on the user's explicit yes, show `shellboy index remove --space SPACE_ID --dry-run`, then run it without `--dry-run`. `removed: true` means the index is no longer searchable; `reclaim_pending: true` means maintenance still has physical data to reclaim. Inspect the discarded space's remaining segments in `index status` and logical index bytes in storage status. Reclamation resumes after restart and does not guarantee immediate disk-file shrinkage.
 
 Never delete an index to relieve a low-disk or storage-limit hold on your own: tell the user it is an option and let them decide.
 

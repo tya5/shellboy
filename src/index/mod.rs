@@ -36,7 +36,10 @@ mod shrink;
 mod source;
 mod space_gc;
 mod split;
+#[cfg(test)]
+#[cfg(test)]
 pub(crate) use space_gc::collect_inactive_spaces;
+pub(crate) use space_gc::reclaim_step;
 mod store;
 use coverage::{covered_ranges, range_covered};
 use queue::{AutoAdmission, Work, bootstrap_key, job_id_for, queue_job};

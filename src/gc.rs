@@ -558,20 +558,33 @@ impl GcService {
             }
         }
         if has(Work::InactiveSpaces) {
+            let mut after = String::new();
+            let mut limit = SPACE_UNIT;
             loop {
+                let cursor = after.clone();
                 let unit = requester
-                    .unit(SPACE_UNIT, |db, _| {
-                        crate::index::collect_inactive_spaces(db)
+                    .unit(limit, move |db, limit| {
+                        let mut cursor = cursor;
+                        let (removed, more) = crate::index::reclaim_step(db, limit.get(), &mut cursor)?;
+                        Ok((removed, more, cursor))
                     })
                     .await
                     .map_err(crate::app::storage_error)?;
-                let Background::Done(removed) = unit else {
-                    report.defer(Work::InactiveSpaces);
-                    break;
-                };
-                report.inactive_index_spaces_collected += removed;
-                if removed < 32 {
-                    break;
+                match unit {
+                    Background::Done((removed, more, cursor)) => {
+                        after = cursor;
+                        report.inactive_index_spaces_collected += removed;
+                        if !more {
+                            break;
+                        }
+                    }
+                    Background::Deferred if limit.get() > 1 => {
+                        limit = NonZeroU32::new(limit.get() / 2).expect("nonzero half");
+                    }
+                    Background::Deferred => {
+                        report.defer(Work::InactiveSpaces);
+                        break;
+                    }
                 }
             }
         }
