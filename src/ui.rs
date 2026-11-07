@@ -4819,6 +4819,15 @@ impl UiState {
         }]
     }
     /// An unsaved tab follows live defaults until the person explicitly picks a model.
+    fn live_context_bar(&self) -> Option<chrome::ContextBar> {
+        let view = self.view();
+        let config = self.config.current();
+        view.thread_id.as_ref().map(|_| chrome::ContextBar {
+            usage: view.context_usage,
+            auto_at: config.compaction.auto_at_tokens_for(view.auto_compact_at,
+                view.connection.as_deref().and_then(|name| config.connections.get(name))),
+        })
+    }
     fn refresh_connection_defaults(&mut self) {
         if self.view().thread_id.is_some() || self.view().explicit_model {
             return;
@@ -6818,16 +6827,7 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let hints = state
         .key_hints
         .text(state.hint_context(), area.width, &state.config);
-    let config = state.config.current();
-    let context = view.thread_id.is_some().then(|| chrome::ContextBar {
-        usage: view.context_usage,
-        auto_at: state.config.compaction.auto_at_tokens_for(
-            view.auto_compact_at,
-            view.connection
-                .as_deref()
-                .and_then(|name| config.connections.get(name)),
-        ),
-    });
+    let context = state.live_context_bar();
     let lines = chrome::footer_lines_with_db(
         view,
         area.width,

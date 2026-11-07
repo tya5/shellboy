@@ -4125,3 +4125,15 @@ No new workers, tables, queues, events or dependencies. See [configuration](../d
 Implementation is validated separately in acceptance; the earlier stage C paragraph records investigation, not a
 claim that stage C was part of A+B. Direct hand edits still require restart. Updating an embedding connection's
 file definition does not change the running registry entry or index identity until restart.
+
+### D-269 stage C review: pin one generation per Run (2026-11-07)
+
+Per-request snapshots leave tool continuations, admission refresh, retry policy and proactive summaries vulnerable
+to mixed generations. Adopt the owner's permitted Run-level rule: capture the registry once at driver entry and
+carry it through every preparing refresh and automatic Compactor view. The next Run observes live changes; existing
+Thread selection IDs remain unchanged. Credentials still use their shared store at request time. No persisted Run
+column, worker, table or queue is added. Manual operations and TUI readers retain their own current-generation view.
+
+The TUI model command and context threshold use live lookup. A regression covers adding a connection, selecting it,
+changing its warning threshold and removing it without rebuilding UiState; deleted definitions cannot leak through
+a startup fallback. This supersedes earlier stage C wording that only promised one request's lifetime.

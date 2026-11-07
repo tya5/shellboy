@@ -71,6 +71,7 @@ async fn marker_case(rollback: bool) {
             .await;
         handles.push(handle);
         let snapshot = Snapshot {
+            clients: control.store.clients.snapshot(),
             thread: format!("t{index}"),
             run: format!("r{index}"),
             turn: format!("u{index}"),

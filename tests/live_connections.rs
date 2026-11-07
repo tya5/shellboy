@@ -140,21 +140,24 @@ async fn live_connections_removal_during_run_preserves_response_and_recovers_wit
             edit(&control, vec![ConfigChange { field:"connections.transient".into(), value:None }]).await;
             pending.reply.send((status, if status == 200 { answer("preserved response") }
                 else { json!({"error":{"message":"synthetic server failure"}}) })).unwrap();
-            if status == 200 {
-                settled(&control, &target).await;
-                let id = target.clone();
-                let state: String = control.store.database.call(move |db| Ok(db.query_row(
-                    "SELECT state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1", [id], |r|r.get(0))?)).await.unwrap();
-                assert_eq!(state, "completed");
-                send(&control, &target, "next request needs explicit recovery").await;
+            if status == 500 {
+                // The Run retains both its client and retry policy despite removal.
+                let retry = incoming(&control, &mut receive).await;
+                retry.reply.send((200, answer("retained Run client completed"))).unwrap();
             }
+            settled(&control, &target).await;
+            let id = target.clone();
+            let state: String = control.store.database.call(move |db| Ok(db.query_row(
+                "SELECT state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1", [id], |r|r.get(0))?)).await.unwrap();
+            assert_eq!(state, "completed");
+            send(&control, &target, "new Run needs explicit recovery").await;
             assert_eq!(recovery(&control, &target).await["code"], "config_invalid");
             let id = target.clone();
             let (attempts, retained): (i64, bool) = control.store.database.call(move |db| Ok((
                 db.query_row("SELECT count(*) FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1", [&id], |r|r.get(0))?,
                 db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.payload_json LIKE '%preserved input%')", [&id], |r|r.get(0))?
             ))).await.unwrap();
-            assert_eq!(attempts, 1, "missing connection never sends another POST");
+            assert_eq!(attempts, if status == 500 { 2 } else { 1 }, "only the original Run can send");
             assert!(retained);
             assert!(receive.try_recv().is_err());
             control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
@@ -300,5 +303,91 @@ async fn live_connections_catalog_removal_keeps_its_start_generation() {
         assert_eq!(missing.error.unwrap().code,ErrorCode::ConfigInvalid);
         server.await.unwrap();
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_connections_run_keeps_endpoint_body_and_retry_policy_across_tool_loop() {
+    crate::test_watchdog::watchdog("live Run generation", async {
+        let root = tempfile::tempdir().unwrap();
+        let (old_url, mut old_receive, old_server) = proxy().await;
+        let (new_url, mut new_receive, new_server) = proxy().await;
+        let owner = owner(root.path(), &old_url).await;
+        let control = Control::new(&owner, root.path().into());
+        edit(&control, vec![change("connections.fixture.extra_body", json!({"synthetic_generation":"old"}))]).await;
+        let target = thread(&control).await;
+        send(&control, &target, "keep one Run generation").await;
+        let first = incoming(&control, &mut old_receive).await;
+        assert_eq!(first.body["synthetic_generation"], "old");
+        edit(&control, vec![
+            change("connections.fixture.base_url", json!(new_url)),
+            change("connections.fixture.extra_body", json!({"synthetic_generation":"new"})),
+            change("connections.fixture.response_max_retries",json!(0)),
+        ]).await;
+        first.reply.send((200, json!({"id":"tool-generation","status":"completed","output":[{
+            "type":"function_call","call_id":"generation-tool","name":"shell",
+            "arguments":json!({"command":"echo synthetic-generation-tool"}).to_string()
+        }]}))).unwrap();
+        let continued = incoming(&control, &mut old_receive).await;
+        assert_eq!(continued.body["synthetic_generation"],"old");
+        assert!(continued.body.to_string().contains("synthetic-generation-tool"));
+        continued.reply.send((500,json!({"error":{"message":"synthetic retry"}}))).unwrap();
+        let retry = incoming(&control, &mut old_receive).await;
+        assert_eq!(retry.body["synthetic_generation"],"old");
+        retry.reply.send((200,answer("old Run finished"))).unwrap();
+        settled(&control,&target).await;
+        assert!(new_receive.try_recv().is_err());
+        send(&control,&target,"new Run gets new generation").await;
+        let fresh=incoming(&control,&mut new_receive).await;
+        assert_eq!(fresh.body["synthetic_generation"],"new");
+        fresh.reply.send((200,answer("new Run finished"))).unwrap();
+        settled(&control,&target).await;
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap();
+        old_server.abort(); new_server.abort();
+    }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_connections_run_pins_proactive_threshold_and_summary_endpoint() {
+    crate::test_watchdog::watchdog("live Run summary generation", async {
+        let root=tempfile::tempdir().unwrap();
+        let (old_url,mut old_receive,old_server)=proxy().await;
+        let (new_url,mut new_receive,new_server)=proxy().await;
+        let owner=owner(root.path(),&old_url).await;
+        let control=Control::new(&owner,root.path().into());
+        edit(&control,vec![change("connections.fixture.auto_at_tokens",json!(100)),
+            change("connections.fixture.extra_body",json!({"synthetic_generation":"old"}))]).await;
+        let target=thread(&control).await;
+        for _ in 0..2 {
+            send(&control,&target,"seed summary history").await;
+            let mut done=answer("saved prefix");
+            done["usage"]=json!({"input_tokens":50,"output_tokens":1});
+            incoming(&control,&mut old_receive).await.reply.send((200,done)).unwrap();
+            settled(&control,&target).await;
+        }
+        send(&control,&target,"tool before proactive summary").await;
+        let pending=incoming(&control,&mut old_receive).await;
+        edit(&control,vec![change("connections.fixture.base_url",json!(new_url)),
+            change("connections.fixture.auto_at_tokens",json!(0)),
+            change("connections.fixture.extra_body",json!({"synthetic_generation":"new"}))]).await;
+        pending.reply.send((200,json!({"id":"summary-trigger","status":"completed",
+            "usage":{"input_tokens":150,"output_tokens":1},"output":[{"type":"function_call",
+                "call_id":"summary-tool","name":"shell","arguments":json!({"command":"echo synthetic-summary-tool"}).to_string()}]}))).unwrap();
+        let mut summaries=0;
+        for _ in 0..6 {
+            let next=incoming(&control,&mut old_receive).await;
+            assert_eq!(next.body["synthetic_generation"],"old");
+            if next.body["tools"]==json!([]) {
+                summaries+=1;
+                next.reply.send((200,answer("Synthetic summary. User instructions to keep: none."))).unwrap();
+            } else {
+                let mut done=answer("old Run complete");done["usage"]=json!({"input_tokens":10,"output_tokens":1});
+                next.reply.send((200,done)).unwrap();break;
+            }
+        }
+        assert!(summaries>0,"new threshold=0 must not suppress this Run's pinned summary");
+        settled(&control,&target).await;
+        assert!(new_receive.try_recv().is_err());
+        control.shutdown().await.unwrap();owner.shutdown().await.unwrap();old_server.abort();new_server.abort();
     }).await.unwrap();
 }

@@ -764,3 +764,8 @@ retains its original connection; next-request lookup of a removed Thread connect
 `config.get.restart.all_fields_require_restart` changes to false. `loaded.values` and `differing_fields` account for
 live connection/default adoption. `loaded.content_hash` and `differs` remain startup-byte facts, not a restart gate.
 Consumers such as Studio must use the per-change flags/differing fields rather than infer restart from `differs`.
+
+Stage C review clarification: `applied_to_running_owner` means adopted by the owner registry. New Runs use that
+registry, while an already-active Run pins its start-time generation across tool continuations, admission refresh,
+automatic summaries and retries. It does not mean an active Run switches provider mid-conversation. Credential
+lookup remains next-request. The response shape and restart flag classification are unchanged by this clarification.

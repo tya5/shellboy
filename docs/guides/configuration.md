@@ -147,8 +147,9 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 ```
 
 - **Connections and defaults apply live.** `connections.*`, `default_connection` and `default_model` apply from the
-  next request. Live defaults govern new root Threads; existing Threads keep their selected connection/model IDs.
-  An already-started request keeps its original connection. The running embedding connection and other
+  next Run. Each Run keeps its start-time connection generation through tool continuations, admission waits,
+  automatic summaries and retries. Live defaults govern new root Threads; existing Threads keep their selected IDs.
+  The running embedding connection and other
   settings still need restart, preserving the index identity. Read each change's `restart_required` and
   `applied_to_running_owner`; mixed edits may set both result-level flags. `config get.loaded.values` includes live
   changes and `differing_fields` compares effective values with the file. `differs` and the loaded content hash still
@@ -174,8 +175,8 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 - Add a connection with an object, `--set 'connections.new={"base_url":"https://x.example/v1","api_key_env":"X_KEY"}'`,
   and remove one with `--unset connections.new`. Other tables are changed one field at a time.
 - Removing the running default or embedding connection is refused before writing. Change the default in a separate
-  operation first. Removing another connection a Thread uses is accepted: its in-flight request finishes, but its
-  next request stops in `recovery_wait` with `config_invalid`. Move it with
+  operation first. Removing another connection a Thread uses is accepted: its current Run (including retries)
+  finishes on the old generation, but its next Run stops in `recovery_wait` with `config_invalid`. Move it with
   `thread set --connection NAME --model MODEL`; `--model` alone fails too.
 - A change that would make the file larger than 1 MiB is refused.
 

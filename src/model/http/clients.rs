@@ -47,6 +47,12 @@ impl HttpClients {
             diagnostics: OnceLock::new(),
         }
     }
+    pub(crate) fn pinned(snapshot: Arc<ClientSnapshot>) -> Arc<Self> {
+        Arc::new(Self {
+            current: RwLock::new(snapshot),
+            diagnostics: OnceLock::new(),
+        })
+    }
     pub(crate) fn snapshot(&self) -> Arc<ClientSnapshot> {
         self.current.read().unwrap().clone()
     }

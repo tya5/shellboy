@@ -31,10 +31,19 @@ impl Instructions {
         self.turn = snapshot.turn.clone();
         // A known absence is cached too. Observe once per Turn, then reload
         // the append-only observation before the first HTTP request.
-        Ok(match next(control, &snapshot.thread, &slot.run_id).await? {
-            Next::Ready(snapshot) => Some(snapshot),
-            _ => None,
-        })
+        Ok(
+            match next_with_clients(
+                control,
+                &snapshot.thread,
+                &slot.run_id,
+                snapshot.clients.clone(),
+            )
+            .await?
+            {
+                Next::Ready(snapshot) => Some(snapshot),
+                _ => None,
+            },
+        )
     }
 }
 
@@ -130,10 +139,10 @@ pub(super) async fn prepare_attempt(
     }))
 }
 pub(super) fn model_client(
-    control: &Control,
+    _control: &Control,
     snapshot: &Snapshot,
 ) -> Result<HttpModelClient, ApiError> {
-    let clients = control.store.clients.snapshot();
+    let clients = &snapshot.clients;
     if !clients.connections.contains_key(&snapshot.profile) {
         let error = ApiError::new(
             ErrorCode::ConfigInvalid,

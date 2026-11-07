@@ -10627,3 +10627,15 @@ set effort directly rather than issuing the explicit UI operation that preserves
 create a fresh synthetic registry before constructor-failure injection and enter `/effort low` through the actual
 UI command path. Neither disables a test nor changes its intended assertion. Their focused rerun and a new full-CI
 pair at a new source SHA are required; the old CI is retained as failed evidence, not rerun.
+
+### #269 stage C W8 follow-up (2026-11-07, validation pending)
+
+P1 review found per-request registry re-reads across one Run. The fix pins the registry at driver entry and carries
+it through preparation refresh, model-client lookup, retry policy and pinned automatic Compactor views. New synthetic
+regressions cover a cooldown admission lease/body, DB refresh generation identity, tool continuation plus retry after
+endpoint/body/policy replacement, and a proactive threshold/summary after live replacement. The existing deletion
+regression now requires the current Run's retry to finish before the next Run reports missing connection.
+
+P2 is guarded by live TUI context resolution and a real `/model` event regression for addition, threshold change
+and removal. No real API, user database or OS clipboard is used. Passing results and exact-tip CI will be reported
+separately; this entry is a test/implementation record, not a claim of completed validation.

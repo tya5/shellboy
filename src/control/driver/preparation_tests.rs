@@ -1835,3 +1835,22 @@ async fn unknown_arguments_and_invalid_calls_are_isolated_per_policy() {
         close(control, owner).await;
     }
 }
+
+#[tokio::test]
+async fn live_connections_refresh_during_admission_keeps_run_generation() {
+    let (root, owner, control, accepted)=fixture("http://127.0.0.1:1/v1").await;
+    let snapshot=ready(&control,&accepted).await;
+    let pinned=snapshot.clients.clone();
+    let original=model_client(&control,&snapshot).unwrap();
+    let mut changed=(*control.store.config).clone();
+    changed.connections.get_mut("fixture").unwrap().base_url="http://127.0.0.1:2/v1".into();
+    changed.connections.get_mut("fixture").unwrap().extra_body.insert("synthetic_generation".into(),json!("new"));
+    control.store.clients.adopt(&changed,None);
+    let Next::Ready(refreshed)=next_with_clients(&control,&snapshot.thread,&snapshot.run,pinned.clone()).await.unwrap() else {panic!("expected preparing Run")};
+    assert!(Arc::ptr_eq(&pinned,&refreshed.clients));
+    let body=json!({"model":"synthetic","input":[],"tools":[]});
+    assert_eq!(original.wire_request(body.clone(),None).unwrap().0,model_client(&control,&refreshed).unwrap().wire_request(body.clone(),None).unwrap().0);
+    assert_eq!(control.store.clients.get("fixture").unwrap().wire_request(body,None).unwrap().0["synthetic_generation"],"new");
+    close(control,owner).await;
+    drop(root);
+}
