@@ -170,7 +170,7 @@ impl Store {
         startup_cwd: PathBuf,
         instance_id: String,
     ) -> Self {
-        let clients = Arc::new(crate::model::http::HttpClients::new(&config));
+        let clients = config.live_connections.clients(&config);
         Self {
             index: crate::index::IndexService::with_clients(
                 database.clone(),
@@ -1593,6 +1593,7 @@ impl Store {
         args: &ThreadCreateArgs,
         now: &str,
     ) -> Result<String> {
+        let config = &self.config.current();
         let inherited = if let Some(parent) = &args.parent_id {
             Some(tx.query_row("SELECT cwd,agents_path,profile_id,model_id,effort,auto_compact_at,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",[parent],|row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<i64>>(6)?,row.get::<_,Option<i64>>(7)?))).optional().map_err(sql_error)?.ok_or_else(|| error(ErrorCode::ThreadNotFound,"parent Thread not found"))?)
         } else {
@@ -1610,27 +1611,23 @@ impl Store {
             .connection
             .clone()
             .or_else(|| inherited.as_ref().map(|p| p.2.clone()))
-            .or_else(|| self.config.default_connection.clone())
+            .or_else(|| config.default_connection.clone())
             .ok_or_else(|| {
                 crate::config_setup::enrich(
-                    &self.config,
+                    config,
                     None,
-                    args.model
-                        .as_deref()
-                        .or(self.config.default_model.as_deref()),
+                    args.model.as_deref().or(config.default_model.as_deref()),
                     error(
                         ErrorCode::ConfigInvalid,
                         "set a default connection or choose --connection",
                     ),
                 )
             })?;
-        let connection = self.config.connections.get(&profile).ok_or_else(|| {
+        let connection = config.connections.get(&profile).ok_or_else(|| {
             crate::config_setup::enrich(
-                &self.config,
+                config,
                 Some(&profile),
-                args.model
-                    .as_deref()
-                    .or(self.config.default_model.as_deref()),
+                args.model.as_deref().or(config.default_model.as_deref()),
                 error(
                     ErrorCode::ConfigInvalid,
                     "selected connection is not configured",
@@ -1641,10 +1638,10 @@ impl Store {
             .model
             .clone()
             .or_else(|| inherited.as_ref().map(|p| p.3.clone()))
-            .or_else(|| self.config.default_model.clone())
+            .or_else(|| config.default_model.clone())
             .ok_or_else(|| {
                 crate::config_setup::enrich(
-                    &self.config,
+                    config,
                     Some(&profile),
                     None,
                     error(
@@ -1673,8 +1670,9 @@ impl Store {
 
     /// Values in effect for the Thread: its own override, then the connection, then `[compaction]`.
     fn fill_effective(&self, details: &mut ThreadDetails) {
-        let connection = self.config.connections.get(&details.connection);
-        let compaction = &self.config.compaction;
+        let config = &self.config.current();
+        let connection = config.connections.get(&details.connection);
+        let compaction = &config.compaction;
         details.effective_auto_compact_at =
             Some(compaction.auto_at_tokens_for(details.auto_compact_at, connection));
         details.effective_segment_chars = Some(
@@ -1694,6 +1692,7 @@ impl Store {
         caller: Option<&Origin>,
         now: &str,
     ) -> Result<MutationResult> {
+        let config = &self.config.current();
         let id = target(args.thread_id.as_deref(), caller)?;
         let current = thread_details(tx, &id)?;
         let title = args.title.as_deref().map(str::trim);
@@ -1761,7 +1760,7 @@ impl Store {
             return Ok(result);
         }
         let profile = args.connection.as_deref().unwrap_or(&current.connection);
-        if !self.config.connections.contains_key(profile) {
+        if !config.connections.contains_key(profile) {
             return Err(error(
                 ErrorCode::ConfigInvalid,
                 "selected connection is not configured",

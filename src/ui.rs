@@ -3752,6 +3752,7 @@ impl UiState {
                 view.palette = self.palette;
                 view.connection = previous.connection.clone();
                 view.model = previous.model.clone();
+                view.explicit_model = true;
                 view.effort = previous.effort.clone();
                 view.auto_compact_at = previous.auto_compact_at;
                 view.title =
@@ -4757,7 +4758,18 @@ impl UiState {
             ))),
         }]
     }
+    /// An unsaved tab follows live defaults until the person explicitly picks a model.
+    fn refresh_connection_defaults(&mut self) {
+        if self.view().thread_id.is_some() || self.view().explicit_model {
+            return;
+        }
+        let config = self.config.current();
+        let view = self.active_view_mut();
+        view.connection = config.default_connection.clone();
+        view.model = config.default_model.clone();
+    }
     fn send_current(&mut self) -> Vec<UiAction> {
+        self.refresh_connection_defaults();
         // The next submission ends the "right after the rewind" undo offer.
         self.rewind_undo = None;
         if self.view().composer.reply.is_some() {
@@ -5107,7 +5119,7 @@ impl UiState {
             }
             "/model" => {
                 let parts: Vec<_> = argument.split_whitespace().collect();
-                if parts.len() != 2 || !self.config.connections.contains_key(parts[0]) {
+                if parts.len() != 2 || !self.config.current().connections.contains_key(parts[0]) {
                     return self.command_error(i18n::local!(self.config.ui.language, "/model <connection> <model> を指定してください", "Specify /model <connection> <model>"));
                 }
                 self.change_model(parts[0].into(), parts[1].into())
@@ -6715,13 +6727,14 @@ fn draw_status(frame: &mut Frame<'_>, area: Rect, state: &UiState) {
     let hints = state
         .key_hints
         .text(state.hint_context(), area.width, &state.config);
+    let config = state.config.current();
     let context = view.thread_id.is_some().then(|| chrome::ContextBar {
         usage: view.context_usage,
         auto_at: state.config.compaction.auto_at_tokens_for(
             view.auto_compact_at,
             view.connection
                 .as_deref()
-                .and_then(|name| state.config.connections.get(name)),
+                .and_then(|name| config.connections.get(name)),
         ),
     });
     let lines = chrome::footer_lines_with_db(
@@ -6755,6 +6768,7 @@ fn visible_render_nodes(
 }
 
 pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
+    state.refresh_connection_defaults();
     let area = frame.area();
     state.popup_paint = None;
     state.aux_popup_paint.set(None);

@@ -117,7 +117,7 @@ pub(super) async fn maybe_compact(
     budget: &mut ProactiveBudget,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<bool, ApiError> {
-    let config = &control.store.config;
+    let config = &control.store.config.current();
     // Read at every boundary so `thread set --auto-compact-at` applies from the next check (#229).
     let thread_override = {
         let thread = snapshot.thread.clone();

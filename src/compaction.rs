@@ -434,7 +434,8 @@ impl Compactor {
             }
             Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,segment_chars:0,reduce_rounds:0}).map(|snapshot|(snapshot,data.6,data.7))
         }).await.map_err(storage_error).map(|(mut snapshot,segment,rounds)|{
-            let connection=self.config.connections.get(&snapshot.profile);
+            let config = self.config.current();
+            let connection=config.connections.get(&snapshot.profile);
             snapshot.segment_chars=self.config.compaction.segment_chars_for(segment.map(|v|v as usize),connection);
             snapshot.reduce_rounds=self.config.compaction.reduce_rounds_for(rounds.map(|v|v as usize),connection);
             snapshot
@@ -1065,17 +1066,14 @@ impl Compactor {
             usage: ledger,
         };
         let budget = &mut budget;
-        self.config
-            .connections
-            .get(&snapshot.profile)
-            .ok_or_else(|| {
-                ApiError::new(
-                    ErrorCode::ConfigInvalid,
-                    "Summary connection is not configured",
-                )
-            })?;
-        let client = self
-            .clients
+        let clients = self.clients.snapshot();
+        let connection = clients.connections.get(&snapshot.profile).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::ConfigInvalid,
+                "Summary connection is not configured",
+            )
+        })?;
+        let client = clients
             .get(&snapshot.profile)
             .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
         let segments = segments(groups, snapshot.epoch, policy.segment_chars)?;
@@ -1107,7 +1105,7 @@ impl Compactor {
             );
             return Err(error.hint("Narrow the range or raise compaction.summary_map_max_requests; no model request was sent"));
         }
-        let connection = &self.config.connections[&snapshot.profile];
+        // The map definition and client belong to the same generation.
         let build = |(start, end, depth): (usize, usize, u8), path: Vec<usize>| {
             let sources: Vec<Source> = groups[start..end]
                 .iter()

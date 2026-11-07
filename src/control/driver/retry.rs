@@ -208,7 +208,21 @@ pub(super) async fn retry_or_recover<'a>(
     boundary_guard: tokio::sync::MutexGuard<'a, ()>,
 ) -> Result<(), ApiError> {
     let mut boundary_guard = crate::compaction::boundary::Boundary::new(boundary, boundary_guard);
-    let connection = &control.store.config.connections[&snapshot.profile];
+    let clients = control.store.clients.snapshot();
+    let Some(connection) = clients.connections.get(&snapshot.profile) else {
+        return recover(
+            control,
+            snapshot,
+            ApiError::new(
+                ErrorCode::ConfigInvalid,
+                "Model connection is not configured",
+            ),
+            Some((attempt.clone(), json!({"error":failure.error,"partial_text":failure.partial_text,
+                "partial_reasoning":failure.partial_reasoning,"completed_items":failure.completed_items,
+                "raw_response":failure.raw_response,"attempt_id":attempt,"rate_observation":failure.facts.rate_metadata()}))),
+        )
+        .await;
+    };
     let limit = connection.response_max_retries;
     if failure.error.is_thinking_binding() && !budget.thinking_binding_retried {
         budget.thinking_binding_retried = true;

@@ -84,9 +84,14 @@ impl Compactor {
                 )
             })
             .collect();
-        let connection = &self.config.connections[&snapshot.profile];
-        let client = self
-            .clients
+        let clients = self.clients.snapshot();
+        let connection = clients.connections.get(&snapshot.profile).ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::ConfigInvalid,
+                "Summary connection is not configured",
+            )
+        })?;
+        let client = clients
             .get(&snapshot.profile)
             .map_err(|e| budget.error(&e.to_string()))?;
         for round in 0..=budget.reduce_rounds {
