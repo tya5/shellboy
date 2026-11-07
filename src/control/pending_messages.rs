@@ -59,6 +59,21 @@ pub(crate) fn cancel_tx(
         item.thread_id = Some(thread.clone());
         let archive = archive_id(message);
         if state == "cancelled" {
+            if caller.is_some_and(|origin| {
+                tx.query_row(
+                    "SELECT json_extract(result_json,'$.cancellation.cancelled_by') FROM receipt WHERE message_node_id=?1",
+                    [message],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+                .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+                    != Some(json!({"kind":"model","identity":origin.identity()}))
+            }) {
+                item.outcome = Forbidden;
+                items.push(item);
+                continue;
+            }
             item.outcome = AlreadyCancelled;
             let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM draft WHERE id=?1 AND state='archived' AND json_extract(body_json,'$.kind')='cancelled_message' AND json_extract(body_json,'$.source_message_id')=?2)",params![archive,message],|r|r.get(0))?;
             item.archive_draft_id = exists.then_some(archive);

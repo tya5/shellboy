@@ -458,12 +458,9 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     let human: MessageAccepted = serde_json::from_value(human_result.result.clone()).unwrap();
     let effects = human_result;
     assert_eq!(human.turn_id, accepted.turn_id);
-    assert_eq!(human.delivery_status, DeliveryStatus::Held);
-    assert!(
-        effects.wake_threads.is_empty(),
-        "ordinary human resume does not request foreground release"
-    );
-    assert!(effects.quiet_wake_threads.is_empty());
+    assert_eq!(human.delivery_status, DeliveryStatus::Accepted);
+    assert_eq!(effects.quiet_wake_threads, vec![child.thread_id.clone()]);
+    assert!(effects.wake_threads.is_empty());
     let run = human.run_id.unwrap();
     store
         .database
@@ -472,7 +469,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
                 connection.query_row("SELECT state FROM turn WHERE run_id=?1", [run], |row| {
                     row.get(0)
                 })?;
-            assert_eq!(state, "recovery_wait");
+            assert_eq!(state, "preparing");
             Ok(())
         })
         .await

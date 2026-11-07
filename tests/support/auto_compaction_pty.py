@@ -52,7 +52,7 @@ def main():
                     text, tokens = 'Synthetic prior conversation summary.', 120
                 else:
                     index = requests.count('ordinary')
-                    text, tokens = f'fixture answer {index} ' + ('a' * 1024), (50 if index == 1 else 203000 if index == 2 else 10)
+                    text, tokens = 'a' * 1024 + f' fixture answer {index}', (50 if index == 1 else 203000 if index == 2 else 10)
                 response = {'id': f'fixture-{len(requests)}', 'status': 'completed',
                             'output': [{'type': 'message', 'role': 'assistant', 'status': 'completed',
                                         'content': [{'type': 'output_text', 'text': text}]}],
@@ -78,7 +78,7 @@ def main():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     terminal = None
     try:
-        terminal = Terminal(args.binary.resolve(strict=True), cols=80, rows=36,
+        terminal = Terminal(args.binary.resolve(strict=True), cols=80, rows=28,
                             connection_url=f'http://127.0.0.1:{server.server_port}/v1', language=args.language)
         ready, completed = ('Ready for input', 'Completed') if args.language == 'en' else ('入力できます', '完了')
         label = 'Auto-compacting' if args.language == 'en' else '自動圧縮中'

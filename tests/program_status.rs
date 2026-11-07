@@ -171,8 +171,10 @@ mod native {
             // The owned File's fd is never replaced/closed until AsyncFd deregisters it.
             let master=unsafe { tokio::io::unix::AsyncFd::register(File::from_raw_fd(master)) }.unwrap();
             let slave=unsafe{File::from_raw_fd(slave)};
-            let mut owner=command(&home).arg("--config").arg(&config).arg("--data-dir").arg(&data).current_dir(root.path()).stdin(Stdio::from(slave.try_clone().unwrap())).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave)).spawn().unwrap();
-            let mut bytes=Vec::new();read_until(&master,&mut bytes,|bytes|bytes.windows(2).any(|v|v==b"F1")).await;
+            let mut owner_command=command(&home);
+            crate::pty_session::isolate_child(&mut owner_command);
+            let mut owner=owner_command.arg("--config").arg(&config).arg("--data-dir").arg(&data).current_dir(root.path()).stdin(Stdio::from(slave.try_clone().unwrap())).stdout(Stdio::from(slave.try_clone().unwrap())).stderr(Stdio::from(slave)).spawn().unwrap();
+            let mut bytes=Vec::new();read_until(&master,&mut bytes,|bytes|{let text=String::from_utf8_lossy(bytes);text.contains("Ready for input")||text.contains("入力できます")}).await;
             let created=cli(&home,&data,&["thread","create"]).await;let id=created["thread_id"].as_str().unwrap();let terminal_id=shellboy::program_status::thread_id(id);
             let sent=cli(&home,&data,&["message","send","--thread",id,"--text","fixture work"]).await;
             received.await.unwrap();
@@ -180,18 +182,32 @@ mod native {
             let _=release.send(());
             let conditions=json!([{"type":"run_ended","run_id":sent["run_id"]}]).to_string();cli(&home,&data,&["wait","--conditions-json",&conditions,"--timeout-ms","60000"]).await;
             if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("done")&&p.get("id")==Some(&terminal_id))).await;}
-            let mut input=master.get_ref();input.write_all(format!("/switch {id}\r").as_bytes()).unwrap();
-            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("clear")&&p.get("id")==Some(&terminal_id))).await;}
+            master.get_ref().write_all(format!("/switch {id}\r").as_bytes()).unwrap();
+            // This UI started on an unsaved draft; selecting this thread has no prior
+            // thread-scoped OSC state to clear. The next auth request emits its own state.
             cli(&home,&data,&["message","send","--thread",id,"--text","auth fixture"]).await;
             server.await.unwrap();
-            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("blocked")&&p.get("kind").map(String::as_str)==Some("auth"))).await;}
-            input.write_all(&[17]).unwrap();
-            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("clear")&&!p.contains_key("id"))).await;}
-            else {
-                // A foreign marker is not an OSC packet; only use it to complete a read turn.
-                read_until(&master,&mut bytes,|bytes|bytes.windows(8).any(|v|v==b"\x1b[?1049l")).await;
-            }
-            assert!(owner.wait().await.unwrap().success());
+            if mode=="on" {read_until(&master,&mut bytes,|bytes|packets(bytes).iter().any(|p|p.get("state").map(String::as_str)==Some("blocked")&&p.get("kind").map(String::as_str)==Some("auth"))).await; }
+            master.get_ref().write_all(&[17]).unwrap();
+
+            // Keep consuming output while the final redraw and OSC clear drain.
+            crate::test_watchdog::watchdog("native PTY owner shutdown", async {
+                let exit = owner.wait();
+                tokio::pin!(exit);
+                loop {
+                    tokio::select! {
+                        status = &mut exit => break status,
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => {
+                            let mut buffer = [0; 8192];
+                            match master.get_ref().read(&mut buffer) {
+                                Ok(count) => bytes.extend_from_slice(&buffer[..count]),
+                                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {},
+                                Err(error) => panic!("PTY read during shutdown: {error}"),
+                            }
+                        }
+                    }
+                }
+            }).await.unwrap().unwrap();
             let records=packets(&bytes);
             assert!(records.iter().all(|record|record.get("app").map(String::as_str)==Some("shellboy")&&!record.contains_key("progress")));
             assert!(!bytes.windows(b"\x1b]7501;state=error:app=evil".len()).any(|v|v==b"\x1b]7501;state=error:app=evil"));

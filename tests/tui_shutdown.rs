@@ -53,18 +53,7 @@ async fn explicit_force_exits_a_blocked_db_worker_and_restores_terminal_modes() 
     let binary = std::env::var_os("SHELLBOY_TEST_BINARY")
         .unwrap_or_else(|| env!("CARGO_BIN_EXE_shellboy").into());
     let mut command = tokio::process::Command::new(binary);
-    // Size/input APIs may prefer /dev/tty over stdio. Give this child only the
-    // disposable PTY, never the parent's interactive controlling terminal.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setsid() == -1
-                || libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) == -1
-            {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    crate::pty_session::isolate_child(&mut command);
     let mut child = command
         .arg("--config")
         .arg(&config)

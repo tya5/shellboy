@@ -458,12 +458,9 @@ mod tests {
             serde_json::json!({"kind":"human"}),
             false,
         );
-        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','pending') WHERE message_node_id='expected'",[]).unwrap();
+        db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',0) WHERE message_node_id='expected'",[]).unwrap();
         let pending = query(&db, "thread").unwrap();
-        assert_eq!(pending.awaiting_replies.len(), 1);
-        assert_eq!(pending.awaiting_replies[0].message_id, "expected");
-        assert!(pending.awaiting_replies[0].applied);
-        assert!(!pending.awaiting_replies[0].to_human);
+        assert!(pending.awaiting_replies.is_empty());
         assert!(query(&db, "elsewhere").unwrap().awaiting_replies.is_empty());
         input(
             &db,
@@ -486,18 +483,19 @@ mod tests {
         )
         .unwrap();
         let pending = query(&db, "thread").unwrap();
-        assert_eq!(pending.awaiting_replies.len(), 2);
-        assert_eq!(pending.awaiting_replies[1].message_id, "human-question");
-        assert!(pending.awaiting_replies[1].to_human);
-        assert_eq!(pending.awaiting_replies[1].excerpt, "choose A or B");
-        assert_eq!(pending.awaiting_replies[1].elapsed_ms, 0);
+        assert_eq!(pending.awaiting_replies.len(), 1);
+        assert_eq!(pending.awaiting_replies[0].message_id, "human-question");
+        assert!(pending.awaiting_replies[0].to_human);
+        assert_eq!(pending.awaiting_replies[0].excerpt, "choose A or B");
+        assert_eq!(pending.awaiting_replies[0].elapsed_ms, 0);
         db.execute(
             "UPDATE receipt SET state='held',path_admission='unadmitted' WHERE message_node_id='expected'",
             [],
         )
         .unwrap();
         let pending = query(&db, "thread").unwrap();
-        assert!(!pending.awaiting_replies[0].applied);
+        assert_eq!(pending.awaiting_replies.len(), 1);
+        assert_eq!(pending.awaiting_replies[0].message_id, "human-question");
         assert!(pending.items[0].expect_reply);
         db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','cancelled') WHERE message_node_id='expected'",[]).unwrap();
         let remaining = query(&db, "thread").unwrap().awaiting_replies;
@@ -515,7 +513,7 @@ mod tests {
                 serde_json::json!({"kind":"human"}),
                 false,
             );
-            db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','pending') WHERE message_node_id=?1",[id]).unwrap();
+            db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',1) WHERE message_node_id=?1",[id]).unwrap();
         }
         assert_eq!(query(&db, "thread").unwrap().awaiting_replies.len(), 128);
     }

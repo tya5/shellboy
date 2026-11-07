@@ -110,6 +110,25 @@ async fn collect_output(terminal: &mut File, output: &mut Vec<u8>) -> Vec<u8> {
     })
     .await
 }
+async fn read_until_ready(terminal: &mut File, output: &mut Vec<u8>) {
+    let saved = compact(emitted_text(output));
+    if saved.contains("Readyforinput") || saved.contains("入力できます") {
+        return;
+    }
+    collect_matching(
+        terminal,
+        output,
+        "interactive composer readiness",
+        |bytes| {
+            let text = compact(emitted_text(bytes));
+            text.contains("Readyforinput") || text.contains("入力できます")
+        },
+    )
+    .await;
+}
+fn compact(text: String) -> String {
+    text.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
 async fn read_until_text(terminal: &mut File, output: &mut Vec<u8>, label: &str) {
     eprintln!("PTY awaiting footer/text: {label}");
     let deadline = crate::test_watchdog::Deadline::new("PTY readiness/repaint");
@@ -467,7 +486,9 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         0
     );
     let mut foreign_output = slave.try_clone().unwrap();
-    let mut child = tokio::process::Command::new(&binary)
+    let mut child_command = tokio::process::Command::new(&binary);
+    crate::pty_session::isolate_child(&mut child_command);
+    let mut child = child_command
         .arg("--config")
         .arg(&config)
         .arg("--data-dir")
@@ -482,9 +503,10 @@ async fn real_tui_accepts_text_renders_proxy_response_and_exits_cleanly() {
         .spawn()
         .unwrap();
     let mut output = Vec::new();
-    // F1 belongs to the normal footer. Bootstrap already offers Ctrl+Q, but
-    // cannot accept conversation input or promise that IPC is ready yet.
+    // The bootstrap screen also contains F1; only the composer footer proves
+    // the interactive UI is ready to accept thread-management input.
     read_until(&mut terminal, &mut output, b"F1").await;
+    read_until_ready(&mut terminal, &mut output).await;
     read_repaint_text(
         &mut terminal,
         &mut output,
@@ -828,8 +850,10 @@ async fn short_tool_history_wheel_loads_older_without_refollow() {
         let mut terminal=unsafe{File::from_raw_fd(master)};let slave=unsafe{File::from_raw_fd(slave)};
         // SAFETY: only change flags on the disposable owned PTY descriptors.
         unsafe{assert!(libc::fcntl(master,libc::F_SETFL,libc::O_NONBLOCK)>=0);assert!(libc::fcntl(master,libc::F_SETFD,libc::FD_CLOEXEC)>=0);assert!(libc::fcntl(slave.as_raw_fd(),libc::F_SETFD,libc::FD_CLOEXEC)>=0);}
-        let mut child=tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy")).args(["--config",config.to_str().unwrap(),"--data-dir",data.to_str().unwrap()]).env_clear().env("PATH","/usr/bin:/bin").env("HOME",root.path()).env("TERM","xterm-256color").current_dir(root.path()).stdin(slave.try_clone().unwrap()).stdout(slave.try_clone().unwrap()).stderr(slave).kill_on_drop(true).spawn().unwrap();
-        read_until_text(&mut terminal,&mut output,"F1").await;
+        let mut child_command=tokio::process::Command::new(env!("CARGO_BIN_EXE_shellboy"));
+        crate::pty_session::isolate_child(&mut child_command);
+        let mut child=child_command.args(["--config",config.to_str().unwrap(),"--data-dir",data.to_str().unwrap()]).env_clear().env("PATH","/usr/bin:/bin").env("HOME",root.path()).env("TERM","xterm-256color").current_dir(root.path()).stdin(slave.try_clone().unwrap()).stdout(slave.try_clone().unwrap()).stderr(slave).kill_on_drop(true).spawn().unwrap();
+        read_until_ready(&mut terminal,&mut output).await;
         terminal.write_all(format!("/switch {thread}\r").as_bytes()).unwrap();
         read_until_text(&mut terminal,&mut output,"CMD119").await;
         let sent=short_history_cli(root.path(), &["message","send","--thread",&thread,"--text","Hold the synthetic response"]).await;

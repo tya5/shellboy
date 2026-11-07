@@ -227,6 +227,9 @@ mod exec_client;
 #[path = "../support/watchdog.rs"]
 pub(crate) mod test_watchdog;
 
+#[path = "../support/pty_session.rs"]
+pub(crate) mod pty_session;
+
 #[path = "../support/count_after.rs"]
 pub(crate) mod count_after;
 #[path = "../reply.rs"]

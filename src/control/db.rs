@@ -2103,7 +2103,7 @@ fn assign_message(
                                 |r| r.get(0),
                             )
                             .map_err(sql_error)?;
-                        if still_recovering {
+                        if still_recovering && !human {
                             status = DeliveryStatus::Held;
                             reason = Some("recovery_wait");
                         }

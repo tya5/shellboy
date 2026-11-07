@@ -1500,6 +1500,7 @@ impl Form {
                 vec![
                     thread(),
                     f("expect_reply", "返信を依頼", "false".into(), Boolean),
+                    f("resume_recovery", "回復待ちを解除", "false".into(), Boolean),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
                         "sender_label",

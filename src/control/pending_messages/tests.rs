@@ -98,10 +98,18 @@ async fn cancellation_is_partial_unrestricted_archived_idempotent_and_never_wake
     assert_eq!(replay.result, outcome.result);
     assert!(replay.changed_threads.is_empty());
     let already = store
-        .execute(request("cancel-again", &["own"]), Some(origin("sender")))
+        .execute(
+            request("cancel-again", &["own"]),
+            Some(origin("different-sender")),
+        )
         .await
         .unwrap();
-    assert_eq!(already.result["items"][0]["outcome"], "already_cancelled");
+    assert_eq!(already.result["items"][0]["outcome"], "forbidden");
+    let repeat = store
+        .execute(request("cancel-repeat", &["own"]), Some(origin("sender")))
+        .await
+        .unwrap();
+    assert_eq!(repeat.result["items"][0]["outcome"], "forbidden");
     let human = store
         .execute(request("human-cancel", &["human-late"]), None)
         .await
