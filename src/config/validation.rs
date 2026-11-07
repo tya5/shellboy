@@ -200,15 +200,15 @@ impl Connection {
             ));
         }
         // The credential header (from the variable or a stored key) is defined once.
-        if self.api_key_env.is_some() || self.api_key_header.is_some() {
-            if self.headers.keys().any(|key| {
+        if (self.api_key_env.is_some() || self.api_key_header.is_some())
+            && self.headers.keys().any(|key| {
                 key.eq_ignore_ascii_case(self.api_key_header.as_deref().unwrap_or("authorization"))
-            }) {
-                return Err(invalid(
-                    format!("connections.{name}.headers"),
-                    "the api_key_env credential header cannot also be defined in headers",
-                ));
-            }
+            })
+        {
+            return Err(invalid(
+                format!("connections.{name}.headers"),
+                "the api_key_env credential header cannot also be defined in headers",
+            ));
         }
         let mut seen = std::collections::BTreeSet::new();
         for (key, value) in &self.headers {
