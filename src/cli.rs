@@ -297,7 +297,7 @@ pub struct UsageOptions {
     #[arg(long="attempt", conflicts_with_all=["thread_id","run_id","turn_id","include_children","since","until","group_by","timezone","limit","cursor"])]
     pub attempt_id: Option<String>,
     /// Return bounded saved-attempt groups instead of ungrouped totals.
-    #[arg(long, value_parser = ["hour", "day", "thread"])]
+    #[arg(long, value_parser = ["hour", "day", "thread", "model"])]
     pub group_by: Option<String>,
     /// Bucket timezone: local (owner default), UTC, or a fixed +HH:MM/-HH:MM.
     #[arg(long, requires = "group_by")]

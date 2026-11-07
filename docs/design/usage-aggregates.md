@@ -75,11 +75,13 @@ existing request task into the DB job; it is not a protocol option or setting.
 
 ## Bounded grouped CLI readback (#101)
 
-`usage get --group-by hour|day|thread` uses the existing finite presentation pool
-and read-only WAL snapshot, not the write DB worker. Ungrouped totals are unchanged.
+`usage get --group-by hour|day|thread|model` uses the existing finite presentation
+pool and read-only WAL snapshot, not the write DB worker. Ungrouped totals are
+unchanged.
 Without an explicit scope, grouped reads cover non-deleted Threads. Thread groups
-provide the multi-conversation alternative; one explicit Thread/Run/Turn filter
-and bounded existing descendant selection remain available.
+provide the multi-conversation alternative; model groups key saved attempts by
+`model_attempt.model_id`. One explicit Thread/Run/Turn filter and bounded
+existing descendant selection remain available.
 
 The saved-start interval is half-open, defaults to the last 24 hours, and cannot
 exceed 31 days. Unknown starts are excluded. Each scan page reads at most 10,000
@@ -97,9 +99,14 @@ Responses contain at most 168 groups (default168, `--limit` can lower it).
 A cursor first pages groups in the same candidate window, then continues the
 next candidate window. `scan_truncated` explicitly marks incomplete coverage;
 statistics are exact for the displayed scan window, not whole-period estimates.
-The same group can occur in multiple scan windows. Do not average percentiles or
-ratios across pages. Cursors bind filters, limits, owner instance and an insertion
-watermark; they do not promise an immutable snapshot across separate requests.
+Model grouping reuses the same rowid candidate scan and page limits, and does not
+run the separate `app_meta` summary-usage query. Summary records lack model
+attribution, so model-group `summary_requests`, summary cache-creation totals and
+compaction counts are null with `coverage.summary=not_attributed_by_model`; they
+are not reported as zero. The same group can occur in multiple scan windows. Do
+not average percentiles or ratios across pages. Cursors bind filters, limits,
+owner instance and an insertion watermark; they do not promise an immutable
+snapshot across separate requests.
 
 Time buckets use owner local time by default (`local`), or `UTC`/a fixed
 `+HH:MM`/`-HH:MM` offset via `--timezone`. Local hours retain their offset so DST

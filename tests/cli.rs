@@ -1006,6 +1006,26 @@ async fn saved_usage_cli_scopes_are_read_only_and_mutually_exclusive() {
         let value = serde_json::to_value(command).unwrap();
         assert!(value["args"][kind].is_string());
     }
+    let grouped = convert(&[
+        "usage",
+        "get",
+        "--group-by",
+        "model",
+        "--since",
+        "2026-10-31T00:00:00Z",
+        "--until",
+        "2026-11-01T00:00:00Z",
+        "--limit",
+        "10",
+        "--timezone",
+        "UTC",
+    ])
+    .await;
+    let value = serde_json::to_value(grouped).unwrap();
+    assert_eq!(value["args"]["group_by"], "model");
+    assert_eq!(value["args"]["since"], "2026-10-31T00:00:00Z");
+    assert_eq!(value["args"]["limit"], 10);
+
     for args in [
         vec!["usage", "get", "--thread", "t", "--run", "r"],
         vec!["usage", "get", "--turn", "u", "--include-children"],

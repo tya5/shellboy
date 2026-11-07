@@ -16,7 +16,18 @@ fn fixture() -> Connection {
     db
 }
 fn insert(db: &Connection, id: &str, thread: &str, at: &str, state: &str, usage: Option<&str>) {
-    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?2,0,0,'p','m',0,?3,'{}',?4,?5,?5)",params![id,thread,state,usage,DateTime::parse_from_rfc3339(at).map(|v|v.with_timezone(&Utc).to_rfc3339()).unwrap_or_else(|_|at.into())]).unwrap();
+    insert_model(db, id, thread, at, state, usage, "m");
+}
+fn insert_model(
+    db: &Connection,
+    id: &str,
+    thread: &str,
+    at: &str,
+    state: &str,
+    usage: Option<&str>,
+    model: &str,
+) {
+    db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?2,0,0,'p',?6,0,?3,'{}',?4,?5,?5)",params![id,thread,state,usage,DateTime::parse_from_rfc3339(at).map(|v|v.with_timezone(&Utc).to_rfc3339()).unwrap_or_else(|_|at.into()),model]).unwrap();
 }
 fn args(group: &str) -> UsageGetArgs {
     UsageGetArgs {
@@ -773,4 +784,88 @@ fn large_compaction_records_are_byte_bounded_and_resume_without_loss() {
     }
     assert_eq!(total, 7);
     assert!(pages >= 4);
+}
+
+#[test]
+fn model_groups_use_existing_bounded_attempt_scan_and_do_not_invent_summary_usage() {
+    let db = fixture();
+    insert_model(
+        &db,
+        "luna-1",
+        "t1",
+        "2026-10-31T00:10:00Z",
+        "completed",
+        Some("{\"input_tokens\":100,\"input_tokens_details\":{\"cached_tokens\":80}}"),
+        "gpt-6-luna",
+    );
+    insert_model(
+        &db,
+        "luna-2",
+        "t2",
+        "2026-10-31T00:20:00Z",
+        "failed",
+        Some("{\"input_tokens\":200}"),
+        "gpt-6-luna",
+    );
+    insert_model(
+        &db,
+        "terra-1",
+        "t1",
+        "2026-10-31T00:30:00Z",
+        "completed",
+        Some("{\"input_tokens\":50,\"input_tokens_details\":{\"cached_tokens\":10}}"),
+        "terra",
+    );
+    let before = db.total_changes();
+    db.pragma_update(None, "query_only", true).unwrap();
+    let mut a = args("model");
+    a.limit = Some(1);
+    let first = read(&db, &a, "fixture").unwrap();
+    assert_eq!(db.total_changes(), before);
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first["items"][0]["key"], "gpt-6-luna");
+    assert_eq!(first["items"][0]["model_attempts"]["completed"]["count"], 1);
+    assert_eq!(first["items"][0]["model_attempts"]["failed"]["count"], 1);
+    assert_eq!(first["items"][0]["cache"]["ratio"], 0.8);
+    assert_eq!(first["items"][0]["total"]["summary_requests"], Value::Null);
+    assert_eq!(
+        first["items"][0]["total"]["cache_creation_tokens"],
+        Value::Null
+    );
+    assert_eq!(first["items"][0]["compaction"]["compactions"], Value::Null);
+    assert_eq!(first["coverage"]["summary"], "not_attributed_by_model");
+    assert_eq!(first["scan_truncated"], false);
+    assert_eq!(first["scanned_compaction_candidates"], Value::Null);
+    assert_eq!(first["matched_compactions"], Value::Null);
+    assert_eq!(first["more"], true);
+    a.cursor = first["next_cursor"].as_str().map(Into::into);
+    let second = read(&db, &a, "fixture").unwrap();
+    assert_eq!(second["items"][0]["key"], "terra");
+    assert_eq!(second["items"][0]["cache"]["ratio"], 0.2);
+    assert_eq!(second["more"], false);
+}
+
+#[test]
+fn model_group_by_validates_and_reuses_rowid_query_without_model_scan() {
+    let db = fixture();
+    let mut a = args("model");
+    assert!(validate(&a).is_ok());
+    a.group_by = Some("profile".into());
+    assert_eq!(validate(&a).unwrap_err().code, ErrorCode::InvalidArgument);
+    let plan = db
+        .prepare(&format!("EXPLAIN QUERY PLAN {}", query()))
+        .unwrap()
+        .query_map(
+            params!["2026-10-31T00:00:00", "2026-11-01T00:00:01", 0, i64::MAX],
+            |r| r.get::<_, String>(3),
+        )
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+        .join("\n");
+    assert!(
+        plan.contains("SEARCH model_attempt USING INTEGER PRIMARY KEY"),
+        "{plan}"
+    );
+    assert!(!plan.contains("SCAN model_attempt"), "{plan}");
 }

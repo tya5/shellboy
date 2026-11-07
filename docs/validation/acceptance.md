@@ -10728,3 +10728,8 @@ blocked foreground work in proportion to space size. Exact counts are now dry-ru
 unknown quantities explicitly as null and `counts_exact: false`. A SQLite authorizer regression denies COUNT:
 dry-run must fail under that guard while actual removal succeeds and commits its durable decision. This tests the
 SQL boundary deterministically instead of relying on a timing threshold. Focused/CI validation is pending.
+
+
+### #272 model-grouped bounded usage
+
+- Model-grouped saved-attempt requests/cache ratio aggregate by persisted `model_id` using the existing bounded rowid candidate scan and page cursor. Summary records have no model attribution and are not read or assigned; summary fields report null/unknown. Synthetic regression and `EXPLAIN QUERY PLAN` check pending. Thread shell outcome aggregation is outside this stage.
