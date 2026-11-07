@@ -4353,7 +4353,7 @@ mod agents_reference_tests {
         );
     }
     #[tokio::test]
-    async fn sender_receipts_cover_appends_deleted_sources_labels_and_cancel_authority() {
+    async fn sender_receipts_cover_appends_deleted_sources_labels_and_unrestricted_cancel() {
         let (_root, store) = fixture().await;
         let source = store
             .execute(req(create(None, None, None)), None)
@@ -4476,20 +4476,6 @@ mod agents_reference_tests {
             .unwrap()
             .result;
         assert_eq!(result["sender"]["thread_id"], source);
-        let own = store
-            .execute(
-                req(Command::MessageCancel(MessageCancelArgs {
-                    message_ids: vec![model_id.clone()],
-                })),
-                Some(origin.clone()),
-            )
-            .await
-            .unwrap()
-            .result;
-        assert_eq!(
-            own["items"][0]["outcome"], "cancelled",
-            "additive kind/label must preserve top-level sender ownership"
-        );
         let mut foreign = origin.clone();
         foreign.thread_id = "different-thread".into();
         let cancelled_by_other_thread = store
