@@ -10385,9 +10385,18 @@ replay with the same operation ID returning the saved result with no second edit
 concurrent changes with one hash leaving one winner; no owner (`app_not_running`, file untouched); `--config`
 refused; and the real CLI against a `serve` owner with a temporary HOME.
 
-Not verified: the Windows branch is exercised only by CI on this change (`ReplaceFileW` replacing the file, and a
-held file refused), and keeping a Windows ACL has no test because the test sets none. File ownership on Unix when
-the owner runs as another user. The race with another program in the replace step itself is narrowed and not
-tested as closed. A timed-out file worker is not exercised. The `config_changed` diagnostic line has no dedicated
-test. Hot-candidate labels come from reading call sites, and no value was applied live. Not tried with a real
-provider, a real user configuration, the Web settings screen or a real terminal.
+Review fixes add: an interrupted replace (errors 1176 and 1177 simulated on every OS through the replace seam)
+finishing with a move and a `warning`, or keeping the new contents with `replace_interrupted` when the move fails
+too; other replace errors leaving the file; a change over the 1 MiB bound refused; the `[redacted` placeholder
+refused in values and paths; a credential in a field path refused without repeating it; pasted names hidden and
+removable; real names that the first heuristic refused now accepted; a new root key below the opening comment;
+`indexing.concurrency` bounded; and removing a connection a Thread uses, through a real owner restart.
+
+Not verified: a real Windows 1176 or 1177 has never been produced, so that recovery has run only with the failure
+simulated. The Windows-only test reaches a real `ReplaceFileW` failure by holding the file without write sharing;
+CI logs don't list individual tests, so its running is inferred from the Tests step passing. Keeping a Windows ACL
+has no test because the test sets none. File ownership on Unix when the owner runs as another user. The race with
+another program in the replace step itself is narrowed and not tested as closed; two owners sharing one file get
+only that. A timed-out file worker, the result-size refusal, `changed_by` with a real model-shell origin and the
+`config_changed` diagnostic line have no dedicated test. Not tried with a real provider, a real user configuration,
+the Web settings screen or a real terminal.

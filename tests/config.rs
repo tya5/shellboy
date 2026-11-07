@@ -322,11 +322,7 @@ fn config_loading_distinguishes_default_missing_explicit_missing_and_errors() {
 #[test]
 fn worker_counts_exceeding_pool_and_shutdown_permits_fail_before_startup() {
     let too_many = tokio::sync::Semaphore::MAX_PERMITS.min(u32::MAX as usize) + 1;
-    for (section, key) in [
-        ("workers", "attachment"),
-        ("workers", "control_file"),
-        ("indexing", "concurrency"),
-    ] {
+    for (section, key) in [("workers", "attachment"), ("workers", "control_file")] {
         let source = format!("[{section}]\n{key}={too_many}\n");
         let error = Config::parse(&source).unwrap_err().to_string();
         assert!(error.contains(&format!("{section}.{key}")), "{error}");
@@ -1200,4 +1196,15 @@ fn indexing_auto_kinds_default_to_user_summary_and_assistant_response_and_reject
     );
     let error = Config::parse("[indexing]\nauto_kinds=[\"tool_output\"]\n").unwrap_err();
     assert!(matches!(error, ConfigError::Invalid { key, .. } if key == "indexing.auto_kinds"));
+}
+
+#[test]
+fn indexing_concurrency_has_an_upper_bound_because_startup_spawns_each_worker() {
+    assert!(Config::parse("[indexing]\nconcurrency=64\n").is_ok());
+    for value in ["65", "4294967295"] {
+        let source = format!("[indexing]\nconcurrency={value}\n");
+        let error = Config::parse(&source).unwrap_err().to_string();
+        assert!(error.contains("indexing.concurrency"), "{error}");
+        assert!(error.contains("1..=64"), "{error}");
+    }
 }

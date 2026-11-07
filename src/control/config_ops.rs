@@ -6,10 +6,18 @@ use tokio::time::{Duration, Instant};
 
 /// Keeps room for the response envelope around the largest allowed read.
 const MAX_READ_RESULT_BYTES: usize = MAX_FRAME_BYTES - 1024 * 1024;
+const MIN_FILE_TIMEOUT_MS: u64 = 1_000;
 
 impl Control {
     fn config_deadline(&self) -> Instant {
-        Instant::now() + Duration::from_millis(self.store.config.io.file_prepare_timeout_ms)
+        // A tiny configured value must not make every settings call time out.
+        let millis = self
+            .store
+            .config
+            .io
+            .file_prepare_timeout_ms
+            .max(MIN_FILE_TIMEOUT_MS);
+        Instant::now() + Duration::from_millis(millis)
     }
 
     pub(super) async fn config_get(

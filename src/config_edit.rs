@@ -23,15 +23,8 @@ pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 /// Certified bound of a `config.set` result, checked before the file is replaced.
 const MAX_RESULT_BYTES: usize = 512 * 1024;
 const REDACTED: &str = "[redacted]";
-/// Every field needs a restart today. These are read when next used instead of being
-/// captured by a worker or client at startup, so they are the candidates to apply live.
-pub const HOT_CANDIDATES: [&str; 4] = [
-    "default_connection",
-    "default_model",
-    "compaction.*",
-    "retention.*",
-];
-
+/// Also matches a redacted `base_url` and a redacted name.
+const REDACTED_MARK: &str = "[redacted";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Class {
     /// Not meant to hold a secret; a value with a known credential prefix is still hidden.
@@ -75,6 +68,12 @@ impl Fields {
         let mut empty = true;
         for (name, value) in entries {
             empty = false;
+            // A name can be a pasted secret too. The digest keeps it distinct and stable.
+            let name = if looks_like_credential(&name) {
+                format!("[redacted-name-{}]", &sha256_hex(&name)[..8])
+            } else {
+                name
+            };
             let mut full = path.to_vec();
             full.push(&name);
             self.add(&full, value, Class::Secret);
@@ -220,7 +219,7 @@ fn field_name(path: &[String]) -> String {
         .join(".")
 }
 fn has_credential_prefix(value: &str) -> bool {
-    const PREFIXES: [&str; 21] = [
+    const PREFIXES: [&str; 18] = [
         "sk-",
         "sk_",
         "pk_",
@@ -237,29 +236,32 @@ fn has_credential_prefix(value: &str) -> bool {
         "xoxa-",
         "xapp-",
         "hf_",
-        "AKIA",
-        "ASIA",
-        "AIza",
         "ya29.",
         "eyJ",
     ];
     let value = value.trim();
     let lower = value.to_ascii_lowercase();
-    lower.starts_with("bearer ")
-        || lower.starts_with("basic ")
-        || (value.len() >= 16 && PREFIXES.iter().any(|prefix| value.starts_with(prefix)))
+    let bytes = value.as_bytes();
+    let aws = bytes.len() == 20
+        && (value.starts_with("AKIA") || value.starts_with("ASIA"))
+        && bytes[4..]
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit());
+    let google = bytes.len() == 39 && value.starts_with("AIza");
+    // Generated keys carry digits; names like `hf_token_for_my_proxy` usually don't.
+    let prefixed = value.len() >= 16
+        && bytes.iter().any(u8::is_ascii_digit)
+        && PREFIXES.iter().any(|prefix| value.starts_with(prefix));
+    lower.starts_with("bearer ") || lower.starts_with("basic ") || aws || google || prefixed
 }
-/// A protective heuristic for name fields: known prefixes and long opaque tokens.
+/// A protective heuristic for name fields: known key shapes and long opaque tokens.
 /// It is never proof of either, so a refusal says how to proceed by hand.
 pub fn looks_like_credential(value: &str) -> bool {
     let value = value.trim();
-    let count = value.chars().count();
-    let digit = value.bytes().any(|b| b.is_ascii_digit());
-    let lower = value.bytes().any(|b| b.is_ascii_lowercase());
-    let upper = value.bytes().any(|b| b.is_ascii_uppercase());
     has_credential_prefix(value)
-        || (count >= 20 && digit && lower && upper)
-        || (count >= 32 && digit && value.bytes().all(|b| b.is_ascii_alphanumeric()))
+        || (value.len() >= 32
+            && value.bytes().any(|b| b.is_ascii_digit())
+            && value.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 fn redact_url(value: &str) -> (Value, bool) {
     let Ok(mut url) = url::Url::parse(value) else {
@@ -476,7 +478,7 @@ pub fn read(loaded: &Config) -> Result<Value, ApiError> {
         },
         "differs": loaded_hash != file_hash,
         "differing_fields": differing_fields,
-        "restart": {"all_fields_require_restart": true, "hot_candidates": HOT_CANDIDATES},
+        "restart": {"all_fields_require_restart": true},
     }))
 }
 fn no_source() -> ApiError {
@@ -499,14 +501,6 @@ fn changed_names(before: &BTreeMap<String, Leaf>, after: &BTreeMap<String, Leaf>
     });
     names
 }
-fn hot_candidate(path: &[String]) -> bool {
-    match path {
-        [one] => matches!(one.as_str(), "default_connection" | "default_model"),
-        [section, _] => matches!(section.as_str(), "compaction" | "retention"),
-        _ => false,
-    }
-}
-
 /// What a finished `config.set` reports. `fields` holds names only, for the record.
 #[derive(Debug)]
 pub struct Applied {
@@ -529,6 +523,16 @@ pub fn apply_with(
     changes: &[ConfigChange],
     before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
 ) -> Result<Applied, ApiError> {
+    apply_with_replace(path, expected_hash, changes, before_replace, replace_file)
+}
+/// `replace` takes (temporary, target, target exists); tests return OS failures from it.
+pub fn apply_with_replace(
+    path: &Path,
+    expected_hash: &str,
+    changes: &[ConfigChange],
+    before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
+    replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
+) -> Result<Applied, ApiError> {
     let state = read_state(path)?;
     if state.hash != expected_hash {
         return Err(conflict(expected_hash, &state.hash));
@@ -541,6 +545,16 @@ pub fn apply_with(
         .details(json!({"written":false}))
     })?;
     let edited = edit_text(text, changes)?;
+    // A bigger file could no longer be read back here, which would lock this out.
+    if edited.len() as u64 > MAX_FILE_BYTES {
+        return Err(ApiError::new(
+            ErrorCode::InputLimit,
+            format!(
+                "The changed configuration would exceed {MAX_FILE_BYTES} bytes; nothing was written"
+            ),
+        )
+        .details(json!({"written":false})));
+    }
     let after = parse_file(edited.as_bytes(), path).map_err(|message| {
         ApiError::new(ErrorCode::ConfigInvalid, message)
             .hint("Nothing was written. Correct the value; the whole file must pass the same rules as config check")
@@ -563,7 +577,7 @@ pub fn apply_with(
         })
         .collect();
     let new_hash = sha256_hex(&edited);
-    let result = json!({
+    let mut result = json!({
         "config_path": path,
         "written": written,
         "previous_hash": state.hash,
@@ -588,7 +602,11 @@ pub fn apply_with(
             )
             .details(json!({"config_path":path,"written":false})));
         }
-        replace_atomically(path, &state, edited.as_bytes(), before_replace)?;
+        if let Some(warning) =
+            replace_atomically(path, &state, edited.as_bytes(), before_replace, replace)?
+        {
+            result["warning"] = json!(warning);
+        }
     }
     Ok(Applied {
         result,
@@ -599,15 +617,10 @@ pub fn apply_with(
 fn change_entry(name: &str, before: Option<Option<&Leaf>>, after: Option<&Leaf>) -> Value {
     let hidden = |leaf: Option<&Leaf>| leaf.is_some_and(|leaf| shown(leaf).1);
     let sensitive = before.is_some_and(hidden) || hidden(after);
-    let path = after
-        .or(before.flatten())
-        .map(|leaf| leaf.path.as_slice())
-        .unwrap_or_default();
     let mut entry = json!({
         "field": name,
         "sensitive": sensitive,
         "restart_required": true,
-        "hot_candidate": hot_candidate(path),
     });
     if !sensitive {
         // Effective values, so removing a key shows the default that now applies.
@@ -631,6 +644,7 @@ fn change_error(index: usize, message: impl Into<String>) -> ApiError {
     ApiError::new(ErrorCode::InvalidArgument, message)
         .details(json!({"change_index":index,"written":false}))
 }
+/// `field` must be safe to return: a name in the path is reported by its parent.
 fn refused_name(index: usize, field: &str) -> ApiError {
     ApiError::new(
         ErrorCode::InvalidArgument,
@@ -639,31 +653,53 @@ fn refused_name(index: usize, field: &str) -> ApiError {
     .hint("Put the credential in the environment and set the variable's name here. If this really is a name, edit the file by hand and run shellboy config check")
     .details(json!({"reason":"credential_value_refused","change_index":index,"field":field,"written":false}))
 }
+fn has_placeholder(value: &Value) -> bool {
+    match value {
+        Value::String(text) => text.contains(REDACTED_MARK),
+        Value::Array(items) => items.iter().any(has_placeholder),
+        Value::Object(entries) => entries
+            .iter()
+            .any(|(key, item)| key.contains(REDACTED_MARK) || has_placeholder(item)),
+        _ => false,
+    }
+}
+fn has_credential_key(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(has_credential_key),
+        Value::Object(entries) => entries
+            .iter()
+            .any(|(key, item)| looks_like_credential(key) || has_credential_key(item)),
+        _ => false,
+    }
+}
 fn check_names(path: &[String], value: &Value, index: usize) -> Result<(), ApiError> {
+    if let Some(at) = path.iter().position(|part| looks_like_credential(part)) {
+        let parent = if at == 0 {
+            "The field path".to_owned()
+        } else {
+            field_name(&path[..at])
+        };
+        return Err(refused_name(index, &parent));
+    }
+    let name = field_name(path);
+    if has_credential_key(value) {
+        return Err(refused_name(index, &name));
+    }
     let parts: Vec<&str> = path.iter().map(String::as_str).collect();
-    let refuse = |text: &str, field: &str| {
+    let refuse = |text: &str| {
         if looks_like_credential(text) {
-            Err(refused_name(index, field))
+            Err(refused_name(index, &name))
         } else {
             Ok(())
         }
     };
-    let name = field_name(path);
     match parts.as_slice() {
         ["connections", _, "api_key_env" | "api_key_header"] => {
-            refuse(value.as_str().unwrap_or_default(), &name)
+            refuse(value.as_str().unwrap_or_default())
         }
         ["connections", _, "session_header_names"] => {
             for item in value.as_array().into_iter().flatten() {
-                refuse(item.as_str().unwrap_or_default(), &name)?;
-            }
-            Ok(())
-        }
-        // The variable's value is free; the name is not a place for a secret.
-        ["shell", "env", variable] => refuse(variable, &name),
-        ["shell", "env"] => {
-            for variable in value.as_object().into_iter().flatten().map(|(k, _)| k) {
-                refuse(variable, &name)?;
+                refuse(item.as_str().unwrap_or_default())?;
             }
             Ok(())
         }
@@ -750,6 +786,9 @@ fn set_field(
     index: usize,
 ) -> Result<(), ApiError> {
     let last = path.last().expect("parsed fields have a part");
+    let header = (path.len() == 1 && !doc.as_table().contains_key(last))
+        .then(|| file_header(doc))
+        .flatten();
     let parent = parent_table(doc, path, true, index)?.expect("created");
     match parent.get_mut(last) {
         Some(Item::Value(existing)) => {
@@ -772,9 +811,38 @@ fn set_field(
         }
         None => {
             parent.insert(last, Item::Value(toml_value(value, index)?));
+            if let (Some(header), Some(mut key)) = (header, parent.key_mut(last)) {
+                key.leaf_decor_mut().set_prefix(header);
+            }
         }
     }
     Ok(())
+}
+/// A root key prints before every table. With no root key yet, the file's opening
+/// comment (up to a blank line) stays above it instead of ending up below it.
+fn file_header(doc: &mut DocumentMut) -> Option<String> {
+    let has_root_key = doc
+        .as_table()
+        .iter()
+        .any(|(_, item)| item.is_value() || item.as_table().is_some_and(Table::is_dotted));
+    if has_root_key {
+        return None;
+    }
+    let mut first = None;
+    next_position(doc.as_table(), None, &mut first);
+    let Some(table) = first.and_then(|at| table_at(doc.as_table_mut(), at)) else {
+        let trailing = doc.trailing().as_str().unwrap_or_default().to_owned();
+        if !trailing.contains('#') {
+            return None;
+        }
+        doc.set_trailing("");
+        return Some(trailing);
+    };
+    let prefix = table.decor().prefix()?.as_str()?.to_owned();
+    let (head, rest) = prefix.rsplit_once("\n\n")?;
+    let rest = format!("\n{rest}");
+    table.decor_mut().set_prefix(rest);
+    Some(format!("{head}\n\n"))
 }
 fn remove_field(doc: &mut DocumentMut, path: &[String], index: usize) -> Result<(), ApiError> {
     let last = path.last().expect("parsed fields have a part");
@@ -911,6 +979,15 @@ pub fn edit_text(text: &str, changes: &[ConfigChange]) -> Result<String, ApiErro
         }
         match &change.value {
             Some(value) => {
+                // A form posting back what config.get showed would destroy the secret.
+                if has_placeholder(value) || path.iter().any(|part| part.contains(REDACTED_MARK)) {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidArgument,
+                        "This value is the placeholder config.get shows for a hidden value; writing it would replace the real one, so nothing was written",
+                    )
+                    .hint("Send only the fields you are changing, with their real values")
+                    .details(json!({"reason":"redacted_placeholder_refused","change_index":index,"written":false})));
+                }
                 check_names(&path, value, index)?;
                 set_field(&mut doc, &path, value, index)?;
             }
@@ -927,12 +1004,19 @@ pub fn edit_text(text: &str, changes: &[ConfigChange]) -> Result<String, ApiErro
     })
 }
 
+/// `ReplaceFileW` without a backup name: the replaced file is gone and the
+/// replacement remains under its own name.
+const ERROR_UNABLE_TO_MOVE_REPLACEMENT: i32 = 1176;
+/// The replaced file survives under a name Windows chose; the replacement remains.
+const ERROR_UNABLE_TO_MOVE_REPLACEMENT_2: i32 = 1177;
+/// Returns a warning when the file is in place but a replace was interrupted.
 fn replace_atomically(
     path: &Path,
     state: &FileState,
     bytes: &[u8],
     before_replace: impl FnOnce(&Path) -> std::io::Result<()>,
-) -> Result<(), ApiError> {
+    replace: impl FnOnce(&Path, &Path, bool) -> std::io::Result<()>,
+) -> Result<Option<&'static str>, ApiError> {
     let target = &state.target;
     let parent = target
         .parent()
@@ -946,7 +1030,7 @@ fn replace_atomically(
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let temporary = parent.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()));
-    let outcome = write_temporary(&temporary, state, bytes)
+    let prepared = write_temporary(&temporary, state, bytes)
         .and_then(|()| before_replace(&temporary))
         .map_err(|_| {
             file_error(
@@ -960,23 +1044,68 @@ fn replace_atomically(
             if again.hash != state.hash {
                 return Err(conflict(&state.hash, &again.hash));
             }
-            replace_file(&temporary, target, state.present).map_err(|_| {
-                file_error(
+            Ok(())
+        });
+    if let Err(error) = prepared {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error);
+    }
+    let warning = match replace(&temporary, target, state.present) {
+        Ok(()) => None,
+        Err(error) => match error.raw_os_error() {
+            Some(
+                code @ (ERROR_UNABLE_TO_MOVE_REPLACEMENT | ERROR_UNABLE_TO_MOVE_REPLACEMENT_2),
+            ) => {
+                // The temporary file may be the only copy: never delete it here.
+                Some(finish_interrupted_replace(path, &temporary, target, code)?)
+            }
+            _ => {
+                // Every other failure leaves both files under their own names.
+                let _ = std::fs::remove_file(&temporary);
+                return Err(file_error(
                     "Cannot replace the configuration file; it is unchanged",
                     path,
-                )
-            })
-        });
-    if outcome.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-        return outcome;
-    }
+                ));
+            }
+        },
+    };
     #[cfg(unix)]
     if let Ok(directory) = std::fs::File::open(parent) {
         // The replace has happened; this only hardens it against power loss.
         let _ = directory.sync_all();
     }
-    Ok(())
+    Ok(warning)
+}
+fn finish_interrupted_replace(
+    path: &Path,
+    temporary: &Path,
+    target: &Path,
+    code: i32,
+) -> Result<&'static str, ApiError> {
+    let previous_survives = code == ERROR_UNABLE_TO_MOVE_REPLACEMENT_2;
+    if std::fs::rename(temporary, target).is_ok() {
+        return Ok(if previous_survives {
+            "The replace was interrupted and finished with a plain move. The new file is in place; the previous version remains in the same directory under a name Windows chose, and the file's permissions may differ"
+        } else {
+            "The replace was interrupted and finished with a plain move. The new file is in place, but its permissions may differ from the previous file's"
+        });
+    }
+    Err(ApiError::new(
+        ErrorCode::IoFailed,
+        if previous_survives {
+            "Replacing the configuration file was interrupted: nothing is at its path. The new contents are in details.recovery_file and the previous version remains in the same directory under a name Windows chose"
+        } else {
+            "Replacing the configuration file was interrupted: nothing is at its path and the previous version is gone. The new contents are in details.recovery_file"
+        },
+    )
+    .hint("Move details.recovery_file to details.config_path, then restart the owner. Without that, the next owner start finds no configuration at this path")
+    .details(json!({
+        "reason": "replace_interrupted",
+        "config_path": path,
+        "recovery_file": temporary,
+        "previous_version_survives": previous_survives,
+        "written": false,
+    })))
 }
 fn write_temporary(temporary: &Path, state: &FileState, bytes: &[u8]) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
@@ -997,9 +1126,10 @@ fn write_temporary(temporary: &Path, state: &FileState, bytes: &[u8]) -> std::io
     file.sync_all()
 }
 /// Windows `ReplaceFileW` keeps the replaced file's ACL and attributes, which a
-/// rename would lose; a sharing violation fails with both files intact.
+/// rename would lose. Errors 1176 and 1177 mean it stopped midway and the target is
+/// no longer at its path; every other error leaves both files under their own names.
 #[cfg(windows)]
-fn replace_file(temporary: &Path, target: &Path, present: bool) -> std::io::Result<()> {
+pub fn replace_file(temporary: &Path, target: &Path, present: bool) -> std::io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     if !present {
         return std::fs::rename(temporary, target);
@@ -1029,6 +1159,6 @@ fn replace_file(temporary: &Path, target: &Path, present: bool) -> std::io::Resu
     Ok(())
 }
 #[cfg(not(windows))]
-fn replace_file(temporary: &Path, target: &Path, _present: bool) -> std::io::Result<()> {
+pub fn replace_file(temporary: &Path, target: &Path, _present: bool) -> std::io::Result<()> {
     std::fs::rename(temporary, target)
 }

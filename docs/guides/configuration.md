@@ -95,11 +95,14 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 ```
 
 - **Every change needs an owner restart.** Nothing is applied to the running owner. Until then `config get`
-  reports `differs: true` and names the fields in `differing_fields`.
+  reports `differs: true` and names the fields in `differing_fields`. Standalone commands that read the file
+  themselves, such as `rag` and `storage vacuum`, use the new values on their next run.
 - **Credentials stay in the environment.** `config get` never returns the value of `headers`, `extra_headers`,
   `extra_body` or `shell.env`, only names, and hides any credential-looking `base_url` path part or name. Each
   hidden field is listed in `redacted_fields`. `api_key_env` takes a variable name; a value that looks like a
   key is refused and isn't shown. The heuristic can catch a real name, in which case edit the file by hand.
+  Send only the fields you are changing: a value containing `[redacted` is refused, so posting back what
+  `config get` showed cannot destroy a secret.
 - **The whole file is validated first** with the rules of `config check`, except its model catalog request. A
   refused change leaves the file as it was.
 - **Another edit is detected.** If the file changed after your read, the change is refused with
@@ -113,6 +116,13 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 - `data_dir` can't be changed here, because a restart would then open another, possibly empty, directory.
 - Add a connection with an object, `--set 'connections.new={"base_url":"https://x.example/v1","api_key_env":"X_KEY"}'`,
   and remove one with `--unset connections.new`. Other tables are changed one field at a time.
+- Removing a connection a Thread uses is accepted. After the restart a new message to that Thread stops in
+  `recovery_wait` with `config_invalid`. Move it with `thread set --connection NAME --model MODEL`; `--model` alone
+  fails too.
+- A change that would make the file larger than 1 MiB is refused.
+
+On Windows, if the replace is interrupted midway, Shellboy finishes it with a plain move and the result has a
+`warning`. If that fails too, the error's `details.recovery_file` holds the new contents to move into place.
 
 The file's owner on Unix becomes the user running the owner, if that differs. A crash during a write can leave
 a `.config.toml.*.tmp` file beside it, which is safe to delete and may hold the same values as the file.
@@ -624,7 +634,7 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `io` | `term_grace_ms=2000`, `drain_timeout_ms=1000`, `self_reply_grace_ms=250`, `shutdown_grace_ms=5000` | Termination grace, pipe drain, self-stop reply, shutdown UI grace |
 | `io` | `output_buffer_bytes=8388608`, `output_batch_bytes=65536`, `output_batch_ms=25` | Raw collection buffer 8MiB, DB batch 64KiB/25ms |
 | `workers` | `attachment=2`, `control_file=1` | Bounded file-worker counts |
-| `indexing` | `auto_history=true`, `auto_kinds=["user","summary","assistant_response"]`, `concurrency=1`, `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
+| `indexing` | `auto_history=true`, `auto_kinds=["user","summary","assistant_response"]`, `concurrency=1` (at most 64), `split_chars=2000`, `retries=2`, `common_failure_pause_count=3`, `retry_delays_ms=[1000,4000]` | Embedding concurrency, chunk characters, retries, common-failure pause |
 | `ui` | `language="en"`, `max_fps=30`, `live_work_rows=3`, `held_input_rows=3`, `paste_fold_chars=1000`, `paste_fold_lines=3`, `send_key="Enter"`, `newline_keys=["Ctrl+J","Shift+Enter"]`, `copy_backend="auto"`, `palette="dark"`, `bell=true`, `program_status="on"`, `motion="on"` | UI language (`en` or `ja`), rendering, motion, independent owned-work and held-input rows, paste folding, send/newline, copy method, header/user surfaces, terminal bell on recovery wait. Keyboard enhancement is negotiated at runtime, not configured here; Ctrl+J is the portable fallback and Shift+Enter requires terminal support. |
 | `logging` | `file_bytes=5242880`, `files=3` | Diagnostic logs, 5MiB ×3 |
 

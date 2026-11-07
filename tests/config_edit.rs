@@ -3,7 +3,10 @@ use crate::runtime_features::{owner, request};
 use serde_json::{Value, json};
 use shellboy::{
     config::Config,
-    config_edit::{apply, apply_with, edit_text, looks_like_credential, read},
+    config_edit::{
+        MAX_FILE_BYTES, apply, apply_with, apply_with_replace, edit_text, looks_like_credential,
+        read,
+    },
     config_setup::TEMPLATE,
     control::Control,
     protocol::{ApiError, Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, ErrorCode, Request},
@@ -492,17 +495,225 @@ fn the_windows_replace_keeps_the_target_and_refuses_when_it_is_open_exclusively(
     );
     let hash = hash_of(&path);
     let before = std::fs::read_to_string(&path).unwrap();
-    // No sharing: the hash read itself fails and nothing changes.
+    // Reads stay allowed, so the hash checks pass and ReplaceFileW itself is what fails.
+    const FILE_SHARE_READ: u32 = 1;
     let held = std::fs::OpenOptions::new()
         .read(true)
-        .share_mode(0)
+        .share_mode(FILE_SHARE_READ)
         .open(&path)
         .unwrap();
     let error = apply(&path, &hash, &[change("ui.bell", json!(true))]).unwrap_err();
     assert_eq!(error.code, ErrorCode::IoFailed);
+    assert!(
+        error
+            .message
+            .contains("Cannot replace the configuration file"),
+        "{}",
+        error.message
+    );
     drop(held);
     assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
     assert_eq!(entries(root.path()), ["config.toml"]);
+}
+
+fn interrupted(code: i32) -> std::io::Result<()> {
+    Err(std::io::Error::from_raw_os_error(code))
+}
+
+#[test]
+fn an_interrupted_windows_replace_keeps_the_only_copy_and_finishes_the_move() {
+    // These run the real recovery on every OS, with the OS failure simulated.
+    let bell = || vec![change("ui.bell", json!(false))];
+    let (root, path, hash) = fixture(FULL);
+    let applied = apply_with_replace(
+        &path,
+        &hash,
+        &bell(),
+        |_| Ok(()),
+        |_, target, _| {
+            std::fs::remove_file(target).unwrap();
+            interrupted(1176)
+        },
+    )
+    .unwrap();
+    assert!(
+        applied.result["warning"]
+            .as_str()
+            .unwrap()
+            .contains("permissions may differ")
+    );
+    assert!(
+        !Config::parse(&std::fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .ui
+            .bell
+    );
+    assert_eq!(entries(root.path()), ["config.toml"]);
+
+    let (root, path, hash) = fixture(FULL);
+    let aside = root.path().join("windows-chose-this");
+    let applied = apply_with_replace(
+        &path,
+        &hash,
+        &bell(),
+        |_| Ok(()),
+        |_, target, _| {
+            std::fs::rename(target, &aside).unwrap();
+            interrupted(1177)
+        },
+    )
+    .unwrap();
+    assert!(
+        applied.result["warning"]
+            .as_str()
+            .unwrap()
+            .contains("previous version remains")
+    );
+    assert!(
+        !Config::parse(&std::fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .ui
+            .bell
+    );
+    assert_eq!(std::fs::read_to_string(&aside).unwrap(), FULL);
+
+    // The move fails too: the new contents stay and the error says where.
+    for (code, survives) in [(1176, false), (1177, true)] {
+        let (root, path, hash) = fixture(FULL);
+        let error = apply_with_replace(
+            &path,
+            &hash,
+            &bell(),
+            |_| Ok(()),
+            |_, target, _| {
+                std::fs::remove_file(target).unwrap();
+                std::fs::create_dir(target).unwrap();
+                interrupted(code)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, ErrorCode::IoFailed);
+        assert!(!error.message.contains("unchanged"), "{}", error.message);
+        let details = error.details.unwrap();
+        assert_eq!(details["reason"], "replace_interrupted");
+        assert_eq!(details["previous_version_survives"], survives);
+        let kept = PathBuf::from(details["recovery_file"].as_str().unwrap());
+        assert!(
+            !Config::parse(&std::fs::read_to_string(&kept).unwrap())
+                .unwrap()
+                .ui
+                .bell
+        );
+        assert_eq!(entries(root.path()).len(), 2);
+    }
+
+    // Every other failure leaves both files under their own names; the temporary goes.
+    let (root, path, hash) = fixture(FULL);
+    let error = apply_with_replace(
+        &path,
+        &hash,
+        &bell(),
+        |_| Ok(()),
+        |_, _, _| interrupted(1175),
+    )
+    .unwrap_err();
+    assert!(error.message.contains("unchanged"), "{}", error.message);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), FULL);
+    assert_eq!(entries(root.path()), ["config.toml"]);
+}
+
+#[test]
+fn a_change_that_would_outgrow_the_read_bound_is_refused() {
+    let padding = format!("# {}\n", "x".repeat(MAX_FILE_BYTES as usize - 16));
+    let (_root, path, hash) = fixture(&padding);
+    let error = apply(
+        &path,
+        &hash,
+        &[change("default_model", json!("a-longer-model-name"))],
+    )
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InputLimit);
+    assert_eq!(error.details.unwrap()["written"], false);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), padding);
+    assert_eq!(
+        hash_of(&path),
+        hash,
+        "the file can still be read and changed"
+    );
+}
+
+#[test]
+fn writing_back_a_placeholder_is_refused() {
+    let (_root, path, hash) = fixture(FULL);
+    for bad in [
+        change("connections.proxy.headers.X-Org", json!("[redacted]")),
+        change("shell.env.MY_VAR", json!("[redacted]")),
+        change("connections.proxy.extra_body.metadata", json!("[redacted]")),
+        change(
+            "connections.proxy.extra_body",
+            json!({"metadata":"[redacted]"}),
+        ),
+        change(
+            "connections.proxy.base_url",
+            json!("https://proxy.example/v1/[redacted]"),
+        ),
+        change("connections.proxy.api_key_env", json!("[redacted]")),
+        change("shell.env.\"[redacted-name-12345678]\"", json!("x")),
+        change("ui.newline_keys", json!(["[redacted]"])),
+    ] {
+        let name = bad.field.clone();
+        let error = apply(&path, &hash, &[bad]).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{name}");
+        assert_eq!(
+            error.details.unwrap()["reason"],
+            "redacted_placeholder_refused",
+            "{name}"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), FULL);
+    }
+}
+
+#[test]
+fn a_secret_pasted_as_a_name_is_hidden_and_can_be_removed() {
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz012345";
+    let text = format!(
+        "[connections.a]\nbase_url = \"https://a.example/v1\"\n[connections.a.headers]\n{secret} = \"v\"\nX-Real = \"v\"\n[shell.env]\n{secret} = \"v\"\n"
+    );
+    let (_root, path, hash) = fixture(&text);
+    let result = read(&loaded(&path)).unwrap();
+    assert!(!result.to_string().contains(secret), "{result}");
+    let headers = &result["file"]["values"]["connections"]["a"]["headers"];
+    assert_eq!(headers["X-Real"], "[redacted]");
+    assert_eq!(headers.as_object().unwrap().len(), 2);
+    let applied = apply(&path, &hash, &[removal(&format!("shell.env.{secret}"))]).unwrap();
+    assert!(applied.written);
+    assert!(!applied.result.to_string().contains(secret));
+    assert!(!format!("{:?}", applied.fields).contains(secret));
+    assert!(
+        Config::parse(&std::fs::read_to_string(&path).unwrap())
+            .unwrap()
+            .shell
+            .env
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_new_root_key_stays_below_the_opening_comment() {
+    let model = [change("default_model", json!("m"))];
+    assert_eq!(
+        edit_text("# Header\n\n# Interface\n[ui]\nbell = true\n", &model).unwrap(),
+        "# Header\n\ndefault_model = \"m\"\n\n# Interface\n[ui]\nbell = true\n"
+    );
+    assert_eq!(
+        edit_text("# Only comments\n", &model).unwrap(),
+        "# Only comments\ndefault_model = \"m\"\n"
+    );
+    // With no blank line the comment describes the table, so it stays with the table.
+    assert_eq!(
+        edit_text("# Interface\n[ui]\nbell = true\n", &model).unwrap(),
+        "default_model = \"m\"\n# Interface\n[ui]\nbell = true\n"
+    );
 }
 
 #[test]
@@ -560,9 +771,6 @@ fn each_changed_field_says_it_needs_a_restart_and_sensitive_values_are_left_out(
     assert_eq!(model["previous"], "model-a");
     assert_eq!(model["value"], "model-b");
     assert_eq!(model["sensitive"], false);
-    assert_eq!(model["hot_candidate"], true);
-    assert_eq!(find("compaction.segment_chars")["hot_candidate"], true);
-    assert_eq!(find("ui.language")["hot_candidate"], false);
     for name in ["connections.plain.headers.X-New", "shell.env.OTHER"] {
         let entry = find(name);
         assert_eq!(entry["sensitive"], true);
@@ -604,8 +812,8 @@ fn a_credential_in_a_name_field_is_refused_without_echoing_it() {
         ),
         (
             "connections.plain.api_key_env",
-            json!("AbCdEf0123456789GhIjKlMn"),
-            "AbCdEf",
+            json!("AKIAIOSFODNN7EXAMPLE"),
+            "AKIAIOSF",
         ),
         (
             "connections.plain.api_key_header",
@@ -622,7 +830,21 @@ fn a_credential_in_a_name_field_is_refused_without_echoing_it() {
             json!({"base_url":"https://n.example/v1","api_key_env":"sk-abcdef0123456789abcdef"}),
             "sk-abcdef",
         ),
-        ("shell.env.\"sk-abcdef0123456789abcdef\"", json!("x"), ""),
+        (
+            "shell.env.\"sk-abcdef0123456789abcdef\"",
+            json!("x"),
+            "sk-abcdef",
+        ),
+        (
+            "connections.plain.api_key_env",
+            json!("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"),
+            "a1b2c3d4",
+        ),
+        (
+            "connections.plain.headers.\"ghp_abcdefghijklmnopqrstuvwxyz012345\"",
+            json!("x"),
+            "ghp_",
+        ),
         (
             "shell.env",
             json!({"ghp_abcdefghijklmnopqrstuvwxyz012345":"x"}),
@@ -634,10 +856,8 @@ fn a_credential_in_a_name_field_is_refused_without_echoing_it() {
         let details = error.details.as_ref().unwrap();
         assert_eq!(details["reason"], "credential_value_refused", "{field}");
         assert_eq!(details["written"], false);
-        if !secret.is_empty() {
-            let text = serde_json::to_string(&error).unwrap();
-            assert!(!text.contains(secret), "{text}");
-        }
+        let text = serde_json::to_string(&error).unwrap();
+        assert!(!text.contains(secret), "{text}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), FULL);
     }
     // Ordinary variable names pass.
@@ -648,6 +868,10 @@ fn a_credential_in_a_name_field_is_refused_without_echoing_it() {
         "MY_SERVICE_PROD_2_API_KEY",
         "Authorization",
         "X-Api-Key",
+        "ASIA_PACIFIC_API_KEY",
+        "hf_token_for_my_proxy",
+        "MyProxyService2ApiKeyName",
+        "X-Stainless-Runtime-Version2",
     ] {
         assert!(!looks_like_credential(name), "{name}");
     }
@@ -799,6 +1023,102 @@ async fn through_the_owner_set_replays_and_get_shows_the_pending_difference() {
         // Reads create no receipt: both rows above are the two set operations.
 
         control.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removing_a_connection_a_thread_uses_stops_it_until_it_is_moved() {
+    use shellboy::{
+        app::DataOwner,
+        protocol::{ThreadCreateArgs, ThreadSetArgs},
+    };
+    crate::test_watchdog::watchdog("removing a connection in use", async {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "default_connection = \"q\"\ndefault_model = \"m\"\n[connections.p]\nbase_url = \"http://127.0.0.1:1/v1\"\n[connections.q]\nbase_url = \"http://127.0.0.1:1/v1\"\n",
+        )
+        .unwrap();
+        let open = || {
+            DataOwner::start(Some(path.clone()), Some(root.path().join("data")), root.path().into())
+        };
+        let owner = open().await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let thread = request(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                cwd: None,
+                parent_id: None,
+                connection: Some("p".into()),
+                model: Some("m".into()),
+                effort: None,
+            }),
+        )
+        .await["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let hash = request(&control, Command::ConfigGet(ConfigGetArgs {})).await["file"]
+            ["content_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        // config.set doesn't consult the database: this is accepted.
+        let operation = format!("{}:remove", control.store.instance_id);
+        let args = ConfigSetArgs {
+            expected_hash: hash,
+            changes: vec![removal("connections.p")],
+        };
+        assert_eq!(set(&control, &operation, args).await.unwrap()["written"], true);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+
+        let owner = open().await.unwrap();
+        let control = Control::new(&owner, root.path().into());
+        crate::runtime_features::send(&control, &thread, "hello").await;
+        crate::runtime_features::settled(&control, &thread).await;
+        let target = thread.clone();
+        let turn: String = control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1",
+                    [target],
+                    |row| row.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(turn, "recovery_wait");
+        let args = |connection: Option<&str>| {
+            Command::ThreadSet(Box::new(ThreadSetArgs {
+                thread_id: Some(thread.clone()),
+                connection: connection.map(str::to_owned),
+                model: Some("m2".into()),
+                ..ThreadSetArgs::default()
+            }))
+        };
+        let response = control
+            .request(Request::new(
+                format!("{}:model-only", control.store.instance_id),
+                args(None),
+            ))
+            .await;
+        assert!(!response.ok, "the saved connection no longer exists");
+        let moved = control
+            .request(Request::new(
+                format!("{}:moved", control.store.instance_id),
+                args(Some("q")),
+            ))
+            .await;
+        assert!(moved.ok, "{:?}", moved.error);
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
     })
     .await
     .unwrap();

@@ -606,8 +606,7 @@ started write finishes and is reported. There is no authority check (#256). Neit
   },
   "differs": true,                  // file bytes differ from what was loaded, comments included
   "differing_fields": ["default_model"],  // effective values; null when the file is invalid
-  "restart": {"all_fields_require_restart": true,
-              "hot_candidates": ["default_connection", "default_model", "compaction.*", "retention.*"]}
+  "restart": {"all_fields_require_restart": true}
 }
 
 // config.set: args. field is a TOML dotted key; a missing or null value removes the key.
@@ -624,8 +623,8 @@ started write finishes and is reported. There is no authority check (#256). Neit
  "changed_by": null,                               // Origin identity of a model shell; null for a terminal
  "changes": [
    {"field": "default_model", "previous": "model-a", "value": "model-b",
-    "sensitive": false, "restart_required": true, "hot_candidate": true},
-   {"field": "shell.env.MY_VAR", "sensitive": true, "restart_required": true, "hot_candidate": false}
+    "sensitive": false, "restart_required": true},
+   {"field": "shell.env.MY_VAR", "sensitive": true, "restart_required": true}
  ]}
 ```
 
@@ -633,11 +632,14 @@ started write finishes and is reported. There is no authority check (#256). Neit
 applies, adding a connection lists its fields, and a sensitive entry has no `previous` or `value`.
 
 Errors: `invalid_argument` for a malformed or refused change (`details.change_index`; `details.reason =
-"credential_value_refused"` for a credential in a name field), `config_invalid` when the whole result fails
+"credential_value_refused"` for a credential in a name field, `"redacted_placeholder_refused"` for a value
+containing `[redacted`), `config_invalid` when the whole result fails
 `Config::parse`, `operation_conflict` with `details.reason = "config_changed"` and `current_hash` for a stale
-hash, `io_failed` or `input_limit` otherwise. All carry `details.written = false` when nothing was written,
+hash, `io_failed` or `input_limit` otherwise. An interrupted Windows replace that couldn't be finished is
+`io_failed` with `details.reason = "replace_interrupted"` and `details.recovery_file`; when it could be finished,
+the result gains a `warning`. All carry `details.written = false` when nothing was written,
 and none quotes a value from the file or the request. Bounds: 64 changes, 512-byte field, 128 KiB value
-(request validation), 1 MiB file, 512 KiB result (checked before the replace, so a saved outcome never hides
+(request validation), 1 MiB file before and after the change, 512 KiB result (checked before the replace, so a saved outcome never hides
 a finished write).
 
 The design is in [config.md](config.md#reading-and-changing-through-the-owner-266).

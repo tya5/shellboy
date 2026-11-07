@@ -90,10 +90,10 @@ Brackets mean optional; `|` means alternatives. Add common global flags and `--h
 | Command | Behavior |
 |---|---|
 | `config get` | Read what the running owner loaded and the current file: `loaded`, `file` (`content_hash`, `valid`, `error`, `values`, `redacted_fields`), `differs`, `differing_fields`. No credential value is returned, only names. No receipt |
-| `config set --expected-hash HASH [--set FIELD=VALUE]... [--unset FIELD]...` | Change named fields. Refused with `operation_conflict` if the file changed since the read, `config_invalid` if the whole result fails validation, and `invalid_argument` if a name field is given what looks like a credential; each leaves the file untouched. Result: `written`, `content_hash`, `restart_required`, and `changes[]` with `field`, `previous`, `value`, `sensitive`, `restart_required`, `hot_candidate` per field. Same `--operation-id` replays the saved outcome |
+| `config set --expected-hash HASH [--set FIELD=VALUE]... [--unset FIELD]...` | Change named fields. Refused with `operation_conflict` if the file changed since the read, `config_invalid` if the whole result fails validation, and `invalid_argument` if a name field is given what looks like a credential; each leaves the file untouched. Result: `written`, `content_hash`, `restart_required`, and `changes[]` with `field`, `previous`, `value`, `sensitive`, `restart_required` per field. Same `--operation-id` replays the saved outcome |
 
 Both need a running owner of the selected `--data-dir`, act on the file it loaded and refuse `--config`. With no
-owner they fail with `app_not_running`. Every field takes effect after an owner restart. See
+owner they fail with `app_not_running`. Every field reaches the running owner only after a restart; standalone commands that read the file use it on their next run. See
 [configuration](configuration.md#read-and-change-settings-through-the-owner).
 
 ### Standalone configuration (2 commands)

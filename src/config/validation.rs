@@ -368,6 +368,7 @@ impl Connection {
         Ok(())
     }
 }
+const MAX_INDEXING_CONCURRENCY: usize = 64;
 const CREDENTIAL_WORDS: [&str; 5] = ["api-key", "apikey", "secret", "token", "credential"];
 const MAX_EXTRA_BODY_BYTES: usize = 64 * 1024;
 const MAX_EXTRA_HEADERS: usize = 32;
@@ -459,11 +460,13 @@ impl Indexing {
         }
         Ok(())
     }
+    /// Startup spawns one task per worker, so a huge value stops the owner becoming
+    /// ready; `max` below this bound can only come from the platform's permit range.
     fn validate_capacity(&self, max: usize) -> Result<(), ConfigError> {
-        if self.concurrency > max {
+        if self.concurrency > MAX_INDEXING_CONCURRENCY.min(max) {
             return Err(invalid(
                 "indexing.concurrency",
-                "exceeds the supported worker permit range",
+                format!("must be in 1..={MAX_INDEXING_CONCURRENCY}"),
             ));
         }
         Ok(())

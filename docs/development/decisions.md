@@ -3885,17 +3885,25 @@ The user decided the core gets `config.get` and `config.set`, for the Web settin
   lock. The lock moves `toml_datetime` 1.1.2 to 1.1.3 and `toml_writer` 1.1.3 to 1.2.0, which `toml` also uses.
   Used only on a bounded file worker and in request validation. Recheck if `toml` regains a preserving API.
 - **Every field reports restart required; nothing is hot-applied.** Swapping `Arc<Config>` needs a decision per
-  reader. `hot_candidate` is a note from reading call sites, not a promise. Recheck when a real need for a live
-  value appears.
+  reader. Later candidates are in the design only, not on the wire. Recheck when a real need for a live value
+  appears.
 - **No standalone edit path.** It would write with no receipt or record, and the user's request was for the
   owner. Uncertain: a first-time user with no owner must edit by hand, as today. Recheck if the Web UI needs to
   edit before an owner exists.
 - **`extra_body` shows top-level names only.** Provider options are opaque by design, so no leaf is known to be
   safe; useful ones like `thinking.type` are hidden too. Recheck if the settings screen needs them, and then by
   a user-visible choice, not by guessing at names.
-- **The credential check is a heuristic, with two strengths.** Name fields use known prefixes and long opaque
-  tokens; other plain strings use known prefixes only, because model IDs can be long and mixed-case. It can miss
-  a key and it can catch a real name, whose refusal says to edit by hand. No value is guessed or stored by it.
+- **The credential check is a heuristic, with two strengths.** Name fields and field paths use known key shapes
+  and long opaque tokens; other plain strings use known key shapes only, because model IDs can be long and
+  mixed-case. Known prefixes need a digit, AWS and Google keys their full shape, and there is no mixed-case rule,
+  after review showed real names such as `ASIA_PACIFIC_API_KEY` and `MyProxyService2ApiKeyName` being refused. It
+  can miss a key and can catch a real name, whose refusal says to edit by hand. No value is guessed or stored.
+- **A pasted name is hidden except for connection names.** Header, variable and `extra_body` names that look like
+  credentials are shown as a digest-based placeholder. Connection names are returned as they are, because Threads
+  refer to them and setting one that looks like a credential is refused.
+- **`indexing.concurrency` is capped at 64 (#266 review).** Startup spawns one task per worker, and 4,294,967,295
+  kept an owner from being ready at 16.9 s with 483 MB. 64 is a chosen bound, not a measured limit: one owner
+  has no known need for more parallel embedding requests. Recheck if a real provider setup wants more.
 - **`data_dir` is refused.** After a restart it would silently open another, possibly empty, directory. Recheck
   if data moving becomes a feature.
 - **A plain whole-file hash, not salted.** Simple and stable across restarts, so a client can compare it with

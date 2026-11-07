@@ -209,13 +209,13 @@ sections are serialized whole, and the macro that declares them says so.
 
 | Class | Fields | Returned |
 |---|---|---|
-| Secret | `connections.*.headers`, `extra_headers`, `shell.env` (each entry), `extra_body` (each top-level key, whatever is below it) | The name, value `[redacted]` |
+| Secret | `connections.*.headers`, `extra_headers`, `shell.env` (each entry), `extra_body` (each top-level key, whatever is below it) | The name, value `[redacted]`. A name that itself looks like a credential appears as `[redacted-name-<8 hex>]`, from a digest so it stays distinct and stable |
 | Url | `connections.*.base_url` | Userinfo, query and fragment removed (validation already refuses them); a path segment that looks like a credential becomes `[redacted]` |
 | Name | `connections.*.api_key_env`, `api_key_header` | The name; `[redacted]` if it looks like a credential (a valid variable name can be `ghp_...`) |
 | Plain | Everything else | The value; a string with a known credential prefix becomes `[redacted]` |
 
-Everything hidden is listed in `redacted_fields`. Names of headers, variables and `extra_body` keys are
-returned. `credential_env_set` is presence in the owner's environment only. `content_hash` is a SHA-256 of
+Everything hidden is listed in `redacted_fields`. Ordinary names of headers, variables and `extra_body` keys
+are returned. Connection names are always returned, because Threads refer to them. `credential_env_set` is presence in the owner's environment only. `content_hash` is a SHA-256 of
 the whole file, secrets and comments included: it identifies a version and is not a salted digest, so a
 reader could confirm a guess of the entire file. An invalid file returns its validation message, which is
 built not to quote values, and no values.
@@ -228,9 +228,19 @@ leaves the file as it was; a crash can leave a `.config.toml.<uuid>.tmp` beside 
 
 - A symlink resolves to its target, so a linked dotfile stays linked. A read-only file is refused.
 - Unix replaces with `rename`. Windows uses `ReplaceFileW` for an existing file, which keeps its ACL and
-  attributes, and a sharing violation fails with both files intact.
+  attributes. It takes no backup name, so its documented failures fall in two groups:
+  - Errors 1176 and 1177 mean it stopped midway and nothing is at the path. After 1176 the previous file is
+    gone; after 1177 it survives under a name Windows chose. The temporary file may be the only copy, so it is
+    kept and moved into place. If that works, the result has a `warning`, since the permissions may differ. If
+    not, the error has `details.reason = "replace_interrupted"` and `details.recovery_file`.
+  - Every other error leaves both files under their own names; the temporary file is removed and the error says
+    the file is unchanged.
+  The recovery runs on every OS with the failure simulated. A real 1176 or 1177 has not been produced; the
+  Windows test reaches a real `ReplaceFileW` failure through a sharing violation, which is the second group.
 - The last hash shrinks the race with another program's edit to the single replace step. It does not remove
-  it: an edit landing between that read and the replace is lost. Owner-side changes are serialized fully.
+  it: an edit landing between that read and the replace is lost. The mutex is per `Control`, so changes through
+  one owner are serialized, while two owners sharing a file (different data directories, one config) only get
+  the narrowed race, like any other program.
 - The owner's Unix user becomes the file's owner if it differs; ownership is not restored.
 
 **Comments.** Untouched text is preserved byte for byte, and a consistently CRLF file stays CRLF. A file mixing line endings comes back with LF, because the parser normalizes them. A replaced value keeps its trailing
@@ -243,14 +253,24 @@ the comments attached to them.
 a restart the owner would open another, possibly empty, directory; a whole table cannot be replaced or removed
 except adding a new `connections.<name>` from an object and removing one. A credential-looking string in
 `api_key_env`, `api_key_header`, `session_header_names` or a `shell.env` name is refused without echoing it.
-That check is a heuristic (known prefixes, long opaque tokens), so its error says how to proceed by hand when
-a real name is caught. Values may be written to `headers`, `extra_headers`, `extra_body` and `shell.env`,
+So is one in any part of a field path or any key of an object value, reported by the parent's name so the
+refusal doesn't repeat it. The check is a heuristic (known key shapes with a digit, full AWS and Google key
+shapes, long opaque alphanumeric tokens), so its error says how to proceed by hand when a real name is caught.
+Removing such a key stays allowed, as the way to clean one up. A value or field containing `[redacted` is refused
+(`redacted_placeholder_refused`), since a form posting back what `config.get` showed would destroy the secret. A
+result over the 1 MiB read bound is refused before the replace, since it could not be read back. Values may be written to `headers`, `extra_headers`, `extra_body` and `shell.env`,
 because those fields hold them today; they then appear only as `sensitive` entries.
 
 **Restart.** Nothing is hot-applied. `Control` shares one immutable `Arc<Config>`, and swapping it would need a
-decision for each reader. So every field reports `restart_required: true`. `hot_candidate` marks what is read
-when next used instead of being captured at startup (`default_connection`, `default_model`, `compaction.*`,
-`retention.*`). It is a note for later work, based on reading those call sites, not a tested promise.
+decision for each reader. So every field reports `restart_required: true` for the running owner. Standalone
+commands that load the file themselves, such as `rag` (`src/rag/search.rs`) and `storage vacuum`
+(`src/storage/vacuum.rs`), see a change on their next run. Candidates for applying live later, read when next
+used rather than captured at startup, are `default_connection`, `default_model`, `compaction.*` and
+`retention.*`. That is a note from reading those call sites and isn't on the wire, since nothing applies live.
+
+**Removing a connection a Thread uses.** `config.set` doesn't consult the database, and validation only checks
+references inside the file. After the restart, a new message to such a Thread leaves its Run in `recovery_wait`
+with `config_invalid`. `thread set --model` alone fails too, and `thread set --connection Q --model M` moves it.
 
 **Who changed what.** The operation receipt holds the caller's identity and the result, with no sensitive
 value, for its 24-hour retention. `operation get` reads it, and `result.changed_by` repeats the identity. A
