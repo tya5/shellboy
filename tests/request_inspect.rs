@@ -186,6 +186,7 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,

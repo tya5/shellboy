@@ -247,7 +247,7 @@ duplicated.
 
 ### How a model lists pending reply-expected messages
 
-No new list operation. `thread get` adds `awaiting_reply`: up to 128 items
+No new list operation. `thread get` adds `awaiting_replies`: up to 128 unified items
 `{message_id, sender, created_at, delivery_status, reminded}` for the Thread,
 oldest first (the cap guarantees completeness). Bodies are read with
 `message get` / `history get --node`. Besides that, every reply-expected message
@@ -261,7 +261,7 @@ immediately (`shellboy message reply --message ID --text …` from another
 terminal). The TUI adds a small reply mode in this issue (decision Q7, **Judgement**: landed last, after the CLI path):
 
 - `/replies` opens a shared-framework popup listing the current Thread's
-  `awaiting_reply` items (sender, time, excerpt).
+  `awaiting_replies` items (recipient kind/Thread, sender, excerpt, elapsed time).
 - Enter on an item puts the composer into reply mode, shown as one line above
   the composer (`Replying to <sender>: <excerpt>`); Esc leaves the mode.
 - The next submit sends `message.reply` instead of `message.send`, text only.
@@ -587,9 +587,9 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Wait for all owned work to drain | `wait run_ended` | unchanged | no |
 | Recovery decision | `run get` / `turn get` / `run retry` / `run stop` | unchanged; the pending reply survives retry and is answered after it | no |
 | Stop a child | `run stop --run CHILD_RUN` | unchanged; pending reply stays pending (decision Q2); parent may `message cancel` it | no |
-| After restart | interruption context + stored answers + unprocessed messages | same, with `awaiting_reply` and reply states instead of answers | no |
+| After restart | interruption context + stored answers + unprocessed messages | same, with `awaiting_replies` and reply states instead of answers | no |
 | Delete child | `thread delete-preview` / `thread delete` | unchanged; pending replies become `recipient_deleted` and the parent is notified | no |
-| Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `awaiting_reply` | no |
+| Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `awaiting_replies` | no |
 | "Make sure you report before finishing" via `--deliver complete` | leader's workaround | unnecessary: the Run-end rule is that check | removed |
 
 ### Leader's operational flow
@@ -624,7 +624,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G7 | `--deliver now` | Decided | combinable (D2); no reply-specific effect |
 | G8 | `--deliver complete` and Run-end ordering | Design | waiting `complete` messages are delivered first; the reminder is checked only when none wait, so a `complete` message can still be answered before any reminder |
 | G9 | Forks (`thread fork`) | Decided | receipts stay with the original target Thread; the fork shares the node but cannot reply and has no reminder (Q13) |
-| G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history get` still work; the model regains IDs from `awaiting_reply` and the reminder |
+| G10 | Compaction replacing original or reply nodes | Design | node rows stay (receipt and Turn roots), so `message get` and `history get` still work; the model regains IDs from `awaiting_replies` and the reminder |
 | G11 | Attachments in replies | Decided | text only, like `message send`; a human can send attachments as an ordinary message (Q8) |
 | G12 | Who may reply | Decided | recipient model (D4) and humans; parent-for-child not allowed (Q5) |
 | G13 | Who may cancel | Decided | sender may cancel (decided); authority reuses the existing cancel rule |
@@ -715,7 +715,7 @@ the operation fingerprint), `message reply` (`Command::MessageReply`,
 message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
-`context_changed` notice, `thread get` `awaiting_reply`, the admission notices
+`context_changed` notice, `thread get` `awaiting_replies`, the admission notices
 (`reply_expected`, `reply`), the 128 cap, and model-self-target rejection.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
@@ -911,3 +911,54 @@ The ordered unit merges current-Turn recovery_wait input with terminal-Run
 interrupted input before LIMIT, rather than allocating separate source quotas.
 Older Turns of the same still-live Run remain isolated: retrying the current
 Turn is not permission to revive stale/imported assignments from another Turn.
+
+
+## Human decision requests (#262, 2026-11-07)
+
+A model may ask the user for a decision with `shellboy message ask --text ...`.
+The question reuses a reply-expected receipt; no table, schema migration,
+worker, queue, timeout or cross-Thread question browser is introduced. The
+pending receipt records `to_human=true`; reply state remains `pending` until a
+human reply, sender cancellation or recipient Thread deletion. Questions do not
+create a Run, deliver to a model, trigger Run-end reminders, or become ignored.
+They count toward the same 128 pending-reply cap.
+
+`thread get` exposes unified pending duties for that Thread; `thread list` exposes
+only their count. The TUI renders the same per-Thread list in its `Pending replies`
+region; existing person/model marks distinguish recipient kind. Its fixed body
+height is configured by `ui.awaiting_human_rows` (1..=10, default 1). It reuses
+the established `◉` region heading and `›` human mark; no new glyph is added. Overflow is summarized
+and remains accessible through existing `/replies` actions. Answering uses the
+existing `message reply` flow, including the existing reply mark and reply notice.
+
+On answer, the receipt resolves and the answer is admitted to that Thread as an
+ordinary human message, starting a Run if none is live. Cancellation is terminal
+without a wake; deletion resolves as `recipient_deleted` through existing receipt
+collection. Asking an archived Thread unarchives it with reason
+`question_asked`, consistent with the reply-resume unarchive behavior.
+
+A model that has an outstanding reply duty while asking the human must tell its
+requester it is blocked before ending its Run; the human question itself is not
+a reason to pause or abandon that reply duty.
+
+## Thread-scoped reply inbox (#262, unified for web/TUI)
+
+There is no cross-Thread inbox endpoint. The existing `thread.get` read is the
+public, bounded per-Thread inbox: `ThreadDetails.awaiting_replies` is the unified
+page of pending duties for that one Thread, ordered by saved creation time and
+bounded to 128. Each item has `message_id`, `recipient_kind` (`human` for
+`message ask`, otherwise `thread`), `recipient_thread_id` (the target Thread),
+`excerpt` (bounded first-line question), `created_at`, `elapsed_ms` (derived
+from saved creation time and observation time), `delivery_status`, and
+`reminded`. `thread.get` is already refreshed by `events.wait --thread THREAD_ID`;
+clients reload only that Thread after a change hint. Answering uses existing
+`message.reply` with `message_id` and text. No new queue or read operation is
+needed. The caller must observe `recipient_kind`, not infer it from sender or
+Thread identity. A thread-targeted duty is not a human notification.
+
+The TUI `Pending replies` region is the same unified per-Thread list. It uses the
+existing human mark for `recipient_kind=human`; Thread-targeted duties retain the
+existing model mark. `thread list` exposes the count of all pending duties only.
+Overflow remains reachable through `/replies`. Human questions alone are
+suppressed from Run-end reminders and `ignored`; other-Thread duties keep the
+existing rules.

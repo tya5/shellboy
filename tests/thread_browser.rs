@@ -3,6 +3,7 @@ use shellboy::{config::Config, protocol::ThreadSummary, ui::*};
 
 fn item(id: &str, parent: Option<&str>) -> ThreadSummary {
     ThreadSummary {
+        awaiting_replies: 0,
         archived_at: None,
         tags: Vec::new(),
         last_end_message: None,

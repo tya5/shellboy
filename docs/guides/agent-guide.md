@@ -218,6 +218,12 @@ parent cannot reply on the child's behalf. A model cannot send a reply-expected
 message to its own Thread. If the duty is cancelled, do not send a late reply.
 See [Delegation](delegation.md#waiting-for-replies) for reminders and wait states.
 
+### Ask the human for a decision
+
+When only the user can decide, run `shellboy message ask --text 'Question and options'`, then end your Turn; do not poll or wait. The request reuses a pending reply receipt but does not start a Run or deliver input to a model. Its answer arrives in this Thread and starts a Run if needed. Questions have no deadline and are not reminded or marked ignored. A reply duty you already owe remains active: tell its requester you are blocked before ending the Run. The TUI shows pending replies for the displayed Thread; choose one and press Enter to answer.
+
+The bounded Web/API inbox is `thread get --thread THREAD_ID` → `awaiting_replies` (up to 128, for only that Thread). Each item includes `message_id`, `recipient_kind` (`human` or `thread`), `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status`, and `reminded`. On `events wait --thread THREAD_ID` change hints, reread that Thread. Answer with `shellboy message reply --message MESSAGE_ID --text 'Decision'`; never notify a person for `recipient_kind: "thread"`.
+
 ## Distinguish acceptance from completion
 
 CLI `ok:true` means that the operation succeeded, not that a sent request has been replied to. In `message send` results, inspect `message_id`, `delivery_status`, `assignment`, and optional `run_id` / `turn_id`. Do not equate `accepted` with `applied`; track `held` / `pending` using `message get`.

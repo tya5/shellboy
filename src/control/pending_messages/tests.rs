@@ -229,6 +229,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
                 "fixture:queued",
                 Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     thread_id: Some("t".into()),
@@ -256,6 +257,7 @@ async fn only_explicit_unadmitted_now_input_releases_foreground_wait() {
                 "fixture:now",
                 Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     thread_id: Some("t".into()),

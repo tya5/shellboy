@@ -56,6 +56,7 @@ async fn fixture_with_policy(
                 format!("{}:send", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
@@ -1677,6 +1678,7 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
                     format!("{}:expected", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
                         human: false,
+                        to_human: false,
                         expect_reply: true,
                         sender_label: None,
                         deliver: crate::protocol::Deliver::Next,

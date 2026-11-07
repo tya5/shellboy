@@ -10666,3 +10666,11 @@ correctly retain the removed connection; the test then waited for a nonexistent 
 live-connection regressions now subscribe before querying Run state and wait for Run completion notifications,
 without a fixed sleep. Recovery-path waits still use the original Turn helper. This preserves the Run-pinning
 contract and checks an actually new Run. The failed CI is retained; a new tip requires new CI evidence.
+## #262 Human decisions
+
+- [x] `message ask` creates an applied pending reply receipt on the current Thread without a Run/Turn/wake; its change hint notifies `events.wait` observers, and the sender Turn can end (reply integration tests).
+- [x] Human questions and Thread-targeted `--expect-reply` duties appear together, ordered and bounded, in `thread.get.awaiting_replies`; each item identifies recipient kind/Thread, excerpt, creation time and elapsed duration (frontend and reply integration tests).
+- [x] `events.wait --thread` change hints allow a client to refresh only that Thread; `message.reply` answers through the existing path (reply integration test asserts the Thread change effect and answer correlation).
+- [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
+- [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
+- [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.

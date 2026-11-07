@@ -103,14 +103,38 @@ fn append_notice_tx(
     Ok(())
 }
 
-pub(crate) fn awaiting_reply_tx(db: &Connection, thread: &str) -> rusqlite::Result<Vec<Value>> {
-    let mut statement = db.prepare("SELECT message_node_id,sender_json,created_at,state,result_json FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT 128")?;
-    statement.query_map([thread], |r| {
-        let saved: String = r.get(4)?;
-        let saved: Value = serde_json::from_str(&saved).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        let sender: String = r.get(1)?;
-        Ok(json!({"message_id":r.get::<_,String>(0)?,"sender":crate::protocol::MessageSender::from_saved(Some(&sender)),"created_at":r.get::<_,String>(2)?,"delivery_status":r.get::<_,String>(3)?,"reminded":saved["reply"].get("reminded_at").is_some()}))
-    })?.collect()
+pub(crate) fn awaiting_replies_tx(db: &Connection, thread: &str) -> rusqlite::Result<Vec<Value>> {
+    let mut statement = db.prepare("SELECT r.message_node_id,r.sender_json,r.target_thread_id,r.created_at,r.state,r.result_json,n.payload_json,CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' ORDER BY r.created_at,r.rowid LIMIT 128")?;
+    statement
+        .query_map([thread], |r| {
+            let saved: String = r.get(5)?;
+            let saved: Value = serde_json::from_str(&saved)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+            let sender: String = r.get(1)?;
+            let payload: Option<String> = r.get(6)?;
+            let excerpt = payload
+                .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+                .map(|value| crate::history::conversation_excerpt(&value, 512))
+                .unwrap_or_default();
+            let excerpt =
+                crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""), 0)
+                    .0
+                    .chars()
+                    .take(512)
+                    .collect::<String>();
+            Ok(json!({
+                "message_id":r.get::<_,String>(0)?,
+                "recipient_kind":if saved["to_human"] == true {"human"} else {"thread"},
+                "recipient_thread_id":r.get::<_,String>(2)?,
+                "sender":crate::protocol::MessageSender::from_saved(Some(&sender)),
+                "created_at":r.get::<_,String>(3)?,
+                "elapsed_ms":r.get::<_,i64>(7)?.max(0),
+                "delivery_status":r.get::<_,String>(4)?,
+                "excerpt":excerpt.lines().next().unwrap_or(""),
+                "reminded":saved["reply"].get("reminded_at").is_some()
+            }))
+        })?
+        .collect()
 }
 
 fn cancelled_notice_tx(
@@ -172,7 +196,7 @@ impl super::db::Store {
                 "message does not expect a reply",
             ));
         }
-        if caller.is_some_and(|c| c.thread_id != row.0) {
+        if saved["to_human"] != true && caller.is_some_and(|c| c.thread_id != row.0) {
             return Err(
                 ApiError::new(ErrorCode::InvalidState, "only the recipient may reply")
                     .details(json!({"reason":"not_recipient"})),
@@ -250,7 +274,8 @@ impl super::db::Store {
             let result = self.send(
                 tx,
                 &MessageSendArgs {
-                    human: false,
+                    human: saved["to_human"] == true && caller.is_none(),
+                    to_human: false,
                     expect_reply: false,
                     sender_label: args.sender_label.clone(),
                     thread_id: Some(target.into()),
@@ -314,7 +339,7 @@ pub(crate) fn complete_tx(
     at: &str,
     wakes: &mut Vec<String>,
 ) -> rusqlite::Result<Option<String>> {
-    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND state='applied' ORDER BY created_at,rowid LIMIT 128")?
+    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 AND state='applied' ORDER BY created_at,rowid LIMIT 128")?
         .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     if !rows.is_empty() {
         db.execute(
@@ -394,7 +419,7 @@ fn outcome_tx(
 }
 
 // Per-recipient pending duties are capped at 128 by send admission.
-const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT 128";
+const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT 128";
 
 /// All selected Threads are already marked deleted. No sender-side scan here.
 pub(crate) fn deleted_threads_tx(
@@ -407,12 +432,20 @@ pub(crate) fn deleted_threads_tx(
     for target in targets {
         let rows = query
             .query_map([target], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (message, sender) in rows {
+        for (message, sender, saved) in rows {
             if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
-                if let Some(thread) = outcome_tx(db, &message, &sender, "recipient_deleted", at)? { wakes.push(thread); }
+                let saved: Value = serde_json::from_str(&saved)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                if saved["to_human"] != true
+                    && let Some(thread) = outcome_tx(db, &message, &sender, "recipient_deleted", at)?
+                { wakes.push(thread); }
                 db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
             }
         }

@@ -63,6 +63,10 @@ column and two partial list indexes; archive is organization metadata only. See
 Re-parenting (#222 stage 2, no schema change) lets `thread set --parent` move a Thread under another live
 Thread or detach it; live Run ownership is never transferred. See the same documents.
 
+Human decision requests (#262) reuse schema34 reply receipts; no migration,
+table or worker is needed. `thread.get` is the bounded per-Thread unified reply
+inbox, and Thread lists expose only counts. See [reply-expected messages](reply-expected-messages.md#thread-scoped-reply-inbox-262-unified-for-webtui).
+
 Conversation schema34 (#222 stage 3) adds the `thread_tag` table, its `(tag, thread_id)` index and the partial
 `threads_cwd_updated` index: `thread tag`, `thread tags`, `thread list --tag/--cwd` and `tags` in `thread list`/`thread get`.
 Tags and the cwd filter are organization metadata only. See [thread organization](thread-organization.md).
@@ -125,7 +129,7 @@ limit; schema v24 drops that metadata. Existing
 shutdown and [Thread browser](thread-browser.md) projections expose interrupted
 latest Runs without adding a lifecycle state or automatically resuming work.
 
-## Reply-expected messages (#194, adopted 2026-11-03, not implemented)
+## Reply-expected messages (#194, adopted 2026-11-03)
 
 Adopt [reply-expected messages](reply-expected-messages.md): a message sent
 with `--expect-reply` carries a per-message reply state on its existing receipt,
@@ -136,9 +140,10 @@ assistant text is the "end message", not a reply; public `answer_node_id` /
 `exec --result reply|turn-end|run-end` (default `reply`) selects the result;
 an empty end message is a successful empty result (exit 0, not
 Schema-validated), while a Turn ended by
-Esc has no end message and exits 4 like a stopped Turn. No table, worker or queue is
-added; schema 26 adds one partial index when step 2 lands. Until then the
-current schema and contracts below remain in force.
+Esc has no end message and exits 4 like a stopped Turn. No new table, worker or queue is added by this feature; it reuses the
+existing pending-receipt index and requires no schema migration. Human decision
+requests share the bounded per-Thread inbox but are not model reply duties,
+reminders or `ignored` outcomes.
 
 ## Interrupted tool groups (#37)
 

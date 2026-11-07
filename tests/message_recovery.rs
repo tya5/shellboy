@@ -158,6 +158,7 @@ fn create(parent_id: Option<String>) -> Command {
 fn send(thread: &str, text: &str) -> Command {
     Command::MessageSend(MessageSendArgs {
         human: false,
+        to_human: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,

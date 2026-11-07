@@ -2986,6 +2986,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
         next_cursor: None,
         threads: (0..30)
             .map(|i| shellboy::protocol::ThreadSummary {
+                awaiting_replies: 0,
                 archived_at: None,
                 tags: Vec::new(),
                 last_end_message: None,
