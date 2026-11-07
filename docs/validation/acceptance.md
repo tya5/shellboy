@@ -10587,3 +10587,18 @@ and identical indexed and unindexed query plans. The history-window module
 passed 7 tests; `cargo check --tests`, formatting, test layout, and language audit
 passed. Linux and Windows validation is pending CI; no real Web UI or user data
 was used.
+
+
+## Recovery-wait message sends (#263)
+
+Verified by focused tests: ordinary external CLI and model-origin message sends to a
+live recovery-wait Turn are held with no wake; `run retry` reaccepts an external CLI
+held message; `--resume-recovery` resumes from a model origin and records the shell
+Origin as the recovery actor; human input still resumes; CLI default/flag mapping and
+optional wire decoding are checked.
+
+Not yet verified: the final Rust focused test/build and default/all-OS CI have not run
+on the final tip. The language inventory audit completed; its existing 13 pending
+Japanese source literals remain outside this change. A live TUI/chat terminal was not
+manually driven; the preserved `human` flag path is covered through the same Control
+send transaction.

@@ -23,7 +23,7 @@ shellboy thread tags [--limit 50] [--cursor TOKEN]
 shellboy thread cwds [--limit 50] [--cursor TOKEN]
 shellboy thread set [--thread ID] [--cwd PATH] [--connection PROFILE] [--model ID] [--effort TEXT] [--auto-compact-at N|0|''] [--segment-chars N|''] [--reduce-rounds N|''] [--parent ID|'']
 shellboy thread request --thread ID [--attempt ID] [--compare-attempt ID] [--body]
-shellboy message send [--thread ID] [--deliver now|complete] (--text TEXT | --text-stdin)
+shellboy message send [--thread ID] [--deliver now|complete] [--resume-recovery] (--text TEXT | --text-stdin)
 shellboy message get --message ID
 shellboy operation get --operation ID
 shellboy run (get|retry|stop) --run ID

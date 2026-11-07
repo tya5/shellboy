@@ -271,6 +271,8 @@ mod tests {
                 Request::new(
                     format!("{}:send", owner.instance_id),
                     Command::MessageSend(MessageSendArgs {
+                        resume_recovery: false,
+
                         human: false,
                         expect_reply: false,
                         sender_label: None,

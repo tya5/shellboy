@@ -107,8 +107,9 @@ fn previously_missing_flags_have_typed_effects() {
     set(&mut send, "sender_label", "operator");
     set(&mut send, "deliver", "now");
     set(&mut send, "expect_reply", "true");
+    set(&mut send, "resume_recovery", "true");
     assert!(
-        matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.expect_reply&&args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
+        matches!(send.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.expect_reply&&args.resume_recovery&&args.deliver==Deliver::Now&&args.sender_label.as_deref()==Some("operator"))
     );
     let mut history = Form::new(OpKind::HistoryGet, &c);
     set(&mut history, "end_message_only", "true");

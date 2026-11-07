@@ -785,6 +785,9 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
+    /// Explicitly resume a Thread waiting for recovery; default machine messages stay held.
+    #[arg(long)]
+    pub resume_recovery: bool,
     /// Require a deliberate reply to this message.
     #[arg(long)]
     pub expect_reply: bool,
@@ -1402,6 +1405,7 @@ impl Cli {
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
                     human: false,
+                    resume_recovery: a.resume_recovery,
                     expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,

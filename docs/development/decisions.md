@@ -4113,3 +4113,15 @@ Revisit when the owner explicitly authorizes a bounded, privacy-reviewed
 measurement and supplies representative evidence; until then the observed
 production rate is unknown. This decision is not evidence that rejections are
 rare or that the current behavior is optimal.
+## Recovery-wait message send policy (#263, 2026-11-07)
+
+Human TUI/chat input and `message reply` remain explicit recovery actions. All
+non-human `message send` calls are held on a live `recovery_wait` Turn by default,
+regardless of whether they have a model Origin. `--resume-recovery` is the explicit
+per-message opt-in, including for a model sending from another Thread; its
+`recovery_resumed` event records the caller actor (human or shell Origin); the
+message receipt also retains authenticated sender provenance. Existing generation CAS and
+receipt-scope checks remain the authority for what can be resumed. This avoids
+automatic scheduler/CLI restart while allowing deliberate automation. Revisit if
+callers need a narrower authority boundary or if external CLI callers use the flag
+without treating recovery as an explicit decision.

@@ -724,3 +724,12 @@ restore remain available for the wider saved-input and reply workflows.
 ## Cancelling queued input
 
 In `/queue` and the held rows above the composer, D (selected) and A (displayed IDs) cancel immediately; there is no Y step. A mis-key is recoverable: each cancelled input is archived, the status line reports the outcome per message ("Saved in /restore list"), and `/restore list` / `/restore draft ID` bring the text back (an empty composer also receives it automatically). A reply duty is not restored: if the cancelled input asked for a reply (`ReplyCancelled`), the sender's duty is cancelled and restoring the text does not recreate it; send a new request instead. Input the model already admitted is not cancelled (`すでに会話へ反映済み`).
+
+
+### Resuming a recovery-wait Thread from the operation form
+
+The `message send` operation form has an explicit `明示的に復旧待ちを再開` checkbox.
+Leave it off for ordinary queued input; turn it on only when this message itself is
+the deliberate recovery instruction. It has the same effect as CLI
+`message send --resume-recovery`. Human text entered in the normal conversation
+input remains a separate explicit human-resume action.
