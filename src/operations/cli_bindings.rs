@@ -234,6 +234,7 @@ const MEANINGS: &[Meaning] = &[
             ("sender_label", FieldId::SenderLabel),
             ("deliver", FieldId::Deliver),
             ("expect_reply", FieldId::ExpectReply),
+            ("resume_recovery", FieldId::ResumeRecovery),
             ("text", FieldId::Text),
             ("text_stdin", FieldId::Text),
         ],

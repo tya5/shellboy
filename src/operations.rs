@@ -232,6 +232,7 @@ pub(crate) enum FieldId {
     RemoveTags,
     SenderLabel,
     ExpectReply,
+    ResumeRecovery,
     Deliver,
     Text,
     Conditions,

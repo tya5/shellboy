@@ -1006,6 +1006,7 @@ fn english_field_label(label: &str) -> &str {
         }
         "送信者の表示名（任意）" => "Sender display name (optional)",
         "届けるとき（空=次の区切り）" => "Delivery time (empty = next boundary)",
+        "明示的に復旧待ちを再開" => "Explicitly resume recovery wait",
         "取消する入力ID（空白区切り）" => "Input IDs to cancel (space-separated)",
         "応答処理ID" => "Response ID",
         "観測する条件" => "Condition to observe",

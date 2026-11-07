@@ -88,6 +88,7 @@ impl Form {
             "sender_label" => FieldId::SenderLabel,
             "deliver" => FieldId::Deliver,
             "expect_reply" => FieldId::ExpectReply,
+            "resume_recovery" => FieldId::ResumeRecovery,
             "text" => FieldId::Text,
             "condition" | "target" => FieldId::Conditions,
             "settled_states" => FieldId::SettlementStates,
@@ -1160,6 +1161,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::RemoveTags => local!(language, "外すタグ", "Tags to remove"),
         FieldId::SenderLabel => local!(language, "送信者の表示名", "Sender display name"),
         FieldId::ExpectReply => local!(language, "返信を依頼", "Expect a reply"),
+        FieldId::ResumeRecovery => local!(language, "復旧待ちを再開", "Resume recovery wait"),
         FieldId::Deliver => local!(language, "届けるとき", "Delivery timing"),
         FieldId::Text => local!(language, "入力本文", "Message text"),
         FieldId::Conditions => local!(language, "観測条件", "Observation conditions"),
@@ -1514,6 +1516,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "指定メッセージへの返信を依頼します。",
             "Request an explicit reply to this message."
+        ),
+        FieldId::ResumeRecovery => local!(
+            language,
+            "通常の会話入力は復旧待ちを再開します。この操作は外部送信者の復旧再開を明示して許可します。",
+            "Ordinary conversation input resumes recovery wait. This explicitly permits an external sender to resume recovery."
         ),
         FieldId::Deliver => local!(
             language,
