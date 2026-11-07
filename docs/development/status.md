@@ -1,13 +1,16 @@
 # Development status
 
-## Model-grouped usage groundwork (#272; branch `issue-272/model-usage-group`)
+## Model-grouped usage (#272; complete on `issue-272/model-usage-group`)
 
 Adds `usage.get --group-by model` using saved attempt model IDs and the existing
-10,000-rowid candidate window, group page limit and cursor. It intentionally skips
-the app_meta summary-usage read: saved summary records have no model ID, so their
-counts/tokens are explicitly unknown for model groups rather than misattributed.
-Thread-level shell exit-code trends and model-shell joins remain a separate stage.
-Focused tests, SQL plan validation, language audit and CI pending.
+10,000-rowid candidate window, group page limit and cursor. It skips summary-usage
+reads because saved summary records have no model ID; those counts/tokens are
+explicitly unknown rather than misattributed. `cargo check --locked --tests`, model
+aggregation/cursor and query-plan unit tests, CLI parser integration, and language
+audit passed (16 unrelated pre-existing pending literals). Default CI
+`42415912236` and all-OS CI `42415914964` passed on SHA
+`1f9479427ca7e3ced92fa722b9397e2113d59684`. Thread-level shell exit-code trends
+remain a separate stage.
 
 
 ## Recovery-wait external CLI messages (#263; branch issue-263/review-fixes-1)

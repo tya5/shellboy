@@ -10699,4 +10699,5 @@ Planned synthetic coverage: any model can cancel another sender's queued input; 
 
 ### #272 model-grouped bounded usage
 
-- Model-grouped saved-attempt requests/cache ratio aggregate by persisted `model_id` using the existing bounded rowid candidate scan and page cursor. Summary records have no model attribution and are not read or assigned; summary fields report null/unknown. Synthetic regression and `EXPLAIN QUERY PLAN` check pending. Thread shell outcome aggregation is outside this stage.
+- `usage.get --group-by model` aggregates saved-attempt requests/cache ratio by persisted `model_id`, reusing the bounded rowid candidate scan and page cursor. Summary records have no model attribution and are not read or assigned; summary fields report null/unknown. Synthetic regressions cover model totals, cursor continuation and summary unknowns; `EXPLAIN QUERY PLAN` verifies the existing rowid lookup rather than a full attempt scan. CLI parser integration and `cargo check --locked --tests` pass.
+- Language audit found 16 pre-existing pending literals and no new findings. Default CI `42415912236` and all-OS CI `42415914964` passed on `1f9479427ca7e3ced92fa722b9397e2113d59684`. Thread shell outcome aggregation remains outside this bounded stage.
