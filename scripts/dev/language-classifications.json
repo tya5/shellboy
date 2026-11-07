@@ -646,33 +646,28 @@
   },
   "src/frontend/message_queue.rs:4fa6cdbf13079926:1": {
     "category": "a",
-    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
+    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
   },
   "src/frontend/message_queue.rs:608fe041d34bd512:1": {
     "category": "a",
-    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
+    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
   },
   "src/frontend/message_queue.rs:7f700320a8e9130b:1": {
     "category": "a",
-    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
+    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
   },
   "src/frontend/message_queue.rs:2f9cd041aebb9dfa:1": {
     "category": "a",
-    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
-  },
-  "src/frontend/message_queue.rs:ef2584fefd34143b:1": {
-    "category": "a",
-    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
+    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
   },
   "src/frontend/message_queue.rs:53d2d615b808d023:1": {
     "category": "a",
-    "reason": "Reviewed cancellation outcome grouping after adding ReplyCancelled: Japanese labels preserve stable grouping; English UI uses typed cancelled_summary. Persisted outcomes are unchanged.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
+    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
   },
   "src/ui/watch.rs:06000f833535e558:1": {
     "category": "a",
@@ -6386,8 +6381,8 @@
   },
   "src/frontend/message_queue.rs:428bbfd88c37c740:1": {
     "category": "a",
-    "reason": "Japanese outcome label for ReplyCancelled; the English UiLanguage arm delegates to cancelled_summary, which maps the same enum outcome.",
-    "source_tokens_sha256": "75052c12426888d8d49bc4f6807a99e9f95645d810864a27738e151c47ef4492"
+    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
+    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
   },
   "src/frontend/tools.rs:cdf1b7d7bdf25eba:1": {
     "category": "a",
