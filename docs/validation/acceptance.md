@@ -10459,6 +10459,11 @@ cursor from another listing refused, and a 200-name page with a next cursor. Uni
 - Tags of a 50-Thread page in one statement: 667 VM steps with 200 and with 8,000 stored Threads. 40 name
   seeks of `thread tags`: 480 VM steps with 200 and with 8,000 stored Threads (members per name differ by 40x).
 
+- `thread cwds`: plan `SEARCH t USING INDEX threads_cwd_updated (cwd>?)`, no sort; 40 name seeks cost the same VM
+  steps (MEASURED_CWD) for 2 and for 200 Threads per directory, and with every Thread archived. Store test: distinct
+  ordered names, paging by one, an archived-only directory still listed, deleted Threads dropped, 1..=200 limits, a
+  cursor from `thread tags` refused.
+
 The release-upgrade checker tests cover schema 33 to 34 (empty `thread_tag`, both indexes, rows preserved)
 and the new default (public v0.9.0 to schema 34); `tests/storage*.rs`, `src/storage/migrate.rs` and the
 historical downgrade fixtures drop the new table and index first. The operation catalogue, CLI bindings and

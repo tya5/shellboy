@@ -4003,9 +4003,11 @@ Thread count for a rare tag. `threads_cwd_updated` is added so `--cwd` is a seek
 per live Thread and an index update when a Thread's cwd or `updated_at` changes. Tag names are paged by one seek per
 name rather than `SELECT DISTINCT`, so a page never reads the members of a tag; no member counts are offered. The cursor
 filter is a SHA-256 digest of the sorted tags and the cwd because 64 tags of 128 characters do not fit the 8 KiB cursor.
-Scope: this is NOT the whole of the user's request. The user asked for automatic grouping by cwd; this delivers an
-exact-path filter only. A listing of distinct cwds and a TUI filter or grouping were not built and await the user's
-decision; the choices below were made by the implementer, not by the user. Choices made without a user answer: no TUI browser filter (the palette forms are the whole TUI surface, an implementer default; the form
+cwd grouping: core offers the filter and `thread.cwds` (distinct saved cwds, byte order, one `threads_cwd_updated` seek
+per name, no counts, no table). Archived Threads count, because the index has no archive column and excluding them would
+make each name a walk over a directory's archived entries; deleted Threads do not. Grouping stays in clients. User
+decisions (2026-11-07): add the cwd listing; leave the TUI browser filter for later. Rename, merge and OR filters are
+unbuilt. Choices made by the implementer without a user answer: the palette forms are the whole TUI surface (the form
 takes comma-separated tags, so a tag containing a comma is set through the CLI or wire only); tags are not read on
 the browser/Watch row paths, only in `thread list` and `thread get`; the form and CLI do not suggest existing tags; no
 tag inheritance on fork/rewind/create; a tag change is a `changes_context` write like archive (admitted before shutdown

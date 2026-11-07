@@ -6,13 +6,17 @@
 use super::{MutationResult, error, sql_error, target};
 use crate::protocol::validation::{MAX_THREAD_TAGS, normalize_tag};
 use crate::protocol::{
-    ApiError, ErrorCode, Origin, Page, PageCursor, ThreadTagArgs, ThreadTagsArgs,
+    ApiError, ErrorCode, Origin, Page, PageCursor, ThreadCwdsArgs, ThreadTagArgs, ThreadTagsArgs,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 
 const TAGS_SCOPE: &str = "thread.tags";
+const CWDS_SCOPE: &str = "thread.cwds";
+/// The next distinct saved cwd after the bound one: one seek of `threads_cwd_updated`.
+pub(super) const NEXT_CWD_SQL: &str = "SELECT cwd FROM thread INDEXED BY threads_cwd_updated
+     WHERE deleted_at IS NULL AND cwd>?1 ORDER BY cwd LIMIT 1";
 /// Every Thread of one list page in one statement (`thread_id` is the key prefix).
 pub(super) const FOR_THREADS_SQL: &str = "SELECT thread_id,tag FROM thread_tag
              WHERE thread_id IN (SELECT value FROM json_each(?1)) ORDER BY thread_id,tag";
@@ -155,36 +159,65 @@ pub(crate) fn for_thread(connection: &Connection, id: &str) -> super::Result<Vec
 /// Distinct names in byte order. Each name costs one index seek, never a scan of
 /// its members, so a page is at most `limit + 1` seeks however large a tag is.
 pub(crate) fn names(connection: &Connection, args: &ThreadTagsArgs) -> super::Result<Page<String>> {
-    let mut after = match &args.cursor {
+    distinct_page(
+        connection,
+        TAGS_SCOPE,
+        NEXT_NAME_SQL,
+        args.limit,
+        args.cursor.as_deref(),
+    )
+}
+
+/// Distinct saved cwds of non-deleted Threads, archived ones included: the index
+/// `threads_cwd_updated` has no archive column, so excluding archived Threads would
+/// walk every archived entry of a directory. Same one-seek-per-name paging.
+pub(crate) fn cwds(connection: &Connection, args: &ThreadCwdsArgs) -> super::Result<Page<String>> {
+    distinct_page(
+        connection,
+        CWDS_SCOPE,
+        NEXT_CWD_SQL,
+        args.limit,
+        args.cursor.as_deref(),
+    )
+}
+
+fn distinct_page(
+    connection: &Connection,
+    scope: &str,
+    next_sql: &str,
+    limit: u32,
+    cursor: Option<&str>,
+) -> super::Result<Page<String>> {
+    let mut after = match cursor {
         Some(token) => {
-            let cursor = PageCursor::decode(token, TAGS_SCOPE, "", 0, None)?;
+            let cursor = PageCursor::decode(token, scope, "", 0, None)?;
             Some(
                 serde_json::from_str::<String>(&cursor.last_sort_key)
-                    .map_err(|_| error(ErrorCode::CursorExpired, "invalid tag list position"))?,
+                    .map_err(|_| error(ErrorCode::CursorExpired, "invalid list position"))?,
             )
         }
         None => None,
     };
-    let mut statement = connection.prepare(NEXT_NAME_SQL).map_err(sql_error)?;
+    let mut statement = connection.prepare(next_sql).map_err(sql_error)?;
     let mut items = Vec::new();
-    while items.len() <= args.limit as usize {
+    while items.len() <= limit as usize {
         let next: Option<String> = statement
             .query_row([after.as_deref().unwrap_or("")], |row| row.get(0))
             .optional()
             .map_err(sql_error)?;
-        let Some(tag) = next else { break };
-        after = Some(tag.clone());
-        items.push(tag);
+        let Some(value) = next else { break };
+        after = Some(value.clone());
+        items.push(value);
     }
-    let next_cursor = if items.len() > args.limit as usize {
+    let next_cursor = if items.len() > limit as usize {
         items.pop();
         let last = items.last().expect("limit is at least one");
         Some(
             PageCursor {
                 version: 1,
-                scope: TAGS_SCOPE.into(),
+                scope: scope.into(),
                 filter: String::new(),
-                last_sort_key: serde_json::to_string(last).expect("tag serializes"),
+                last_sort_key: serde_json::to_string(last).expect("name serializes"),
                 watermark: 0,
                 revision: 0,
                 encoding: None,

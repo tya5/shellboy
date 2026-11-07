@@ -567,6 +567,13 @@ args!(ThreadTagsArgs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     cursor: Option<String>
 });
+// Distinct saved cwds of non-deleted Threads (archived included) in byte order, paged; no counts.
+args!(ThreadCwdsArgs {
+    #[serde(default = "list_limit")]
+    limit: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cursor: Option<String>
+});
 args!(ThreadRewindArgs {
     #[serde(default)]
     thread_id: Option<String>,
@@ -894,6 +901,8 @@ pub enum Command {
     ThreadTag(ThreadTagArgs),
     #[serde(rename = "thread.tags")]
     ThreadTags(ThreadTagsArgs),
+    #[serde(rename = "thread.cwds")]
+    ThreadCwds(ThreadCwdsArgs),
     #[serde(rename = "thread.set")]
     ThreadSet(Box<ThreadSetArgs>),
     #[serde(rename = "message.reply")]

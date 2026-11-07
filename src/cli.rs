@@ -299,6 +299,11 @@ pub enum ThreadCommand {
         after_help = "  shellboy thread tags [--limit N] [--cursor CURSOR]\n\nPages of at most 200 names; pass next_cursor back as --cursor. Tags on deleted Threads are not listed."
     )]
     Tags(ThreadTagsOptions),
+    /// List the distinct saved working directories of Threads, in byte order (paths only, no counts).
+    #[command(
+        after_help = "  shellboy thread cwds [--limit N] [--cursor CURSOR]\n\nPages of at most 200 paths; pass next_cursor back as --cursor. Every non-deleted Thread counts, archived ones included, so a directory used only by archived Threads is listed. List its Threads with `shellboy thread list --cwd PATH [--archived include|only]`."
+    )]
+    Cwds(ThreadTagsOptions),
     Set(ThreadSetOptions),
     /// Debug: assemble a saved Thread's request without sending it; read-only, no owner.
     #[command(
@@ -1142,6 +1147,10 @@ impl Cli {
                     remove: a.remove,
                 }),
                 ThreadCommand::Tags(a) => C::ThreadTags(wire::ThreadTagsArgs {
+                    limit: a.limit,
+                    cursor: a.cursor,
+                }),
+                ThreadCommand::Cwds(a) => C::ThreadCwds(wire::ThreadCwdsArgs {
                     limit: a.limit,
                     cursor: a.cursor,
                 }),

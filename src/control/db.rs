@@ -1343,6 +1343,7 @@ impl Store {
             }
             Command::ThreadList(args) => MutationResult::value(thread_list(tx, args)?),
             Command::ThreadTags(args) => MutationResult::value(tags::names(tx, args)?),
+            Command::ThreadCwds(args) => MutationResult::value(tags::cwds(tx, args)?),
             Command::ThreadSet(args) => {
                 let mut result = self.set_thread(tx, args, caller, now)?;
                 if let Some(thread) = result.result["thread_id"].as_str().map(str::to_owned) {
@@ -3297,6 +3298,59 @@ mod thread_list_plan_tests {
         // (thousands of steps per row) run for the 21 returned rows only.
         let per_member = (many - few) / 4900;
         assert!(per_member < 150, "{per_member} VM steps per added member");
+    }
+
+    #[test]
+    fn cwd_names_are_one_index_seek_each_whatever_a_directory_holds() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        let plan: Vec<String> = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", tags::NEXT_CWD_SQL))
+            .unwrap()
+            .query_map(["/a"], |r| r.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        eprintln!("EXPLAIN cwds: {plan:?}");
+        assert!(
+            plan.iter()
+                .any(|p| p.contains("threads_cwd_updated (cwd>?)")),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|p| p.contains("TEMP B-TREE")), "{plan:?}");
+        // 40 directories; one holds few Threads and many are archived, the other fixture many.
+        let measure = |per_dir: u32, archived: bool| {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch(&format!(
+                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{})
+                 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
+                 SELECT printf('t%06d',x),printf('/dir%02d',x%50),'','p','m','2026-11-01T00:00:00Z',
+                        {} FROM n;",
+                per_dir * 50,
+                if archived {
+                    "'2026-11-02T00:00:00Z'"
+                } else {
+                    "NULL"
+                }
+            ))
+            .unwrap();
+            let mut next = db.prepare(tags::NEXT_CWD_SQL).unwrap();
+            let mut after = String::new();
+            for _ in 0..40 {
+                after = next
+                    .query_row([&after], |row| row.get::<_, String>(0))
+                    .unwrap();
+            }
+            next.get_status(rusqlite::StatementStatus::VmStep)
+        };
+        let (small, large, all_archived) =
+            (measure(2, false), measure(200, false), measure(200, true));
+        eprintln!(
+            "40 cwd seeks: 2 Threads per directory {small} VM steps, 200 per directory {large}, 200 per directory all archived {all_archived}"
+        );
+        assert_eq!(small, large);
+        assert_eq!(large, all_archived);
     }
 
     #[test]

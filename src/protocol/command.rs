@@ -38,6 +38,7 @@ impl Command {
             Self::ThreadUnarchive(_) => ("thread.unarchive", CommandRoute::Database),
             Self::ThreadTag(_) => ("thread.tag", CommandRoute::Database),
             Self::ThreadTags(_) => ("thread.tags", CommandRoute::Database),
+            Self::ThreadCwds(_) => ("thread.cwds", CommandRoute::Database),
             Self::ThreadSet(_) => ("thread.set", CommandRoute::Database),
             Self::MessageReply(_) => ("message.reply", CommandRoute::Database),
             Self::MessageSend(_) => ("message.send", CommandRoute::Database),
@@ -114,6 +115,7 @@ impl Command {
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
             | Self::ThreadTags(_)
+            | Self::ThreadCwds(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -164,6 +166,7 @@ impl Command {
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
             | Self::ThreadTags(_)
+            | Self::ThreadCwds(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -242,6 +245,7 @@ impl Command {
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
             | Self::ThreadTags(_)
+            | Self::ThreadCwds(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)
@@ -287,6 +291,7 @@ impl Command {
             | Self::ThreadGet(_)
             | Self::ThreadBranches(_)
             | Self::ThreadTags(_)
+            | Self::ThreadCwds(_)
             | Self::CompactList(_)
             | Self::CompactPreview(_)
             | Self::ShellList(_)

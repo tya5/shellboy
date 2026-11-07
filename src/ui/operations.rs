@@ -58,6 +58,7 @@ ThreadList,
     ThreadUnarchive,
     ThreadTag,
     ThreadTags,
+    ThreadCwds,
     ThreadSet,
     MessageSend,
     MessageReply,
@@ -1402,6 +1403,12 @@ impl Form {
                     cursor: form.optional("cursor")?,
                 }))
             }),
+            OpKind::ThreadCwds => (list(), |form, _cwd| {
+                Ok(Command::ThreadCwds(ThreadCwdsArgs {
+                    limit: form.number("limit")?,
+                    cursor: form.optional("cursor")?,
+                }))
+            }),
             OpKind::ThreadDelete => (
                 vec![
                     thread(),
@@ -2557,6 +2564,7 @@ mod tests {
                 json!({"thread_ids":[id(1)],"add":["a"]}),
             ),
             (OpKind::ThreadTags, "thread.tags", json!({"limit":20})),
+            (OpKind::ThreadCwds, "thread.cwds", json!({"limit":20})),
             (
                 OpKind::ThreadSet,
                 "thread.set",
@@ -2878,6 +2886,7 @@ mod tests {
                         | "thread.get"
                         | "thread.branches"
                         | "thread.tags"
+                        | "thread.cwds"
                         | "usage.get"
                         | "shell.list"
                         | "compact.list"
@@ -3469,10 +3478,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 68);
+        assert_eq!(rows.len(), 69);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            68
+            69
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
