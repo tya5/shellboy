@@ -10337,3 +10337,21 @@ recorded with the final SHA), a real terminal (no PTY capture of the archived li
 an archived Thread through the semantic index (no code path reads `archived_at` outside the list, summary
 and archive code), and archive of very large real databases.
 
+
+## Free-space guard (#261)
+
+Environment: macOS 26 arm64 (Darwin 25.3.0), Rust via rust-slot, a busy machine (two build slots).
+Free space is injected per temporary data directory in unit tests; no disk was filled and no user data
+or paid API was touched. Verified locally: gate holds below the minimum, passes at exactly the minimum,
+passes when free space is unknown, and returns distinct `reason` values (logical wins when both);
+`GcService::details` reports `ok`/`warning`/`held`/`unknown` and omits `filesystem_free_bytes` when unknown;
+the physical observation sample carries `disk_guard`; `collect` (raw and history) and observation work
+while held; a Turn held by the gate persists `disk_free_low` in its failure reason, an explicit `RunRetry`
+after space returns makes the same Turn runnable and the gate passes; a database opened through a symlinked
+directory resolves a volume; config defaults 40/50/5 GiB, old 8/10 GiB values still load, data_warning >=
+data_max and `disk_free_min_bytes=0` are rejected, 1 MiB is accepted. Cost (release, empty temporary store,
+mean of 20,000 calls, a single run on a loaded machine; the counter table has four rows regardless of data
+size): statvfs 2.2 us, logical counters 6.5 us, whole gate 15.1 us. Not verified: a real full or nearly full
+disk; a symlink onto a different volume (the test uses one volume); network filesystems; Windows and Linux
+local runs (CI is recorded with the final SHA); the TUI rendering of `disk_guard` in a real terminal (only
+the sample content is tested); real user data sizes.

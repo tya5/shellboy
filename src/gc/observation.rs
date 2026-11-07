@@ -545,6 +545,14 @@ pub(crate) struct PhysicalSample {
     pub temporary: PhysicalField,
     pub logs: PhysicalField,
     pub filesystem_free: PhysicalField,
+    /// Set by the service that knows `limits.disk_free_min_bytes`.
+    pub disk_guard: Option<DiskGuard>,
+}
+/// Free space against the new-work gate, as shown beside the free bytes.
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct DiskGuard {
+    pub min_bytes: u64,
+    pub state: super::DiskState,
 }
 fn field(
     started_at: String,
@@ -713,7 +721,7 @@ pub(crate) fn physical_sample(
     let filesystem_free = if let Some(reason) = stopped(deadline, cancel) {
         field(start, None, false, 0, Some(reason))
     } else {
-        match fs2::available_space(directory_path) {
+        match super::disk::volume_free_result(directory_path) {
             Ok(bytes) => field(start, Some(bytes), true, 0, None),
             Err(error) => field(start, None, false, 0, Some(error.to_string())),
         }
@@ -727,6 +735,7 @@ pub(crate) fn physical_sample(
         temporary,
         logs,
         filesystem_free,
+        disk_guard: None,
     }
 }
 pub(crate) async fn sample_physical(
@@ -756,14 +765,20 @@ impl super::GcService {
         deadline: tokio::time::Instant,
         cancel: CancellationToken,
     ) -> Result<PhysicalSample, ApiError> {
-        sample_physical(
+        let mut sample = sample_physical(
             &self.files,
             self.data_dir.clone(),
             PhysicalLimits::default(),
             deadline,
             cancel,
         )
-        .await
+        .await?;
+        let min_bytes = self.config.limits.disk_free_min_bytes;
+        sample.disk_guard = Some(DiskGuard {
+            min_bytes,
+            state: super::disk_state(sample.filesystem_free.bytes, min_bytes),
+        });
+        Ok(sample)
     }
 }
 
