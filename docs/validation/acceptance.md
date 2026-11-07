@@ -10594,3 +10594,26 @@ Validation pending. Intended evidence: deterministic loopback request barrier ac
 `config.set`/`credentials.set` concurrency, live defaults and TUI snapshots, unchanged embedding identity and client,
 restart-only embedding field differences, default/embedding deletion rejection and strict non-live response flags.
 No live provider or user data will be used; final tip default/all-OS CI must be recorded separately.
+
+### #269 stage C: focused local evidence (2026-11-07)
+
+- Source checkpoint: `366bda0d76` on `issue-269/live-connections-2`, based on A+B `a42a80cff8`; macOS arm64,
+  Rust 1.99.1. All Rust commands run through the sandbox `rust-slot` using its allocated shared target and bounded
+  build/test threads. No provider API, user database or OS clipboard was used.
+- `cargo check --locked --tests`: passed. `cargo test --locked --lib live_connections_ -- --nocapture`: 3 passed.
+  `cargo test --locked --test integration live_connections_ -- --nocapture`: 6 passed. These nine distinct tests
+  cover retained/changed client pools, TUI direct registry/default/explicit selection behavior, embedding definition
+  restart flags and unchanged profile/family/saved active-space IDs, in-flight endpoint swap, removal during a Run
+  with both successful and failed responses, catalog removal across a GET barrier, protected default deletion, and
+  concurrent config/credential updates including the actual synthetic Bearer POST without restarting.
+- `cargo test --locked --test integration config_edit::`: 31 passed. `cargo test --locked --test integration
+  credentials::`: 21 passed (including the concurrency test already counted above). The existing empty-config first
+  send now succeeds both before restart and after restarting from durable config/credentials.
+- `python3 -m unittest discover -s scripts/tests`, integration-layout/watchdog checks, language audit with
+  `scripts/dev/language-classifications.json`, `git diff --check` and append-only record-delta checks passed.
+  The language audit retained the existing 13 class-c items; no new user-facing Japanese-only string was added.
+- A prior draft fixture failed to compile because metadata seeding needs a transaction; it was corrected before
+  these passing runs. Earlier dedicated-target builds were stopped to follow the shared-cache/RAM instruction;
+  neither is counted as a test result. No completed CI was rerun.
+- Remaining at this checkpoint: final-main rebase, strict clippy, final-tip local checks and both CI runs. Local full
+  suite, real-provider behavior, performance/load, natural disk failures and exhaustive interleavings are unverified.
