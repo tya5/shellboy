@@ -66,12 +66,11 @@ deleted attachment or changed owner from breaking commit-before-ack replay.
 
 `message cancel --message ID [--message ID ...]` accepts 1..128 fixed unique IDs
 under one operation receipt and transaction. Return each ID's outcome:
-cancelled, already_cancelled, already_admitted, not_found, forbidden or unavailable.
+cancelled, already_cancelled, already_admitted, not_found or unavailable.
 Per-item domain outcomes permit partial success; SQL/storage failure rolls back
 the whole transaction. Ordinary operation replay returns the saved outcomes.
-Humans may cancel any sender's input in the target Thread; an authenticated
-model may cancel only messages whose saved sender Thread equals its own Thread.
-Do not infer authority from a claimed sender, current Run, parent or target.
+Any model or human caller may cancel queued input in the target Thread. Origin
+records who acted but does not grant or restrict this operation.
 
 Check admission and path membership in the cancellation transaction. The single
 DB lane serializes this race with driver/attachment adoption; the first commit
@@ -255,12 +254,11 @@ the redundant submitted copy must not collect the archived message source.
 `message send --expect-reply` creates a pending reply duty in the acceptance
 receipt. Ordinary sends omit that flag, retaining their existing fingerprint.
 At most 128 duties may remain pending per recipient Thread, including held or
-unassigned input. Replay does not create a second duty. A model cannot require
-a reply from its own Thread. Admission appends an ordered, once-only
+unassigned input. Replay does not create a second duty. A model may require a reply from any Thread, including its own. Admission appends an ordered, once-only
 `reply_expected` notice after the input in the same transaction. Explicit
 replies use `message reply`; Turn end messages do not satisfy duties.
 
-Cancellation retains the existing sender/human authority. A queued input is
+Cancellation is available to any model or human caller. A queued input is
 archived and its duty is cancelled together. An admitted input stays in history;
 its duty becomes cancelled, returns `reply_cancelled`, and adds a durable
 recipient notice without waking it. See [the adopted design](reply-expected-messages.md).

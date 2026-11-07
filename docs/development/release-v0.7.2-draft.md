@@ -29,7 +29,7 @@ Explicit replies, more predictable context reduction, and bounded startup recove
 
 ## Changed behavior
 
-- Shell tool `unknown_arguments = warn|strict` controls unknown keys; malformed
+- Shell tool unknown keys are always ignored with a bounded warning; malformed
   or duplicate arguments and other preflight failures receive precise per-call
   errors without discarding valid sibling calls.
 - Proactive compaction calibrates its target to measured request sizes and widens

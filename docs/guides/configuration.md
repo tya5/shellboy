@@ -905,10 +905,9 @@ shows `segment_chars` / `reduce_rounds` beside `effective_segment_chars` /
 
 ### Unknown shell arguments
 
-`[shell] unknown_arguments = "warn"` is the default: unknown model-supplied
-shell parameters are ignored and named in the call result. Set it to `"strict"`
-to reject calls containing unknown parameters. Invalid known parameters are
-errors in either mode.
+Unknown model-supplied shell parameters are always ignored and named in the call
+result. The removed `[shell] unknown_arguments` setting is not accepted. Invalid
+known parameters remain errors.
 
 ### Shell call descriptions
 

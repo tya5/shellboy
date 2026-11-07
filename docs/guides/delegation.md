@@ -53,7 +53,7 @@ shellboy message get --message CHILD_MESSAGE_ID
 shellboy history get --node REPLY_NODE_ID --limit-bytes 65536
 ```
 
-The child receives the message ID and replies once after it is applied:
+Any model or human caller may reply once the message is applied:
 
 ```bash
 shellboy message reply --message CHILD_MESSAGE_ID --text 'Findings, evidence, and remaining work.'

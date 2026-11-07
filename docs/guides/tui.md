@@ -317,7 +317,7 @@ A branch is a child conversation (a Thread) made by `/fork`, `/edit` or `/rewind
 
 In the conversation, press Tab and Up/Down to select one of your own requests, then press **`r`** (shown as `r Rewind` in the key help and listed in F1 under the rewind entry). The conversation goes back to just before that request: the same as `/rewind` and `shellboy thread rewind --exclude-node`. `r` does nothing on other items (the status says to select a request). No other key of the history focus uses `r`.
 
-Nothing changes yet. The owner reads the facts with `shellboy thread rewind --dry-run` (the same rewind run and rolled back, so refusals such as a running Run or queued messages appear here too) and Shellboy shows a confirmation:
+Nothing changes yet. The owner reads the facts with `shellboy thread rewind --dry-run` (the same rewind run and rolled back, so refusals such as a live Run or unknown path admission appear here too) and Shellboy shows a confirmation:
 
 ```
 Rewind this conversation to just before this request?

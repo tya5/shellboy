@@ -72,7 +72,7 @@ Run; retry by generation CAS; one reply per message; reply only after applicatio
 | #253 | Nothing; no int8 code | All |
 | #254 | Only the on/off switch `indexing.auto_history` | Target selection and its default |
 | #256 (closed) | Stop, retry and shell write/EOF/stop have no authority check | |
-| #259 | Nothing. Still present: `not_recipient` (`src/control/reply.rs`), `Forbidden` on cancel (`src/control/pending_messages.rs`), no reply-expected to own Thread and "owned by another live parent Run" (`src/control/db.rs`), exec 128 KiB (`src/exec_client.rs`) | All. The parent-send item follows #222 stage 2 |
+| #259 | In progress on `issue-259/remove-constraints`: remove caller/recipient gates and low exec input cap | CI and handoff remain |
 | #261 | Logical limit only, defaults 8 GiB warning and 10 GiB stop (`src/config.rs`, `require_capacity_tx` in `src/gc.rs`). `storage status` already reports `filesystem_free_bytes` | Floor, new defaults, 2x-floor warning |
 | #262 | Nothing. Reused parts exist: `--expect-reply`, `message reply`, `wait reply_received`, TUI `/replies`, `RegionLayout` (`src/ui/region.rs`) | All. Follows #259 |
 
@@ -237,7 +237,7 @@ binary. Until the last row below lands, hand it to the on-site Shellboy as a fil
 
 | When | Add to guides |
 |---|---|
-| #259 lands | Remove "a parent cannot reply on the child's behalf" and "cannot send a reply-expected message to its own Thread" (Agent Guide, [Reply to a request](../guides/agent-guide.md#reply-to-a-request)), same in `cli-reference.md` and `delegation.md` |
+| #259 | Landed in this branch: guides now state that any model can reply and self-target expected replies are accepted | Branch CI and handoff pending |
 | #261 lands | [Storage and resources](../guides/agent-guide.md#storage-and-resources): floor, 50 GiB, running commands' writes not stopped. New defaults in `configuration.md`; hold and retry in `recovery-and-storage.md` |
 | #262 lands | Agent Guide section "when a human decision is needed"; region and count in `tui.md` |
 | #253, #254 land | History and index text: defaults, explicit backfill, `scope_status`, keyword fallback |

@@ -50,7 +50,7 @@ Completed); no surveyed product offers arbitrary re-parenting.
 | Creation defaults: cwd, AGENTS reference, connection, model, effort, compaction overrides copied from the parent | `create_thread`, `src/control/db.rs:1609-1682` | once, at create | none; stays a creation-time copy |
 | Fork / `/edit` / rewind child: parent = source Thread, settings and path prefix copied | `fork_thread`, `src/history.rs:469`; [history](history.md) ("fork's parent_thread_id is lineage and creates no Run ownership edge") | once | none |
 | **Ownership grant**: model send starting a new Run on a Thread whose parent is the caller's Thread sets `owner_run_id` = caller Run | `assign_message`, `src/control/db.rs:1901-2021` | at each new Run start | the *next* Run follows the new parent; live Runs keep their stored owner |
-| Refusal "child Run is owned by another live parent Run" (caller is the parent, target's live Run has another owner) | `src/control/db.rs:1926-1934` | at send | after re-parenting a busy child, the new parent gets this refusal until the old owner's Run ends; correct behavior |
+| Parent send to a live child Run owned by a different parent | `assign_message`, `src/control/db.rs` | at send | accepted into existing Run without transferring its saved owner |
 | TUI Thread browser tree (▾/▸, ├─/└─, missing-parent marker, cycle marker) | `src/ui/threads.rs:2051-2120`; [thread browser](thread-browser.md) | each fetched page | already a projection of fetched rows; needs refetch of old and new parent |
 | Browser lineage counts (bounded descendant walk, depth 8, 256 rows, cycle flag) | `src/frontend/lineage.rs:12-37`, `affected_tx` `:196-210` | read time | invalidation walks *upward from the changed IDs*; the move must report the old parent as changed too |
 | Header / watch / status show parent id and title | `src/frontend/header.rs:97`, `src/frontend/watch_read.rs:22-35`, `src/status.rs:444` | read time | none |
@@ -347,8 +347,8 @@ TUI (Thread browser, [thread browser](thread-browser.md)):
 2. **Re-parent**: `thread set --parent P|''`; live-parent and cycle checks with the
    1024-step bound; context record; changed old/new parent; F8 form field;
    guide wording. Tests: cycle (self, descendant, deep chain at the bound),
-   re-parent with a live owned Run (old owner keeps notices and the stop cascade, new parent
-   refused until the Run ends, then owns the next Run), branch view divergence
+   re-parent with a live owned Run (old owner keeps notices and stop cascade; new parent
+   may send to the existing Run without taking ownership, then owns the next Run), branch view divergence
    after a move, usage and delete following the current tree, preview_stale.
 3. **Tags and cwd grouping** (replaces the folder plan; see "Tags and cwd grouping" above): tags, a cwd
    filter and a cwd listing are implemented, see "Stage 3 as implemented" (migration 34). Done. The user chose to
@@ -419,7 +419,7 @@ Follows §3 with these concrete choices (decision D-222-2).
   unchanged; replies follow the receipt's recorded sender, and wait cycles follow the owner
   chain, neither reads `parent_id`. The result's `parent_change` reports the previous parent
   and the Thread's live Run with its owner so the caller sees who still controls it. The new
-  parent is refused with "child Run is owned by another live parent Run" until that Run ends;
+  parent may send to the existing Run while its recorded owner remains unchanged;
   its later send then owns the next Run. The old owner keeps the notices and the stop cascade (any caller may stop or retry a Run).
 - Change hints: `changed_threads` is the moved Thread, the old parent and the new parent, in
   that order (deduplicated), so lineage caches and `events.wait` clients refresh both sides.
@@ -477,9 +477,7 @@ belongs to #253, so this is `0034_thread_tags`.
 
 - **Hidden work**: an archived Thread with a live Run is hidden from the list;
   mitigated by bulk skip, `status`/`watch`, and auto-unarchive on new Runs.
-- **Misread authority** after a move: the new parent sees "owned by another live
-  parent Run" until the old Run ends. Mitigated by returning `owner_run_id` from
-  `thread set` and by the guide wording.
+- **Misread authority** after a move: callers may mistake a send to the existing Run for an ownership transfer. Mitigated by returning `owner_run_id` from `thread set` and by the guide wording.
 - **Lineage cache staleness** in the TUI if the old parent is not reported as
   changed; covered by reporting both parents.
 - **Deep trees** from moves exceed reader depth bounds (8) more often; readers

@@ -26,14 +26,7 @@ pub(super) async fn run_tool_group(
     // Validate every encoding and initial input before the first OS spawn.
     for call in &calls {
         if !call.unknown_arguments.is_empty() {
-            let event = match control.store.config.shell.unknown_arguments {
-                crate::config::UnknownArguments::Warn => {
-                    crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsIgnored
-                }
-                crate::config::UnknownArguments::Strict => {
-                    crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsRejected
-                }
-            };
+            let event = crate::diagnostics::DiagnosticEvent::ShellUnknownArgumentsIgnored;
             for name in &call.unknown_arguments {
                 control.diagnostics().record_shell_unknown_parameter(
                     event,
@@ -46,19 +39,6 @@ pub(super) async fn run_tool_group(
                     name,
                 );
             }
-        }
-        if !call.unknown_arguments.is_empty()
-            && control.store.config.shell.unknown_arguments
-                == crate::config::UnknownArguments::Strict
-        {
-            validation_errors.insert(
-                call.call_id.clone(),
-                format!(
-                    "Unknown parameter(s): {}. Accepted: {}.",
-                    call.unknown_arguments.join(", "),
-                    model::SHELL_ARGUMENTS.join(", ")
-                ),
-            );
         }
         let args = match &call.args {
             Ok(args) => args,
@@ -163,9 +143,7 @@ pub(super) async fn run_tool_group(
                 }
             }
         };
-        if !call.unknown_arguments.is_empty()
-            && control.store.config.shell.unknown_arguments == crate::config::UnknownArguments::Warn
-        {
+        if !call.unknown_arguments.is_empty() {
             result["warning"] = json!(format!(
                 "Ignored unknown parameter(s): {}. Accepted: {}.",
                 call.unknown_arguments.join(", "),

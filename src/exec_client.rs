@@ -10,10 +10,18 @@ use tokio::{
 };
 mod schema;
 use schema::Schema;
-const INPUT_LIMIT: usize = 128 * 1024;
+const INPUT_LIMIT: usize = crate::cli::MAX_STDIN_TEXT_BYTES;
 const SCHEMA_LIMIT: usize = 64 * 1024;
 const HISTORY_LIMIT: usize = 4 * 1024 * 1024;
 const ANSWER_LIMIT: usize = 1024 * 1024;
+
+#[cfg(test)]
+mod input_limit_tests {
+    #[test]
+    fn exec_uses_the_shared_cli_stdin_limit() {
+        assert_eq!(super::INPUT_LIMIT, crate::cli::MAX_STDIN_TEXT_BYTES);
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ResultMode {
@@ -598,7 +606,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
             .await
             .map_err(|_| "Cannot read stdin")?;
         if bytes.len() > INPUT_LIMIT {
-            return Err("stdin exceeds128KiB".into());
+            return Err("stdin exceeds the input byte limit".into());
         }
         String::from_utf8(bytes).map_err(|_| "stdin must be UTF-8")?
     } else {
@@ -609,7 +617,7 @@ async fn prepare(options: &ExecOptions) -> Result<(Schema, String, ThreadCreateA
     }
     let prompt = contract(&text, &schema, options.result);
     if prompt.len() > INPUT_LIMIT {
-        return Err("Composed request and Schema exceed128KiB".into());
+        return Err("Composed request and Schema exceed the input byte limit".into());
     }
     Command::MessageSend(MessageSendArgs {
         resume_recovery: false,

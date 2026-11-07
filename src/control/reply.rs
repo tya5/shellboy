@@ -172,12 +172,6 @@ impl super::db::Store {
                 "message does not expect a reply",
             ));
         }
-        if caller.is_some_and(|c| c.thread_id != row.0) {
-            return Err(
-                ApiError::new(ErrorCode::InvalidState, "only the recipient may reply")
-                    .details(json!({"reason":"not_recipient"})),
-            );
-        }
         if saved["reply"]["state"] != "pending" {
             return Err(
                 ApiError::new(ErrorCode::InvalidState, "reply is already terminal")

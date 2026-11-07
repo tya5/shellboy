@@ -49,10 +49,10 @@ fn request(id: &str, ids: &[&str]) -> Request {
     )
 }
 #[tokio::test]
-async fn cancellation_is_partial_authorized_archived_idempotent_and_never_wakes_models() {
+async fn cancellation_is_partial_unrestricted_archived_idempotent_and_never_wakes_models() {
     let (_root, store) = store().await;
     store.database.call(|db| {
-        input(db,"own",Some(&origin("sender")))?; input(db,"human",None)?;
+        input(db,"own",Some(&origin("different-sender")))?; input(db,"human",None)?; input(db,"human-late",None)?;
         input(db,"rewound",Some(&origin("sender")))?; input(db,"selected",Some(&origin("sender")))?;
         input(db,"missing",Some(&origin("sender")))?; input(db,"uncertain",Some(&origin("sender")))?;
         db.execute("UPDATE receipt SET state='held',path_admission='unknown',hold_reason='uncertain_path_admission' WHERE id='uncertain'",[])?;
@@ -85,7 +85,7 @@ async fn cancellation_is_partial_authorized_archived_idempotent_and_never_wakes_
             .collect::<Vec<_>>(),
         [
             MessageCancelOutcome::Cancelled,
-            MessageCancelOutcome::Forbidden,
+            MessageCancelOutcome::Cancelled,
             MessageCancelOutcome::AlreadyAdmitted,
             MessageCancelOutcome::AlreadyAdmitted,
             MessageCancelOutcome::Unavailable,
@@ -93,7 +93,7 @@ async fn cancellation_is_partial_authorized_archived_idempotent_and_never_wakes_
             MessageCancelOutcome::Cancelled
         ]
     );
-    assert!(cancelled.items[1].thread_id.is_none());
+    assert_eq!(cancelled.items[1].thread_id.as_deref(), Some("t"));
     let replay = store.execute(req, Some(origin("sender"))).await.unwrap();
     assert_eq!(replay.result, outcome.result);
     assert!(replay.changed_threads.is_empty());
@@ -103,7 +103,7 @@ async fn cancellation_is_partial_authorized_archived_idempotent_and_never_wakes_
         .unwrap();
     assert_eq!(already.result["items"][0]["outcome"], "already_cancelled");
     let human = store
-        .execute(request("human-cancel", &["human"]), None)
+        .execute(request("human-cancel", &["human-late"]), None)
         .await
         .unwrap();
     assert_eq!(human.result["items"][0]["outcome"], "cancelled");
@@ -116,7 +116,7 @@ async fn cancellation_is_partial_authorized_archived_idempotent_and_never_wakes_
                     [],
                     |r| r.get::<_, i64>(0)
                 )?,
-                3
+                4
             );
             assert_eq!(
                 db.query_row(
