@@ -147,7 +147,8 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 ```
 
 - **Connections and defaults apply live.** `connections.*`, `default_connection` and `default_model` apply from the
-  next request. An already-started request keeps its original connection. The running embedding connection and other
+  next request. Live defaults govern new root Threads; existing Threads keep their selected connection/model IDs.
+  An already-started request keeps its original connection. The running embedding connection and other
   settings still need restart, preserving the index identity. Read each change's `restart_required` and
   `applied_to_running_owner`; mixed edits may set both result-level flags. `config get.loaded.values` includes live
   changes and `differing_fields` compares effective values with the file. `differs` and the loaded content hash still
