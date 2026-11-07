@@ -5228,12 +5228,16 @@ impl UiState {
                             return self.command_error(i18n::local!(self.config.ui.language, "作業場所はUTF-8で表現できる必要があります", "The working directory must be representable in UTF-8"));
                         }
                     };
+                    let config = self.config.current();
+                    let follow_defaults = !view.explicit_model;
                     let args = crate::protocol::ThreadCreateArgs {
                         agents: Some(argument.into()),
                         cwd: Some(cwd),
-                        connection: view.connection.clone(),
-                        model: view.model.clone(),
-                        effort: view.effort.clone(),
+                        connection: if follow_defaults { config.default_connection.clone() } else { view.connection.clone() },
+                        model: if follow_defaults { config.default_model.clone() } else { view.model.clone() },
+                        effort: if follow_defaults && !view.explicit_effort {
+                            config.default_connection.as_ref().and_then(|name| config.connections.get(name)).and_then(|connection| connection.default_effort.clone())
+                        } else { view.effort.clone() },
                         parent_id: None,
                     };
                     self.select_agents(args)
