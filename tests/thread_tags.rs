@@ -457,11 +457,15 @@ async fn the_filter_is_and_with_paging_in_every_archived_mode_and_cursors_are_bo
         .await
         .unwrap();
     let cursor = first.next_cursor.unwrap();
+    let other_cwd = std::env::temp_dir()
+        .join("shellboy-other")
+        .to_string_lossy()
+        .into_owned();
     for (tags, cwd, mode) in [
         (vec!["a", "b"], None, ArchivedFilter::Exclude),
         (vec!["b"], None, ArchivedFilter::Exclude),
         (vec![], None, ArchivedFilter::Exclude),
-        (vec!["a"], Some("/x"), ArchivedFilter::Exclude),
+        (vec!["a"], Some(other_cwd.as_str()), ArchivedFilter::Exclude),
         (vec!["a"], None, ArchivedFilter::Include),
     ] {
         let error = list_with(&store, &tags, cwd, mode, 1, Some(cursor.clone()))
@@ -518,7 +522,11 @@ async fn the_cwd_filter_is_exact_and_combines_with_tags_and_the_text_query() {
     assert_eq!(in_cwd(&one, &[]).await, [b.clone(), a.clone()]);
     assert_eq!(in_cwd(&two, &[]).await, std::slice::from_ref(&c));
     assert_eq!(in_cwd(&one, &["x"]).await, std::slice::from_ref(&a));
-    assert!(in_cwd("/no/such", &[]).await.is_empty());
+    assert!(
+        in_cwd(&dir.path().join("none").to_string_lossy(), &[])
+            .await
+            .is_empty()
+    );
     // Lexical cleanup like saved cwds: trailing slash, `.` and `..` find the same Threads.
     assert_eq!(
         in_cwd(&format!("{one}/"), &[]).await,
