@@ -97,7 +97,8 @@ fn live_list_marks_current_filters_and_changes_only_the_current_saved_thread() {
 #[test]
 fn unsaved_selection_keeps_effort_and_does_not_change_new_thread_defaults() {
     let mut state = state(false);
-    state.view_mut().effort = Some("low".into());
+    state.insert("/effort low", false);
+    assert!(key(&mut state, KeyCode::Enter).is_empty());
     let request = open(&mut state, "/models proxy");
     response(&mut state, &request, Ok(vec!["model-a", "model-b"]));
     key(&mut state, KeyCode::Up);
