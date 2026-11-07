@@ -1392,7 +1392,8 @@ async fn shrink_never_removes_a_space_and_remove_does_only_what_it_previews() {
     assert_eq!(removed["removed"], true);
     assert_eq!(removed["reclaim_pending"], true);
     assert_eq!(removed["vector_payload_bytes_freed"], 0);
-    assert_eq!(removed["vector_payload_bytes_pending"], 40 * 8 * 4);
+    assert!(removed["vector_payload_bytes_pending"].is_null());
+    assert!(!removed["counts_exact"].as_bool().unwrap());
     assert_eq!(f.space(&source).await.unwrap().state, "removing");
     assert!(f.service.select_space(&source).await.is_err());
     f.db.call(|db| {

@@ -156,20 +156,28 @@ pub(crate) fn reclaim_step(
 }
 
 /// The facts of removing one space. Read-only; `blocked_by` says why it cannot go.
-fn removal_preview(db: &Connection, id: &str) -> Result<Value, StorageError> {
+fn removal_preview(db: &Connection, id: &str, exact_counts: bool) -> Result<Value, StorageError> {
     let space = load_space(db, id)?.ok_or_else(|| {
         StorageError::from(err(ErrorCode::TargetUnavailable, "Unknown index space"))
     })?;
-    let segments: i64 = db.query_row(
-        "SELECT count(*) FROM embedding_chunk WHERE space_id=?1",
-        [id],
-        |row| row.get(0),
-    )?;
-    let unfinished: i64 = db.query_row(
+    let segments: Option<i64> = if exact_counts {
+        Some(db.query_row(
+            "SELECT count(*) FROM embedding_chunk WHERE space_id=?1",
+            [id],
+            |row| row.get(0),
+        )?)
+    } else {
+        None
+    };
+    let unfinished: Option<i64> = if exact_counts {
+        Some(db.query_row(
         "SELECT count(*) FROM embedding_job WHERE space_id=?1 AND state IN ('pending','failed','split')",
         [id],
         |row| row.get(0),
-    )?;
+    )?)
+    } else {
+        None
+    };
     let blocked_by = removal_blocker(db, id)?;
     Ok(json!({
         "space_id":space.id,
@@ -181,7 +189,8 @@ fn removal_preview(db: &Connection, id: &str) -> Result<Value, StorageError> {
         "partial":meta(db, &IndexKeys::partial(id))?.is_some(),
         "segments":segments,
         "unfinished_jobs_deleted":unfinished,
-        "vector_payload_bytes_freed":segments as u64 * space.dimension as u64 * space.element_bytes(),
+        "vector_payload_bytes_freed":segments.map(|n| n as u64 * space.dimension as u64 * space.element_bytes()),
+        "counts_exact":exact_counts,
         "removable":blocked_by.is_none(),
         "blocked_by":blocked_by,
         "effects":"Commits removal from search. Maintenance subsequently reclaims vectors and unfinished jobs with their saved inputs; conversation history is not touched. Recreating it means paid embedding of every segment. Reclaimed pages can be reused; the database file shrinks only with `storage vacuum`.",
@@ -196,7 +205,7 @@ impl IndexService {
         let result = self
             .database
             .call(move |db| {
-                let mut preview = removal_preview(db, &args.space_id)?;
+                let mut preview = removal_preview(db, &args.space_id, dry_run)?;
                 preview["dry_run"] = json!(dry_run);
                 if dry_run {
                     return Ok(preview);
@@ -333,6 +342,61 @@ mod tests {
             assert_eq!(finished,1);
             Ok(())
         }).await.unwrap();
+        db.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod decision_bounds_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn actual_removal_does_not_count_chunks_or_jobs() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        let temp = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(temp.path().join("no-count.db"))
+            .await
+            .unwrap();
+        db.call(|db| {
+            db.execute_batch("INSERT INTO index_space VALUES('r','p','m',2,'splitter','inactive','shellboy_vec_0123456789abcdef0123456789abcdef',NULL);")?;
+            // Prohibit COUNT itself, not only a slow example or a wall-clock threshold.
+            db.authorizer(Some(|context:AuthContext<'_>| match context.action {
+                AuthAction::Function { function_name } if function_name.eq_ignore_ascii_case("count") => Authorization::Deny,
+                _ => Authorization::Allow,
+            }));
+            Ok(())
+        }).await.unwrap();
+        let service = IndexService::new(db.clone(), Arc::new(crate::config::Config::default()));
+        let preview = service
+            .remove_space(IndexRemoveArgs {
+                space_id: "r".into(),
+                dry_run: true,
+            })
+            .await;
+        assert!(
+            preview.is_err(),
+            "dry-run intentionally requests exact counts"
+        );
+        let removed = service
+            .remove_space(IndexRemoveArgs {
+                space_id: "r".into(),
+                dry_run: false,
+            })
+            .await
+            .unwrap();
+        assert_eq!(removed["removed"], true);
+        assert_eq!(removed["reclaim_pending"], true);
+        assert_eq!(removed["counts_exact"], false);
+        assert!(removed["segments"].is_null());
+        assert!(removed["unfinished_jobs_pending"].is_null());
+        assert!(removed["vector_payload_bytes_pending"].is_null());
+        assert_eq!(removed["vector_payload_bytes_freed"], 0);
+        db.call(|db| {
+            db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            Ok(())
+        })
+        .await
+        .unwrap();
         db.shutdown().await.unwrap();
     }
 }
