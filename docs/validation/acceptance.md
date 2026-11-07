@@ -10609,3 +10609,13 @@ No live provider or user data will be used; final tip default/all-OS CI must be 
   neither is counted as a test result. No completed CI was rerun.
 - Remaining at this checkpoint: final-main rebase, strict clippy, final-tip local checks and both CI runs. Local full
   suite, real-provider behavior, performance/load, natural disk failures and exhaustive interleavings are unverified.
+
+### #269 stage C: first full-CI feedback (2026-11-07)
+
+The first normal CI (`42376435137`, source `e5c12c0a777785bd7a4b44bafb67822e7314ba3d`) failed two existing tests
+outside the initial focused set. This is not classified as a flake: the constructor-failure fixture reused its
+synthetic owner's already-initialized live registry after mutating startup config, and the model-picker fixture
+set effort directly rather than issuing the explicit UI operation that preserves the choice. The fixture changes
+create a fresh synthetic registry before constructor-failure injection and enter `/effort low` through the actual
+UI command path. Neither disables a test nor changes its intended assertion. Their focused rerun and a new full-CI
+pair at a new source SHA are required; the old CI is retained as failed evidence, not rerun.
