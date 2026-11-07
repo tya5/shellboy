@@ -133,7 +133,7 @@ async fn live_connections_removal_during_run_preserves_response_and_recovers_wit
             let (url, mut receive, server) = proxy().await;
             let owner = owner(root.path(), &url).await;
             let control = Control::new(&owner, root.path().into());
-            edit(&control, vec![change("connections.transient", json!({"base_url":url}))]).await;
+            edit(&control, vec![change("connections.transient", json!({"base_url":url,"response_max_retries":1,"response_retry_max_delay_ms":10}))]).await;
             let target = named_thread(&control, "transient").await;
             send(&control, &target, "preserved input").await;
             let pending = incoming(&control, &mut receive).await;
@@ -314,37 +314,69 @@ async fn live_connections_run_keeps_endpoint_body_and_retry_policy_across_tool_l
         let (new_url, mut new_receive, new_server) = proxy().await;
         let owner = owner(root.path(), &old_url).await;
         let control = Control::new(&owner, root.path().into());
-        edit(&control, vec![change("connections.fixture.extra_body", json!({"synthetic_generation":"old"}))]).await;
+        edit(
+            &control,
+            vec![change("connections.fixture.response_max_retries",json!(1)), change(
+                "connections.fixture.extra_body",
+                json!({"synthetic_generation":"old"}),
+            )],
+        )
+        .await;
         let target = thread(&control).await;
         send(&control, &target, "keep one Run generation").await;
         let first = incoming(&control, &mut old_receive).await;
         assert_eq!(first.body["synthetic_generation"], "old");
-        edit(&control, vec![
-            change("connections.fixture.base_url", json!(new_url)),
-            change("connections.fixture.extra_body", json!({"synthetic_generation":"new"})),
-            change("connections.fixture.response_max_retries",json!(0)),
-        ]).await;
-        first.reply.send((200, json!({"id":"tool-generation","status":"completed","output":[{
-            "type":"function_call","call_id":"generation-tool","name":"shell",
-            "arguments":json!({"command":"echo synthetic-generation-tool"}).to_string()
-        }]}))).unwrap();
+        edit(
+            &control,
+            vec![
+                change("connections.fixture.base_url", json!(new_url)),
+                change(
+                    "connections.fixture.extra_body",
+                    json!({"synthetic_generation":"new"}),
+                ),
+                change("connections.fixture.response_max_retries", json!(0)),
+            ],
+        )
+        .await;
+        first
+            .reply
+            .send((
+                200,
+                json!({"id":"tool-generation","status":"completed","output":[{
+                    "type":"function_call","call_id":"generation-tool","name":"shell",
+                    "arguments":json!({"command":"echo synthetic-generation-tool"}).to_string()
+                }]}),
+            ))
+            .unwrap();
         let continued = incoming(&control, &mut old_receive).await;
-        assert_eq!(continued.body["synthetic_generation"],"old");
-        assert!(continued.body.to_string().contains("synthetic-generation-tool"));
-        continued.reply.send((500,json!({"error":{"message":"synthetic retry"}}))).unwrap();
+        assert_eq!(continued.body["synthetic_generation"], "old");
+        assert!(
+            continued
+                .body
+                .to_string()
+                .contains("synthetic-generation-tool")
+        );
+        continued
+            .reply
+            .send((500, json!({"error":{"message":"synthetic retry"}})))
+            .unwrap();
         let retry = incoming(&control, &mut old_receive).await;
-        assert_eq!(retry.body["synthetic_generation"],"old");
-        retry.reply.send((200,answer("old Run finished"))).unwrap();
-        settled(&control,&target).await;
+        assert_eq!(retry.body["synthetic_generation"], "old");
+        retry.reply.send((200, answer("old Run finished"))).unwrap();
+        settled(&control, &target).await;
         assert!(new_receive.try_recv().is_err());
-        send(&control,&target,"new Run gets new generation").await;
-        let fresh=incoming(&control,&mut new_receive).await;
-        assert_eq!(fresh.body["synthetic_generation"],"new");
-        fresh.reply.send((200,answer("new Run finished"))).unwrap();
-        settled(&control,&target).await;
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap();
-        old_server.abort(); new_server.abort();
-    }).await.unwrap();
+        send(&control, &target, "new Run gets new generation").await;
+        let fresh = incoming(&control, &mut new_receive).await;
+        assert_eq!(fresh.body["synthetic_generation"], "new");
+        fresh.reply.send((200, answer("new Run finished"))).unwrap();
+        settled(&control, &target).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        old_server.abort();
+        new_server.abort();
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
