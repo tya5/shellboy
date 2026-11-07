@@ -307,7 +307,7 @@ mod activity_migration_tests {
             assert_eq!(
                 db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                     .unwrap(),
-                34
+                super::super::SCHEMA_VERSION
             );
             assert_eq!(
                 db.query_row(
@@ -439,22 +439,10 @@ mod activity_migration_tests {
             &|| {},
         )
         .unwrap();
+        let total = super::super::SCHEMA_VERSION - 22;
         assert_eq!(
             *observed.borrow(),
-            vec![
-                (1, 12),
-                (2, 12),
-                (3, 12),
-                (4, 12),
-                (5, 12),
-                (6, 12),
-                (7, 12),
-                (8, 12),
-                (9, 12),
-                (10, 12),
-                (11, 12),
-                (12, 12),
-            ]
+            (1..=total).map(|n| (n, total)).collect::<Vec<_>>()
         );
         assert_eq!(db.query_row("SELECT count(*) FROM shell_execution INDEXED BY activity_shell_spawned_turn WHERE turn_id='u' AND CASE WHEN json_valid(shell_json) THEN json_extract(shell_json,'$.spawned')=1 ELSE 1 END", [], |r| r.get::<_, i64>(0)).unwrap(), 2);
         assert_eq!(
