@@ -377,7 +377,9 @@ Read settings with `shellboy config get`; it never returns a credential value. C
 `shellboy config set` only when the user asked for that change, not to work around a problem you met. Before
 writing, show the current and new values of each field. Pass `result.file.content_hash` as `--expected-hash`.
 Afterwards, show the returned `changes` and their `restart_required` / `applied_to_running_owner` facts.
-Connections and default connection/model apply from the next request; an in-flight request keeps its original client.
+Connections apply from the next Run. A Run pins its start-time connection generation across tool continuations,
+admission waits, automatic summaries and retries; live changes never split one Run across endpoints or policies.
+Default connection/model apply to new Threads immediately. Credentials keep their next-request lookup semantics.
 The running embedding connection and all other settings still need restart. Removing the running default or embedding
 connection is refused. A removed Thread connection needs an explicit `thread set --connection Q --model M` before retry.
 Never write a credential value into the config file: set

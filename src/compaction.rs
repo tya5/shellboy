@@ -396,6 +396,18 @@ impl Compactor {
         }
     }
 
+    pub(crate) fn pinned(&self, snapshot: Arc<crate::model::http::ClientSnapshot>) -> Self {
+        let mut pinned = self.clone();
+        let mut config = (*self.config).clone();
+        config.connections = snapshot.connections.clone();
+        config.default_connection = snapshot.default_connection.clone();
+        config.default_model = snapshot.default_model.clone();
+        config.live_connections = Default::default();
+        pinned.config = Arc::new(config);
+        pinned.clients = HttpClients::pinned(snapshot);
+        pinned
+    }
+
     async fn snapshot(&self, thread: &str, for_summary: bool) -> Result<Snapshot, ApiError> {
         let thread = thread.to_owned();
         self.database.call(move |db| {

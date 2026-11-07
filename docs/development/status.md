@@ -5233,3 +5233,9 @@ The nine live-connection regressions and existing config-edit (31) / credential 
 `366bda0d76`; counts overlap in one credential regression. See acceptance for commands and scope. A+B has now landed
 at `69b2af9227`; stage C will be rebased under a new branch name and checked at its final tip. CI/landing is not yet
 claimed by this progress entry.
+
+### #269 stage C W8 follow-up (2026-11-07)
+
+Review identified mixed connection generations across a Run. The follow-up pins its start-time generation through
+admission, tool continuations, retry and automatic summaries; TUI current-generation threshold/model regressions are
+added. Focused local checks and exact-tip CI are pending. Earlier successful stage C CI did not establish this case.

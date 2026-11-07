@@ -117,7 +117,10 @@ pub(super) async fn maybe_compact(
     budget: &mut ProactiveBudget,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<bool, ApiError> {
-    let config = &control.store.config.current();
+    let mut config = (*control.store.config).clone();
+    config.connections = snapshot.clients.connections.clone();
+    let config = &config;
+    let compactor = control.compactor.pinned(snapshot.clients.clone());
     // Read at every boundary so `thread set --auto-compact-at` applies from the next check (#229).
     let thread_override = {
         let thread = snapshot.thread.clone();
@@ -299,7 +302,7 @@ pub(super) async fn maybe_compact(
     {
         return Ok(false);
     }
-    let open_loop = control.compactor.tool_loop_open(&snapshot.thread).await?;
+    let open_loop = compactor.tool_loop_open(&snapshot.thread).await?;
     let calibrated = evidence
         .input_characters
         .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars))
@@ -433,8 +436,7 @@ pub(super) async fn maybe_compact(
         Reason::CoverageLimited,
         budget.guard.as_ref(),
     );
-    let mut spill_counts = control
-        .compactor
+    let mut spill_counts = compactor
         .proactive_spill_counts(
             &snapshot.thread,
             open_loop
@@ -498,12 +500,12 @@ pub(super) async fn maybe_compact(
     let mut stages = json!({"closed_spill":{"ran":false,"skipped":"not_reached"},"closed_summary":{"ran":false,"skipped":"not_reached"},"active_spill":{"ran":false,"skipped":"not_reached"},"active_summary":{"ran":false,"skipped":"not_reached"}});
     let result: Result<Value, ApiError> = async {
     let before_characters = if target_plan.is_some() {
-        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
+        Some(compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
     let spill = if let Some(plan) = target_plan {
-        control.compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
+        compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
     } else if spill_new && !open_loop {
-        control.compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
+        compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
     } else {
         Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
     };
@@ -514,7 +516,7 @@ pub(super) async fn maybe_compact(
         fault_tests::checkpoint(control, slot, "closed_spill").await?;
     }
     let after_spill = if target_plan.is_some() {
-        Some(control.compactor.proactive_history_characters(&snapshot.thread).await?)
+        Some(compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
     let remaining = target_plan.map(|plan| plan.remove_characters.saturating_sub(
         before_characters.unwrap_or(0).saturating_sub(after_spill.unwrap_or(0))));
@@ -531,15 +533,15 @@ pub(super) async fn maybe_compact(
             "summary": spill,
             "summary_deferred": true,
         }),
-        Ok(spill) => match summarize_once(control, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed, boundary, &automatic).await
+        Ok(spill) => match summarize_once(control, &compactor, &snapshot.thread, slot, Order { prefer_active, middle_new, active_spill_new, ordinary_new: summary_new }, &mut midturn, &mut summary_scope, remaining, &mut selection_shortfall, &mut stages, &mut committed, boundary, &automatic).await
         {
             Ok(mut summary) => {
                 if summary_scope == "prefix" && (middle_new || active_spill_new) && !slot.stop.is_cancelled()
                     && let (Some(plan), Some(before)) = (target_plan, before_characters)
                 {
-                    let after = control.compactor.proactive_history_characters(&snapshot.thread).await?;
+                    let after = compactor.proactive_history_characters(&snapshot.thread).await?;
                     if before.saturating_sub(after) < plan.remove_characters {
-                        match active_after_spill(control, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed, boundary, &automatic).await {
+                        match active_after_spill(control, &compactor, &snapshot.thread, slot, Some(plan.remove_characters.saturating_sub(before.saturating_sub(after))), middle_new, &mut stages, &mut committed, boundary, &automatic).await {
                             Ok(active) if !active.no_target => {
                                 summary.spilled_groups = summary.spilled_groups.saturating_add(active.spilled_groups);
                                 summary.source_nodes = summary.source_nodes.saturating_add(active.source_nodes);
@@ -912,7 +914,8 @@ fn committed_result(
 
 #[allow(clippy::too_many_arguments)]
 async fn active_after_spill(
-    control: &Arc<Control>,
+    _control: &Arc<Control>,
+    compactor: &crate::compaction::Compactor,
     thread: &str,
     slot: &DriverSlot,
     remaining: Option<u64>,
@@ -924,8 +927,7 @@ async fn active_after_spill(
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let Some(need) = remaining else {
         // #226: the uncalibrated active-Turn summary is a recorded stage too.
-        let summary = control
-            .compactor
+        let summary = compactor
             .summarize_active_guarded(
                 thread,
                 slot.stop.clone(),
@@ -944,17 +946,13 @@ async fn active_after_spill(
         }});
         #[cfg(test)]
         if summary.as_ref().is_ok_and(|r| !r.no_target) {
-            fault_tests::checkpoint(control, slot, "active_summary").await?;
+            fault_tests::checkpoint(_control, slot, "active_summary").await?;
         }
         return summary;
     };
-    let before = control
-        .compactor
-        .proactive_history_characters(thread)
-        .await?;
+    let before = compactor.proactive_history_characters(thread).await?;
     stages["active_spill"] = json!({"ran":true,"remaining_before":need,"outcome":"started"});
-    let spill = match control
-        .compactor
+    let spill = match compactor
         .spill_staged_cancellable(
             thread,
             true,
@@ -977,7 +975,7 @@ async fn active_after_spill(
     committed.push(spill.clone());
     #[cfg(test)]
     if !spill.no_target {
-        fault_tests::checkpoint(control, slot, "active_spill").await?;
+        fault_tests::checkpoint(_control, slot, "active_spill").await?;
     }
     stages["active_spill"]["adopted_groups"] = json!(spill.spilled_groups);
     stages["active_spill"]["outcome"] = json!(if spill.no_target {
@@ -985,10 +983,7 @@ async fn active_after_spill(
     } else {
         "adopted"
     });
-    let after = control
-        .compactor
-        .proactive_history_characters(thread)
-        .await?;
+    let after = compactor.proactive_history_characters(thread).await?;
     let removed = before.saturating_sub(after);
     let remaining = need.saturating_sub(removed);
     stages["active_spill"] = json!({"ran":true,"removed_characters":removed,"adopted_groups":spill.spilled_groups,"remaining_before":need,"remaining_after":remaining,"outcome":if spill.no_target {"no_target"} else {"adopted"}});
@@ -1002,8 +997,7 @@ async fn active_after_spill(
         return Ok(spill);
     }
     stages["active_summary"] = json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
-    let (mut summary, projected_shortfall) = match control
-        .compactor
+    let (mut summary, projected_shortfall) = match compactor
         .summarize_target_active_guarded(
             thread,
             remaining,
@@ -1026,17 +1020,14 @@ async fn active_after_spill(
     committed.push(summary.clone());
     #[cfg(test)]
     if !summary.no_target {
-        fault_tests::checkpoint(control, slot, "active_summary").await?;
+        fault_tests::checkpoint(_control, slot, "active_summary").await?;
     }
     stages["active_summary"]["outcome"] = json!(if summary.no_target {
         "no_target"
     } else {
         "adopted"
     });
-    let after_summary = control
-        .compactor
-        .proactive_history_characters(thread)
-        .await?;
+    let after_summary = compactor.proactive_history_characters(thread).await?;
     let summary_removed = after.saturating_sub(after_summary);
     stages["active_summary"] = json!({"ran":true,"removed_characters":summary_removed,"remaining_before":remaining,"remaining_after":remaining.saturating_sub(summary_removed),"projected_shortfall":projected_shortfall,"outcome":if summary.no_target {"no_target"} else {"adopted"}});
     summary.spilled_groups += spill.spilled_groups;
@@ -1061,6 +1052,7 @@ struct Order {
 #[allow(clippy::too_many_arguments)]
 async fn summarize_once(
     control: &Arc<Control>,
+    compactor: &crate::compaction::Compactor,
     thread: &str,
     slot: &DriverSlot,
     order: Order,
@@ -1073,7 +1065,6 @@ async fn summarize_once(
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
     automatic: &Automatic,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
-    let compactor = &control.compactor;
     if !order.prefer_active && order.ordinary_new {
         let before = if remaining.is_some() {
             Some(compactor.proactive_history_characters(thread).await?)
@@ -1144,6 +1135,7 @@ async fn summarize_once(
             .or(remaining);
         let active = active_after_spill(
             control,
+            compactor,
             thread,
             slot,
             remaining,

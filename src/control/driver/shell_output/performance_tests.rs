@@ -61,6 +61,7 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
             .unwrap();
         handles.push(shell.handle.clone());
         let snapshot = Snapshot {
+            clients: control.store.clients.snapshot(),
             thread: format!("t{i}"),
             run: format!("r{i}"),
             turn: format!("u{i}"),

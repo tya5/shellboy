@@ -3,7 +3,7 @@ use super::ModelError;
 use crate::config::{ApiEndpoint, Config, Connection};
 mod body;
 mod clients;
-pub(crate) use clients::HttpClients;
+pub(crate) use clients::{ClientSnapshot, HttpClients};
 mod deadline;
 mod observation;
 mod rate_gate;

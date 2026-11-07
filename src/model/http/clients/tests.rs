@@ -1198,3 +1198,27 @@ async fn live_connections_rebuild_only_changed_clients_and_keep_existing_generat
     assert!(old.get("chat").is_ok());
     assert_eq!(config.current().default_connection.as_deref(), Some("keep"));
 }
+
+#[tokio::test(start_paused = true)]
+async fn live_connections_admission_wait_preserves_lease_endpoint_and_wire_generation() {
+    use super::super::{RateAdmission, RateReservation};
+    let mut config = Config::parse("[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\ncontext_role='developer'\n[connections.fixture.extra_body]\nsynthetic_generation='old'\n").unwrap();
+    let owner = HttpClients::new(&config);
+    let run = owner.snapshot();
+    let client = run.get("fixture").unwrap();
+    client.rate_gate.throttle(Some(std::time::Duration::from_secs(30)), client.rate_gate.generation());
+    let RateReservation::Waiting(waiter) = client.reserve_rate_admission(None).unwrap() else { panic!("cooldown must queue admission") };
+    config.connections.get_mut("fixture").unwrap().base_url="http://127.0.0.1:2/v1".into();
+    config.connections.get_mut("fixture").unwrap().extra_body.insert("synthetic_generation".into(),serde_json::json!("new"));
+    owner.adopt(&config,None);
+    tokio::time::advance(std::time::Duration::from_secs(31)).await;
+    let admitted=client.admission_after_wait(waiter.wait(&CancellationToken::new()).await,None).unwrap();
+    assert!(matches!(admitted,RateAdmission::Lease(_)));
+    let selected=run.get("fixture").unwrap();
+    assert!(Arc::ptr_eq(&selected.pool,&client.pool));
+    assert_eq!(selected.connection.base_url,"http://127.0.0.1:1/v1");
+    let body=serde_json::json!({"model":"synthetic","input":[{"role":"developer","content":[{"type":"input_text","text":"synthetic"}]}],"tools":[]});
+    assert_eq!(selected.wire_request(body.clone(),None).unwrap().0["synthetic_generation"],"old");
+    assert_eq!(owner.get("fixture").unwrap().wire_request(body,None).unwrap().0["synthetic_generation"],"new");
+    drop(admitted);
+}

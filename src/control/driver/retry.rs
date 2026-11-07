@@ -208,7 +208,7 @@ pub(super) async fn retry_or_recover<'a>(
     boundary_guard: tokio::sync::MutexGuard<'a, ()>,
 ) -> Result<(), ApiError> {
     let mut boundary_guard = crate::compaction::boundary::Boundary::new(boundary, boundary_guard);
-    let clients = control.store.clients.snapshot();
+    let clients = &snapshot.clients;
     let Some(connection) = clients.connections.get(&snapshot.profile) else {
         return recover(
             control,
@@ -307,7 +307,7 @@ pub(super) async fn retry_or_recover<'a>(
                 }
                 let maximum_outcome = observation["outcome"].clone();
                 observation = match spill_and_summarize(
-                    &control.compactor,
+                    &control.compactor.pinned(snapshot.clients.clone()),
                     &snapshot.thread,
                     slot.stop.clone(),
                     Some(&mut boundary_guard),
