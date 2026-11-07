@@ -590,3 +590,19 @@ even if the sender was deleted. See gc.md and storage.md.
 ## Shell argument policy
 
 The model response envelope is validated before any call runs: duplicate or missing call IDs, disabled tools, malformed envelopes and the argument byte limit reject the group. Duplicate shell parameter names, including unknown names, reject the affected call rather than choosing a value. Shell argument, encoding and initial-stdin errors instead produce a result for that call; other valid calls continue in order. Preflight reports all detected encoding and initial-stdin failures alongside strict unknown-key failures. Unknown keys are ignored with a result warning by default, or reject that call in strict mode. Both messages name keys and accepted parameters, never their values. The existing bounded diagnostics queue records one fixed ignored/rejected event per unknown key, with Turn identifiers for correlation; it stores a bounded, sanitized parameter name but never the argument value. NUL and size checks remain in effect.
+
+## Live connection adoption boundary (#269 stage C)
+
+The existing control-file operation and `config_write` guard serialize `config.set` with `credentials.set` /
+`credentials.clear`. Validate the complete resulting file and reject running-default/embedding connection removal
+before replacement. A successful replacement precedes adoption of one registry generation (definitions, defaults,
+clients), and adoption finishes before the guard is released. A disconnected/timed-out observer does not release
+that guard while the existing bounded file closure is still writing. The normal operation receipt records the
+result; no new worker, table, queue, event or persisted state is introduced.
+
+Requests retain their cloned HTTP client from rate admission through completion and manifest-digest creation.
+Definition replacement does not cancel an in-flight request. The next lookup sees the adopted generation. Missing
+Thread connections enter the existing `config_invalid` recovery path; changing configuration never retries or
+resumes a recovery-waiting Run automatically. Explicit Thread model selection and retry retain their existing
+ownership and generation checks. The startup embedding connection stays pinned until restart so query/index
+identity is unchanged. TUI readers consult the registry directly, with no event subscription or file read.
