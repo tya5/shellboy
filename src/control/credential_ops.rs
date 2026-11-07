@@ -13,8 +13,6 @@ use std::path::Path;
 /// The reply carries ids only up to these bounds; `model_count` is always the full count.
 const MAX_TEST_MODELS: usize = 1_000;
 const MAX_TEST_MODEL_BYTES: usize = 256 * 1024;
-/// Never a real variable name: only a header-name candidate with an inline key needs one.
-const PLACEHOLDER_ENV: &str = "SHELLBOY_CONNECTION_TEST_UNSET";
 
 fn caller_ids(caller: Option<&Origin>) -> crate::diagnostics::DiagnosticIds {
     caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
@@ -396,9 +394,7 @@ fn prepare_test(
     let connection = Connection {
         api: args.api.unwrap_or_default(),
         base_url: args.base_url.clone().unwrap_or_default(),
-        api_key_env: args.api_key_env.clone().or_else(|| {
-            (inline.is_some() && args.api_key_header.is_some()).then(|| PLACEHOLDER_ENV.to_owned())
-        }),
+        api_key_env: args.api_key_env.clone(),
         api_key_header: args.api_key_header.clone(),
         ssl_verify: args.ssl_verify.unwrap_or(true),
         ..Connection::default()

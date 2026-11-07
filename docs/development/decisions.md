@@ -4010,8 +4010,13 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   it (`config_invalid`, with a line number and no content), because refusing to start on an unrelated file would block
   keyless local use.
 - **A stored key works without `api_key_env`**, in `Authorization: Bearer`, unless `headers` defines `Authorization`
-  (then the explicit header wins and `credentials.set` is refused). `api_key_header` still requires `api_key_env`: I did
-  not relax validation, so an `x-api-key` preset sets both. Recheck if presets find that awkward.
+  (then the explicit header wins and `credentials.set` is refused). **`api_key_header` no longer requires `api_key_env`**
+  (coordinator request, 2026-11-07): the variable wins over a stored key on every request, so Studio writes
+  `api_key_env` only when the person chose a variable, and a typed key must not be overridden by an unrelated
+  `ANTHROPIC_API_KEY`. The "header defined once" checks now key off either setting. With the header and no key from
+  either source the request fails with a new `ConfigError::MissingKey` (same `config_missing` kind, text names
+  `api_key_header`) instead of the variable-name error, which cannot name a variable that does not exist. Uncertain:
+  that wording differs from the old text; the old text is unchanged whenever `api_key_env` is set.
 - **`credentials.set` needs the connection in the file (or loaded).** It makes the flow `config.set` (add connection)
   then `credentials.set` explicit and avoids keys for typos. `credentials.clear` accepts any name so stale entries can
   be removed.
