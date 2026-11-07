@@ -855,7 +855,7 @@ fn space_status_is_readonly_until_scope_and_matching_preview_are_present() {
 }
 
 #[test]
-fn quit_leaves_selection_mode_and_remains_available_during_confirmation() {
+fn quit_leaves_selection_mode_and_remains_available_during_edit_send() {
     let mut ui = state();
     ui.event(key(KeyCode::F(2)));
     assert!(ui.selection_mode);
@@ -877,7 +877,7 @@ fn quit_leaves_selection_mode_and_remains_available_during_confirmation() {
         attachments: vec![],
         run_id: Some("run".into()),
     });
-    assert!(enter(&mut ui).is_empty());
+    assert!(matches!(&enter(&mut ui)[0], UiAction::SendEdited { .. }));
     let actions = ui.event(Event::Key(KeyEvent::new(
         KeyCode::Char('q'),
         KeyModifiers::CONTROL,
