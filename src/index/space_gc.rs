@@ -363,7 +363,7 @@ mod decision_bounds_tests {
             db.authorizer(Some(|context:AuthContext<'_>| match context.action {
                 AuthAction::Function { function_name } if function_name.eq_ignore_ascii_case("count") => Authorization::Deny,
                 _ => Authorization::Allow,
-            }));
+            }))?;
             Ok(())
         }).await.unwrap();
         let service = IndexService::new(db.clone(), Arc::new(crate::config::Config::default()));
@@ -392,7 +392,7 @@ mod decision_bounds_tests {
         assert!(removed["vector_payload_bytes_pending"].is_null());
         assert_eq!(removed["vector_payload_bytes_freed"], 0);
         db.call(|db| {
-            db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+            db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
             Ok(())
         })
         .await
