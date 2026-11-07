@@ -102,11 +102,18 @@ async fn runtime(url: &str) -> (tempfile::TempDir, DataOwner, Arc<Control>) {
     runtime_with_io(url, "").await
 }
 async fn runtime_with_io(url: &str, io: &str) -> (tempfile::TempDir, DataOwner, Arc<Control>) {
+    runtime_with_io_and_drain_timeout(url, io, 100).await
+}
+async fn runtime_with_io_and_drain_timeout(
+    url: &str,
+    io: &str,
+    drain_timeout_ms: u64,
+) -> (tempfile::TempDir, DataOwner, Arc<Control>) {
     // These vertical paths exercise explicit recovery/retry and its saved facts.
     // Default automatic partial retries are covered by response_retries instead.
     let directory = tempfile::tempdir().unwrap();
     let config = directory.path().join("config.toml");
-    std::fs::write(&config,format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nresponse_retry_partial=false\n[io]\nterm_grace_ms=100\ndrain_timeout_ms=100\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n{io}")).unwrap();
+    std::fs::write(&config,format!("default_connection='test'\ndefault_model='fixture'\n[connections.test]\nbase_url='{url}'\nresponse_retry_partial=false\n[io]\nterm_grace_ms=100\ndrain_timeout_ms={drain_timeout_ms}\nself_reply_grace_ms=10\nshutdown_grace_ms=2000\n{io}")).unwrap();
     let owner = DataOwner::start(
         Some(config),
         Some(directory.path().join("data")),
@@ -1161,9 +1168,12 @@ async fn raw_save_failure_stops_admission_reaps_shell_and_reports_failed_shutdow
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_tail() {
     let (url, mut requests, server) = proxy().await;
-    let (directory, owner, control) = runtime_with_io(
+    // 2 MiB crosses about 64 batches; the fixture adds 2 ms to each COMMIT,
+    // so allow that measured load while retaining the product's 1 s default.
+    let (directory, owner, control) = runtime_with_io_and_drain_timeout(
         &url,
         "output_batch_bytes=32768\noutput_batch_ms=10\noutput_buffer_bytes=524288\n",
+        1_000,
     )
     .await;
     let stdout: Vec<u8> = (0..1024 * 1024).map(|i| (i % 256) as u8).collect();
