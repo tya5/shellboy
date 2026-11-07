@@ -1059,16 +1059,23 @@ fn raw_stats_tx(db: &Connection, cutoff: Option<String>) -> Result<(u64, u64, u6
 /// Shared DB-lane gate for model, shell, child, summary and index workers.
 /// Stop, terminal-record, observation and GC operations must remain available.
 pub fn require_capacity_tx(db: &Connection, config: &Config) -> Result<()> {
+    require_capacity_below_tx(db, config.limits.data_max_bytes)
+}
+
+pub(crate) fn logical_total_tx(db: &Connection) -> Result<u64> {
+    Ok(logical_usage(db)?.total())
+}
+
+/// `require_capacity_tx` against a lower bound, for optional maintenance growth.
+pub(crate) fn require_capacity_below_tx(db: &Connection, limit: u64) -> Result<()> {
     let used = logical_usage(db)?;
-    if used.total() >= config.limits.data_max_bytes {
+    if used.total() >= limit {
         return Err(ApiError::new(
             ErrorCode::StorageLimit,
             "Logical data limit reached; new work is held",
         )
         .hint("Collect eligible raw/managed data or free capacity, then explicitly retry")
-        .details(
-            json!({"logical_live_bytes":used.total(),"limit_bytes":config.limits.data_max_bytes}),
-        ));
+        .details(json!({"logical_live_bytes":used.total(),"limit_bytes":limit})));
     }
     Ok(())
 }

@@ -69,6 +69,7 @@ impl Command {
             Self::IndexRebuild(_) => ("index.rebuild", CommandRoute::Runtime),
             Self::IndexProbe(_) => ("index.probe", CommandRoute::Runtime),
             Self::IndexShrink(_) => ("index.shrink", CommandRoute::Runtime),
+            Self::IndexRemove(_) => ("index.remove", CommandRoute::Runtime),
             Self::StorageStatus(_) => ("storage.status", CommandRoute::Runtime),
             Self::StorageCollect(_) => ("storage.collect", CommandRoute::Runtime),
         }
@@ -100,6 +101,7 @@ impl Command {
             | Self::IndexRebuild(_)
             | Self::IndexProbe(_)
             | Self::IndexShrink(_)
+            | Self::IndexRemove(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => true,
             Self::OwnerShutdown(_)
@@ -196,6 +198,7 @@ impl Command {
             | Self::IndexRebuild(_)
             | Self::IndexProbe(_)
             | Self::IndexShrink(_)
+            | Self::IndexRemove(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => false,
         }
@@ -254,6 +257,7 @@ impl Command {
             | Self::IndexRebuild(_)
             | Self::IndexProbe(_)
             | Self::IndexShrink(_)
+            | Self::IndexRemove(_)
             | Self::StorageStatus(_)
             | Self::StorageCollect(_) => false,
         }
@@ -313,6 +317,7 @@ impl Command {
             | Self::IndexRebuild(_)
             | Self::IndexProbe(_)
             | Self::IndexShrink(_)
+            | Self::IndexRemove(_)
             | Self::StorageCollect(_) => false,
         }
     }

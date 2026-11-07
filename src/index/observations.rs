@@ -30,6 +30,7 @@ pub(super) fn enrich(
         .collect::<Result<Vec<_>, _>>()?;
     drop(q);
     status.spaces_truncated = status.spaces_total > ids.len() as u64;
+    let mut retained_bytes = 0;
     for id in ids {
         let space = load_space(db, &id)?.ok_or_else(serde_error)?;
         let count = db.query_row(
@@ -41,7 +42,14 @@ pub(super) fn enrich(
             .checked_mul(space.dimension as u64)
             .and_then(|n| n.checked_mul(space.element_bytes()))
             .ok_or_else(serde_error)?;
+        // Paid vectors kept until a person removes them; they count as logical data.
+        let retained = space.state == "inactive" && count > 0;
+        if retained {
+            retained_bytes += bytes;
+        }
         status.spaces.push(IndexSpaceStatus {
+            retained_remove_with: retained
+                .then(|| format!("shellboy index remove --space {id} --dry-run")),
             space_id: id.clone(),
             connection: space.profile,
             model: space.model,
@@ -54,6 +62,7 @@ pub(super) fn enrich(
             int8_scale: space.int8_scale,
         });
     }
+    status.retained_vector_payload_bytes = (retained_bytes > 0).then_some(retained_bytes);
     status.shrink = shrink::status(db)?;
     let mut q=db.prepare("SELECT value FROM app_meta WHERE key LIKE 'index.probe.%' ORDER BY json_extract(value,'$.checked_at') DESC,key DESC LIMIT 32")?;
     for value in q.query_map([], |r| r.get::<_, String>(0))? {

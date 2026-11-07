@@ -240,13 +240,14 @@ Every embedding the provider returns (indexed text and search queries, for every
 
 ### Shrinking the index without API calls
 
-`index shrink` converts the active index to 8-bit values (int8), so a search reads about a quarter of the vector bytes. It calls no embedding API and reads no history: it re-encodes the vectors already saved. It never runs by itself.
+`index shrink` converts the active index to 8-bit values (int8), so a search reads about a quarter of the vector bytes. It calls no embedding API and reads no history: it re-encodes the vectors already saved. It never runs by itself, and it never deletes anything.
 
 ```sh
-shellboy index shrink --dry-run   # effect and sizes; changes nothing
-shellboy index shrink             # start, or resume after a failure
-shellboy index status             # progress in `shrink`, result in `spaces`
-shellboy index shrink --cancel    # stop and keep the old index
+shellboy index shrink --dry-run            # effect and sizes; changes nothing
+shellboy index shrink                      # start, or resume after a failure
+shellboy index status                      # progress in `shrink`, result in `spaces`
+shellboy index shrink --cancel             # stop before the switch and keep using the old index
+shellboy index shrink --revert --dry-run   # the way back and what it would re-index
 ```
 
 | | `index shrink` | `index rebuild` |
@@ -258,14 +259,26 @@ shellboy index shrink --cancel    # stop and keep the old index
 
 What to expect:
 
-- Search keeps using the old index until the new one is complete. A failure, `--cancel`, a restart or reaching the logical data limit leaves the old one in place, without pausing indexing or holding new work; a restart continues where it stopped, and after a failure `index shrink` continues (after the data limit it starts over, because the partial index was given back to keep room for conversations). While it runs, the database holds both, so it needs a quarter of the vector bytes extra (`temporary_extra_vector_payload_bytes` in the preview), plus its bookkeeping rows.
-- Afterwards the old index is removed by storage collection, automatically or with `storage collect --category index`. Returning to full precision then needs a paid `index rebuild`. The database file does not shrink by itself; freed pages are reused, and `storage vacuum` returns them explicitly.
-- The order of results changes slightly. On one real index of 32,779 distinct segments, 98.8% of a search's top 10 stayed the same when segments themselves stood in for queries; real queries were not measured. By the time you can search the new index, the old one is about to be collected or already gone, so a comparison afterwards cannot fall back on it. For a first conversion of a real index, copy the database while the owner is stopped, then check real searches you care about straight after the switch.
+- Search keeps using the old index until the new one is complete. A failure, `--cancel` or a restart leaves it serving; a restart continues where it stopped, and after a failure `index shrink` continues.
+- The database gets bigger, not smaller, until you delete the old index: the conversion adds a quarter of the vector bytes (`added_vector_payload_bytes`, plus bookkeeping rows), and both indexes count toward the logical data limit. It refuses to start, or stops, before reaching the configured data warning level. It then pauses nothing and holds no work, and it gives a partial index back; a later run starts over.
+- The order of results changes slightly. On one real index of 32,779 distinct segments, 98.8% of a search's top 10 stayed the same when segments themselves stood in for queries; real queries were not measured. Check searches you care about.
 - New text and search queries are converted with the same fixed factor, chosen from your vectors when the conversion ran and shown as `int8_scale` in `index status`. An element beyond that range is clipped to ±127 (saturation) rather than failing. On that same index none was clipped when the factor came from the oldest half of the vectors and was applied to the newer half.
 - `distance` is the L2 distance between the stored integers, so values are around hundreds instead of around 1. As before, it only orders results within one space. Do not compare it across spaces or with a threshold.
+- `index shrink --revert` switches back to the retained float32 index with the same atomic switch. Segments indexed since the conversion are not in it, and the preview gives the count. Their sources go back through normal automatic indexing, which charges for them if `auto_history` is on and holds them if it is off; while indexing is paused they are dropped like other new work, so use `index preview` and `index backfill` then. The int8 index stays too.
 - A later `index rebuild` builds a float32 index again; shrink it again if you want.
 
 `vector_payload_bytes` in `index status` is `segments × dimension × 1` for an int8 space.
+
+### Retained indexes and deleting them
+
+An index you have paid for is not deleted automatically. After a conversion or a rebuild the old index stays inactive and keeps its vectors. `index status` shows the total in `retained_vector_payload_bytes` and, per space, `retained_remove_with`. It takes disk and counts toward the logical data limit. Deleting is its own command and names one space:
+
+```sh
+shellboy index remove --space SPACE_ID --dry-run   # space, model, dimension, element type, segments, bytes freed
+shellboy index remove --space SPACE_ID
+```
+
+Recreating a deleted index means paid embedding of every segment. Check real searches first. Freed pages are reused; the file shrinks only with `storage vacuum`. `storage collect --category index` does not delete these: it only takes partial candidates replaced by a newer rebuild or conversion attempt, and inactive spaces with no vectors. At the storage limit, deleting a retained index is one option; a model tells you about it and does not do it on its own.
 
 IndexSpaces are separated by connection, embedding model, observed dimensions, and related settings. Configuration changes do not silently delete old spaces; failed rebuild candidates preserve the old active space. Historical content needs explicit backfill/rebuild to enter the new space. Automatically detecting a changed model behind an alias is not guaranteed.
 
@@ -364,5 +377,6 @@ newer nodes may be absent and searches only retained indexed sources, even if
 available for retained originals; existing coverage is never a completeness claim.
 `scope_status` also lists `auto_kinds` and `kinds_not_auto_indexed`: kinds that
 semantic search finds only after an explicit backfill.
-For storage cleanup, `storage collect --category index` removes eligible inactive
-spaces; no existing CLI removes the active index alone while keeping all history.
+For storage cleanup, `storage collect --category index` removes discarded partial
+candidates and inactive spaces with no vectors, and `index remove` deletes one named
+retained index; no existing CLI removes the active index alone while keeping all history.

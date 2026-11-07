@@ -93,7 +93,8 @@ ThreadList,
     MessageCancel,
     IndexPreview,
     IndexProbe,
-    IndexShrink;
+    IndexShrink,
+    IndexRemove;
     Exec,ConfigInit,ConfigCheck,DocsList,DocsGet,DocsSearch,RagInit,RagSourceAdd,RagSourceList,RagSourceRemove,RagIndex,RagIngest,RagStatus,RagInspect,RagSearch,RagGet,
 }
 /// Display-field references; not command routing or a public protocol target.
@@ -1863,11 +1864,25 @@ impl Form {
                 vec![
                     f("dry_run", "実行対象だけを確認", "true".into(), Boolean),
                     f("cancel", "実行中の変換をやめる", "false".into(), Boolean),
+                    f("revert", "元の索引へ戻す", "false".into(), Boolean),
                 ],
                 |form, _| {
                     Ok(Command::IndexShrink(IndexShrinkArgs {
                         dry_run: form.boolean("dry_run")?,
                         cancel: form.boolean("cancel")?,
+                        revert: form.boolean("revert")?,
+                    }))
+                },
+            ),
+            OpKind::IndexRemove => (
+                vec![
+                    f("space", "索引領域ID", String::new(), Text),
+                    f("dry_run", "実行対象だけを確認", "true".into(), Boolean),
+                ],
+                |form, _| {
+                    Ok(Command::IndexRemove(IndexRemoveArgs {
+                        space_id: form.owned("space")?,
+                        dry_run: form.boolean("dry_run")?,
                     }))
                 },
             ),
@@ -2636,7 +2651,12 @@ mod tests {
             (
                 OpKind::IndexShrink,
                 "index.shrink",
-                json!({"dry_run":true,"cancel":false}),
+                json!({"dry_run":true,"cancel":false,"revert":false}),
+            ),
+            (
+                OpKind::IndexRemove,
+                "index.remove",
+                json!({"space_id":"space-id","dry_run":true}),
             ),
         ];
         assert_eq!(
@@ -2671,6 +2691,7 @@ mod tests {
             "index.rebuild",
             "index.probe",
             "index.shrink",
+            "index.remove",
             "storage.collect",
         ]);
         let mut names = std::collections::HashSet::new();
@@ -2688,6 +2709,7 @@ mod tests {
                 if field.value.is_empty() {
                     field.value = match field.name {
                         "text" | "query" => "synthetic text".into(),
+                        "space" => "space-id".into(),
                         "path" => "synthetic.txt".into(),
                         "attachment" => id(9),
                         "messages" => id(3),
@@ -2724,6 +2746,7 @@ mod tests {
                         | "index.preview"
                         | "index.probe"
                         | "index.shrink"
+                        | "index.remove"
                         | "index.backfill"
                         | "index.retry"
                         | "index.rebuild"
@@ -2752,6 +2775,7 @@ mod tests {
                         | "index.preview"
                         | "index.probe"
                         | "index.shrink"
+                        | "index.remove"
                         | "storage.collect"
                         | "storage.status"
                         | "shell.get"
@@ -3383,10 +3407,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 65);
+        assert_eq!(rows.len(), 66);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            65
+            66
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3398,7 +3422,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 65);
+        assert_eq!(operations.rows().len(), 66);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

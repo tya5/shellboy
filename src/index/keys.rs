@@ -69,6 +69,10 @@ impl<'a> IndexKeys<'a> {
     pub(super) fn shrink(source_space: &str) -> String {
         format!("{}{source_space}", Self::SHRINK_START)
     }
+    /// On an int8 space: the float32 space it was converted from (for revert).
+    pub(super) fn converted_from(space: &str) -> String {
+        format!("index.converted_from.{space}")
+    }
     pub(super) fn input(job: &str) -> String {
         format!("{}{job}", Self::INPUT_PREFIX)
     }
@@ -112,6 +116,10 @@ mod tests {
             (keys.bootstrap_range().1, "index.bootstrap.profile:日本/"),
             (keys.splitter(), "unicode-paragraph-v1:profile:日本"),
             (IndexKeys::shrink("space:1"), "index.shrink.space:1"),
+            (
+                IndexKeys::converted_from("space:1"),
+                "index.converted_from.space:1",
+            ),
             (IndexKeys::input("job:1"), "index.input.job:1"),
             (IndexKeys::preview("chunk:1"), "index.preview.chunk:1"),
             (

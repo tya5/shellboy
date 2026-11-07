@@ -279,6 +279,11 @@ impl Control {
                 ErrorCode::InvalidState,
                 "Cannot encode index conversion",
             ),
+            Command::IndexRemove(args) => encode_result(
+                self.index.remove_space(args).await?,
+                ErrorCode::InvalidState,
+                "Cannot encode index removal",
+            ),
             Command::IndexStatus(args) => encode_result(
                 self.index.status(args).await?,
                 ErrorCode::InvalidState,

@@ -74,22 +74,11 @@ sweepの既存node batch内でtombstone確定と同transactionに当該nodeの�
 history_stepの既存単一write transaction内でroots/provenance/sweepをprivate関数へ分け、破壊的tombstone手順を一箇所にまとめる。TEMP marks/session、BATCH、有限horizon、root revision変更時とlate pinの到達性再検証、cursor進捗、全space vector削除→node tombstone→所有証拠解放→output_item→incomplete attemptの順序は不変。段分離はGC再開状態やworkerを増やさず、Stageの保存済みsnake_case bytesを維持する。
 
 
-## Explicit inactive index-space collection (#55)
+## Index-space collection (#55, #253)
 
-`storage collect --category index` (also `all`) collects inactive derived spaces
-in existing DB-worker transactions of at most 32 spaces, yielding between
-batches. Current active pointers, current rebuild candidate pointers and any
-running embedding job protect a space even if its state says inactive. Validate
-generated vector-table identifiers before DDL. Drop vectors and associated
-chunks/jobs/input/preview/query/request-mode metadata in the same transaction;
-rollback retains the whole batch. Report `inactive_index_spaces_collected`
-separately from reclaimed source vectors. This does not delete conversation
-originals or promise physical SQLite/WAL shrink. Space transitions mark this work, so
-maintenance also collects an inactive space without a command soon after a switch
-([storage](storage.md)); an old space is not kept for a later return. See
-[index operations](index-operations.md). The source of a running
-int8 conversion is also protected, by its `index.shrink.<space>` record, until its
-unfinished jobs have moved ([#253](search-and-relations.md#int8-conversion-253)).
+Paid vectors are not deleted automatically. Maintenance and `storage collect --category index` (also `all`) run the same routine, which takes only what holds no paid work: a `discarded` partial candidate (replaced by a newer rebuild, or a cancelled or failed int8 conversion) and an `inactive` space with no vectors. An `inactive` space with vectors, the old space after a rebuild or conversion, stays. `storage collect` no longer counts as an explicit request to delete such a space, because it names none and offers no preview of one. Only `index remove --space ID` deletes it, for one named space, after its dry run. Candidates superseded before this change were saved as `inactive` and now count as retained, so they stay until removed the same way.
+
+Transactions cover at most 32 spaces and yield between batches. Current active pointers, current rebuild candidate pointers, the source of a running conversion (its `index.shrink.<space>` record) and any running embedding job protect a space. Validate generated vector-table identifiers before DDL. Drop vectors and associated chunks/jobs/input/preview/query/request-mode/conversion metadata in the same transaction; rollback retains the whole batch. Report `inactive_index_spaces_collected` separately from reclaimed source vectors. This does not delete conversation originals or promise physical SQLite/WAL shrink. See [index operations](index-operations.md).
 
 
 ## Finished submission copies (#60)

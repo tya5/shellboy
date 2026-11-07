@@ -2,7 +2,8 @@
 //!
 //! The conversion reuses the space lifecycle: an int8 `candidate` is filled from
 //! the active float32 space, which stays searchable until the candidate is
-//! complete. One durable record (`index.shrink.<source space>`) carries the
+//! complete, and stays afterwards too: nothing here removes a completed space.
+//! One durable record (`index.shrink.<source space>`) carries the
 //! progress; every unit commits with it, so an interruption resumes at the cursor.
 //! The existing index workers drive it through the background lane.
 use super::*;
@@ -16,6 +17,10 @@ const INT8_LIMIT: f64 = 127.0;
 const SCALE: &str = "scale";
 const COPY: &str = "copy";
 const SWEEP: &str = "sweep";
+const REVERT: &str = "revert";
+const REQUEUE: &str = "requeue";
+/// A chunk of space ?1 at row ?2 whose exact segment space ?3 has not indexed.
+const MISSING_ROW: &str = "SELECT c.source_node_id FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id WHERE c.space_id=?1 AND c.vec_row_id=?2 AND NOT EXISTS(SELECT 1 FROM embedding_job f WHERE f.space_id=?3 AND f.source_node_id=j.source_node_id AND f.source_revision=j.source_revision AND f.body_kind=j.body_kind AND f.span_start=j.span_start AND f.span_end=j.span_end AND f.source_hash=j.source_hash AND f.state='done')";
 
 /// Saturating; a space's scale is fixed, so a later larger value clips to ±127.
 pub(super) fn quantize(vector: &[f32], scale: f64) -> Vec<i8> {
@@ -59,6 +64,11 @@ fn read_record(db: &Connection) -> Result<Option<Record>, StorageError> {
 /// converted: rows at or below the cursor are never read again.
 pub(super) fn first_unread_row(db: &Connection, space: &str) -> Result<i64, StorageError> {
     Ok(json_meta::<Record>(db, &IndexKeys::shrink(space))?.map_or(0, |record| record.cursor + 1))
+}
+
+pub(super) fn involves(db: &Connection, space: &str) -> Result<bool, StorageError> {
+    Ok(read_record(db)?
+        .is_some_and(|record| record.source == space || record.target.as_deref() == Some(space)))
 }
 
 pub(super) fn status(db: &Connection) -> Result<Option<IndexShrinkStatus>, StorageError> {
@@ -125,10 +135,17 @@ impl IndexService {
     /// Preview, start or resume, or cancel. Never calls an embedding API.
     pub async fn shrink(&self, args: IndexShrinkArgs) -> Result<Value, ApiError> {
         crate::protocol::Command::IndexShrink(args.clone()).validate()?;
+        let config = self.config.clone();
         if args.dry_run {
             return self
                 .database
-                .call(|db| Ok(preview(db)?.0))
+                .call(move |db| {
+                    Ok(if args.revert {
+                        revert_preview(db)?.0
+                    } else {
+                        preview(db, &config)?.0
+                    })
+                })
                 .await
                 .map_err(db_error);
         }
@@ -138,8 +155,10 @@ impl IndexService {
                 let tx = db.transaction()?;
                 let value = if args.cancel {
                     cancel(&tx)?
+                } else if args.revert {
+                    start_revert(&tx)?
                 } else {
-                    start(&tx)?
+                    start(&tx, &config)?
                 };
                 tx.commit()?;
                 Ok(value)
@@ -166,7 +185,9 @@ fn unit(
     };
     let key = IndexKeys::shrink(&record.source);
     // Before the failure filter: a later explicit choice also releases a failed run.
-    if record.phase != SWEEP && active_source(&tx, &record)?.is_none() {
+    if matches!(record.phase.as_str(), SCALE | COPY | REVERT)
+        && active_source(&tx, &record)?.is_none()
+    {
         drop_candidate(&tx, &record)?;
         tx.execute("DELETE FROM app_meta WHERE key=?1", [&key])?;
         tx.commit()?;
@@ -233,7 +254,20 @@ fn step(
     if record.phase == SWEEP {
         return sweep_page(tx, record, limit);
     }
+    if record.phase == REQUEUE {
+        return requeue_page(tx, record, limit);
+    }
     let source = active_source(tx, &record)?.ok_or_else(serde_error)?;
+    if record.phase == REVERT {
+        let target = record.target.as_deref().ok_or_else(serde_error)?;
+        if source_running(tx, &source.id)? {
+            return Ok(Step::Wait);
+        }
+        switch(tx, &source, target)?;
+        record.phase = REQUEUE.into();
+        record.cursor = 0;
+        return Ok(Step::Progress(record));
+    }
     let rows = chunk_rows(tx, &source.id, record.cursor, limit)?;
     match record.phase.as_str() {
         SCALE => {
@@ -270,23 +304,11 @@ fn step(
                 .ok_or_else(serde_error)?;
             if rows.is_empty() {
                 // No vector is ahead of the cursor. A claim in flight may add one.
-                let running: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state='running')",
-                    [&source.id],
-                    |row| row.get(0),
-                )?;
-                if running {
+                if source_running(tx, &source.id)? {
                     return Ok(Step::Wait);
                 }
-                tx.execute(
-                    "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
-                    [],
-                )?;
-                tx.execute(
-                    "UPDATE index_space SET state=?2 WHERE id=?1",
-                    params![target.id, source.state],
-                )?;
-                set_meta(tx, IndexKeys::ACTIVE_SPACE, &target.id)?;
+                switch(tx, &source, &target.id)?;
+                set_meta(tx, &IndexKeys::converted_from(&target.id), &source.id)?;
                 record.phase = SWEEP.into();
                 record.cursor = 0;
                 return Ok(Step::Progress(record));
@@ -296,13 +318,99 @@ fn step(
                 copy_row(tx, &target, &source.id, *row, &mut vectors)?;
                 record.cursor = *row;
             }
-            // After the copy: this sees the unit's uncommitted bytes. A committed
-            // unit must never take the owner to the cap, which holds new work.
-            crate::gc::require_capacity_tx(tx, config).map_err(StorageError::from)?;
+            // After the copy: this sees the unit's uncommitted bytes. The old space
+            // stays afterwards, so optional growth must leave conversations room
+            // below the cap that holds new work.
+            crate::gc::require_capacity_below_tx(tx, room_limit(config)).map_err(|_| {
+                StorageError::from(err(
+                    ErrorCode::StorageLimit,
+                    "The conversion stopped before reaching the logical data warning level; it paused nothing and held no work",
+                ))
+            })?;
             Ok(Step::Progress(record))
         }
         _ => Err(serde_error()),
     }
+}
+
+/// Existing configured level, no new number: optional maintenance stops here.
+fn room_limit(config: &Config) -> u64 {
+    config
+        .limits
+        .data_warning_bytes
+        .min(config.limits.data_max_bytes)
+}
+
+fn source_running(tx: &Transaction<'_>, space: &str) -> Result<bool, StorageError> {
+    Ok(tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM embedding_job WHERE space_id=?1 AND state='running')",
+        [space],
+        |row| row.get(0),
+    )?)
+}
+
+/// The one atomic switch. The old space stays, inactive, with all its vectors.
+fn switch(tx: &Transaction<'_>, source: &Space, target: &str) -> Result<(), StorageError> {
+    tx.execute(
+        "UPDATE index_space SET state='inactive' WHERE state IN ('active','paused')",
+        [],
+    )?;
+    tx.execute(
+        "UPDATE index_space SET state=?2 WHERE id=?1",
+        params![target, source.state],
+    )?;
+    set_meta(tx, IndexKeys::ACTIVE_SPACE, target)
+}
+
+/// After a revert: sources indexed only in the int8 space go through the existing
+/// automatic admission. It spends only as `auto_history` allows, and existing jobs
+/// of the float space dedupe every segment that is already there.
+fn requeue_page(
+    tx: &Transaction<'_>,
+    mut record: Record,
+    limit: crate::storage::Limit,
+) -> Result<Step, StorageError> {
+    let target_id = record.target.as_deref().ok_or_else(serde_error)?;
+    let target = load_space(tx, target_id)?.ok_or_else(serde_error)?;
+    let key = target
+        .splitter
+        .strip_prefix(&format!("{SPLITTER}:"))
+        .ok_or_else(serde_error)?
+        .to_owned();
+    let rows = chunk_rows(tx, &record.source, record.cursor, limit)?;
+    let Some(last) = rows.last() else {
+        record.phase = SWEEP.into();
+        record.cursor = 0;
+        return Ok(Step::Progress(record));
+    };
+    record.cursor = *last;
+    let mut missing = tx.prepare_cached(MISSING_ROW)?;
+    for row in rows {
+        let node: Option<String> = missing
+            .query_row(params![record.source, row, target_id], |r| r.get(0))
+            .optional()?;
+        if let Some(node_id) = node {
+            let admission = AutoAdmission {
+                recovery: false,
+                recovery_group: None,
+                recovery_authorization: None,
+                recovery_witness: None,
+                recovery_body_kind: None,
+                node_id: node_id.clone(),
+                state: "pending".into(),
+                error: None,
+            };
+            tx.execute(
+                "INSERT OR IGNORE INTO app_meta(key,value)VALUES(?1,?2)",
+                params![
+                    IndexKeys::new(&key).auto(&node_id),
+                    encode_json(&admission)?
+                ],
+            )?;
+        }
+    }
+    drop(missing);
+    Ok(Step::Progress(record))
 }
 
 fn chunk_rows(
@@ -475,7 +583,7 @@ fn sweep_page(
 fn drop_candidate(tx: &Transaction<'_>, record: &Record) -> Result<(), StorageError> {
     if let Some(target) = &record.target {
         tx.execute(
-            "UPDATE index_space SET state='inactive' WHERE id=?1 AND state='candidate'",
+            "UPDATE index_space SET state='discarded' WHERE id=?1 AND state='candidate'",
             [target],
         )?;
     }
@@ -483,7 +591,7 @@ fn drop_candidate(tx: &Transaction<'_>, record: &Record) -> Result<(), StorageEr
 }
 
 /// The facts a person consents to; `state` says whether it can start. Read-only.
-fn preview(db: &Connection) -> Result<(Value, &'static str), StorageError> {
+fn preview(db: &Connection, config: &Config) -> Result<(Value, &'static str), StorageError> {
     let record = read_record(db)?;
     let active = meta(db, IndexKeys::ACTIVE_SPACE)?
         .map(|id| load_space(db, &id))
@@ -495,24 +603,23 @@ fn preview(db: &Connection) -> Result<(Value, &'static str), StorageError> {
             "no_active_index",
         ));
     };
-    let segments: i64 = db.query_row(
-        "SELECT count(*) FROM embedding_chunk WHERE space_id=?1",
-        [&space.id],
-        |row| row.get(0),
-    )?;
+    let segments = count_chunks(db, &space.id)?;
     let unfinished: i64 = db.query_row(
         "SELECT count(*) FROM embedding_job WHERE space_id=?1 AND state IN ('pending','failed')",
         [&space.id],
         |row| row.get(0),
     )?;
     let bytes = segments as u64 * space.dimension as u64;
+    let logical = crate::gc::logical_total_tx(db).map_err(StorageError::from)?;
     let state = match &record {
         Some(record) if record.error.is_some() => "failed",
         Some(_) => "running",
         None if space.int8_scale.is_some() => "already_int8",
         None if segments == 0 => "empty",
+        None if logical + bytes >= room_limit(config) => "low_room",
         None => "ready",
     };
+    let retained = retained_source(db, &space)?;
     let value = json!({
         "dry_run":true,
         "state":state,
@@ -524,17 +631,121 @@ fn preview(db: &Connection) -> Result<(Value, &'static str), StorageError> {
         "segments":segments,
         "vector_payload_bytes":bytes * space.element_bytes(),
         "vector_payload_bytes_after":bytes,
-        "temporary_extra_vector_payload_bytes":bytes,
+        "added_vector_payload_bytes":bytes,
+        "logical_bytes":logical,
+        "logical_bytes_after":logical + bytes,
+        "logical_warning_bytes":config.limits.data_warning_bytes,
+        "logical_limit_bytes":config.limits.data_max_bytes,
         "unfinished_jobs_moved":unfinished,
         "embedding_requests":0,
+        "retained_source":retained,
         "conversion":record.map(|record| json!({"phase":record.phase,"error":record.error})),
-        "effects":"Converts this index in place of the old one without any API call; a search then reads about a quarter of the vector bytes. The old index keeps serving search until the new one is complete, then it is removed by storage collection, so going back to full precision requires a paid rebuild. Rank order changes slightly and distance values change scale. The database file does not shrink by itself; freed pages are reused or need storage vacuum.",
+        "effects":"Adds an int8 copy of this index without any API call and switches search to it, which then reads about a quarter of the vector bytes. It deletes nothing: the old index stays, inactive, counts toward the logical data limit and frees no disk until a person removes it with `index remove`. `index shrink --revert` switches back. Rank order changes slightly and distance values change scale.",
     });
     Ok((value, state))
 }
 
-fn start(tx: &Transaction<'_>) -> Result<Value, StorageError> {
-    let (preview, state) = preview(tx)?;
+fn count_chunks(db: &Connection, space: &str) -> Result<i64, StorageError> {
+    Ok(db.query_row(
+        "SELECT count(*) FROM embedding_chunk WHERE space_id=?1",
+        [space],
+        |row| row.get(0),
+    )?)
+}
+
+fn retained_source(db: &Connection, active: &Space) -> Result<Option<Value>, StorageError> {
+    let Some(source) = meta(db, &IndexKeys::converted_from(&active.id))?
+        .map(|id| load_space(db, &id))
+        .transpose()?
+        .flatten()
+        .filter(|space| space.state == "inactive" && space.int8_scale.is_none())
+    else {
+        return Ok(None);
+    };
+    let segments = count_chunks(db, &source.id)? as u64;
+    Ok(Some(json!({
+        "space_id":source.id,
+        "vector_payload_bytes":segments * source.dimension as u64 * source.element_bytes(),
+        "remove_with":format!("shellboy index remove --space {} --dry-run", source.id),
+    })))
+}
+
+fn revert_preview(db: &Connection) -> Result<(Value, &'static str), StorageError> {
+    let active = meta(db, IndexKeys::ACTIVE_SPACE)?
+        .map(|id| load_space(db, &id))
+        .transpose()?
+        .flatten();
+    let target = match &active {
+        Some(space) if space.int8_scale.is_some() => retained_source(db, space)?,
+        _ => None,
+    };
+    let state = if read_record(db)?.is_some() {
+        "running"
+    } else if target.is_some() {
+        "ready"
+    } else {
+        "no_retained_source"
+    };
+    let (mut missing_segments, mut missing_sources) = (0i64, 0i64);
+    if let (Some(space), Some(target)) = (&active, &target) {
+        // One read over the active space's chunks, as `index status` already does.
+        (missing_segments, missing_sources) = db.query_row(
+            "SELECT count(*),count(DISTINCT c.source_node_id) FROM embedding_chunk c JOIN embedding_job j ON j.id=c.job_id WHERE c.space_id=?1 AND NOT EXISTS(SELECT 1 FROM embedding_job f WHERE f.space_id=?2 AND f.source_node_id=j.source_node_id AND f.source_revision=j.source_revision AND f.body_kind=j.body_kind AND f.span_start=j.span_start AND f.span_end=j.span_end AND f.source_hash=j.source_hash AND f.state='done')",
+            params![space.id, target["space_id"].as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+    }
+    let value = json!({
+        "dry_run":true,
+        "revert":true,
+        "state":state,
+        "active_space":active.as_ref().map(|space| &space.id),
+        "target":target,
+        "missing_segments":missing_segments,
+        "missing_sources":missing_sources,
+        "embedding_requests":0,
+        "effects":"Switches search back to the retained float32 index. Segments indexed since the conversion are not in it: their sources go back through normal automatic indexing, which may charge for them if automatic history indexing is on and holds them if it is off. While indexing is paused, they are dropped like other new work; use `index preview` and `index backfill` then. The int8 index stays, inactive, until a person removes it.",
+    });
+    Ok((value, state))
+}
+
+fn start_revert(tx: &Transaction<'_>) -> Result<Value, StorageError> {
+    let (preview, state) = revert_preview(tx)?;
+    let invalid = |message: &str| Err(StorageError::from(err(ErrorCode::InvalidState, message)));
+    match state {
+        "ready" => {
+            let source = preview["active_space"].as_str().ok_or_else(serde_error)?;
+            let target = preview["target"]["space_id"]
+                .as_str()
+                .ok_or_else(serde_error)?;
+            set_json_meta(
+                tx,
+                &IndexKeys::shrink(source),
+                &Record {
+                    source: source.to_owned(),
+                    target: Some(target.to_owned()),
+                    phase: REVERT.into(),
+                    cursor: 0,
+                    max_abs: 0.0,
+                    started_at: now(),
+                    error: None,
+                },
+            )?;
+            Ok(json!({
+                "accepted":true,
+                "state":"reverting",
+                "target_space":target,
+                "missing_segments":preview["missing_segments"],
+                "missing_sources":preview["missing_sources"],
+            }))
+        }
+        "running" => invalid("A conversion is running; let it finish or cancel it first"),
+        _ => invalid("The active index has no retained float32 index to switch back to"),
+    }
+}
+
+fn start(tx: &Transaction<'_>, config: &Config) -> Result<Value, StorageError> {
+    let (preview, state) = preview(tx, config)?;
     let invalid = |message: &str| Err(StorageError::from(err(ErrorCode::InvalidState, message)));
     match state {
         "ready" => {
@@ -552,9 +763,14 @@ fn start(tx: &Transaction<'_>) -> Result<Value, StorageError> {
                     error: None,
                 },
             )?;
-            Ok(
-                json!({"accepted":true,"state":"started","source_space":source,"embedding_requests":0}),
-            )
+            Ok(json!({
+                "accepted":true,
+                "state":"started",
+                "source_space":source,
+                "embedding_requests":0,
+                "source_after":"retained until removed with index remove",
+                "source_vector_payload_bytes":preview["vector_payload_bytes"],
+            }))
         }
         "failed" => {
             let mut record = read_record(tx)?.ok_or_else(serde_error)?;
@@ -567,6 +783,9 @@ fn start(tx: &Transaction<'_>) -> Result<Value, StorageError> {
         "running" => Ok(json!({"accepted":true,"state":"running","embedding_requests":0})),
         "already_int8" => invalid("The active index is already int8"),
         "empty" => invalid("The active index has no vectors to convert"),
+        "low_room" => invalid(
+            "Converting would reach the logical data warning level. Retained indexes in `index status` are an option for the user to remove; nothing was changed",
+        ),
         _ => invalid("There is no active index to convert"),
     }
 }
@@ -574,9 +793,9 @@ fn start(tx: &Transaction<'_>) -> Result<Value, StorageError> {
 fn cancel(tx: &Transaction<'_>) -> Result<Value, StorageError> {
     let invalid = |message: &str| StorageError::from(err(ErrorCode::InvalidState, message));
     let record = read_record(tx)?.ok_or_else(|| invalid("No index conversion is running"))?;
-    if record.phase == SWEEP {
+    if matches!(record.phase.as_str(), SWEEP | REQUEUE) {
         return Err(invalid(
-            "The converted index is already active; only its unfinished jobs are still moving",
+            "The switch has already happened; only its unfinished work is still moving",
         ));
     }
     drop_candidate(tx, &record)?;

@@ -1,6 +1,7 @@
 //! Int8 conversion on temporary databases. Providers are local fixtures that
 //! count requests; nothing here reaches a real API.
 use super::*;
+use crate::protocol::IndexRemoveArgs;
 use crate::storage::{BACKGROUND_STEP_BUDGET, DbWorker};
 use std::{collections::BTreeMap, sync::atomic::AtomicUsize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -290,7 +291,7 @@ async fn conversion_calls_no_api_keeps_old_space_serving_and_preserves_rank() {
         .service
         .shrink(IndexShrinkArgs {
             dry_run: true,
-            cancel: false,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -482,7 +483,7 @@ async fn failure_keeps_the_old_space_and_an_explicit_run_resumes() {
         f.service
             .shrink(IndexShrinkArgs {
                 dry_run: true,
-                cancel: false
+                ..Default::default()
             })
             .await
             .unwrap()["state"],
@@ -710,7 +711,18 @@ async fn unfinished_jobs_follow_the_switch_and_gc_waits_for_them() {
         inputs, 4,
         "saved inputs stay valid; nothing is re-embedded by the move"
     );
-    assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 1);
+    assert_eq!(
+        f.db.call(collect_inactive_spaces).await.unwrap(),
+        0,
+        "automatic collection never takes a space with vectors"
+    );
+    f.service
+        .remove_space(IndexRemoveArgs {
+            space_id: source.clone(),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
     assert!(f.space(&source).await.is_none());
     // Logical accounting follows one byte per element, and the old float bytes left.
     let (counter, oracle): (i64, i64) = f.db.call(|db| {
@@ -752,11 +764,11 @@ async fn cancel_refusals_and_a_later_space_choice_end_the_record() {
     let f = fixture(clustered(40, 4), vec![1.0; 4]).await;
     let dry = IndexShrinkArgs {
         dry_run: true,
-        cancel: false,
+        ..Default::default()
     };
     let cancel = IndexShrinkArgs {
-        dry_run: false,
         cancel: true,
+        ..Default::default()
     };
     assert!(
         f.service.shrink(cancel.clone()).await.is_err(),
@@ -766,7 +778,8 @@ async fn cancel_refusals_and_a_later_space_choice_end_the_record() {
         f.service
             .shrink(IndexShrinkArgs {
                 dry_run: true,
-                cancel: true
+                cancel: true,
+                ..Default::default()
             })
             .await
             .is_err()
@@ -785,7 +798,7 @@ async fn cancel_refusals_and_a_later_space_choice_end_the_record() {
     assert_eq!(f.service.shrink(cancel).await.unwrap()["cancelled"], true);
     assert!(f.record().await.is_none());
     assert_eq!(f.active().await.id, f.source.id);
-    assert_eq!(f.space(&target).await.unwrap().state, "inactive");
+    assert_eq!(f.space(&target).await.unwrap().state, "discarded");
     assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 1);
     // A leftover rebuild marker, for example of a failed rebuild, never blocks it.
     f.db.call(|db| {
@@ -870,7 +883,9 @@ async fn reaching_the_logical_cap_fails_only_the_conversion() {
     let before = logical_total(&f.db).await;
     // Room for the first page and the metadata, not for the whole conversion.
     let mut limited = (*f.config).clone();
-    limited.limits.data_max_bytes = before + 3_500;
+    // Passes the preflight on vector bytes; the previews and metadata cross it.
+    limited.limits.data_max_bytes = before + 7_000;
+    limited.limits.data_warning_bytes = before + 7_000;
     let limited = Arc::new(limited);
     let service = IndexService::new(f.db.clone(), limited.clone());
     service.shrink(Default::default()).await.unwrap();
@@ -957,12 +972,13 @@ async fn a_failed_run_is_released_when_the_source_stops_being_active() {
     .unwrap();
     assert!(f.service.shrink_unit().await.unwrap());
     assert!(f.record().await.is_none());
-    assert_eq!(f.space(&target).await.unwrap().state, "inactive");
+    assert_eq!(f.space(&target).await.unwrap().state, "discarded");
     assert_eq!(
         f.db.call(collect_inactive_spaces).await.unwrap(),
-        2,
-        "source and candidate"
+        1,
+        "the partial candidate; the source holds paid vectors and stays"
     );
+    assert!(f.space(&source).await.is_some());
     f.db.shutdown().await.unwrap();
 }
 
@@ -994,8 +1010,8 @@ async fn sweep_drops_a_job_the_new_space_already_holds_and_survives_cancel_and_r
     assert!(
         f.service
             .shrink(IndexShrinkArgs {
-                dry_run: false,
-                cancel: true
+                cancel: true,
+                ..Default::default()
             })
             .await
             .is_err()
@@ -1154,7 +1170,7 @@ async fn command_dispatch_and_started_workers_convert_without_any_api_call() {
         "preview",
         Command::IndexShrink(IndexShrinkArgs {
             dry_run: true,
-            cancel: false,
+            ..Default::default()
         }),
     )
     .await;
@@ -1197,6 +1213,294 @@ async fn command_dispatch_and_started_workers_convert_without_any_api_call() {
     assert_eq!(requests.load(Ordering::SeqCst), 0, "no embedding API call");
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn shrink_never_removes_a_space_and_remove_does_only_what_it_previews() {
+    let f = fixture(clustered(40, 8), vec![1.0; 8]).await;
+    let source = f.source.id.clone();
+    f.start().await;
+    f.drain().await;
+    let active = f.active().await;
+    assert_ne!(active.id, source);
+    // Maintenance and `storage collect` both end in this routine.
+    assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 0);
+    assert_eq!(f.space(&source).await.unwrap().state, "inactive");
+    assert_eq!(f.count(CHUNKS, &source).await, 40);
+    let status = f.service.status(Default::default()).await.unwrap();
+    assert_eq!(status.retained_vector_payload_bytes, Some(40 * 8 * 4));
+    let old = status.spaces.iter().find(|s| s.space_id == source).unwrap();
+    assert_eq!(
+        old.retained_remove_with.as_deref(),
+        Some(format!("shellboy index remove --space {source} --dry-run").as_str())
+    );
+    let dry = IndexShrinkArgs {
+        dry_run: true,
+        ..Default::default()
+    };
+    let preview = f.service.shrink(dry).await.unwrap();
+    assert_eq!(preview["retained_source"]["space_id"], source.as_str());
+    assert_eq!(
+        preview["retained_source"]["vector_payload_bytes"],
+        40 * 8 * 4
+    );
+    // Refused for the active index and unknown IDs; a dry run changes nothing.
+    let remove = |space_id: &str, dry_run| IndexRemoveArgs {
+        space_id: space_id.to_owned(),
+        dry_run,
+    };
+    assert!(
+        f.service
+            .remove_space(remove(&active.id, false))
+            .await
+            .is_err()
+    );
+    assert!(
+        f.service
+            .remove_space(remove("missing", true))
+            .await
+            .is_err()
+    );
+    let blocked = f
+        .service
+        .remove_space(remove(&active.id, true))
+        .await
+        .unwrap();
+    assert_eq!(blocked["removable"], false);
+    let preview = f.service.remove_space(remove(&source, true)).await.unwrap();
+    assert_eq!(preview["removable"], true);
+    assert_eq!(preview["model"], "synthetic");
+    assert_eq!(preview["dimension"], 8);
+    assert_eq!(preview["element_type"], "float32");
+    assert_eq!(preview["segments"], 40);
+    assert_eq!(preview["vector_payload_bytes_freed"], 40 * 8 * 4);
+    assert!(
+        preview["effects"]
+            .as_str()
+            .unwrap()
+            .contains("paid embedding")
+    );
+    assert_eq!(f.count(CHUNKS, &source).await, 40);
+    let snapshot = |db: &DbWorker| {
+        let db = db.clone();
+        async move {
+            db.call(|db| {
+                Ok(db.query_row("SELECT (SELECT count(*) FROM node),(SELECT count(*) FROM thread_path),(SELECT count(*) FROM index_space),(SELECT count(*) FROM embedding_chunk),(SELECT logical_bytes FROM quota_counter WHERE category='logical.index')", [], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?, r.get::<_, i64>(4)?)))?)
+            }).await.unwrap()
+        }
+    };
+    let before = snapshot(&f.db).await;
+    let removed = f
+        .service
+        .remove_space(remove(&source, false))
+        .await
+        .unwrap();
+    assert_eq!(removed["removed"], true);
+    let after = snapshot(&f.db).await;
+    assert_eq!(
+        (after.0, after.1),
+        (before.0, before.1),
+        "history untouched"
+    );
+    assert_eq!(after.2, before.2 - 1, "exactly the named space");
+    assert_eq!(after.3, before.3 - 40);
+    assert!(before.4 - after.4 >= 40 * 8 * 4);
+    assert_eq!(f.active().await.id, active.id);
+    assert_eq!(f.count(CHUNKS, &active.id).await, 40);
+    let status = f.service.status(Default::default()).await.unwrap();
+    assert_eq!(status.retained_vector_payload_bytes, None);
+    // Without its source there is nothing to go back to.
+    let revert = IndexShrinkArgs {
+        revert: true,
+        ..Default::default()
+    };
+    assert!(f.service.shrink(revert).await.is_err());
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn low_room_refuses_before_any_change() {
+    let f = fixture(clustered(40, 8), vec![1.0; 8]).await;
+    let logical = logical_total(&f.db).await;
+    let mut tight = (*f.config).clone();
+    tight.limits.data_warning_bytes = logical + 8;
+    let service = IndexService::new(f.db.clone(), Arc::new(tight));
+    let dry = IndexShrinkArgs {
+        dry_run: true,
+        ..Default::default()
+    };
+    let preview = service.shrink(dry).await.unwrap();
+    assert_eq!(preview["state"], "low_room");
+    assert_eq!(preview["added_vector_payload_bytes"], 40 * 8);
+    assert!(service.shrink(Default::default()).await.is_err());
+    assert!(f.record().await.is_none());
+    f.db.shutdown().await.unwrap();
+}
+
+/// Paid vectors stay after a rebuild too: only `index remove` deletes them.
+#[tokio::test]
+async fn rebuild_activation_and_a_maintenance_pass_keep_the_old_vectors() {
+    let f = fixture(clustered(12, 4), vec![1.0; 4]).await;
+    let old = f.source.id.clone();
+    let config = f.config.clone();
+    let vectors = clustered(5, 4);
+    let new =
+        f.db.call(move |db| {
+            let tx = db.transaction()?;
+            let profile = identity::profile_key(&config).unwrap();
+            let keys = IndexKeys::new(&profile);
+            set_meta(&tx, &keys.rebuild(), "rebuild-x")?;
+            let identity = identity::EmbeddingIdentity::configured(&config, profile.clone());
+            let space = store::ensure_space(&tx, &identity, "rebuild-x", 4)?;
+            seed_rows(&tx, &space, 1000, &vectors);
+            assert!(maybe_activate_candidate(&tx, keys, "rebuild-x")?);
+            tx.commit()?;
+            Ok(space.id)
+        })
+        .await
+        .unwrap();
+    assert_eq!(f.active().await.id, new);
+    assert_eq!(f.space(&old).await.unwrap().state, "inactive");
+    let attachments = Arc::new(crate::attachments::AttachmentService::new(
+        f.db.clone(),
+        &f.config,
+        f.temp.path().into(),
+        "fixture".into(),
+    ));
+    let gc = crate::gc::GcService::new(
+        f.db.clone(),
+        f.config.clone(),
+        f.temp.path().into(),
+        attachments,
+    );
+    let mut pass = crate::maintenance::WorkSet::default();
+    pass.insert(crate::maintenance::Work::InactiveSpaces);
+    let report = gc.collect_kinds(pass, chrono::Utc::now()).await.unwrap();
+    assert_eq!(report.inactive_index_spaces_collected, 0);
+    // `storage collect --category index` does not name a space, so it keeps it too.
+    let report = gc
+        .collect(crate::protocol::StorageCategory::Index, chrono::Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(report.inactive_index_spaces_collected, 0);
+    assert_eq!(f.count(CHUNKS, &old).await, 12);
+    let status = f.service.status(Default::default()).await.unwrap();
+    assert_eq!(status.retained_vector_payload_bytes, Some(12 * 4 * 4));
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn revert_switches_back_requeues_what_is_missing_and_removes_nothing() {
+    let f = fixture(clustered(10, 4), vec![1.0; 4]).await;
+    let float = f.source.id.clone();
+    let seeded = float.clone();
+    f.db.call(move |db| {
+        spare_input_job(db, "moved", &seeded, "failed", 70);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let revert = IndexShrinkArgs {
+        revert: true,
+        ..Default::default()
+    };
+    let dry = IndexShrinkArgs {
+        revert: true,
+        dry_run: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        f.service.shrink(dry.clone()).await.unwrap()["state"],
+        "no_retained_source"
+    );
+    assert!(f.service.shrink(revert.clone()).await.is_err());
+    f.start().await;
+    f.drain().await;
+    let int8 = f.active().await;
+    assert!(int8.int8_scale.is_some());
+    assert_eq!(
+        f.count(
+            "SELECT count(*) FROM embedding_job WHERE space_id=?1 AND id='moved'",
+            &int8.id
+        )
+        .await,
+        1
+    );
+    // Indexed after the switch, so only the int8 space has it.
+    let space = int8.clone();
+    f.db.call(move |db| {
+        let tx = db.transaction()?;
+        tx.execute("INSERT INTO node(id,kind,created_at,payload_json,body_hash)VALUES('late','user','2026-11-07T00:00:00Z','{}','body')", [])?;
+        tx.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('thread',1000,'late')", [])?;
+        let work = Work::pending(
+            Witness { node_id: "late".into(), revision: 0, body_hash: Some("body".into()), raw: None },
+            "user".into(),
+            Segment { start: 0, end: 1, text: "x".into() },
+            "active",
+            "explicit",
+        );
+        queue_job(&tx, &space, &work)?;
+        let job = job_id_for(&tx, &space, &work)?.unwrap();
+        store::adopt_vector_tx(&tx, &space, &job, &work, &[0.5, 0.5, 0.5, 0.5])?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let preview = f.service.shrink(dry.clone()).await.unwrap();
+    assert_eq!(preview["state"], "ready");
+    assert_eq!(preview["target"]["space_id"], float.as_str());
+    assert_eq!(preview["missing_segments"], 1);
+    assert_eq!(preview["missing_sources"], 1);
+    assert_eq!(f.active().await.id, int8.id, "a dry run changes nothing");
+    let started = f.service.shrink(revert.clone()).await.unwrap();
+    assert_eq!(started["state"], "reverting");
+    assert_eq!(started["missing_segments"], 1);
+    f.drain().await;
+    assert!(f.record().await.is_none());
+    let active = f.active().await;
+    assert_eq!(
+        (active.id.as_str(), active.state.as_str()),
+        (float.as_str(), "active")
+    );
+    // Neither space lost anything, and the int8 one is retained as well.
+    assert_eq!(f.count(CHUNKS, &float).await, 10);
+    assert_eq!(f.count(CHUNKS, &int8.id).await, 11);
+    assert_eq!(f.space(&int8.id).await.unwrap().state, "inactive");
+    assert_eq!(f.db.call(collect_inactive_spaces).await.unwrap(), 0);
+    // Unfinished work came back, and the missing source waits in normal admission.
+    assert_eq!(
+        f.count(
+            "SELECT count(*) FROM embedding_job WHERE space_id=?1 AND id='moved'",
+            &float
+        )
+        .await,
+        1
+    );
+    let config = f.config.clone();
+    let queued =
+        f.db.call(move |db| {
+            let profile = identity::profile_key(&config).unwrap();
+            meta(db, &IndexKeys::new(&profile).auto("late"))
+        })
+        .await
+        .unwrap();
+    assert!(queued.unwrap().contains("pending"));
+    assert_eq!(
+        f.requests.load(Ordering::SeqCst),
+        0,
+        "the revert itself spends nothing"
+    );
+    assert_eq!(
+        f.service.shrink(dry).await.unwrap()["state"],
+        "no_retained_source"
+    );
+    // It can be converted again; the first int8 space still stays.
+    f.start().await;
+    f.drain().await;
+    assert!(f.active().await.int8_scale.is_some());
+    assert_ne!(f.active().await.id, int8.id);
+    assert!(f.space(&int8.id).await.is_some());
+    assert!(f.space(&float).await.is_some());
+    f.db.shutdown().await.unwrap();
 }
 
 /// Rule 1 of the requester contract, at the dimension the real data uses.
@@ -1380,9 +1684,16 @@ async fn measure_conversion_on_a_vector_file() {
     let after = page_count(&f.db).await;
     println!("page_count before={before} after={after}");
     let t = Instant::now();
-    let collected = f.db.call(collect_inactive_spaces).await.unwrap();
-    println!("collected {collected} old space in {:?}", t.elapsed());
-    measure(&active, "int8 (old space collected)", &queries);
+    let source_id = f.source.id.clone();
+    f.service
+        .remove_space(IndexRemoveArgs {
+            space_id: source_id,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    println!("removed the old space in {:?}", t.elapsed());
+    measure(&active, "int8 (old space removed)", &queries);
     f.db.shutdown().await.unwrap();
     let steps = f.db.take_background_steps();
     let max = steps

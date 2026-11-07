@@ -652,11 +652,14 @@ impl Command {
             Self::AttachmentRemove(a) => a.validate(),
             Self::IndexProbe(a) => validate_dimensions(a.dimensions),
             Self::IndexShrink(a) => {
-                if a.dry_run && a.cancel {
-                    return Err(invalid("index shrink --dry-run conflicts with --cancel"));
+                if a.cancel && (a.dry_run || a.revert) {
+                    return Err(invalid(
+                        "index shrink --cancel conflicts with --dry-run and --revert",
+                    ));
                 }
                 Ok(())
             }
+            Self::IndexRemove(a) => nonempty(&a.space_id, "space_id"),
             Self::IndexStatus(a)
             | Self::IndexPreview(a)
             | Self::IndexBackfill(a)

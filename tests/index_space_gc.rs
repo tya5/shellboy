@@ -64,14 +64,14 @@ impl Fixture {
 async fn explicit_gc_collects_multiple_bounded_batches_and_preserves_protected_spaces() {
     let f = Fixture::new().await;
     for n in 0..35 {
-        f.space(n, "inactive", false).await;
+        f.space(n, "discarded", false).await;
     }
     f.space(40, "active", false).await;
     f.space(41, "candidate", false).await;
     f.space(42, "candidate_paused", false).await;
-    f.space(43, "inactive", true).await;
-    f.space(44, "inactive", false).await;
-    f.space(45, "inactive", false).await;
+    f.space(43, "discarded", true).await;
+    f.space(44, "discarded", false).await;
+    f.space(45, "discarded", false).await;
     f.db.call(|db| {
         db.execute_batch("INSERT INTO app_meta VALUES('index.active_space','space-044'),('index.rebuild.fixture','current'),('index.group.fixture.current','space-045'),('index.bootstrap.unrelated','{}');")?;
         Ok(())
@@ -106,10 +106,36 @@ async fn explicit_gc_collects_multiple_bounded_batches_and_preserves_protected_s
 }
 
 #[tokio::test]
-async fn inactive_space_failure_rolls_back_vector_ddl_chunks_jobs_and_metadata() {
+async fn collection_keeps_a_retained_space_with_vectors_and_takes_an_empty_one() {
     let f = Fixture::new().await;
     f.space(0, "inactive", false).await;
-    f.space(1, "inactive", false).await;
+    f.space(1, "discarded", false).await;
+    f.space(2, "inactive", false).await;
+    f.db.call(|db| {
+        db.execute("DELETE FROM embedding_chunk WHERE space_id='space-002'", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(f.collect().await.inactive_index_spaces_collected, 2);
+    f.db.call(|db| {
+        let left: String =
+            db.query_row("SELECT group_concat(id) FROM index_space", [], |r| r.get(0))?;
+        assert_eq!(left, "space-000");
+        let chunks: i64 = db.query_row("SELECT count(*) FROM embedding_chunk", [], |r| r.get(0))?;
+        assert_eq!(chunks, 1);
+        Ok(())
+    })
+    .await
+    .unwrap();
+    f.db.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn inactive_space_failure_rolls_back_vector_ddl_chunks_jobs_and_metadata() {
+    let f = Fixture::new().await;
+    f.space(0, "discarded", false).await;
+    f.space(1, "discarded", false).await;
     f.db.call(|db| {
         db.execute_batch("CREATE TRIGGER fail_space_gc BEFORE DELETE ON index_space WHEN old.id='space-001' BEGIN SELECT RAISE(ABORT,'synthetic space collection failure'); END;")?;
         Ok(())
@@ -149,7 +175,7 @@ async fn inactive_space_failure_rolls_back_vector_ddl_chunks_jobs_and_metadata()
 #[tokio::test]
 async fn malformed_vector_table_identifier_is_rejected_without_deleting_space() {
     let f = Fixture::new().await;
-    f.space(0, "inactive", false).await;
+    f.space(0, "discarded", false).await;
     f.db.call(|db| {
         db.execute("UPDATE index_space SET vec_table_name='node'", [])?;
         Ok(())

@@ -956,7 +956,7 @@ impl IndexService {
                     && let Some(space) = meta(&tx, &IndexKeys::new(&key).group(&previous))?
                 {
                     tx.execute(
-                        "UPDATE index_space SET state='inactive' WHERE id=?1 AND state<>'active'",
+                        "UPDATE index_space SET state='discarded' WHERE id=?1 AND state IN ('candidate','candidate_paused')",
                         [space],
                     )?;
                 }

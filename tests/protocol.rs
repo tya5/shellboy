@@ -111,10 +111,11 @@ fn all_public_commands_have_typed_roundtrip_fixtures() {
         ("index.rebuild", json!({"thread_ids":["t"]})),
         ("index.probe", json!({"dimensions":768})),
         ("index.shrink", json!({"dry_run":true})),
+        ("index.remove", json!({"space_id":"s","dry_run":true})),
         ("storage.status", json!({})),
         ("storage.collect", json!({})),
     ];
-    assert_eq!(fixtures.len(), 40);
+    assert_eq!(fixtures.len(), 41);
     for (command, args) in fixtures {
         let request = Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"instance:nonce","command":command,"args":args})).unwrap_or_else(|e| panic!("{command}: {e}"));
         assert_eq!(request.command.name(), command);

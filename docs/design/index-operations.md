@@ -74,7 +74,7 @@ query embeddings remain single-input.
 
 `index shrink` re-encodes the active space without any API call; design in
 [search and relations](search-and-relations.md#int8-conversion-253). A candidate rebuild
-always creates a float32 space. Dimension changes stay with `rebuild --dimensions`.
+always creates a float32 space. Dimension changes stay with `rebuild --dimensions`. An old space with vectors is retained after any switch; only `index remove` deletes it ([gc](gc.md)).
 
 ## Explicit dimension operation
 
@@ -108,7 +108,7 @@ errors retain existing endpoint-family pause rules.
 Existing selection/retry can inspect or explicitly retry the failed candidate;
 no alternative dimension is tried automatically. The old active vectors remain
 searchable throughout. Switch only after complete catch-up, then old space data
-becomes inactive and eligible for existing explicit GC.
+becomes inactive and stays until `index remove` (#253).
 
 Probe sends one fixed short input exactly once, with the same HTTP timeout and
 optional request mode. Persist an observation keyed by configured connection/

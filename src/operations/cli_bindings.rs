@@ -487,7 +487,14 @@ const MEANINGS: &[Meaning] = &[
         &[
             ("dry_run", FieldId::DryRun),
             ("cancel", FieldId::ShrinkCancel),
+            ("revert", FieldId::ShrinkRevert),
         ],
+        None,
+    ),
+    (
+        OperationId::IndexRemove,
+        &["index", "remove"],
+        &[("space_id", FieldId::Space), ("dry_run", FieldId::DryRun)],
         None,
     ),
     (

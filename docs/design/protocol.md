@@ -269,13 +269,15 @@ segment count, state/selection, `vector_payload_bytes` and, for an int8 space,
 pause time remains unknown. Probe observations are per endpoint/model/request
 mode, not a provider capability catalogue. See [index operations](index-operations.md).
 
-## Index shrink (#253)
+## Index shrink and remove (#253)
 
 `index.shrink` is a cancellable runtime command with ordinary operation receipts and optional
-`dry_run` and `cancel` booleans (both together are refused). It never sends an embedding
-request. Index status adds an optional `shrink` (source_space, target_space, phase, source_segments,
-target_segments, started_at, error) and an optional `int8_scale` per space; `vector_payload_bytes`
-follows the element size. Additive; protocol version unchanged. See
+`dry_run`, `cancel` and `revert` booleans (`cancel` excludes the others). It never sends an embedding
+request and never deletes a space. `index.remove` takes `space_id` and optional `dry_run` and deletes
+one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
+source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
+and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
+the element size. Additive; protocol version unchanged. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)

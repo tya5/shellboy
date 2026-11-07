@@ -324,9 +324,14 @@ pub enum IndexCommand {
     Probe(IndexProbeOptions),
     /// Shrink the active index to a quarter of its vector bytes without any API call.
     #[command(
-        after_help = "Explicit only; nothing converts automatically. Preview first, then run:\n  shellboy index shrink --dry-run\n  shellboy index shrink\n  shellboy index status   # progress in `shrink`, result in `spaces`\n\nConverts the stored vectors of the active index to 8-bit values (int8) with a scale taken from those vectors. No embedding API is called and no history is read. Search keeps using the old index until the new one is complete; a failure or `--cancel` leaves the old one in place, and running `index shrink` again resumes. Afterwards rank order changes slightly, `distance` has a different scale, new embeddings and search queries use the same fixed scale (larger values saturate), and the old index is removed by storage collection, so returning to full precision requires a paid `index rebuild`. Unlike `index rebuild`, it costs nothing and keeps the dimension. Guide: shellboy docs get --id shellboy/history-and-search"
+        after_help = "Explicit only; nothing converts automatically. Preview first, then run:\n  shellboy index shrink --dry-run\n  shellboy index shrink\n  shellboy index status   # progress in `shrink`, result in `spaces`\n\nConverts the stored vectors of the active index to 8-bit values (int8) with a scale taken from those vectors. No embedding API is called and no history is read. Search keeps using the old index until the new one is complete; a failure or `--cancel` leaves the old one in place, and running `index shrink` again resumes. Afterwards rank order changes slightly, `distance` has a different scale, and new embeddings and search queries use the same fixed scale (larger values saturate).\n\nShrink only converts and never deletes: the old index stays, counts as logical data, and frees no disk until you remove it with `index remove`. `--revert [--dry-run]` switches back to it and re-queues segments indexed since through normal indexing. Unlike `index rebuild`, it costs nothing and keeps the dimension. Guide: shellboy docs get --id shellboy/history-and-search"
     )]
     Shrink(IndexShrinkOptions),
+    /// Delete one inactive index for good; recreating it means paid embedding.
+    #[command(
+        after_help = "Preview first; only the named space is deleted:\n  shellboy index remove --space SPACE_ID --dry-run\n  shellboy index remove --space SPACE_ID\n\nFind retained spaces in `index status` (`retained_remove_with`). Refused for the active index and for a space a conversion, rebuild or running request is using. Conversation history is not touched. The database file shrinks only with `storage vacuum`."
+    )]
+    Remove(IndexRemoveOptions),
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum StorageCommand {
@@ -875,6 +880,18 @@ pub struct IndexShrinkOptions {
     /// Stop a running conversion and discard its partial result.
     #[arg(long)]
     pub cancel: bool,
+    /// Switch back to the retained float32 index this one was converted from.
+    #[arg(long, conflicts_with = "cancel")]
+    pub revert: bool,
+}
+#[derive(Debug, Clone, Args)]
+pub struct IndexRemoveOptions {
+    /// The inactive index space to delete.
+    #[arg(long = "space")]
+    pub space_id: String,
+    /// Report what would be deleted and the bytes freed without changing anything.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 #[derive(Debug, Clone, Args)]
 pub struct IndexProbeOptions {
@@ -1291,6 +1308,11 @@ impl Cli {
                 IndexCommand::Shrink(a) => C::IndexShrink(wire::IndexShrinkArgs {
                     dry_run: a.dry_run,
                     cancel: a.cancel,
+                    revert: a.revert,
+                }),
+                IndexCommand::Remove(a) => C::IndexRemove(wire::IndexRemoveArgs {
+                    space_id: a.space_id,
+                    dry_run: a.dry_run,
                 }),
                 IndexCommand::Probe(a) => C::IndexProbe(wire::IndexProbeArgs {
                     dimensions: a.dimensions,

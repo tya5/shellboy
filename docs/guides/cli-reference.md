@@ -259,15 +259,18 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 
 ### Index size
 
-`shellboy index shrink [--dry-run | --cancel]` converts the active index to int8 from its saved vectors. No embedding API call, explicit only. See [Shrinking the index](history-and-search.md#shrinking-the-index-without-api-calls).
+`shellboy index shrink [--dry-run] [--cancel | --revert]` converts the active index to int8 from its saved vectors. No embedding API call, explicit only, and it never deletes. `shellboy index remove --space ID [--dry-run]` is the separate delete. See [Shrinking the index](history-and-search.md#shrinking-the-index-without-api-calls) and [Retained indexes](history-and-search.md#retained-indexes-and-deleting-them).
 
 | Form | Main result and conditions |
 |---|---|
-| `index shrink --dry-run` | Changes nothing. `state` (`ready`, `running`, `failed`, `already_int8`, `empty`, `no_active_index`), space_id/connection/model/dimension/int8_scale, segments, vector_payload_bytes, vector_payload_bytes_after, temporary_extra_vector_payload_bytes, unfinished_jobs_moved, embedding_requests (always 0), conversion, effects |
-| `index shrink` | Accepted with `state` `started`, `resumed` (a saved failure was cleared) or `running`; refused with `invalid_state` for an already int8 or empty index or no active index. The work continues in the background; follow `shrink` in `index status` (phase `scale`, `copy`, `sweep`, source_segments, target_segments, error; `error.code` `storage_limit` means it reached the logical limit, gave its partial index back, paused nothing, and starts over when run again) |
-| `index shrink --cancel` | Stops before the switch, keeps the old index, retires the partial one. Refused when nothing runs or after the switch |
+| `index shrink --dry-run` | Changes nothing. `state` (`ready`, `running`, `failed`, `already_int8`, `empty`, `low_room`, `no_active_index`), space_id/connection/model/dimension/int8_scale, segments, vector_payload_bytes, vector_payload_bytes_after, added_vector_payload_bytes, logical_bytes, logical_bytes_after, logical_warning_bytes, logical_limit_bytes, unfinished_jobs_moved, embedding_requests (always 0), retained_source, conversion, effects |
+| `index shrink` | Accepted with `state` `started`, `resumed` (a saved failure was cleared) or `running`; refused with `invalid_state` for an already int8 or empty index, no active index, or `low_room`. The work continues in the background; follow `shrink` in `index status` (phase `scale`, `copy`, `sweep`, also `revert`, `requeue`; source_segments, target_segments, error; `error.code` `storage_limit` means it stopped below the warning level, gave its partial index back, paused nothing, and starts over when run again) |
+| `index shrink --cancel` | Stops before the switch, keeps the old index, discards the partial one. Refused when nothing runs or after the switch |
+| `index shrink --revert [--dry-run]` | Switches back to the retained float32 index. Preview: `state` (`ready`, `running`, `no_retained_source`), target, missing_segments, missing_sources, effects. Spends nothing itself; missing sources go through normal automatic indexing |
+| `index remove --space ID --dry-run` | Changes nothing. space_id, connection, model, dimension, element_type, state, segments, vector_payload_bytes_freed, removable, blocked_by, effects. `target_unavailable` for an unknown space |
+| `index remove --space ID` | Deletes that one inactive space. Refused with `invalid_state` for the active index or a space a conversion, rebuild or running request is using |
 
-Each space in `index status` adds `int8_scale` when it is int8: stored value = round(element × int8_scale), clipped to ±127. `vector_payload_bytes` is then `segments × dimension × 1`. `distance` is L2 between stored values within that space, not comparable across spaces.
+Each space in `index status` adds `int8_scale` when it is int8: stored value = round(element × int8_scale), clipped to ±127. `vector_payload_bytes` is then `segments × dimension × 1`. A retained space (inactive, with vectors) adds `retained_remove_with`, and the status adds `retained_vector_payload_bytes`. `distance` is L2 between stored values within that space, not comparable across spaces.
 
 ### Storage (2 operations, plus standalone `check` and `vacuum`)
 

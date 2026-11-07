@@ -123,6 +123,7 @@ impl Form {
             "clear_excludes" => FieldId::ClearExcludes,
             "dry_run" => FieldId::DryRun,
             "cancel" => FieldId::ShrinkCancel,
+            "revert" => FieldId::ShrinkRevert,
             "exclude_node" => FieldId::ExcludeNode,
             "search_mode" => FieldId::SearchMode,
             "ingest_kind" => FieldId::IngestKind,
@@ -660,6 +661,11 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
                 "Index · Shrink without API calls"
             )
         }
+        OperationId::IndexRemove => local!(
+            language,
+            "索引 · 使わない索引を削除",
+            "Index · Remove an unused index"
+        ),
         OperationId::StorageStatus => local!(language, "保存 · 状態", "Storage · Status"),
         OperationId::StorageCollect => local!(language, "保存 · 回収", "Storage · Collect"),
         OperationId::Exec => local!(
@@ -705,10 +711,15 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
 
 fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -> &'static str {
     match id {
+        OperationId::IndexRemove => local!(
+            language,
+            "指定した非アクティブの索引を完全に削除します。作り直すには埋め込みの費用がかかります。",
+            "Delete one named inactive index for good. Recreating it means paid embedding."
+        ),
         OperationId::IndexShrink => local!(
             language,
-            "選択中の索引をAPIを使わず8ビットへ変換し、検索で読むベクトル量を約4分の1にします。完成まで古い索引で検索を続けます。完全な精度へ戻すには有料の作り直しが必要です。",
-            "Convert the active index to 8-bit values without any API call, so a search reads about a quarter of the vector bytes. Search keeps using the old index until the new one is complete. Returning to full precision requires a paid rebuild."
+            "選択中の索引をAPIを使わず8ビットへ変換し、検索で読むベクトル量を約4分の1にします。完成まで古い索引で検索を続けます。古い索引は削除せず残します。",
+            "Convert the active index to 8-bit values without any API call, so a search reads about a quarter of the vector bytes. Search keeps using the old index until the new one is complete. The old index is kept, not deleted."
         ),
         OperationId::CompactList => local!(
             language,
@@ -1035,6 +1046,7 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
 
 fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
     match id {
+        FieldId::ShrinkRevert => local!(language, "元の索引へ戻す", "Switch back to the old index"),
         FieldId::ShrinkCancel => local!(
             language,
             "実行中の変換をやめる",
@@ -1202,6 +1214,11 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
 
 fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static str {
     match id {
+        FieldId::ShrinkRevert => local!(
+            language,
+            "残してある変換前の索引へ切り替えます。変換後に増えた分は通常の索引作成へ戻します。",
+            "Switch to the retained index from before the conversion. Segments indexed since go back through normal indexing."
+        ),
         FieldId::ShrinkCancel => local!(
             language,
             "途中の結果を捨て、古い索引をそのまま使い続けます。",

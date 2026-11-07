@@ -461,6 +461,7 @@ fn read_status(
         spaces_truncated: false,
         probes: Vec::new(),
         shrink: None,
+        retained_vector_payload_bytes: None,
     };
     let mut spaces = HashSet::new();
     if let Some(space) = &selected {

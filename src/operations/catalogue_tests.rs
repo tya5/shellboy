@@ -32,7 +32,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     parser.build();
     let mut leaves = BTreeMap::new();
     executable_commands(&parser, &mut vec![], &mut leaves);
-    assert_eq!(leaves.len(), 74, "track new CLI lifecycle paths explicitly");
+    assert_eq!(leaves.len(), 75, "track new CLI lifecycle paths explicitly");
     for name in ["serve", "shutdown", "storage check"] {
         let lifecycle = leaves
             .remove(name)
@@ -141,7 +141,7 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     );
     assert_eq!(
         leaves.len(),
-        66,
+        67,
         "update executable-path inventory deliberately; UI launch/help/version are not operations"
     );
     let bindings = CLI_BINDINGS
@@ -257,8 +257,8 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
 
 #[test]
 fn identities_are_complete_and_attach_is_the_only_explicit_alias() {
-    assert_eq!(OperationId::ALL.len(), 65);
-    assert_eq!(SPECS.len(), 65);
+    assert_eq!(OperationId::ALL.len(), 66);
+    assert_eq!(SPECS.len(), 66);
     let ids = OperationId::ALL.iter().copied().collect::<BTreeSet<_>>();
     assert_eq!(ids.len(), OperationId::ALL.len());
     assert_eq!(

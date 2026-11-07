@@ -665,7 +665,7 @@ then `index backfill` with the same arguments (see
 nothing automatically but, unlike `auto_history=false`, is not reported as a
 disabled switch. Unknown words are a configuration error.
 
-`storage collect --category index` collects eligible inactive spaces only; turning automatic indexing off does not free active-index bytes.
+`storage collect --category index` collects discarded partial candidates and inactive spaces with no vectors only (`index remove` deletes a retained index); turning automatic indexing off does not free active-index bytes.
 There is no CLI to erase all active vectors while retaining history; do not delete SQLite tables or the database manually.
 
 ## Explicit summary size limits
