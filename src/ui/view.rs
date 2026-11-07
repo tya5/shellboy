@@ -23,6 +23,7 @@ pub struct ThreadView {
     pub connection: Option<String>,
     pub model: Option<String>,
     pub(super) explicit_model: bool,
+    pub(super) explicit_effort: bool,
     /// Latest saved provider-reported usage; replaced only by an adopted snapshot.
     pub(super) context_usage: ContextUsage,
     pub effort: Option<String>,
@@ -348,6 +349,7 @@ impl ThreadView {
             connection: config.default_connection.clone(),
             model: config.default_model.clone(),
             explicit_model: false,
+            explicit_effort: false,
             effort: config
                 .default_connection
                 .as_ref()

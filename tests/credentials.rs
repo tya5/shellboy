@@ -1045,13 +1045,21 @@ async fn from_an_empty_configuration_to_a_first_send_using_only_owner_operations
             let tested = call(&control, test_saved("proxy")).await.unwrap();
             assert_eq!(tested["ok"], true, "{tested}");
             assert_eq!(tested["models"], json!(["model-a", "model-b"]));
+            // Stage C: the newly added connection and stored key work in this very owner.
+            let live = thread(&control).await;
+            crate::runtime_features::send(&control, &live, "first send without restarting").await;
+            settled(&control, &live).await;
+            let id = live;
+            let state: String = control.store.database.call(move |db| Ok(db.query_row(
+                "SELECT state FROM turn WHERE thread_id=?1 ORDER BY rowid DESC LIMIT 1", [id], |r|r.get(0))?)).await.unwrap();
+            assert_eq!(state, "completed");
             control.shutdown().await.unwrap();
             owner.shutdown().await.unwrap();
         }
         assert!(std::fs::read_to_string(&config_path).unwrap().contains("[connections.proxy]"));
         assert!(!std::fs::read_to_string(&config_path).unwrap().contains(KEY));
 
-        // The next owner start (a new connection needs a restart until stage C) sends with it.
+        // A new owner also reads the durable configuration and credential, without re-entering either.
         let (_owner, control) = start(root.path()).await;
         let thread = thread(&control).await;
         crate::runtime_features::send(&control, &thread, "hello").await;
@@ -1061,8 +1069,8 @@ async fn from_an_empty_configuration_to_a_first_send_using_only_owner_operations
             .into_iter()
             .filter(|seen| seen.method == "POST")
             .collect();
-        assert_eq!(posts.len(), 1, "{posts:?}");
-        assert!(posts[0].path.ends_with("/responses"));
+        assert_eq!(posts.len(), 2, "{posts:?}");
+        assert!(posts.iter().all(|post| post.path.ends_with("/responses")));
         assert_eq!(
             posts[0].authorization.as_deref(),
             Some(format!("Bearer {KEY}").as_str())

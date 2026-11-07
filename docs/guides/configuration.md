@@ -115,8 +115,8 @@ shellboy credentials clear --connection proxy
   receipt keeps only a digest salted with a random value that exists while the owner runs), and the key is never accepted as a command-line argument: it comes from standard input (a terminal
   is refused so it is not echoed). A pasted key does not appear in `config.toml`, so its `content_hash` is unchanged.
 - **The connection must exist.** `credentials set` needs the name in the configuration file (add it with
-  `config set` first). The connection itself still takes effect after an owner restart, but its stored key can be
-  saved before that. `credentials clear` also removes the entry of a connection that is gone.
+  `config set` first). Ordinary connections and stored keys apply from the next request; the running embedding
+  connection retains restart semantics. `credentials clear` also removes the entry of a connection that is gone.
 - **`config get` states the source** per connection under `loaded.credential_source` (what this owner would use now)
   and `file.credential_source` (the file's connections): `env`, `stored` or `none`. It states presence, not that the
   key works. `credentials_file` says whether the file exists and parses. A hand edit of `credentials.toml` is used by
@@ -143,12 +143,16 @@ differ. `shellboy config set` changes named fields in that file. Both need a run
 ```sh
 shellboy config get    # note result.file.content_hash
 shellboy config set --expected-hash HASH --set default_model=my-model --set ui.bell=false --unset ui.language
-# Restart the owner for the change to take effect.
+# default_model applies now; restart the owner to apply the UI fields.
 ```
 
-- **Every change needs an owner restart.** Nothing is applied to the running owner. Until then `config get`
-  reports `differs: true` and names the fields in `differing_fields`. Standalone commands that read the file
-  themselves, such as `rag` and `storage vacuum`, use the new values on their next run.
+- **Connections and defaults apply live.** `connections.*`, `default_connection` and `default_model` apply from the
+  next request. An already-started request keeps its original connection. The running embedding connection and other
+  settings still need restart, preserving the index identity. Read each change's `restart_required` and
+  `applied_to_running_owner`; mixed edits may set both result-level flags. `config get.loaded.values` includes live
+  changes and `differing_fields` compares effective values with the file. `differs` and the loaded content hash still
+  compare startup file bytes: `differs: true` alone does not mean restart is needed. Standalone `rag` and
+  `storage vacuum` read new values on their next invocation.
 - **Credentials stay out of `config.toml`.** Use the environment, or the stored key above. `config get` never returns the value of `headers`, `extra_headers`,
   `extra_body` or `shell.env`, only names, and hides any credential-looking `base_url` path part or name. Each
   hidden field is listed in `redacted_fields`. `api_key_env` takes a variable name; a value that looks like a
@@ -168,9 +172,10 @@ shellboy config set --expected-hash HASH --set default_model=my-model --set ui.b
 - `data_dir` can't be changed here, because a restart would then open another, possibly empty, directory.
 - Add a connection with an object, `--set 'connections.new={"base_url":"https://x.example/v1","api_key_env":"X_KEY"}'`,
   and remove one with `--unset connections.new`. Other tables are changed one field at a time.
-- Removing a connection a Thread uses is accepted. After the restart a new message to that Thread stops in
-  `recovery_wait` with `config_invalid`. Move it with `thread set --connection NAME --model MODEL`; `--model` alone
-  fails too.
+- Removing the running default or embedding connection is refused before writing. Change the default in a separate
+  operation first. Removing another connection a Thread uses is accepted: its in-flight request finishes, but its
+  next request stops in `recovery_wait` with `config_invalid`. Move it with
+  `thread set --connection NAME --model MODEL`; `--model` alone fails too.
 - A change that would make the file larger than 1 MiB is refused.
 
 On Windows, if the replace is interrupted midway, Shellboy finishes it with a plain move and the result has a
@@ -472,8 +477,9 @@ Each connection selects `api = "responses"` (the default),
 `api = "chat_completions"` or `api = "anthropic_messages"`. Use an API **root**,
 not its final endpoint: Shellboy appends `/responses`, `/chat/completions` or
 `/messages` for conversations and summaries.
-Catalog (`/models`) and embedding (`/embeddings`) paths are unchanged. Changing
-the dialect requires an owner restart. No automatic protocol fallback is tried.
+Catalog (`/models`) and embedding (`/embeddings`) paths are unchanged. A dialect edit through `config set` applies
+from the next request, except for the running embedding connection. Direct file edits require owner restart.
+No automatic protocol fallback is tried.
 
 ```toml
 default_connection = "gemini"
@@ -618,7 +624,7 @@ Per-connection `response_max_retries` defaults to 8 and accepts 0–20. Consecut
 
 For a small input whose body source is fully consumed, nine silent header waits at the default 120 seconds plus backoff delays of 1+2+4+8+16+32+60+60=183 seconds take up to about 1,263 seconds (21 minutes). If headers arrive but each body then stalls for 600 seconds, the same attempts can take about 5,583 seconds (93 minutes), plus header time. These are examples rather than total deadlines: received data or Retry-After can extend the wait. Large-input early reduction and repeated unconsumed-source failures can end these sequences earlier. Adjust `response_header_timeout_ms`, `stream_idle_timeout_ms` and `response_max_retries` to control each part. Stalled error-body reception on HTTP 429/500/502/503/504 is also retryable.
 
-This applies only to conversations and does not change summary, embedding, or model-list retry policy. Configuration changes apply after owner restart. Duplicate billing cannot be prevented when the upstream processed a request but its connection failed. Failures and retries are recorded in existing attempts, and partially received text is preserved. Tool calls are not executed before adoption of the final response.
+This applies only to conversations and does not change summary, embedding, or model-list retry policy. Connection retry-policy edits through `config set` apply from the next request (except the embedding connection). Direct file edits require owner restart. Duplicate billing cannot be prevented when the upstream processed a request but its connection failed. Failures and retries are recorded in existing attempts, and partially received text is preserved. Tool calls are not executed before adoption of the final response.
 
 ## HTTP(S) proxies and exclusions
 
