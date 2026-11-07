@@ -10447,10 +10447,15 @@ cursor from another listing refused, and a 200-name page with a next cursor. Uni
   sqlite_autoindex_thread_1 (id=?)`, `SEARCH g1 EXISTS USING PRIMARY KEY (thread_id=? AND tag=?)`,
   `USE TEMP B-TREE FOR ORDER BY`; no `SCAN` of a Thread or tag table in any archived mode.
 - `--cwd`: `SEARCH t USING INDEX threads_cwd_updated (cwd=?)`, no sort.
-- One filtered page of 21 rows from 40 tagged Threads (VM steps) with 50 and with 6,000 unrelated Threads of
-  another cwd: one tag 5,673 and 5,673; two tags 5,186 and 5,186; cwd alone 2,566 and 2,566; two tags and cwd
-  5,267 and 5,267. The step count does not depend on the number of unrelated Threads; it does depend on the
-  first tag's membership (all members are read and the top `limit + 1` kept), which is not asserted.
+- The tag page selects IDs and sort keys in an inner query and reads the summary columns for the returned rows
+  only (plan: inner `SEARCH g0 ... thread_tag_by_tag`, `SEARCH t` by primary key, `SEARCH g1 EXISTS`, temp
+  B-tree; outer `SEARCH t` by primary key for the page). One filtered page of 21 rows from 40 tagged Threads
+  (VM steps) with 50 and with 6,000 unrelated Threads of another cwd: one tag 3,905 and 3,905; two tags 4,048
+  and 4,048; cwd alone 2,566 and 2,566; two tags and cwd 4,129 and 4,129. One tag whose members each have a
+  Run and a Turn, page of 21: 5,624 VM steps with 100 members and 97,937 with 5,000 (about 19 steps per added
+  member, asserted below 150; the summary subqueries run for 21 rows). Before the change the first version
+  measured 5,673 steps for the 40-member fixture. These are step counts, not times; no wall-clock claim is made.
+  The cost still depends on the first tag's membership, and with `--query` (page limit -1) every member is read.
 - Tags of a 50-Thread page in one statement: 667 VM steps with 200 and with 8,000 stored Threads. 40 name
   seeks of `thread tags`: 480 VM steps with 200 and with 8,000 stored Threads (members per name differ by 40x).
 
