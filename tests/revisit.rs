@@ -771,7 +771,7 @@ async fn model_shell_cli_can_reply_to_its_own_expected_message_and_finish() {
     let replied: i64 = f.control.store.database.call({
         let message_id = message_id.clone();
         move |db| Ok(db.query_row(
-            "SELECT count(*) FROM receipt WHERE id=?1 AND json_extract(result_json,'$.reply.state')='replied'",
+            "SELECT count(*) FROM receipt WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='replied'",
             [&message_id], |row| row.get(0))?)
     }).await.unwrap();
     assert_eq!(
