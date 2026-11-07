@@ -703,6 +703,17 @@ saved state tags. A reply row shows `Reply:` and a width-limited original excerp
 Japanese UI uses `返事待ち`, `返事済み`, `返事なし`, `取消`, `相手削除`, and `返事:`.
 No new reply glyph is introduced.
 
+## Pending Replies Region
+
+The fixed `◉ Pending replies` region follows held input. It lists the selected
+Thread's unanswered human questions and reply duties to other Threads, using
+the existing person/model marks; the question excerpt and elapsed time remain
+visible. `ui.awaiting_human_rows` reserves 1..10 rows (default 1). Shift+Tab
+traverses live work, held input, pending replies, then the composer; empty
+regions are skipped. Alt+W folds the last focused region. Enter on an applied
+row enters reply mode; submitting answers that message, and Esc keeps the draft.
+`/replies` remains available for overflow and wider inspection.
+
 ## Held Input Region
 
 The fixed `◉ Held input` region follows live work and precedes the composer.

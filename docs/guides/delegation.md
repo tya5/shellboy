@@ -70,7 +70,10 @@ messages. `satisfied` is not necessarily success: inspect the reply snapshot's
 `state` (`replied`, `ignored`, `cancelled`, or `recipient_deleted`). A pending
 reply has no deadline; a timeout limits only that wait call. At normal Run end,
 one reminder is delivered for unanswered applied requests; if still unanswered,
-they become `ignored`. A stopped or recovery-waiting Run leaves the reply pending.
+they become `ignored`. Human decision questions are distinct: they do not trigger
+these outcomes or pause another reply duty you hold. Tell your requester you are
+blocked on the human before ending the Run. A stopped or recovery-waiting Run
+leaves an ordinary reply pending.
 Use `thread_settled` for stalls and an explicit recovery decision; do not resend
 the same request merely because it is held or the wait timed out. Cancellation
 can withdraw a reply duty even after admission; inspect the receipt.

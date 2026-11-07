@@ -421,7 +421,8 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
         });
         let mut changes=control.subscribe();
         for text in ["first fixture","second fixture"] {
-            let sent=control.request(req(Command::MessageSend(MessageSendArgs{ human: false,resume_recovery:false,expect_reply:false,sender_label:None,thread_id:Some(thread.clone()),text:text.into(),deliver: Deliver::Next}))).await;
+            let sent=control.request(req(Command::MessageSend(MessageSendArgs{ human: false, resume_recovery: false,
+ to_human: false,expect_reply:false,sender_label:None,thread_id:Some(thread.clone()),text:text.into(),deliver: Deliver::Next}))).await;
             assert!(sent.ok,"{sent:?}");let turn=sent.result.unwrap()["turn_id"].as_str().unwrap().to_owned();
             wait_turn(&control,&owner.instance_id,&turn,&mut changes).await;
         }

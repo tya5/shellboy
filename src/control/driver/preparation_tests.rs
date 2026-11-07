@@ -56,6 +56,7 @@ async fn fixture_with_policy(
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,
@@ -1679,6 +1680,7 @@ async fn cancelled_reply_notice_reaches_next_admission_without_changing_current_
                         resume_recovery: false,
 
                         human: false,
+                        to_human: false,
                         expect_reply: true,
                         sender_label: None,
                         deliver: crate::protocol::Deliver::Next,

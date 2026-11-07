@@ -24,6 +24,7 @@ fn send(expected: bool) -> Command {
         resume_recovery: false,
 
         human: false,
+        to_human: false,
         expect_reply: expected,
         sender_label: None,
         thread_id: Some("recipient".into()),
@@ -214,7 +215,11 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert_eq!(details["awaiting_reply"].as_array().unwrap().len(), 1);
+        assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
+        assert_eq!(
+            details["awaiting_thread_replies"].as_array().unwrap().len(),
+            1
+        );
         if admitted {
             let node = id.clone();
             store.database.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1",[node])?;Ok(()) }).await.unwrap();
@@ -274,6 +279,12 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .unwrap()
             .result;
         assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
+        assert!(
+            details["awaiting_thread_replies"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         let error = store
             .execute(
                 request(Command::MessageReply(MessageReplyArgs {
@@ -316,6 +327,44 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .result;
     assert_eq!(accepted["expect_reply"], true);
     let message_id = accepted["message_id"].as_str().unwrap().to_owned();
+    let human_ask = store
+        .execute(
+            request(Command::MessageAsk(MessageAskArgs {
+                thread_id: None,
+                text: "Choose A or B".into(),
+            })),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap()
+        .result;
+    let details = store
+        .execute(
+            request(Command::ThreadGet(ThreadTarget {
+                thread_id: Some("sender".into()),
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(details["awaiting_reply"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        details["awaiting_reply"][0]["message_id"],
+        human_ask["message_id"]
+    );
+    assert_eq!(
+        details["awaiting_human"][0]["message_id"],
+        human_ask["message_id"]
+    );
+    assert_eq!(
+        details["awaiting_thread_replies"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        details["awaiting_thread_replies"][0]["message_id"],
+        message_id
+    );
     let not_applied = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {

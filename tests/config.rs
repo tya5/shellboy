@@ -1164,6 +1164,7 @@ fn clean_redraw_is_a_strict_startup_boolean() {
 #[test]
 fn held_input_rows_have_independent_strict_bounds() {
     assert_eq!(Config::parse("").unwrap().ui.held_input_rows, 3);
+    assert_eq!(Config::parse("").unwrap().ui.awaiting_human_rows, 1);
     for limit in [1, 3, 10] {
         let config = Config::parse(&format!(
             "[ui]\nheld_input_rows = {limit}\nlive_work_rows = 2\n"
@@ -1171,9 +1172,12 @@ fn held_input_rows_have_independent_strict_bounds() {
         .unwrap();
         assert_eq!(config.ui.held_input_rows, limit);
         assert_eq!(config.ui.live_work_rows, 2);
+        let human = Config::parse(&format!("[ui]\nawaiting_human_rows={limit}\n")).unwrap();
+        assert_eq!(human.ui.awaiting_human_rows, limit);
     }
     for invalid in ["0", "11", "-1", "true", "\"3\""] {
         assert!(Config::parse(&format!("[ui]\nheld_input_rows = {invalid}\n")).is_err());
+        assert!(Config::parse(&format!("[ui]\nawaiting_human_rows={invalid}\n")).is_err());
     }
 }
 

@@ -10733,3 +10733,11 @@ SQL boundary deterministically instead of relying on a timing threshold. Focused
 ### #272 model-grouped bounded usage
 
 - Model-grouped saved-attempt requests/cache ratio aggregate by persisted `model_id` using the existing bounded rowid candidate scan and page cursor. Summary records have no model attribution and are not read or assigned; summary fields report null/unknown. Synthetic regression and `EXPLAIN QUERY PLAN` check pending. Thread shell outcome aggregation is outside this stage.
+## #262 Human decisions
+
+- [x] `message ask` creates an applied pending reply receipt on the current Thread without a Run/Turn/wake; its change hint notifies `events.wait` observers, and the sender Turn can end (reply integration tests).
+- [x] Human questions and Thread-targeted `--expect-reply` duties appear together, ordered and bounded, in `thread.get.awaiting_replies`; each item identifies recipient kind/Thread, excerpt, creation time and elapsed duration (frontend and reply integration tests).
+- [x] `events.wait --thread` change hints allow a client to refresh only that Thread; `message.reply` answers through the existing path (reply integration test asserts the Thread change effect and answer correlation).
+- [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
+- [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
+- [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.

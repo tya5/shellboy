@@ -190,6 +190,7 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
             resume_recovery: false,
 
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -610,6 +611,7 @@ async fn changed_file_retry_keeps_update_identity_and_success_advances_only_that
             resume_recovery: false,
 
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -1084,6 +1086,7 @@ async fn compacted_attachment_source_is_replaced_without_sending_its_file_entity
             resume_recovery: false,
 
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -1649,6 +1652,7 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,

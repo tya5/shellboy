@@ -1006,7 +1006,6 @@ fn english_field_label(label: &str) -> &str {
         }
         "送信者の表示名（任意）" => "Sender display name (optional)",
         "届けるとき（空=次の区切り）" => "Delivery time (empty = next boundary)",
-        "明示的に復旧待ちを再開" => "Explicitly resume recovery wait",
         "取消する入力ID（空白区切り）" => "Input IDs to cancel (space-separated)",
         "応答処理ID" => "Response ID",
         "観測する条件" => "Condition to observe",
@@ -1501,12 +1500,6 @@ impl Form {
                 vec![
                     thread(),
                     f("expect_reply", "返信を依頼", "false".into(), Boolean),
-                    f(
-                        "resume_recovery",
-                        "明示的に復旧待ちを再開",
-                        String::new(),
-                        Boolean,
-                    ),
                     f("text", "依頼本文（Ctrl+J改行）", String::new(), Multiline),
                     f(
                         "sender_label",
@@ -1525,6 +1518,7 @@ impl Form {
                     Ok(Command::MessageSend(MessageSendArgs {
                         human: false,
                         resume_recovery: form.boolean("resume_recovery")?,
+                        to_human: false,
                         expect_reply: form.boolean("expect_reply")?,
                         sender_label: form.optional("sender_label")?,
                         deliver: form
@@ -2822,7 +2816,6 @@ mod tests {
                 if field.value.is_empty() {
                     field.value = match field.name {
                         "text" | "query" => "synthetic text".into(),
-                        "resume_recovery" => "false".into(),
                         "space" => "space-id".into(),
                         "path" => "synthetic.txt".into(),
                         "attachment" => id(9),
@@ -3384,11 +3377,6 @@ mod tests {
             .find(|field| field.name == "text")
             .unwrap()
             .value = "one\n日本語 second\nlast".into();
-        form.fields
-            .iter_mut()
-            .find(|field| field.name == "resume_recovery")
-            .unwrap()
-            .value = "false".into();
         let before = form
             .fields
             .iter()

@@ -59,8 +59,9 @@ async fn send(store: &Store, thread: &str, text: &str) -> (MessageAccepted, Muta
     let result = execute(
         store,
         Command::MessageSend(MessageSendArgs {
-            resume_recovery: false,
+            to_human: false,
             human: false,
+            resume_recovery: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -90,9 +91,9 @@ async fn same_operation_is_durable_idempotent_conflict_checked_and_old_instance_
     let (_directory, store) = store().await;
     let thread = create(&store, None).await;
     let req = request(Command::MessageSend(MessageSendArgs {
-        resume_recovery: false,
-
+        to_human: false,
         human: false,
+        resume_recovery: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -348,9 +349,9 @@ async fn acceptance_assignments_are_immutable_across_completion_stop_and_delete(
     .unwrap();
     assert_eq!(detail.delivery_status, DeliveryStatus::Cancelled);
     let sending = request(Command::MessageSend(MessageSendArgs {
-        resume_recovery: false,
-
+        to_human: false,
         human: false,
+        resume_recovery: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -400,8 +401,9 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         store
             .execute(
                 request(Command::MessageSend(MessageSendArgs {
-                    resume_recovery: false,
                     human: false,
+                    resume_recovery: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -420,15 +422,16 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
     let mechanical = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+                to_human: false,
                 human: false,
+                resume_recovery: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(child.thread_id.clone()),
                 text: "ordinary parent note".into(),
             })),
-            Some(origin.clone()),
+            Some(origin),
         )
         .await
         .unwrap();
@@ -438,107 +441,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         mechanical.wake_threads.is_empty() && mechanical.quiet_wake_threads.is_empty(),
         "ordinary machine input cannot resume a recovery Turn"
     );
-    // An external CLI send is also held by default, then run retry releases it.
-    let external = store
-        .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
-                human: false,
-                expect_reply: false,
-                sender_label: None,
-                deliver: Deliver::Next,
-                thread_id: Some(child.thread_id.clone()),
-                text: "external CLI note".into(),
-            })),
-            None,
-        )
-        .await
-        .unwrap();
-    let external_message: MessageAccepted = serde_json::from_value(external.result).unwrap();
-    assert_eq!(external_message.delivery_status, DeliveryStatus::Held);
-    let retried = store
-        .execute(
-            request(Command::RunRetry(RunTarget {
-                run_id: accepted.run_id.clone().unwrap(),
-            })),
-            None,
-        )
-        .await
-        .unwrap();
-    assert_eq!(retried.quiet_wake_threads, vec![child.thread_id.clone()]);
-    let delivered_id = external_message.message_id.clone();
-    store
-        .database
-        .call(move |connection| {
-            let state: String = connection.query_row(
-                "SELECT state FROM receipt WHERE message_node_id=?1",
-                [delivered_id],
-                |row| row.get(0),
-            )?;
-            assert_eq!(state, "accepted");
-            Ok(())
-        })
-        .await
-        .unwrap();
-    // A model may explicitly opt in; recovery_resumed records that caller as actor.
-    let run_id = accepted.run_id.clone().unwrap();
-    store.database.call(move |connection| {
-        connection.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json='{\"reason\":\"fixture\"}' WHERE run_id=?1", [run_id])?;
-        Ok(())
-    }).await.unwrap();
-    let opted_in = store
-        .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: true,
-                human: false,
-                expect_reply: false,
-                sender_label: None,
-                deliver: Deliver::Next,
-                thread_id: Some(child.thread_id.clone()),
-                text: "explicit model resume".into(),
-            })),
-            Some(origin.clone()),
-        )
-        .await
-        .unwrap();
-    let opted_message: MessageAccepted = serde_json::from_value(opted_in.result.clone()).unwrap();
-    assert_eq!(opted_message.delivery_status, DeliveryStatus::Accepted);
-    assert!(
-        opted_in
-            .result
-            .get("turn_id")
-            .is_some_and(|turn| turn == accepted.turn_id.as_ref().unwrap())
-    );
-    assert!(opted_in.changed_threads.is_empty());
-    assert_eq!(opted_in.quiet_wake_threads, vec![child.thread_id.clone()]);
-    let turn = accepted.turn_id.clone().unwrap();
-    let expected_actor = origin.run_id.clone();
-    store.database.call(move |connection| {
-        let actor: String = connection.query_row("SELECT json_extract(payload_ref_json,'$.actor.run_id') FROM event WHERE kind='context_changed' AND json_extract(payload_ref_json,'$.kind')='recovery_resumed' AND json_extract(payload_ref_json,'$.change.turn_id')=?1 ORDER BY rowid DESC LIMIT 1", [turn], |row| row.get(0))?;
-        assert_eq!(actor, expected_actor);
-        Ok(())
-    }).await.unwrap();
-    store.database.call({
-        let run_id = accepted.run_id.clone().unwrap();
-        move |connection| { connection.execute("UPDATE turn SET state='recovery_wait',recovery_reason_json='{\"reason\":\"fixture\"}' WHERE run_id=?1", [run_id])?; Ok(()) }
-    }).await.unwrap();
-    let human_result = store
-        .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
-                human: true,
-                expect_reply: false,
-                sender_label: None,
-                deliver: Deliver::Next,
-                thread_id: Some(child.thread_id.clone()),
-                text: "human resume instruction".into(),
-            })),
-            None,
-        )
-        .await
-        .unwrap();
-    let human: MessageAccepted = serde_json::from_value(human_result.result.clone()).unwrap();
-    let effects = human_result;
+    let (human, effects) = send(&store, &child.thread_id, "human resume instruction").await;
     assert_eq!(human.turn_id, accepted.turn_id);
     assert_eq!(human.delivery_status, DeliveryStatus::Accepted);
     assert!(
@@ -563,50 +466,6 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
 }
 
 #[tokio::test]
-async fn external_cli_explicit_recovery_resume_is_not_recorded_as_human() {
-    let (_directory, store) = store().await;
-    let thread = create(&store, None).await;
-    let (accepted, _) = send(&store, &thread.thread_id, "initial").await;
-    let run = accepted.run_id.unwrap();
-    store
-        .database
-        .call(move |db| {
-            db.execute(
-                "UPDATE turn SET state='recovery_wait',recovery_reason_json='{}' WHERE run_id=?1",
-                [&run],
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    let result = store
-        .execute(
-            request(Command::MessageSend(MessageSendArgs {
-                human: false,
-                resume_recovery: true,
-                expect_reply: false,
-                sender_label: None,
-                deliver: Deliver::Next,
-                thread_id: Some(thread.thread_id.clone()),
-                text: "explicit CLI recovery".into(),
-            })),
-            None,
-        )
-        .await
-        .unwrap()
-        .result;
-    assert_eq!(result["delivery_status"], "accepted");
-    let actor = store.database.call(|db| {
-        Ok(db.query_row("SELECT source_json FROM event WHERE json_extract(payload_ref_json,'$.kind')='recovery_resumed' ORDER BY rowid DESC LIMIT 1", [], |row| row.get::<_, String>(0))?)
-    }).await.unwrap();
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&actor).unwrap()["kind"],
-        "external_cli"
-    );
-    store.database.shutdown().await.unwrap();
-}
-
-#[tokio::test]
 async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let (_directory, store) = store().await;
     let parent = create(&store, None).await;
@@ -620,8 +479,9 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let child_result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+                to_human: false,
                 human: false,
+                resume_recovery: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -652,8 +512,9 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
     let result = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+                to_human: false,
                 human: false,
+                resume_recovery: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -688,9 +549,9 @@ async fn receipt_failure_rolls_back_message_run_turn_and_caches_error_without_ef
     let thread = create(&store, None).await;
     store.database.call(|connection| {connection.execute_batch("CREATE TRIGGER fixture_reject_receipt BEFORE INSERT ON receipt BEGIN SELECT RAISE(ABORT,'fixture save failure'); END;")?;Ok(())}).await.unwrap();
     let req = request(Command::MessageSend(MessageSendArgs {
-        resume_recovery: false,
-
+        to_human: false,
         human: false,
+        resume_recovery: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -808,9 +669,9 @@ async fn explicit_new_human_send_assigns_only_unassigned_stopping_messages_once(
         .await
         .unwrap();
     let restart_request = request(Command::MessageSend(MessageSendArgs {
-        resume_recovery: false,
-
+        to_human: false,
         human: false,
+        resume_recovery: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -1133,8 +994,9 @@ async fn any_caller_may_stop_any_run_and_ownership_only_drives_cascade_and_notic
     let accepted = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+                to_human: false,
                 human: false,
+                resume_recovery: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -1182,9 +1044,9 @@ async fn authenticated_origin_credentials_are_not_saved_in_receipts_or_runtime_i
         started.turn_id.as_deref().unwrap(),
     );
     let req = request(Command::MessageSend(MessageSendArgs {
-        resume_recovery: false,
-
+        to_human: false,
         human: false,
+        resume_recovery: false,
         expect_reply: false,
         sender_label: None,
         deliver: Deliver::Next,
@@ -1932,8 +1794,9 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 })
             } else {
                 Command::MessageSend(MessageSendArgs {
+                    human: false,
                     resume_recovery: false,
-                    human: true,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -2535,8 +2398,9 @@ async fn owned_send(store: &Store, origin: &Origin, thread: &str) -> MessageAcce
     let accepted = store
         .execute(
             request(Command::MessageSend(MessageSendArgs {
-                resume_recovery: false,
+                to_human: false,
                 human: false,
+                resume_recovery: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,

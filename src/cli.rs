@@ -352,7 +352,7 @@ pub enum ThreadCommand {
     Prune(ThreadPruneOptions),
     /// Cut this Thread's selected path back to a node; the removed part stays as a child Thread.
     #[command(
-        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live or stopping Run or messages with unknown path admission; definitely unadmitted input may remain queued. Attachments whose message leaves the path are not sent. `--dry-run` reports the same facts (removed range, what is not undone) without changing anything."
+        after_help = "Same Thread, same ID and title; the path now ends at NODE:\n  shellboy thread rewind --thread THREAD_ID --node NODE_ID\n\nThe removed part is kept as a new child Thread (branch_thread_id in the result); opening it undoes the rewind. There is no in-place forward. NODE is a node on the selected path, or an original inside a summary this Thread holds (not after `thread prune`). Conversation only: shell executions and child Threads started after NODE are listed, not undone. Refused while the Thread has a live Run or queued messages, so a model cannot rewind the Thread it is running in; it can rewind another idle Thread. Attachments whose message leaves the path are not sent. `--dry-run` reports the same facts (removed range, what is not undone) without changing anything."
     )]
     Rewind(ThreadRewindOptions),
     /// Show the branch tree: Threads forked, edited or rewound from this one, and where they diverge.
@@ -401,6 +401,8 @@ pub enum MessageCommand {
         after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
+    /// Ask the human a question; the current Turn ends without waiting.
+    Ask(MessageAskOptions),
     /// Reply once to a received reply-expected message.
     Reply(MessageReplyOptions),
     Get(MessageOptions),
@@ -785,7 +787,7 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
-    /// Explicitly resume a Thread waiting for recovery; default machine messages stay held.
+    /// Explicitly resume a Run waiting for recovery.
     #[arg(long)]
     pub resume_recovery: bool,
     /// Require a deliberate reply to this message.
@@ -801,6 +803,11 @@ pub struct MessageSendOptions {
     /// when the Thread's live Run would complete, or immediately if none is live.
     #[arg(long, value_enum)]
     pub deliver: Option<wire::Deliver>,
+    #[command(flatten)]
+    pub text: TextOptions,
+}
+#[derive(Debug, Clone, Args)]
+pub struct MessageAskOptions {
     #[command(flatten)]
     pub text: TextOptions,
 }
@@ -1406,11 +1413,16 @@ impl Cli {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
                     human: false,
                     resume_recovery: a.resume_recovery,
+                    to_human: false,
                     expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
                     deliver: a.deliver.unwrap_or_default(),
+                }),
+                MessageCommand::Ask(a) => C::MessageAsk(wire::MessageAskArgs {
+                    thread_id: None,
+                    text: read_text(a.text, stdin).await?,
                 }),
                 MessageCommand::Reply(a) => C::MessageReply(wire::MessageReplyArgs {
                     message_id: a.message_id,

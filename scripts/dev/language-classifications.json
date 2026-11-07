@@ -646,28 +646,28 @@
   },
   "src/frontend/message_queue.rs:4fa6cdbf13079926:1": {
     "category": "a",
-    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
-    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   },
   "src/frontend/message_queue.rs:608fe041d34bd512:1": {
     "category": "a",
-    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
-    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   },
   "src/frontend/message_queue.rs:7f700320a8e9130b:1": {
     "category": "a",
-    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
-    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   },
   "src/frontend/message_queue.rs:2f9cd041aebb9dfa:1": {
     "category": "a",
-    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
-    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   },
   "src/frontend/message_queue.rs:53d2d615b808d023:1": {
     "category": "a",
-    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
-    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   },
   "src/ui/watch.rs:06000f833535e558:1": {
     "category": "a",
@@ -842,7 +842,7 @@
   "src/ui/threads.rs:03e76b90ffcad3a0:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:05bcfbb952d25bf6:1": {
     "category": "a",
@@ -852,12 +852,12 @@
   "src/ui/threads.rs:17d1fbe0d5842062:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:18c648c232fcb2d5:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:1b0a8eb466c03340:1": {
     "category": "a",
@@ -882,17 +882,12 @@
   "src/ui/threads.rs:27ab8252051f3bf8:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:28d01c30883506ac:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
     "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
-  },
-  "src/ui/threads.rs:296fea21d036ad80:1": {
-    "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
   },
   "src/ui/threads.rs:2a3d305091ce105f:1": {
     "category": "a",
@@ -902,12 +897,12 @@
   "src/ui/threads.rs:2b02db01fef3e847:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:2cd4fe089c1adeea:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:352a772363007f3c:1": {
     "category": "a",
@@ -932,12 +927,12 @@
   "src/ui/threads.rs:439c41c44b4f1a7d:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:4a9661b8fc037aec:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:4d0ff1fa13abebf0:1": {
     "category": "a",
@@ -967,17 +962,17 @@
   "src/ui/threads.rs:5cf688b1161b693f:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:62daf31a037d9662:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:684da57b5141fec7:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:69f649d0bf711005:1": {
     "category": "a",
@@ -987,17 +982,17 @@
   "src/ui/threads.rs:6b6b6a501140a3a9:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:2": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:3": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:6d429bf572bea1fc:1": {
     "category": "a",
@@ -1007,12 +1002,12 @@
   "src/ui/threads.rs:7179959f576d8823:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:73e4e6adaf4d838d:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:7aaf65c3b1b3f3f6:1": {
     "category": "a",
@@ -1022,22 +1017,22 @@
   "src/ui/threads.rs:7bda6297def68be8:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:7d6b83c6b7348603:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:7d838451770f915e:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:7ebc34907e90c4c0:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:8087ef176b4c0d1d:1": {
     "category": "a",
@@ -1052,12 +1047,12 @@
   "src/ui/threads.rs:9676341e507f1036:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:98317bae50982c52:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:9abc66d964ad2f60:1": {
     "category": "a",
@@ -1067,7 +1062,7 @@
   "src/ui/threads.rs:9ca7d8cf8c013360:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:a325ebf1700f8a3e:1": {
     "category": "a",
@@ -1077,7 +1072,7 @@
   "src/ui/threads.rs:a61360828f648330:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:a6c3ef78d56a7a5b:1": {
     "category": "a",
@@ -1092,12 +1087,12 @@
   "src/ui/threads.rs:bb37953c3e148b0b:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:bbc7c0413b562151:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:c5661a5eb0cfca5e:1": {
     "category": "a",
@@ -1112,27 +1107,27 @@
   "src/ui/threads.rs:c7518c08bc44cbf4:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:c9a2f1d38bef31a1:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:2": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:3": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:cd5737cf4caf2d35:1": {
     "category": "a",
@@ -1157,27 +1152,22 @@
   "src/ui/threads.rs:da88d03c0cd7c307:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:e41f81eb06954ce0:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:e52a5a0b453130a7:1": {
     "category": "a",
     "reason": "Reviewed BrowserText::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
     "source_tokens_sha256": "08bf7e59b91443270c56f80335e49dd0781a90e266dee6fb5a65d7e7dd5e635d"
   },
-  "src/ui/threads.rs:eef937651c7611c9:1": {
-    "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
-  },
   "src/ui/threads.rs:ff7dd36ce1b2f0eb:1": {
     "category": "a",
     "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d909b484b72cbc0a410218f0ff094a2345fbd4f94fc687a834e928f46ff3378e"
+    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
   },
   "src/ui/threads.rs:ff8e747ed6480f71:1": {
     "category": "a",
@@ -1822,912 +1812,912 @@
   "src/ui/operations.rs:f2d90a0be0cb1b6e:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b79385f22361b83b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:94897a84832ffe3b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:3ff87e519d11d515:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:8672d3f7bb7ca9c9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:f60497f9a47573ac:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:3fe71c0645a08bdf:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:848a6e6c4a25eaf1:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:c88455f47d5d3b39:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:5bd32228272813a9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:92ecdf93e14a9de0:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:d71c4bafc5bb91e9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:cc424470d0e69488:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:62c47e8cf86515f2:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:9aa71ceffbf6fb2f:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b836c49e526602f2:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:a62c2328334e53b1:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:ca405fd0acebed63:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:fa1a79578fac9214:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:420a6f8c410ffee5:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:7623e1171cfbf221:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:31e0c346273bb2da:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b783e6e5958a219a:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:714c3a350162d715:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:52898e69a76a2a74:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:0e87088ce14c9e4c:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:e71ad616b568f81d:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:69ba911ca69acf5b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:87e017068d1b26e3:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:c31df2c0f63b9037:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:6db0f20b809f67b5:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:90b3e9ee029cd19b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:6b8a86b275545086:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:8bcc510d40a805ff:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:9f1f211b4526f034:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:83a89ad6efba19d1:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:bd9032bc125a2890:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:e5c29ad48e3b7b62:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:4ef15c8c112f06f6:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:f2872a7fcec2f195:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:3b3d325079d81adf:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b3711c0f0ee0ac2a:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:069e23a42d290b1e:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:4862d75be34d3cf1:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:4eee69fe31c36862:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:7e7f8e884af4fe39:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b4c1b3d5062b568f:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:42204d3800ce3b29:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:5ce83451d9727162:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b3461cc4ef1e99e7:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:6c6b672abcc787e4:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:0c34fd3e3f28f63e:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b1accee036e69ade:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:256b55ca71e73beb:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:518a6ffa3c126190:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:8e4fe1bb32a3ac70:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:438f56e0f9f6230b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:2bd629b280ab1812:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:dbdc5bc7bc50568f:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:77c1f34500462ca3:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:e136c67b45b46c29:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:647167466551298e:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:6201e742cf268a24:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:c15ec877e4d704a9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:f4ef0893dd833538:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:2e70e191b3c15d51:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:ad21d3da778e60e5:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:de9ac2554289ad16:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:3e74041ef65012b5:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:1364fa9713f89b10:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:467da2df0c93bc50:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b5bdb07c97da9845:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:a71af27fe55add77:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:90b559183763cb55:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:b41693c5e3b3d37f:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:d0d847b052ac3b50:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:78bbaa0ec69fbc39:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:f2d90a0be0cb1b6e:2": {
     "category": "a",
     "reason": "Re-reviewed after reply field addition: Ja conversation-ID label remains localized by the existing English field-label fallback; command values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b79385f22361b83b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3ff87e519d11d515:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:8672d3f7bb7ca9c9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:f60497f9a47573ac:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fe71c0645a08bdf:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:848a6e6c4a25eaf1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:c88455f47d5d3b39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5bd32228272813a9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:92ecdf93e14a9de0:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:d71c4bafc5bb91e9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:62c47e8cf86515f2:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5bd32228272813a9:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:9aa71ceffbf6fb2f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5bd32228272813a9:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:308f9d956e64cb0f:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b836c49e526602f2:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a62c2328334e53b1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:ca405fd0acebed63:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:420a6f8c410ffee5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:7623e1171cfbf221:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:31e0c346273bb2da:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b783e6e5958a219a:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:714c3a350162d715:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:52898e69a76a2a74:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:0e87088ce14c9e4c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:e71ad616b568f81d:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:69ba911ca69acf5b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:87e017068d1b26e3:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:c31df2c0f63b9037:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:6db0f20b809f67b5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:fa1a79578fac9214:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:90b3e9ee029cd19b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:6b8a86b275545086:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:8bcc510d40a805ff:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:9f1f211b4526f034:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:83a89ad6efba19d1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:bd9032bc125a2890:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:e5c29ad48e3b7b62:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:4ef15c8c112f06f6:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3b3d325079d81adf:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b3711c0f0ee0ac2a:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:069e23a42d290b1e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:94897a84832ffe3b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:94897a84832ffe3b:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:4862d75be34d3cf1:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:4eee69fe31c36862:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:7e7f8e884af4fe39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b4c1b3d5062b568f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:42204d3800ce3b29:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5ce83451d9727162:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b3461cc4ef1e99e7:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:6c6b672abcc787e4:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:0c34fd3e3f28f63e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:cc424470d0e69488:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b1accee036e69ade:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:256b55ca71e73beb:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:518a6ffa3c126190:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:5": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:8e4fe1bb32a3ac70:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:438f56e0f9f6230b:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:2bd629b280ab1812:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:dbdc5bc7bc50568f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:77c1f34500462ca3:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:256b55ca71e73beb:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:f2872a7fcec2f195:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:e136c67b45b46c29:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:647167466551298e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:6201e742cf268a24:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:c15ec877e4d704a9:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:f4ef0893dd833538:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:2e70e191b3c15d51:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:ad21d3da778e60e5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:de9ac2554289ad16:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:de9ac2554289ad16:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3e74041ef65012b5:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3e74041ef65012b5:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:1364fa9713f89b10:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:467da2df0c93bc50:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:6": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3ff87e519d11d515:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:fa1a79578fac9214:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a71af27fe55add77:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5ec571d74776c9ee:3": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:90b559183763cb55:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b41693c5e3b3d37f:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:d0d847b052ac3b50:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:78bbaa0ec69fbc39:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:7": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a4cdf9ed33f1b835:5": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:80aab534242d8deb:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:80aab534242d8deb:2": {
     "category": "a",
     "reason": "Re-reviewed after the #194 rebase onto 226c4f6d: this Japanese end-message-only form label remains UI-only; English uses the catalog translation or english_field_label fallback. Reply form additions do not change command field values. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/presentation/time_text.rs:2721e3380759d54f:1": {
     "category": "a",
@@ -6237,7 +6227,7 @@
   "src/ui/operations.rs:c6c27a0c87dd8a20:1": {
     "category": "a",
     "reason": "Japanese source label for FieldId::ExpectReply; metadata::field_label_for selects English Expect a reply in English UI. CLI field name/value is preserved. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/presentation.rs:ad4a1d6eef0954dc:1": {
     "category": "a",
@@ -6381,8 +6371,8 @@
   },
   "src/frontend/message_queue.rs:428bbfd88c37c740:1": {
     "category": "a",
-    "reason": "Reviewed cancellation summary: the Japanese outcome labels map one-to-one to MessageCancelOutcome and are displayed only in UiLanguage::Ja; English uses cancelled_summary for the same outcomes. Removed the obsolete forbidden outcome; no ordering or status semantics changed.",
-    "source_tokens_sha256": "12e7c24d7e77df277d97562cf0401241b240a518b438115dbc3cf031309c299f"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   },
   "src/frontend/tools.rs:cdf1b7d7bdf25eba:1": {
     "category": "a",
@@ -6800,7 +6790,7 @@
   "src/ui/operations.rs:d64458c280168e4b:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:98e384433a277ef5:1": {
     "category": "a",
@@ -6825,12 +6815,12 @@
   "src/ui/operations.rs:a0a6d7143c6d3cf9:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:6717cd0cc0335f44:1": {
     "category": "a",
@@ -6840,7 +6830,7 @@
   "src/ui/operations.rs:d948f8c126dca97a:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:89c8f33e913bd0e6:1": {
     "category": "a",
@@ -6910,27 +6900,27 @@
   "src/ui/operations.rs:8ff80490925cfc3b:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:be2bbdc8b9edee71:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:0bc34350fa4d0200:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:42177d25ddacf139:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a69aa6a685d84b7c:1": {
     "category": "a",
     "reason": "Reviewed #236 thread rewind: Japanese branch of a paired local!/catalogue En/Ja string; English counterpart is separate; interpolated values opaque. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:546f37705c9cdaa7:1": {
     "category": "a",
@@ -6975,17 +6965,17 @@
   "src/ui/operations.rs:3ff87e519d11d515:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:3fc7219c4fb6297c:8": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:c976f6e20e51fd1c:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:7510ff6a9cff0cb6:1": {
     "category": "a",
@@ -6995,12 +6985,12 @@
   "src/ui/operations.rs:56536b1c95c92223:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback (FieldId::Archived / FieldId::Descendants labels in metadata.rs). Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:fa1a79578fac9214:4": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback (FieldId::Archived / FieldId::Descendants labels in metadata.rs). Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/threads.rs:2f1710c9e60fe0f0:1": {
     "category": "a",
@@ -7080,7 +7070,7 @@
   "src/ui/operations.rs:21605a86ab72428d:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:aebb6bfacb9a07f4:1": {
     "category": "a",
@@ -7100,12 +7090,12 @@
   "src/ui/operations.rs:6b64e3751636d02e:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "source_tokens_sha256": "8215e88ffc1a534c015e1358cfb1a7709a5c81ddacd2b9926cfebc2f5f70b65b"
   },
   "src/ui/operations.rs:6b64e3751636d02e:2": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/presentation/fields.rs:7ce7eca74fd87153:1": {
     "category": "a",
@@ -7205,32 +7195,32 @@
   "src/ui/operations.rs:2f1b750776c0b8b7:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:2453bb067f0edb89:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:a6a08d25e6536c06:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:029f6b93dce69082:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:cca576f2f955fcb1:1": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:b1accee036e69ade:3": {
     "category": "a",
     "reason": "Japanese text of the bilingual history.window operation copy, classified like its neighbors Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/operations.rs:16e19356bf30df15:1": {
     "category": "a",
@@ -7300,26 +7290,26 @@
   "src/ui/operations.rs:3ef74892c51b7cf6:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:0f875dc2b12d3530:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:78d79579b3c4f1e2:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
   "src/ui/operations.rs:5ed29234850df876:1": {
     "category": "a",
     "reason": "Reviewed UI field rendering: Japanese label is retained for Ja; English uses the catalog translation or english_field_label fallback. Command field values are unchanged. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback.",
-    "source_tokens_sha256": "f4db0153f008ecc021957be44fedb4bba7ed628c9cf7afad06b5a36835fd3c7e"
+    "source_tokens_sha256": "735fc3066f905d1e6c7cc91f0530e92e5111229922727da21c33ac446e45e60e"
   },
-  "src/ui/operations.rs:f5dd691d05e0c36d:1": {
+  "src/frontend/message_queue.rs:885623703290c03f:1": {
     "category": "a",
-    "reason": "Explicit Japanese-only UI field label in the bilingual message-send operation form; the field key and command behavior are language-independent. English form uses the existing fallback label from the field key. Re-reviewed for #263: message-send form adds a boolean choice only; existing Japanese labels remain UI-only and English display continues through the existing field-label fallback. Re-reviewed on rebased #263 branch: operation form includes the new recovery opt-in and the English fallback maps its Japanese label; existing literals remain UI labels, not protocol values.",
-    "source_tokens_sha256": "298bd1d27fa41b7847f1d268dd27135d99285cfd0dfc8551d2d07532844039da"
+    "reason": "Reviewed cancellation outcome labels: values are internal grouping keys; Japanese presentation renders them only for UiLanguage::Ja, while English uses cancelled_summary. The labels map one-to-one to cancellation outcomes.",
+    "source_tokens_sha256": "f17a9cb545c60de365fa1c32567c1a23fb8b31add7c46b33457e3256431e1150"
   }
 }

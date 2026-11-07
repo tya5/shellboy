@@ -129,3 +129,26 @@ pub(super) fn clear_for_new_run(
     }
     Ok(())
 }
+
+/// Asking the human is an explicit organization event that reopens the Thread.
+pub(super) fn clear_for_question(
+    tx: &Transaction<'_>,
+    thread: &str,
+    now: &str,
+) -> rusqlite::Result<()> {
+    if tx.execute(
+        "UPDATE thread SET archived_at=NULL,revision=revision+1 WHERE id=?1 AND archived_at IS NOT NULL",
+        [thread],
+    )? > 0
+    {
+        super::super::context::record(
+            tx,
+            thread,
+            "thread_unarchived",
+            json!({"kind":"model"}),
+            json!({"reason":"question_asked"}),
+            now,
+        )?;
+    }
+    Ok(())
+}

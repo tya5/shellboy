@@ -895,6 +895,7 @@ async fn message_delivery_timing_replaces_now_and_revisit_commands() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 thread_id: None,
@@ -1305,4 +1306,22 @@ async fn usage_attempt_selector_is_typed_and_exclusive() {
         args.extend(extra);
         assert!(shellboy::cli::Cli::try_parse_from(args).is_err());
     }
+}
+
+#[test]
+fn message_ask_is_model_scoped_and_takes_text() {
+    let cli = shellboy::cli::Cli::try_parse_from([
+        "shellboy",
+        "message",
+        "ask",
+        "--text",
+        "choose A or B",
+    ])
+    .unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(shellboy::cli::CliCommand::Message {
+            command: shellboy::cli::MessageCommand::Ask(_)
+        })
+    ));
 }

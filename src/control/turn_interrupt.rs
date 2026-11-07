@@ -274,6 +274,7 @@ mod tests {
                         resume_recovery: false,
 
                         human: false,
+                        to_human: false,
                         expect_reply: false,
                         sender_label: None,
                         thread_id: Some(thread.clone()),

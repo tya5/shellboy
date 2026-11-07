@@ -5287,3 +5287,7 @@ current Shellboy main has `config.get`.
 W2's uncommitted reclaim work was inspected and selectively reused in a new owned task worktree. The revised design
 separates the durable `removing` decision from existing maintenance reclamation and avoids an epoch table. Bounded
 float/int8, reopen/resume, rollback and indexed-lookup regressions are being validated. No passing CI is claimed yet.
+
+## #262 — human decision requests
+
+Implementation is being developed against schema 34. It reuses the pending reply receipt, with `to_human=true` in `message.ask` acceptance and the saved receipt. There is no new table, migration, worker or queue. The client wire read is `thread.get` → `awaiting_replies` (per Thread, bounded at 128), with `recipient_kind`, `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status` and `reminded`; answer via `message.reply`. `events.wait --thread` is the change hint. Focused verification: frontend inbox 10 tests; summary 5; reply lifecycle 9; localized detail 1. The archived-question regression was added and reply tests pass. The final reply suite (including archived Thread ask), `cargo check --tests`, and TUI region test pass. Remaining: final acceptance sweep, rebase, and CI.

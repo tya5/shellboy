@@ -237,6 +237,7 @@ impl Fixture {
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,
@@ -1498,6 +1499,7 @@ async fn overflow_trim_keeps_every_user_input_of_the_active_turn() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: Some("leader".into()),
                 deliver: Deliver::Next,
@@ -1759,6 +1761,7 @@ async fn usage_limit_new_conversation(f: &mut Fixture) {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2064,6 +2067,7 @@ async fn concurrent_threads_record_independent_429_observations() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2180,6 +2184,7 @@ async fn connection_cooldown_blocks_other_thread_and_stop_remains_responsive() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2246,6 +2251,7 @@ async fn connection_cooldown_revalidates_model_before_second_thread_sends() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2516,6 +2522,7 @@ async fn shared_connection_wait_is_recorded_on_successful_attempt() {
             Command::MessageSend(MessageSendArgs {
                 resume_recovery: false,
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2699,6 +2706,7 @@ async fn owner_restart_clears_connection_cooldown_without_resuming_old_work() {
             resume_recovery: false,
 
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -2751,6 +2759,7 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
                 Command::MessageSend(MessageSendArgs {
                     resume_recovery: false,
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: Deliver::Next,

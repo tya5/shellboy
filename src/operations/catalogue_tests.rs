@@ -97,6 +97,13 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             "{name} must not be offered as a TUI form"
         );
     }
+    // Human decision requests (#262) are model-origin CLI operations, not TUI forms.
+    assert!(leaves.remove("message ask").is_some());
+    assert!(
+        !CLI_BINDINGS
+            .iter()
+            .any(|binding| binding.path.join(" ") == "message ask")
+    );
     // Standalone explicit maintenance (#238): owner-stopped, never a TUI form.
     let vacuum = leaves
         .remove("storage vacuum")

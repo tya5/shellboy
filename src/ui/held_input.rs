@@ -17,6 +17,7 @@ pub(super) enum HeldKey {
 pub(super) enum RegionOwner {
     Live,
     Held,
+    Human,
 }
 
 enum HeldRow<'a> {
@@ -200,13 +201,26 @@ pub(super) fn draw(frame: &mut Frame<'_>, area: Rect, view: &ThreadView, languag
 
 impl UiState {
     pub(super) fn toggle_focused_region(&mut self) {
-        if self.region_owner == RegionOwner::Live {
-            self.toggle_live_work_section();
-        } else {
-            self.held_input_collapsed = !self.held_input_collapsed;
-            let (fold, cap) = (self.held_input_collapsed, self.config.ui.held_input_rows);
-            self.active_view_mut().held_input.configure(fold, cap);
-            self.dirty = true;
+        match self.region_owner {
+            RegionOwner::Live => self.toggle_live_work_section(),
+            RegionOwner::Held => {
+                self.held_input_collapsed = !self.held_input_collapsed;
+                let collapsed = self.held_input_collapsed;
+                let capacity = self.config.ui.held_input_rows;
+                self.active_view_mut()
+                    .held_input
+                    .configure(collapsed, capacity);
+                self.dirty = true;
+            }
+            RegionOwner::Human => {
+                self.awaiting_human_collapsed = !self.awaiting_human_collapsed;
+                let collapsed = self.awaiting_human_collapsed;
+                let capacity = self.config.ui.awaiting_human_rows;
+                self.active_view_mut()
+                    .awaiting_human
+                    .configure(collapsed, capacity);
+                self.dirty = true;
+            }
         }
     }
     fn held_select(&mut self, index: usize) {
@@ -258,45 +272,73 @@ impl UiState {
             {
                 return None;
             }
-            let view = self.view();
-            if view.live_work.region.active {
-                let index = view
-                    .live_work
-                    .region
-                    .displayed_keys
+            let live_rows = self.view().live_work.region.visible_rows;
+            let held_rows = self.view().held_input.visible_rows;
+            let human_rows = self.view().awaiting_human.visible_rows;
+            let live_active = self.view().live_work.region.active;
+            let held_active = self.view().held_input.active;
+            let human_active = self.view().awaiting_human.active;
+            let live_keys = self.view().live_work.region.displayed_keys.clone();
+            let live_selected = self.view().live_work.region.selected.clone();
+            let held_keys = self.view().held_input.displayed_keys.clone();
+            let held_selected = self.view().held_input.selected.clone();
+            let human_keys = self.view().awaiting_human.displayed_keys.clone();
+            let human_selected = self.view().awaiting_human.selected.clone();
+            if live_active {
+                let index = live_keys
                     .iter()
-                    .position(|key| Some(key) == view.live_work.region.selected.as_ref())
+                    .position(|key| Some(key) == live_selected.as_ref())
                     .unwrap_or(0);
-                if index + 1 < view.live_work.region.visible_rows {
+                if index + 1 < live_rows {
                     self.active_view_mut().live_work.move_focus(true);
                 } else {
                     self.active_view_mut().live_work.region.active = false;
-                    self.held_select(0);
+                    if held_rows > 0 {
+                        self.held_select(0);
+                    } else {
+                        self.human_select(0);
+                    }
                 }
-            } else if view.held_input.active {
-                let index = view
-                    .held_input
-                    .displayed_keys
+            } else if held_active {
+                let index = held_keys
                     .iter()
-                    .position(|key| Some(key) == view.held_input.selected.as_ref())
+                    .position(|key| Some(key) == held_selected.as_ref())
                     .unwrap_or(0);
-                if index + 1 < view.held_input.visible_rows {
+                if index + 1 < held_rows {
                     self.held_select(index + 1);
                 } else {
                     self.active_view_mut().held_input.active = false;
+                    self.human_select(0);
                 }
-            } else if view.live_work.region.visible_rows > 0 {
-                let target = view.live_work.region.displayed_keys.first().cloned();
+            } else if human_active {
+                let index = human_keys
+                    .iter()
+                    .position(|key| Some(key) == human_selected.as_ref())
+                    .unwrap_or(0);
+                if index + 1 < human_rows {
+                    self.human_select(index + 1);
+                } else {
+                    self.active_view_mut().awaiting_human.active = false;
+                }
+            } else if live_rows > 0 {
+                let target = live_keys.first().cloned();
                 let view = self.active_view_mut();
                 view.items.active = false;
+                view.held_input.active = false;
+                view.awaiting_human.active = false;
                 view.live_work.region.active = true;
                 view.live_work.region.selected = target;
                 self.region_owner = RegionOwner::Live;
-            } else {
+            } else if held_rows > 0 {
                 self.held_select(0);
+            } else {
+                self.human_select(0);
             }
             self.dirty = true;
             return Some(vec![]);
+        }
+        if self.view().awaiting_human.active {
+            return self.human_key(key);
         }
         if !self.view().held_input.active {
             return None;
