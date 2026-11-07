@@ -10528,3 +10528,12 @@ size): statvfs 2.2 us, logical counters 6.5 us, whole gate 15.1 us. Not verified
 disk; a symlink onto a different volume (the test uses one volume); network filesystems; Windows and Linux
 local runs (CI is recorded with the final SHA); the TUI rendering of `disk_guard` in a real terminal (only
 the sample content is tested); real user data sizes.
+
+## History execution descriptions
+
+On macOS, the synthetic temporary-database history execution-link test passed:
+list/window equality, unchanged existing fields, missing/invalid/sanitized labels,
+and identical indexed and unindexed query plans. The history-window module
+passed 7 tests; `cargo check --tests`, formatting, test layout, and language audit
+passed. Linux and Windows validation is pending CI; no real Web UI or user data
+was used.

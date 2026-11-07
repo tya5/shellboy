@@ -62,9 +62,15 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 
 `HistoryRelationsArgs` はnode_id、必須relation（previous/next/sources/replacements）、limit既定50・最大200、任意cursor。`Page<RelationItem>` の各要素はnode_id/provenanceと、置換関係に限るreplacement_id/source_revision/source_hashを持つ。previous/nextは会話辺、sourcesはcompleted置換出力→出典、replacementsは出典→completed置換出力である。relation item直下のsource_revision/hashは置換記録時の出典witness、provenance.source_revisionは返却nodeの現在版であり区別する。cursorは対象node・relation・revisionとwatermarkに束縛し、追加関係を途中pageへ混入させない。履歴変更・無制限の祖先/子孫探索は含めない。採用経路は既存history.listで取得する。
 
+`history.list` and `history.window` execution links may include `description`:
+the shell execution's text description, passed through the same bounded,
+control-character-safe label formatting as the TUI. The field is omitted when
+missing, non-text, or empty after formatting. It is display metadata only and
+does not alter the command or execution. Reading it adds no table scan.
+
 #### history.window（#268）
 
-`HistoryWindowArgs` はthread_id、任意のordinal又はnode_id（両方は不可。どちらも無ければ末尾が基準）、任意のexpect_node_id（ordinalと併用のみ）、before・after（各既定20）、excerpt_chars（history.listと同じ）。`before + after + 1` は最大200（`MAX_LIST_LIMIT`）で、超過は`invalid_argument`。結果`HistoryWindow`は`{thread_id, revision, total, items}`で、itemsはhistory.listと同じ`HistorySnippet`（`selection.ordinal`が位置）を位置の昇順に並べる。cursorは持たず、絞り込み（run/since/state）も受けない。history.listの引数・結果は変えない。
+`HistoryWindowArgs` はthread_id、任意のordinal又はnode_id（両方は不可。どちらも無ければ末尾が基準）、任意のexpect_node_id（ordinalと併用のみ）、before・after（各既定20）、excerpt_chars（history.listと同じ）。`before + after + 1` は最大200（`MAX_LIST_LIMIT`）で、超過は`invalid_argument`。結果`HistoryWindow`は`{thread_id, revision, total, items}`で、itemsはhistory.listと同じ`HistorySnippet`（`selection.ordinal`が位置）を位置の昇順に並べる。cursorは持たず、絞り込み（run/since/state）も受けない。history.listの引数は変えない。
 
 - `total` は採用経路の最後のordinal+1、`revision` はThreadのselection_revisionである。ordinalは全ての本番writer（追記はMAX+1、経路の採用＝rewind・compactionは0..nの書き直し、forkは接頭部の複製、中断tool結果の挿入は後続を後ろへ移して連続を保つ）で0から欠番なく連続するため、totalは件数と一致する。欠番は書き手のバグであり、windowは存在する行だけを返し、totalは最後の位置+1のままとする。
 - 追記でrevisionは進むが既存の位置は変わらない。rewind・compactionはrevisionを進め、位置が移動又は消える（pruneは本文だけを回収し経路と位置を変えない）。revisionだけでは追記と巻き戻しを区別できないので、呼び出し側は保持している位置のnodeを`expect_node_id`として渡す。

@@ -5199,3 +5199,9 @@ Not claimed: a real terminal run (macOS Option-as-Meta for Alt+U is unverified).
 every changed field reports that it needs a restart. There is no
 standalone edit path and no TUI form. Independent review fixes are on `issue-266/config-rw-2`. Resume point: exact-tip default and all-OS CI, then integration. The #265
 `config.get` item is covered by this. shellboy-studio has not been changed to use it.
+
+## History execution descriptions
+
+History execution links expose an optional TUI-formatted shell description to
+`history list` and `history window`; existing command and execution fields are
+unchanged.

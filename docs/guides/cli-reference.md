@@ -363,6 +363,11 @@ attempt keeps at most 64 KiB of text; text unread when an attempt ends is gone. 
 
 `shellboy history window --thread THREAD [--ordinal N [--expect-node NODE] | --node NODE] [--before 20] [--after 20] [--excerpt-chars 512]` is a read-only, cursorless read of the selected path around an anchor (the end when none is given). Items are `history list` items in ascending position order. `before + after + 1` must be at most 200 (`invalid_argument` otherwise). `result` is `{thread_id, revision, total, items}`. `total` is the path length and `revision` is the selected-path revision, which also advances on append (earlier positions stay valid then) and on rewind and compaction (positions move). A position at or beyond `total`, a `--node` not on the path, or an `--expect-node` that is not at `--ordinal` fails with `cursor_expired` and `details.revision`/`details.total`. Cost is a few index seeks plus the window, independent of the Thread length. Unknown Thread: `thread_not_found`.
 
+History list and window items may include `executions[].description`, a
+sanitized shell-call label of at most 80 Unicode scalar values for display.
+Missing or empty labels are omitted; the label is not the command and does not
+change its execution.
+
 ## Cursors
 
 List/get/read cursors are opaque continuation tokens. Pass the exact returned string to the same operation, target, filters, and encoding; never construct, edit, or reuse elsewhere. A list without next_cursor ends that enumeration. Shell read returns an observation cursor for subsequent reads until output_complete.
