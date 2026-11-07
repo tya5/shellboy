@@ -5209,7 +5209,7 @@ Implemented through the owner: `credentials.set`, `credentials.clear`, `connecti
 `Connection::credentials_with` and `HttpModelClient::headers`. No schema change, migration, table, worker, event, queue
 or dependency (D-269). A key stored now applies to the next request; a new or changed connection still needs an owner
 restart. Stage C (applying `connections` without a restart) is investigated and planned in D-269, not implemented.
-Branch `issue-269/connection-setup`; not pushed to main, no PR. Resume point: exact-tip default and all-OS CI, then
+Branch `issue-269/connection-setup-3` (rebased on origin/main after #243 E3; `api_key_header` no longer needs `api_key_env`; review fixes applied); not pushed to main, no PR. Resume point: exact-tip default and all-OS CI, then
 integration, then the Studio screen against the shapes in the protocol design.
 Not claimed: Windows behaviour (permissions, `ReplaceFileW` on `credentials.toml`), a real terminal refusing a typed
 key, a real provider, shellboy-web/Studio use.
