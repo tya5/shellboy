@@ -1035,22 +1035,22 @@ fn exported_schema_local_references_resolve() {
     fn visit(value: &Value, document: &Value, path: &str) {
         match value {
             Value::Object(object) => {
-                if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
-                    if reference.starts_with("#/") {
-                        let mut current = document;
-                        for token in reference[2..].split('/') {
-                            let token = token.replace("~1", "/").replace("~0", "~");
-                            current = if let Some(object) = current.as_object() {
-                                object.get(&token)
-                            } else if let (Some(array), Ok(index)) =
-                                (current.as_array(), token.parse::<usize>())
-                            {
-                                array.get(index)
-                            } else {
-                                None
-                            }
-                            .unwrap_or_else(|| panic!("unresolved {reference} at {path}"));
+                if let Some(reference) = object.get("$ref").and_then(Value::as_str)
+                    && let Some(pointer) = reference.strip_prefix("#/")
+                {
+                    let mut current = document;
+                    for token in pointer.split('/') {
+                        let token = token.replace("~1", "/").replace("~0", "~");
+                        current = if let Some(object) = current.as_object() {
+                            object.get(&token)
+                        } else if let (Some(array), Ok(index)) =
+                            (current.as_array(), token.parse::<usize>())
+                        {
+                            array.get(index)
+                        } else {
+                            None
                         }
+                        .unwrap_or_else(|| panic!("unresolved {reference} at {path}"));
                     }
                 }
                 for (key, child) in object {
