@@ -85,6 +85,7 @@ fn six_new_owner_forms_build_real_commands_and_preserve_optional_arguments() {
     let mut deferred = Form::new(OpKind::MessageSend, &c);
     set(&mut deferred, "text", "next instruction");
     set(&mut deferred, "deliver", "complete");
+    set(&mut deferred, "resume_recovery", "false");
     assert!(
         matches!(deferred.command(&c.cwd).unwrap(),Command::MessageSend(args)if args.deliver==Deliver::Complete&&args.text=="next instruction")
     );
