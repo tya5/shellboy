@@ -75,13 +75,22 @@ async fn human_questions_share_the_128_pending_reply_cap() {
         execution_id: "shell".into(),
         token: "synthetic".into(),
     };
-    let ask = || Command::MessageAsk(MessageAskArgs {
-        thread_id: None,
-        text: "Choose A or B".into(),
-    });
-    store.execute(request(ask()), Some(origin.clone())).await.unwrap();
+    let ask = || {
+        Command::MessageAsk(MessageAskArgs {
+            thread_id: None,
+            text: "Choose A or B".into(),
+        })
+    };
+    store
+        .execute(request(ask()), Some(origin.clone()))
+        .await
+        .unwrap();
     assert_eq!(
-        store.execute(request(ask()), Some(origin)).await.unwrap_err().code,
+        store
+            .execute(request(ask()), Some(origin))
+            .await
+            .unwrap_err()
+            .code,
         ErrorCode::InputLimit
     );
     store.database.shutdown().await.unwrap();
