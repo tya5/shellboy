@@ -97,6 +97,12 @@ shellboy config check
 shellboy
 ```
 
+環境変数を設定する代わりに、起動中のownerにkeyを保存させることもできます。
+`printf %s "$KEY" | shellboy credentials set --connection proxy`で、設定ファイルと同じ
+フォルダーの`credentials.toml`に平文で保存します（値のある環境変数が優先されます）。
+`shellboy connection test --connection proxy`は接続先にモデル一覧を問い合わせ、応答の
+有無を示します。[keyの保存と接続確認](configuration.md#store-a-key-and-check-a-connection)を参照してください。
+
 既存の設定ファイルは上書きしません。独自の場所なら全操作に同じ`--config PATH`を
 指定してください。`check`はownerなしで使え、モデル一覧だけを要求し、会話の要求は
 送りません。`base_url`は`https://proxy.example/v1`のようなAPI rootまでで、

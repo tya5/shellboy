@@ -81,8 +81,14 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             .any(|binding| binding.path.join(" ") == "events wait"),
         "events wait must not be offered as a TUI form"
     );
-    // Settings file reads and writes (#266): owner calls with no generated TUI form.
-    for name in ["config get", "config set"] {
+    // Settings reads and writes (#266) and stored keys and connection test (#269): owner calls with no generated TUI form.
+    for name in [
+        "config get",
+        "config set",
+        "credentials set",
+        "credentials clear",
+        "connection test",
+    ] {
         assert!(leaves.remove(name).is_some());
         assert!(
             !CLI_BINDINGS

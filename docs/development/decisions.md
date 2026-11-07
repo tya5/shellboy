@@ -4016,3 +4016,71 @@ capture) although it records no context entry. Impact: `ThreadSummary` and `Thre
 unchanged). Recheck when: tag sets with hundreds of thousands of members appear (a count-bounded or covering
 `(tag, updated_at)` index may then be needed), a TUI filter is asked for, models create near-duplicate spellings
 (a suggestion or case-folding rule), or the Web UI needs `tags` on browser rows.
+## D-269: Connection setup, stages A and B (2026-11-07)
+
+Issue #269, for the Studio first-run screen. The issue fixed the main shape (a stored key per connection, environment
+first, `credentials.set` / `credentials.clear`, `connection.test`, a key-source fact in `config.get`, stdin only,
+Unix `0600`, no keychain). Decisions below are mine where the issue was silent. No schema, table, worker, event, queue,
+dependency or migration is added (`toml_edit` and `toml` are already dependencies).
+
+- **File layout `[connections.NAME] api_key = "..."`** in `credentials.toml` beside the loaded `config.toml`. The nested
+  table mirrors `config.toml` and leaves room for another per-connection secret without a format change. Beside the
+  config file (not in the data directory) because the issue says "設定フォルダ" and the key then follows `--config`.
+  Uncertain: a user who relocates the data directory keeps the keys with the config; a user who shares a config
+  folder shares the keys. Recheck with the first real Studio use.
+- **Plain text, 0600, replaced atomically**, reusing `config_edit::replace_atomically`/`replace_file` (including the
+  Windows interrupted-replace recovery) with a `0600` temporary file. The Windows result (default ACL of the folder,
+  an existing ACL kept by `ReplaceFileW`) is stated from the API documentation and was not run on Windows.
+- **Environment wins; the file is read only when it must be.** `HttpModelClient::headers` is now async and reads the
+  file with `tokio::fs` (bounded to 64 KiB) per request when `api_key_env` yields nothing. Uncertain: that is a small
+  blocking-pool read on the shared runtime rather than the control-file pool. It is not on the UI thread and happens
+  once per request start; recheck if a profile shows it. An invalid `credentials.toml` fails only requests that need
+  it (`config_invalid`, with a line number and no content), because refusing to start on an unrelated file would block
+  keyless local use.
+- **A stored key works without `api_key_env`**, in `Authorization: Bearer`, unless `headers` defines `Authorization`
+  (then the explicit header wins and `credentials.set` is refused). `api_key_header` still requires `api_key_env`: I did
+  not relax validation, so an `x-api-key` preset sets both. Recheck if presets find that awkward.
+- **`credentials.set` needs the connection in the file (or loaded).** It makes the flow `config.set` (add connection)
+  then `credentials.set` explicit and avoids keys for typos. `credentials.clear` accepts any name so stale entries can
+  be removed.
+- **The request fingerprint of `credentials.set` uses a per-process salted digest of the value.** `operation_receipt`
+  keeps `request_hash` for conflict detection; an unsalted SHA-256 of `{command, caller}` would let anyone with the
+  database confirm a guessed key. The salt lives in memory only and the receipt's instance id is the owner's, so replay
+  within the instance still matches. Recheck if receipts ever need to be compared across owner instances.
+- **`connection.test` is a read (no receipt, cancellable).** It sends one GET with a credential to a URL the caller
+  chooses. A model shell could point a candidate at another host with `api_key_env`, but a model shell can already read
+  the environment and `credentials.toml` (same OS user, no authority check, #256), so no new exposure was added. It is
+  not hidden from models; the Agent Guide says to use it only when asked. Recheck when #256 introduces authority.
+- **Failure classes are fixed words, never provider text.** Providers echo part of a refused key in 401 bodies; the
+  reply carries `http_status` and the class only. 401/403 `auth`, 404 `url`, 429 `rate_limited`, 5xx `server`, other
+  `http_status`; `timeout` and `unreachable` come from the transport error kind (TLS errors are `unreachable`: reqwest
+  gives no stable TLS marker, and guessing from text was rejected). `ok` means a catalog answered.
+- **The reply caps `models` at 1000 ids and 256 KiB** (`model_count` is complete, `models_truncated` says so); both
+  numbers are chosen bounds, not measured limits. The catalog client already bounds the response at 2 MiB/10,000 ids.
+- **A saved name is tested from the file, not from the loaded config**, so a connection just added with `config.set`
+  can be checked before the restart that stage C removes. If the file is invalid the call fails with `config_invalid`.
+- **`Config::stored_keys` (names only, shared by clones) feeds the setup hints.** `config_setup::report` runs on the UI
+  thread and in error paths and must not read files. It is filled at load and follows `credentials.set/clear`; a hand
+  edit shows after a restart. `config.get` reads the file each call, so its `credential_source` is authoritative.
+- **The CLI refuses a terminal for the key** so it is never echoed. Not verified under a real pseudo-terminal; the
+  tests pipe stdin.
+- **Stage C is not implemented.** Plan (investigated, not built): `HttpClients` (one `Arc`, already shared by `Store`,
+  `IndexService` and `Compactor`, built in `Store::new`) becomes a swappable registry holding the connection map and
+  clients behind one `RwLock<Arc<_>>`, rebuilding only clients whose definition changed. About 30 readers of
+  `config.connections` take one snapshot at request or operation start: the request path (`control/driver.rs:77,581`,
+  `driver/request.rs:141,155`, `driver/retry.rs:211`, `driver/proactive.rs:143`), Thread validation
+  (`control/db.rs:1649,1698,1786`), `model.list` (`control/runtime.rs:398,436`), compaction (`compaction.rs:437,1069,1110`,
+  `compaction/{bounded.rs:87,preview.rs:707,970,edit/trim.rs:455}`), index search/identity and the TUI's four reads
+  (`ui.rs:5169,6801`, `ui/models.rs:412`, `ui/view.rs:351`, plus `config_setup::report`). A request holds its snapshot and
+  cloned client, so it finishes with its start-time connection. Indexing sites (`retry.rs:211`, `compaction.rs:1110`,
+  `bounded.rs:87`, `runtime.rs:436`) must become `get` with the existing `config_invalid` recovery, since a connection
+  can now disappear mid-Run. `config.set` applies the connections it just wrote while still holding `config_write`
+  (the parsed result is in hand); `config.get` reports live connections as loaded, so `differing_fields` and
+  `restart_required` become false for `connections.*` and `applied_to_running_owner` per change (a wire change for
+  Studio). Open decisions: (1) the connection named by `embedding.connection` keeps restart semantics because the
+  index profile key is computed once from `base_url` and model at `IndexService` construction (`index/mod.rs:357`);
+  (2) removing a connection that the running `default_connection` still names, unless `default_connection` and
+  `default_model` become live too (both are `hot_candidate`); (3) whether the TUI reads the registry directly (an
+  `Arc` clone under a short read lock, no I/O) or gets an event. No schema, table, worker or queue is needed.
+  Tests: swap during an in-flight request, removal during a Run, concurrent `config.set` and `credentials.set`,
+  unchanged index identity.

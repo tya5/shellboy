@@ -496,3 +496,14 @@ provider switch. See [model HTTP](model-http.md).
 Credential values never leave the owner, every field needs a restart and there is no standalone edit path. See
 [config](config.md#reading-and-changing-through-the-owner-266) and
 [protocol](protocol.md#reading-and-changing-the-configuration-file-configget-configset-266).
+
+## Stored keys and connection test (#269, 2026-11-07)
+
+Stages A and B of the owner-side connection setup are adopted: `credentials.set` / `credentials.clear` keep an API key
+per connection in `credentials.toml` beside `config.toml` (plain text, `0600` on Unix, never returned or logged), the
+environment variable wins over the stored key, and `connection.test` sends one model-catalog GET and reports facts.
+`config.get` states each connection's key source (`env` / `stored` / `none`). No table, worker, event, queue or
+dependency is added; no migration. Stage C (applying `connections` changes without a restart) is not adopted yet; see
+[decisions](../development/decisions.md#d-269-connection-setup-stages-a-and-b-2026-11-07). See
+[config](config.md#stored-api-keys-and-connection-test-269) and
+[protocol](protocol.md#stored-keys-and-connection-test-credentialsset-credentialsclear-connectiontest-269).
