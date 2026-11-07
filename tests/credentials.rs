@@ -360,7 +360,7 @@ async fn a_header_only_connection_sends_its_stored_key_in_that_header_and_fails_
         let root = tempfile::tempdir().unwrap();
         let mock = mock().await;
         let file = root.path().join("credentials.toml");
-        let mut connection = Connection {
+        let connection = Connection {
             base_url: mock.url.clone(),
             api_key_header: Some("x-api-key".into()),
             credentials_file: Some(file.clone()),
@@ -389,7 +389,7 @@ async fn a_client_reads_the_stored_key_when_each_request_starts() {
         let root = tempfile::tempdir().unwrap();
         let mock = mock().await;
         let file = root.path().join("credentials.toml");
-        let mut connection = Connection {
+        let connection = Connection {
             base_url: mock.url.clone(),
             api_key_env: Some("SHELLBOY_TEST_ENV_NEVER_SET_269".into()),
             credentials_file: Some(file.clone()),
@@ -439,7 +439,7 @@ async fn an_invalid_credentials_file_fails_the_request_without_quoting_it() {
             format!("[connections.proxy]\napi_key = \"{KEY}\"\nsurprise = 1\n"),
         )
         .unwrap();
-        let mut connection = Connection {
+        let connection = Connection {
             base_url: "http://127.0.0.1:1/v1".into(),
             credentials_file: Some(file),
             api_key_env: Some("SHELLBOY_TEST_ENV_NEVER_SET_269".into()),
