@@ -674,7 +674,7 @@ fn tool(command: &str) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn model_shell_cli_defers_a_message_to_its_own_run_completion() {
+async fn model_shell_cli_can_reply_to_its_own_expected_message_and_finish() {
     let mut f = fixture().await;
     let (send_ipc, receive_ipc) = mpsc::channel(16);
     let ipc = shellboy::ipc::LocalServer::bind(&f.owner, send_ipc)
@@ -685,6 +685,8 @@ async fn model_shell_cli_defers_a_message_to_its_own_run_completion() {
         .await
         .run_id
         .unwrap();
+
+    // The model asks itself for a reply; delivery is held until the current Run ends.
     incoming(&mut f.receive)
         .await
         .reply
@@ -695,37 +697,66 @@ async fn model_shell_cli_defers_a_message_to_its_own_run_completion() {
                 "send",
                 "--deliver",
                 "complete",
+                "--expect-reply",
                 "--text",
-                "MODEL_OWN_REVISIT",
+                "MODEL_SELF_REQUEST",
             ])),
         ))
         .unwrap();
-    let after_tool = incoming(&mut f.receive).await;
-    let waiting: i64 = f
+    let original_turn = incoming(&mut f.receive).await;
+    assert!(
+        original_turn
+            .body
+            .to_string()
+            .contains("MODEL_SELF_REQUEST")
+    );
+    let message_id: String = f
         .control
         .store
         .database
         .call(|db| {
             Ok(db.query_row(
-                "SELECT count(*) FROM receipt WHERE state='held' AND hold_reason='run_completion' AND json_extract(sender_json,'$.kind')='model'",
+                "SELECT message_node_id FROM receipt ORDER BY rowid DESC LIMIT 1",
                 [],
-                |r| r.get(0),
+                |row| row.get(0),
             )?)
         })
         .await
         .unwrap();
-    assert_eq!(waiting, 1, "{}", after_tool.body);
-    after_tool
+    original_turn
         .reply
         .send((200, answer("Original task finished")))
         .unwrap();
+
+    // The completion delivery starts a revisit. Reply through the same shell CLI.
     let revisit = incoming(&mut f.receive).await;
     assert_order(
         &revisit.body,
-        &["Original task finished", "MODEL_OWN_REVISIT"],
+        &["Original task finished", "MODEL_SELF_REQUEST"],
         &[],
     );
     revisit
+        .reply
+        .send((
+            200,
+            tool(&cli_command(&[
+                "message",
+                "reply",
+                "--message",
+                &message_id,
+                "--text",
+                "Self reply delivered",
+            ])),
+        ))
+        .unwrap();
+    let after_reply = incoming(&mut f.receive).await;
+    assert!(
+        after_reply
+            .body
+            .to_string()
+            .contains("Self reply delivered")
+    );
+    after_reply
         .reply
         .send((200, answer("Self check finished")))
         .unwrap();
@@ -736,6 +767,16 @@ async fn model_shell_cli_defers_a_message_to_its_own_run_completion() {
             pending: false,
             consumed_count: 1
         })
+    );
+    let replied: i64 = f.control.store.database.call({
+        let message_id = message_id.clone();
+        move |db| Ok(db.query_row(
+            "SELECT count(*) FROM receipt WHERE id=?1 AND json_extract(result_json,'$.reply.state')='replied'",
+            [&message_id], |row| row.get(0))?)
+    }).await.unwrap();
+    assert_eq!(
+        replied, 1,
+        "self-target reply must be persisted before Run completion"
     );
     f.control.shutdown().await.unwrap();
     ipc.shutdown().await.unwrap();
