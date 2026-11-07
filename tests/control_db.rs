@@ -441,14 +441,29 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
         mechanical.wake_threads.is_empty() && mechanical.quiet_wake_threads.is_empty(),
         "ordinary machine input cannot resume a recovery Turn"
     );
-    let (human, effects) = send(&store, &child.thread_id, "human resume instruction").await;
+    let human_result = execute(
+        &store,
+        Command::MessageSend(MessageSendArgs {
+            human: true,
+            resume_recovery: false,
+            to_human: false,
+            expect_reply: false,
+            sender_label: None,
+            deliver: Deliver::Next,
+            thread_id: Some(child.thread_id.clone()),
+            text: "human resume instruction".into(),
+        }),
+    )
+    .await;
+    let human: MessageAccepted = serde_json::from_value(human_result.result.clone()).unwrap();
+    let effects = human_result;
     assert_eq!(human.turn_id, accepted.turn_id);
-    assert_eq!(human.delivery_status, DeliveryStatus::Accepted);
+    assert_eq!(human.delivery_status, DeliveryStatus::Held);
     assert!(
         effects.wake_threads.is_empty(),
         "ordinary human resume does not request foreground release"
     );
-    assert_eq!(effects.quiet_wake_threads, vec![child.thread_id]);
+    assert!(effects.quiet_wake_threads.is_empty());
     let run = human.run_id.unwrap();
     store
         .database
@@ -457,7 +472,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
                 connection.query_row("SELECT state FROM turn WHERE run_id=?1", [run], |row| {
                     row.get(0)
                 })?;
-            assert_eq!(state, "preparing");
+            assert_eq!(state, "recovery_wait");
             Ok(())
         })
         .await
@@ -1794,7 +1809,7 @@ async fn explicit_recovery_releases_only_the_resumed_turn_and_zero_row_cas_relea
                 })
             } else {
                 Command::MessageSend(MessageSendArgs {
-                    human: false,
+                    human: true,
                     resume_recovery: false,
                     to_human: false,
                     expect_reply: false,
