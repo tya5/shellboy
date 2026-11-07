@@ -10436,7 +10436,7 @@ making room, re-adding an existing tag at the limit not counting), missing and d
 the same operation ID after a later change, the AND filter over 8 Threads with 1, 2 and 3 tags in either
 order (repeats and spaces normalized), paging by 2 without skips or repeats in `exclude`, `only` and
 `include` archived modes, cursors refused (`cursor_expired`) when the tags, cwd or archived mode differ and
-accepted when only the tag order differs, the exact cwd filter (a parent path is not a match) combined with
+accepted when only the tag order differs, the cwd filter (a parent path is not a match; `/dir/`, `/dir/./x/..` match `/dir`; a relative path is `invalid_argument`) combined with
 tags, the text query and the archived modes, `tags` in `thread list` and `thread get` (omitted when empty),
 no inheritance by `thread create --parent`, removal of a Thread's tags (and of a tag name nobody else uses)
 by `thread delete --descendants`, and `thread tags` ordering by bytes, paging, the 1..=200 limit bounds, a

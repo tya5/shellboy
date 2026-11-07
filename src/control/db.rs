@@ -2329,7 +2329,24 @@ pub(crate) fn thread_list(
     let needle = title_text(filter).to_lowercase();
     // Tags and cwd narrow in SQL; the cursor is bound to them through a digest.
     let tags = tags::normalize_all(&args.tags)?;
-    let cwd = args.cwd.as_deref();
+    // Same lexical rule as saved cwds (`normalize`): `/work/proj/` and `/work/./proj` find
+    // `/work/proj`; a relative path has no base here and is refused, never silently empty.
+    let cwd_normalized = match args.cwd.as_deref() {
+        None => None,
+        Some(raw) if Path::new(raw).is_absolute() => Some(
+            normalize(Path::new(raw), Path::new("/"))?
+                .to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| error(ErrorCode::InvalidArgument, "cwd must be valid UTF-8"))?,
+        ),
+        Some(_) => {
+            return Err(error(
+                ErrorCode::InvalidArgument,
+                "cwd filter must be an absolute path",
+            ));
+        }
+    };
+    let cwd = cwd_normalized.as_deref();
     let cursor_filter = list_cursor_filter(filter, &tags, cwd);
     let watermark: i64 = connection
         .query_row("SELECT COALESCE(MAX(rowid),0) FROM thread", [], |row| {
@@ -3245,6 +3262,41 @@ mod thread_list_plan_tests {
             both.iter().any(|p| p.contains("thread_tag_by_tag")),
             "{both:?}"
         );
+    }
+
+    /// One page of 21 rows from a tag with `members` Threads, each with a Run and a Turn
+    /// (the summary columns cost most per row).
+    fn member_steps(members: u32) -> i32 {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch(&format!(
+            "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<{members})
+             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)
+             SELECT printf('m%06d',x),'/work','','p','m',printf('2026-11-01T%02d:%02d:00Z',(x/60)%24,x%60) FROM n;
+             INSERT INTO thread_tag(thread_id,tag) SELECT id,'big' FROM thread;
+             INSERT INTO run(id,thread_id,state,created_at) SELECT 'r'||id,id,'completed',updated_at FROM thread;
+             INSERT INTO turn(id,thread_id,run_id,state,created_at) SELECT 'u'||id,id,'r'||id,'completed',updated_at FROM thread;"
+        ))
+        .unwrap();
+        let mut statement = db
+            .prepare(&thread_summary::page_sql(ArchivedFilter::Exclude, 1, false))
+            .unwrap();
+        let rows = statement
+            .query_map(params![1_000_000_i64, "", "", 21_i64, "big"], |_| Ok(()))
+            .unwrap()
+            .count();
+        assert_eq!(rows, 21);
+        statement.get_status(rusqlite::StatementStatus::VmStep)
+    }
+
+    #[test]
+    fn tag_page_reads_summary_columns_for_the_page_not_for_every_member() {
+        let (few, many) = (member_steps(100), member_steps(5000));
+        eprintln!("tag page, 21 rows: 100 members {few} VM steps, 5000 members {many} VM steps");
+        // The ID sort costs a few dozen steps per member; the summary subqueries
+        // (thousands of steps per row) run for the 21 returned rows only.
+        let per_member = (many - few) / 4900;
+        assert!(per_member < 150, "{per_member} VM steps per added member");
     }
 
     #[test]

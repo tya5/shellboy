@@ -1392,8 +1392,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Cwd => local!(
             language,
-            "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。一覧では保存cwdと完全に一致するThreadだけに絞ります（相対パスは起動場所から解決）。",
-            "On creation, relative paths use the launch directory; on update, the target Thread's saved cwd. Omission follows the operation's defaults or inheritance. In a list it keeps only Threads whose saved cwd matches exactly (relative paths use the launch directory)."
+            "作成時の相対パスは起動場所、設定変更時は対象Threadの保存cwdから解決します。未指定はその操作の既定・継承です。一覧では字句的に整えた（`.`・`..`・末尾の`/`）保存cwdと一致するThreadだけに絞ります（CLIとフォームの相対パスは起動場所から解決し、wireは絶対パスのみ）。",
+            "On creation, relative paths use the launch directory; on update, the target Thread's saved cwd. Omission follows the operation's defaults or inheritance. In a list it keeps only Threads whose saved cwd equals the path after lexical cleanup (`.`, `..`, trailing `/`); the CLI and form resolve relative paths against the launch directory, a wire client must send an absolute path."
         ),
         FieldId::Connection => local!(
             language,
@@ -1442,8 +1442,8 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
         ),
         FieldId::Tags => local!(
             language,
-            "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。",
-            "List only Threads that carry every given tag (AND). The CLI repeats --tag; the form takes a comma-separated list (a tag containing a comma cannot be entered in the form)."
+            "指定したタグをすべて持つThreadだけを一覧します（AND）。CLIは--tagを繰り返し、フォームはコンマ区切りです（フォームではコンマを含むタグは指定できません）。最初のタグの所属Threadから読むため、最も絞れるタグを先に指定します。",
+            "List only Threads that carry every given tag (AND). The CLI repeats --tag; the form takes a comma-separated list (a tag containing a comma cannot be entered in the form). The page is read from the first tag's members, so name the narrowest tag first."
         ),
         FieldId::AddTags => local!(
             language,

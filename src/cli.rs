@@ -427,10 +427,10 @@ pub struct ListOptions {
     /// Archived Threads: exclude (default, hidden), include, or only.
     #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
     pub archived: wire::ArchivedFilter,
-    /// Only Threads carrying this tag; repeat for AND (at most 64).
+    /// Only Threads carrying this tag; repeat for AND (at most 64). Name the narrowest tag first: the page is read from the first tag's members.
     #[arg(long = "tag")]
     pub tags: Vec<String>,
-    /// Only Threads whose working directory is exactly this path (relative paths resolve against the current directory).
+    /// Only Threads whose saved working directory is this path, compared after lexical cleanup (`.`, `..`, trailing `/`); a parent directory does not match. Relative paths resolve against the current directory.
     #[arg(long)]
     pub cwd: Option<PathBuf>,
 }
@@ -1127,7 +1127,13 @@ impl Cli {
                     tags: a.tags,
                     cwd: a
                         .cwd
-                        .map(|path| absolute_attachment(path, startup_cwd))
+                        .map(|path| {
+                            if path.as_os_str().is_empty() {
+                                Err(invalid("--cwd must not be empty"))
+                            } else {
+                                absolute_attachment(path, startup_cwd)
+                            }
+                        })
                         .transpose()?,
                 }),
                 ThreadCommand::Tag(a) => C::ThreadTag(wire::ThreadTagArgs {
