@@ -93,7 +93,11 @@ replacement provenance counts inspect at most 201 candidates; saturation is
 unknown, not zero. Spill association is not inferred from incomplete provenance.
 Display coverage retains `latest_complete` through raw capture, preparation and
 UI adoption; incomplete records are labeled bounded candidates, not no matches
-or canonical latest. CLI history, source bytes and transaction state are unchanged.
+or canonical latest. Even an unsaturated prefix cannot certify the latest event:
+restore updates the selected path without creating a replacement, and its receipt
+may expire. The Thread detail therefore always warns that retained facts can omit
+a later restore, including when no candidate remains. CLI history, source bytes
+and transaction state are unchanged.
 
 The GC batch is one bounded recursive walk over the indexed execution/sequence
 ranges, with explicit step ordering. Each step emits one chunk or advances past
