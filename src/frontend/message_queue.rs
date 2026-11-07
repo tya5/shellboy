@@ -57,19 +57,24 @@ pub(super) fn query(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let mut query=db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),'') FROM receipt r WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' ORDER BY r.created_at,r.rowid LIMIT 128")?;
-    let awaiting_reply = query
+    let mut query = db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),''),COALESCE(json_extract(r.result_json,'$.to_human')=1,0),CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending WHERE r.target_thread_id=?1 AND r.state IN ('applied','accepted','held') AND json_extract(r.result_json,'$.reply.state')='pending' ORDER BY r.created_at,r.rowid LIMIT 128")?;
+    let awaiting_replies = query
         .query_map([thread], |r| {
-            let sender: String = r.get(1)?;
-            let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
-            let sender = sender
-                .label
-                .or(sender.thread_id)
-                .unwrap_or_else(|| format!("{:?}", sender.kind));
+            let sender_json: String = r.get(1)?;
+            let sender = crate::protocol::MessageSender::from_saved(Some(&sender_json));
+            let to_human: bool = r.get(5)?;
+            let label = if to_human {
+                "Human decision".to_owned()
+            } else {
+                sender
+                    .label
+                    .or(sender.thread_id)
+                    .unwrap_or_else(|| format!("{:?}", sender.kind))
+            };
             let excerpt: String = r.get(4)?;
             Ok(crate::ui::ReplyTarget {
                 message_id: r.get(0)?,
-                sender: crate::presentation::sanitize_plain(&sender, 0)
+                sender: crate::presentation::sanitize_plain(&label, 0)
                     .0
                     .replace(['\n', '\r'], " ")
                     .chars()
@@ -77,6 +82,9 @@ pub(super) fn query(
                     .collect(),
                 created_at: r.get::<_, String>(2)?.chars().take(128).collect(),
                 applied: r.get::<_, String>(3)? == "applied",
+                to_human,
+                recipient_thread_id: thread.to_owned(),
+                elapsed_ms: r.get::<_, i64>(6)?.max(0) as u64,
                 excerpt: crate::presentation::sanitize_plain(&excerpt, 0)
                     .0
                     .chars()
@@ -89,7 +97,7 @@ pub(super) fn query(
         items,
         total: total as u64,
         submitted,
-        awaiting_reply,
+        awaiting_replies,
     })
 }
 pub(super) fn submission_snapshot(
@@ -452,20 +460,49 @@ mod tests {
         );
         db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','pending') WHERE message_node_id='expected'",[]).unwrap();
         let pending = query(&db, "thread").unwrap();
-        assert_eq!(pending.awaiting_reply.len(), 1);
-        assert_eq!(pending.awaiting_reply[0].message_id, "expected");
-        assert!(pending.awaiting_reply[0].applied);
-        assert!(query(&db, "elsewhere").unwrap().awaiting_reply.is_empty());
+        assert_eq!(pending.awaiting_replies.len(), 1);
+        assert_eq!(pending.awaiting_replies[0].message_id, "expected");
+        assert!(pending.awaiting_replies[0].applied);
+        assert!(!pending.awaiting_replies[0].to_human);
+        assert!(query(&db, "elsewhere").unwrap().awaiting_replies.is_empty());
+        input(
+            &db,
+            "human-question",
+            "applied",
+            "admitted",
+            "choose A or B",
+            serde_json::json!({"kind":"model","thread_id":"sender"}),
+            false,
+        );
+        db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',1) WHERE message_node_id='human-question'", []).unwrap();
+        db.execute(
+            "UPDATE receipt SET created_at='2026-10-30T00:00:00Z' WHERE message_node_id='expected'",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE receipt SET created_at='2099-01-01' WHERE message_node_id='human-question'",
+            [],
+        )
+        .unwrap();
+        let pending = query(&db, "thread").unwrap();
+        assert_eq!(pending.awaiting_replies.len(), 2);
+        assert_eq!(pending.awaiting_replies[1].message_id, "human-question");
+        assert!(pending.awaiting_replies[1].to_human);
+        assert_eq!(pending.awaiting_replies[1].excerpt, "choose A or B");
+        assert_eq!(pending.awaiting_replies[1].elapsed_ms, 0);
         db.execute(
             "UPDATE receipt SET state='held',path_admission='unadmitted' WHERE message_node_id='expected'",
             [],
         )
         .unwrap();
         let pending = query(&db, "thread").unwrap();
-        assert!(!pending.awaiting_reply[0].applied);
+        assert!(!pending.awaiting_replies[0].applied);
         assert!(pending.items[0].expect_reply);
         db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','cancelled') WHERE message_node_id='expected'",[]).unwrap();
-        assert!(query(&db, "thread").unwrap().awaiting_reply.is_empty());
+        let remaining = query(&db, "thread").unwrap().awaiting_replies;
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].message_id, "human-question");
         // Synthetic overflow checks the reader's bound even with corrupt over-cap input.
         for i in 0..140 {
             let id = format!("bounded-{i:03}");
@@ -480,7 +517,7 @@ mod tests {
             );
             db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','pending') WHERE message_node_id=?1",[id]).unwrap();
         }
-        assert_eq!(query(&db, "thread").unwrap().awaiting_reply.len(), 128);
+        assert_eq!(query(&db, "thread").unwrap().awaiting_replies.len(), 128);
     }
     #[test]
     fn cancellation_summary_uses_english_for_all_outcomes_and_counts() {
@@ -503,7 +540,7 @@ mod tests {
 
     fn fixture() -> Connection {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE receipt(message_node_id TEXT,client_operation_id TEXT,sender_json TEXT,created_at TEXT,state TEXT,hold_reason TEXT,path_admission TEXT,result_json TEXT,target_thread_id TEXT); CREATE TABLE node(id TEXT,payload_json TEXT); CREATE TABLE thread_path(thread_id TEXT,node_id TEXT); CREATE TABLE attachment_ref(source_node_id TEXT); CREATE TABLE draft(id TEXT,thread_id TEXT,state TEXT,updated_at TEXT,body_json TEXT);").unwrap();
+        db.execute_batch("CREATE TABLE receipt(message_node_id TEXT,client_operation_id TEXT,sender_json TEXT,created_at TEXT,state TEXT,hold_reason TEXT,path_admission TEXT,result_json TEXT,target_thread_id TEXT); CREATE TABLE node(id TEXT,payload_json TEXT); CREATE TABLE thread_path(thread_id TEXT,node_id TEXT); CREATE TABLE attachment_ref(source_node_id TEXT); CREATE TABLE draft(id TEXT,thread_id TEXT,state TEXT,updated_at TEXT,body_json TEXT); CREATE INDEX receipt_reply_pending ON receipt(target_thread_id) WHERE json_extract(result_json,'$.reply.state')='pending';").unwrap();
         db
     }
     fn input(

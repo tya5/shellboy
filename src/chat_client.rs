@@ -229,6 +229,7 @@ impl<W: Write> Chat<'_, W> {
         let accepted: MessageAccepted = self
             .call(Command::MessageSend(MessageSendArgs {
                 human: self.human,
+                to_human: false,
                 expect_reply: self.until == ResultMode::Reply,
                 sender_label: None,
                 thread_id: self.thread.clone(),

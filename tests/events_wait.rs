@@ -571,6 +571,7 @@ async fn queued_message_cancel_and_run_stop_advance_the_clock() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(t.clone()),
@@ -794,6 +795,7 @@ async fn reply_settlement_is_announced() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: true,
             sender_label: None,
             thread_id: Some(t.clone()),
@@ -920,6 +922,7 @@ async fn turn_created_from_queued_input_is_announced_while_the_rate_gate_is_held
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(a.clone()),

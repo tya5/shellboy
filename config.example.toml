@@ -65,6 +65,8 @@ language = "en"
 live_work_rows = 3
 # Fixed held-input rows (1..10); folds are remembered only for this UI process.
 held_input_rows = 3
+# Fixed pending-reply rows (1..10; default 1).
+awaiting_human_rows = 1
 # program_status = "on" # OSC7501 terminal status; "off" emits nothing.
 # motion = "on" # "off" keeps the spinner, heading blink and status shimmer static.
 # Header/user surfaces: dark or light; NO_COLOR uses plain markers instead.

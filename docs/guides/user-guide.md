@@ -474,6 +474,10 @@ Closed/covered views and conversation switching stop that preview subscription.
 F2 keeps its existing frozen-screen behavior. Use `/status` or F8 when more than
 the configured row limit or full saved facts are needed.
 
+### Pending replies
+
+The current Thread's `Pending replies` region lists both questions for you and reply requests to another Thread. The existing person/model marks distinguish them; the region and `/replies` are scoped to the displayed Thread. Thread lists show only a pending-reply count. Answer a selected item with Enter; only a question marked as requiring a human is a request for your decision.
+
 ### Held input
 
 A second `◉ Held input` region sits below live work and above the composer. It

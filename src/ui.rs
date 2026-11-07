@@ -51,6 +51,7 @@ pub use inspection::{
     HistorySourceScope, InspectionFieldAnchor, InspectionPart, InspectionSnapshot,
     InspectionTarget, ListInspectionScope,
 };
+mod awaiting_human;
 mod branches;
 mod held_input;
 mod message_queue;
@@ -1826,6 +1827,7 @@ pub struct UiState {
     pub selection_mode: bool,
     pub live_work_collapsed: bool,
     pub held_input_collapsed: bool,
+    pub awaiting_human_collapsed: bool,
     region_owner: held_input::RegionOwner,
     selection_frozen_at: Option<String>,
     pub help_visible: bool,
@@ -1961,6 +1963,7 @@ impl UiState {
             selection_mode: false,
             live_work_collapsed: false,
             held_input_collapsed: false,
+            awaiting_human_collapsed: false,
             region_owner: held_input::RegionOwner::Live,
             selection_frozen_at: None,
             help_visible: false,
@@ -4393,6 +4396,7 @@ impl UiState {
                         || !view.pending.is_empty())
             })
             .map(|(key, view)| ThreadSummary {
+                awaiting_replies: 0,
                 last_end_message: None,
                 last_input: None,
                 activity: crate::activity::ActivityPhase::Idle,
@@ -6804,8 +6808,14 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
     } else {
         0
     };
+    let remaining = layout[1].height.saturating_sub(recovery_height);
+    let human_height = awaiting_human::height(
+        remaining,
+        state.awaiting_human_collapsed,
+        state.config.ui.awaiting_human_rows,
+    );
     let held_height = held_input::height(
-        layout[1].height.saturating_sub(recovery_height),
+        remaining.saturating_sub(human_height),
         state.held_input_collapsed,
         state.config.ui.held_input_rows,
     );
@@ -6817,13 +6827,15 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         layout[1]
             .height
             .saturating_sub(recovery_height)
-            .saturating_sub(held_height),
+            .saturating_sub(held_height)
+            .saturating_sub(human_height),
     );
     let body_area = Rect {
         height: layout[1]
             .height
             .saturating_sub(recovery_height)
             .saturating_sub(held_height)
+            .saturating_sub(human_height)
             .saturating_sub(live_height),
         ..layout[1]
     };
@@ -6839,7 +6851,18 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         layout[1].width,
         live_height,
     );
+    let human_area = Rect::new(
+        layout[1].x,
+        held_area.bottom(),
+        layout[1].width,
+        human_height,
+    );
     state.live_work_mut().set_area(live_area);
+    let (human_fold, human_cap) = (
+        state.awaiting_human_collapsed,
+        state.config.ui.awaiting_human_rows,
+    );
+    awaiting_human::configure(state.active_view_mut(), human_fold, human_cap, human_area);
     let (fold, cap) = (state.held_input_collapsed, state.config.ui.held_input_rows);
     held_input::configure(state.active_view_mut(), fold, cap, held_area);
     let recovery_area = Rect {
@@ -6928,6 +6951,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         draw_recovery(frame, recovery_area, snapshot, state.config.ui.language);
     }
     held_input::draw(frame, held_area, view, state.config.ui.language);
+    awaiting_human::draw(frame, human_area, view, state.config.ui.language);
     live_work::draw(
         frame,
         live_area,
@@ -6957,6 +6981,7 @@ pub fn draw(frame: &mut Frame<'_>, state: &mut UiState) {
         && state.composer_active()
         && !state.view().live_work.region.active
         && !state.view().held_input.active
+        && !state.view().awaiting_human.active
     {
         frame.set_cursor_position(cursor);
     }
@@ -8706,7 +8731,7 @@ mod tool_refresh_tests {
             effective_segment_chars: None,
             reduce_rounds: None,
             effective_reduce_rounds: None,
-            awaiting_reply: Vec::new(),
+            awaiting_replies: vec![serde_json::json!({"message_id":"m","excerpt":"choose"})],
             last_end_message: None,
             last_input: None,
             last_compaction: None,

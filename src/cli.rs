@@ -401,6 +401,8 @@ pub enum MessageCommand {
         after_help = "Submit and follow the returned assignment:\n  shellboy message send --thread THREAD_ID --text 'Summarize the findings'\n  shellboy message get --message MESSAGE_ID\n  shellboy turn get --turn TURN_ID\n  shellboy history get --node END_MESSAGE_NODE_ID\n\nUse only IDs returned for this request. pending has no assigned Turn yet; inspect the same message instead of sending it again. Guide: shellboy docs get --id shellboy/delegation"
     )]
     Send(MessageSendOptions),
+    /// Ask the human a question; the current Turn ends without waiting.
+    Ask(MessageAskOptions),
     /// Reply once to a received reply-expected message.
     Reply(MessageReplyOptions),
     Get(MessageOptions),
@@ -798,6 +800,11 @@ pub struct MessageSendOptions {
     /// when the Thread's live Run would complete, or immediately if none is live.
     #[arg(long, value_enum)]
     pub deliver: Option<wire::Deliver>,
+    #[command(flatten)]
+    pub text: TextOptions,
+}
+#[derive(Debug, Clone, Args)]
+pub struct MessageAskOptions {
     #[command(flatten)]
     pub text: TextOptions,
 }
@@ -1402,11 +1409,16 @@ impl Cli {
             CliCommand::Message { command } => match command {
                 MessageCommand::Send(a) => C::MessageSend(wire::MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: a.expect_reply,
                     sender_label: a.sender_label,
                     thread_id: a.thread_id,
                     text: read_text(a.text, stdin).await?,
                     deliver: a.deliver.unwrap_or_default(),
+                }),
+                MessageCommand::Ask(a) => C::MessageAsk(wire::MessageAskArgs {
+                    thread_id: None,
+                    text: read_text(a.text, stdin).await?,
                 }),
                 MessageCommand::Reply(a) => C::MessageReply(wire::MessageReplyArgs {
                     message_id: a.message_id,

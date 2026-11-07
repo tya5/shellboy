@@ -4561,6 +4561,7 @@ mod stream_tests {
         let ui_thread = std::thread::current().id();
         let rows = vec![
             ThreadSummary {
+                awaiting_replies: 0,
                 archived_at: None,
                 tags: Vec::new(),
                 last_end_message: None,
@@ -4577,6 +4578,7 @@ mod stream_tests {
                 excerpt: String::new(),
             },
             ThreadSummary {
+                awaiting_replies: 0,
                 archived_at: None,
                 tags: Vec::new(),
                 last_end_message: None,

@@ -158,7 +158,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         effective_segment_chars: None,
         reduce_rounds: None,
         effective_reduce_rounds: None,
-        awaiting_reply: Vec::new(),
+        awaiting_replies: Vec::new(),
         last_end_message: None,
         last_input: None,
         last_compaction: None,

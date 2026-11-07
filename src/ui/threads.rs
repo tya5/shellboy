@@ -571,8 +571,8 @@ impl BrowserMessage<'_> {
                     interrupted,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "{}ID {} · Parent {} · {}{}",
-                "{}ID {} | Parent {} | {}{}",
+                "{}ID {} · Parent {} · {}{}{}",
+                "{}ID {} | Parent {} | {}{}{}",
                 thread
                     .revisit
                     .as_ref()
@@ -589,6 +589,11 @@ impl BrowserMessage<'_> {
                     .map(one_line)
                     .unwrap_or_else(|| "none".into()),
                 one_line(activity_label(thread, language)),
+                if thread.awaiting_replies > 0 {
+                    format!(" · {} replies", thread.awaiting_replies)
+                } else {
+                    String::new()
+                },
                 if interrupted {
                     crate::ui::text_width::glyphs::select(
                         " · Interrupted by app exit",
@@ -605,8 +610,8 @@ impl BrowserMessage<'_> {
                     interrupted,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "{}ID {} · 親 {} · {}{}",
-                "{}ID {} | 親 {} | {}{}",
+                "{}ID {} · 親 {} · {}{}{}",
+                "{}ID {} | 親 {} | {}{}{}",
                 thread
                     .revisit
                     .as_ref()
@@ -623,6 +628,11 @@ impl BrowserMessage<'_> {
                     .map(one_line)
                     .unwrap_or_else(|| "なし".into()),
                 one_line(activity_label(thread, language)),
+                if thread.awaiting_replies > 0 {
+                    format!(" · 返信待ち{}件", thread.awaiting_replies)
+                } else {
+                    String::new()
+                },
                 if interrupted {
                     crate::ui::text_width::glyphs::select(
                         " · アプリ終了による中断",
@@ -3421,6 +3431,7 @@ mod tests {
 
     fn thread(id: &str, parent: Option<&str>) -> ThreadSummary {
         ThreadSummary {
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -4258,6 +4269,7 @@ mod tests {
     #[test]
     fn empty_or_invisible_metadata_title_never_leaves_a_blank_conversation_label() {
         let mut thread = ThreadSummary {
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -4503,6 +4515,7 @@ mod patch_tests {
     use super::*;
     fn row(id: &str, title: &str, at: &str) -> ThreadSummary {
         ThreadSummary {
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -5233,6 +5246,7 @@ mod archive_tests {
 
     fn row(id: &str, archived: bool) -> ThreadSummary {
         ThreadSummary {
+            awaiting_replies: 0,
             last_end_message: None,
             last_input: None,
             thread_id: id.into(),
@@ -5539,6 +5553,7 @@ mod watch_integration_tests {
     use crossterm::event::Event;
     fn row(id: &str, phase: crate::activity::ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -6261,6 +6276,7 @@ mod language_tests {
 
     fn record(id: &str, phase: ActivityPhase) -> ThreadSummary {
         ThreadSummary {
+            awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
             last_end_message: None,
@@ -6592,6 +6608,7 @@ mod language_tests {
         row.state = "raw_native_日本語".into();
         row.cwd = "/原文/workspace".into();
         row.latest_run_stop_reason = Some("app_exit".into());
+        row.awaiting_replies = 2;
         let before = format!("{row:?}");
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let info = BrowserMessage::Info {
@@ -6609,6 +6626,19 @@ mod language_tests {
             assert!(info.contains("Native state: raw_native_日本語"));
             assert!(info.contains("Latest Run stop reason: app_exit"));
             assert!(info.contains("raw excerpt 日本語"));
+            let detail = BrowserMessage::Detail {
+                thread: &row,
+                interrupted: false,
+            }
+            .render(language);
+            assert!(
+                detail.contains(if language == UiLanguage::Ja {
+                    "返信待ち2件"
+                } else {
+                    "2 replies"
+                }),
+                "{detail}"
+            );
         }
         assert_eq!(before, format!("{row:?}"));
     }

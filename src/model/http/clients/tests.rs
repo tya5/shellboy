@@ -554,6 +554,7 @@ async fn control_conversations_reuse_owner_client_for_chunked_sse() {
                 format!("{}:send-{n}", owner.instance_id),
                 Command::MessageSend(MessageSendArgs {
                     human: false,
+                    to_human: false,
                     expect_reply: false,
                     sender_label: None,
                     deliver: crate::protocol::Deliver::Next,

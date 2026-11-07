@@ -452,6 +452,7 @@ mod frame_delivery_tests {
         let make = |text| {
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
@@ -531,6 +532,7 @@ mod frame_delivery_tests {
             endpoint(),
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
@@ -704,6 +706,7 @@ mod frame_delivery_tests {
             endpoint(),
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: crate::protocol::Deliver::Next,
@@ -948,6 +951,7 @@ mod frame_delivery_tests {
         });
         let command = Command::MessageSend(MessageSendArgs {
             human: true,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: crate::protocol::Deliver::Next,

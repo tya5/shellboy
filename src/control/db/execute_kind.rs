@@ -63,7 +63,7 @@ named_jobs! {
     ThreadCreate => thread_create, ThreadFork => thread_fork, ThreadDelete => thread_delete,
     ThreadDeletePreview => thread_delete_preview, ThreadPrune => thread_prune, ThreadRewind => thread_rewind, ThreadArchive => thread_archive,
     ThreadUnarchive => thread_unarchive, ThreadTag => thread_tag, ThreadTags => thread_tags, ThreadCwds => thread_cwds, ThreadSet => thread_set,
-    MessageSend => message_send, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
+    MessageSend => message_send, MessageAsk => message_ask, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
     TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
     HistorySearch => history_search, HistoryRelations => history_relations, ShellGet => shell_get,
@@ -84,6 +84,7 @@ const UNDECLARED_WRITER_BOUNDS: &[Kind] = &[
     Kind::ThreadDelete,
     Kind::ThreadSet,
     Kind::MessageSend,
+    Kind::MessageAsk,
     Kind::MessageCancel,
     Kind::RunRetry,
     Kind::RunStop,
@@ -141,6 +142,7 @@ impl Kind {
             | Kind::ThreadDelete
             | Kind::ThreadSet
             | Kind::MessageSend
+            | Kind::MessageAsk
             | Kind::MessageCancel
             | Kind::RunRetry
             | Kind::RunStop
@@ -226,6 +228,7 @@ mod tests {
             Kind::ThreadDelete,
             Kind::ThreadSet,
             Kind::MessageSend,
+            Kind::MessageAsk,
             Kind::MessageCancel,
             Kind::RunRetry,
             Kind::RunStop,
@@ -266,6 +269,7 @@ mod tests {
             Kind::ThreadDelete,
             Kind::ThreadSet,
             Kind::MessageSend,
+            Kind::MessageAsk,
             Kind::MessageCancel,
             Kind::RunRetry,
             Kind::RunStop,

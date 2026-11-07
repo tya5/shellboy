@@ -281,6 +281,7 @@ pub(crate) async fn send(control: &Arc<Control>, thread: &str, text: &str) {
         control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -305,6 +306,7 @@ async fn preparation_failure_preserves_accepted_message_and_retry_reuses_its_tur
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -895,6 +897,7 @@ async fn editing_first_request_forks_an_empty_prefix_and_accepts_once_with_new_s
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -989,6 +992,7 @@ async fn edited_request_refuses_active_run_without_stopping_it() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -1299,6 +1303,7 @@ async fn reopened_provider_history_replays_without_item_ids_after_explicit_http_
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -1465,6 +1470,7 @@ async fn quota_recovery_wait_collects_via_control_and_requires_explicit_same_mes
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -1643,6 +1649,7 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -1703,6 +1710,7 @@ async fn shell_created_agents_waits_for_next_turn_and_survives_a_new_startup_cwd
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -1801,6 +1809,7 @@ async fn accepted_quit_prevents_tools_from_a_late_model_response_without_cancell
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             thread_id: Some(thread.clone()),
@@ -1973,6 +1982,7 @@ async fn responses_session_header_uses_stable_thread_uuid_and_distinct_child_and
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2182,6 +2192,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -2303,6 +2314,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -2449,6 +2461,7 @@ async fn explicit_agents_changes_wait_for_new_turn_and_retry_keeps_snapshot() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -2484,6 +2497,7 @@ async fn working_instruction_header_preserves_empty_and_original_snapshots() {
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2518,6 +2532,7 @@ async fn working_instruction_header_preserves_empty_and_original_snapshots() {
             &control,
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,
@@ -2563,6 +2578,7 @@ async fn unreadable_working_instructions_recover_without_an_outbound_header() {
         &control,
         Command::MessageSend(MessageSendArgs {
             human: false,
+            to_human: false,
             expect_reply: false,
             sender_label: None,
             deliver: Deliver::Next,
@@ -4654,6 +4670,7 @@ async fn content_filter_recovery_readback_and_real_ui_are_bilingual_and_keep_unk
                         &control,
                         Command::MessageSend(MessageSendArgs {
                             human: false,
+                            to_human: false,
                             expect_reply: false,
                             sender_label: None,
                             deliver: Deliver::Next,
@@ -5330,6 +5347,7 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
             &control,
             Command::MessageSend(MessageSendArgs {
                 human,
+                to_human: false,
                 expect_reply: false,
                 sender_label: label.map(str::to_owned),
                 deliver: Deliver::Next,

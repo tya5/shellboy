@@ -261,6 +261,7 @@ async fn streamed_fixture(malformed_final: bool) {
             format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
             Command::MessageSend(MessageSendArgs {
                 human: false,
+                to_human: false,
                 expect_reply: false,
                 sender_label: None,
                 deliver: Deliver::Next,

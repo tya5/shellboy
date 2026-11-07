@@ -533,6 +533,9 @@ impl Ui {
         if !(1..=10).contains(&self.held_input_rows) {
             return Err(invalid("ui.held_input_rows", "must be in 1..=10"));
         }
+        if !(1..=10).contains(&self.awaiting_human_rows) {
+            return Err(invalid("ui.awaiting_human_rows", "must be in 1..=10"));
+        }
         if self.paste_fold_chars == 0 {
             return Err(invalid("ui.paste_fold_chars", "must be a positive integer"));
         }
