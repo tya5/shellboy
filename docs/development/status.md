@@ -8,8 +8,7 @@ default; `--resume-recovery` explicitly resumes the same Turn and records a dist
 `message reply` is marked as human input when delivered back to its model sender, so
 it resumes that sender's recovery Turn; model-origin replies remain non-human and held.
 Tests: `tests/reply.rs` covers human/model reply behavior; `tests/control_db.rs` checks
-external CLI actor provenance. Focused local tests passed; default and all-OS CI pending
-on the new branch tip. W8 P1/P2 addressed; Studio/provider behavior not exercised.
+external CLI actor provenance. Focused local tests passed. Final SHA `9a07276e5a5344037829b4670cbac32486cb6242` passed default CI `42397206194` and all-OS CI `42397208374`. W8 P1/P2 addressed; Studio/provider behavior not exercised.
 
 ## Secretary stack memo (docs only; on branch doc/secretary-stack)
 
