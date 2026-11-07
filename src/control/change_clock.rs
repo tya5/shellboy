@@ -587,9 +587,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_delta_wakes_only_text_waiters() {
+    async fn a_delta_and_its_poll_wake_only_text_waiters_until_a_shutdown_drain() {
+        use crate::protocol::{Command, EventsWaitArgs, Request};
         use futures_util::FutureExt;
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let command = |after: Option<String>| {
+            Command::EventsWait(EventsWaitArgs {
+                after,
+                thread_ids: vec![],
+                timeout_ms: 0,
+                include_text: true,
+            })
+        };
         let changed = control.changed.notified();
         tokio::pin!(changed);
         changed.as_mut().enable();
@@ -597,8 +606,27 @@ mod tests {
         tokio::pin!(text);
         text.as_mut().enable();
         control.stream_delta("t", "a", "x", false, 0);
-        assert!(changed.as_mut().now_or_never().is_none());
         assert!(text.as_mut().now_or_never().is_some());
+        // A whole text poll completes, returning that delta: still no wake for `changed`.
+        let reply = control
+            .request(Request::new(uuid::Uuid::new_v4().to_string(), command(None)))
+            .await;
+        assert_eq!(reply.result.unwrap()["status"], "baseline");
+        assert!(changed.as_mut().now_or_never().is_none());
+        // Once admission is closed a finishing poll wakes the drain, like any other request.
+        let open = control.admit_request(&command(None)).unwrap();
+        let closing = control.admit_request(&command(None)).unwrap();
+        drop(open);
+        let quiet = control.changed.notified();
+        tokio::pin!(quiet);
+        quiet.as_mut().enable();
+        assert!(quiet.as_mut().now_or_never().is_none());
+        control.freeze_owner_admission();
+        let drain = control.changed.notified();
+        tokio::pin!(drain);
+        drain.as_mut().enable();
+        drop(closing);
+        assert!(drain.as_mut().now_or_never().is_some());
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
@@ -675,6 +703,45 @@ mod tests {
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
+    }
+
+    /// Polls finishing while shutdown drains: a skipped wake would park the drain for good.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn shutdown_drains_while_text_polls_are_finishing() {
+        use crate::protocol::{Command, EventsWaitArgs, Request};
+        for _ in 0..8 {
+            let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+            let mut pollers = Vec::new();
+            for _ in 0..16 {
+                let control = control.clone();
+                pollers.push(tokio::spawn(async move {
+                    loop {
+                        let reply = control
+                            .request(Request::new(
+                                uuid::Uuid::new_v4().to_string(),
+                                Command::EventsWait(EventsWaitArgs {
+                                    after: None,
+                                    thread_ids: vec![],
+                                    timeout_ms: 0,
+                                    include_text: true,
+                                }),
+                            ))
+                            .await;
+                        if !reply.ok {
+                            return;
+                        }
+                    }
+                }));
+            }
+            tokio::task::yield_now().await;
+            server.shutdown().await.unwrap();
+            let drained = crate::test_watchdog::watchdog("drain with polls", control.shutdown());
+            drained.await.unwrap().unwrap();
+            for poller in pollers {
+                poller.await.unwrap();
+            }
+            owner.shutdown().await.unwrap();
+        }
     }
 
     #[test]

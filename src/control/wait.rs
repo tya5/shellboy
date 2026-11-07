@@ -1508,6 +1508,81 @@ mod tests {
         control.live.test_drivers().lock().await.clear();
         owner.shutdown().await.unwrap();
     }
+    /// One parked `wait` stays parked through a client looping `events.wait` with text.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_looping_text_client_does_not_reobserve_parked_waits() {
+        let (_directory, owner, control) = fixture().await;
+        let watching = control.clone();
+        let observer = tokio::spawn(async move {
+            observe(
+                watching,
+                "parked-through-text".into(),
+                args(
+                    WaitCondition::TurnCompleted {
+                        turn_id: "ta".into(),
+                    },
+                    600_000,
+                ),
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+        });
+        pending_count(&control, 1).await;
+        let poll = |after: Option<String>| {
+            Request::new(
+                uuid::Uuid::new_v4().to_string(),
+                Command::EventsWait(EventsWaitArgs {
+                    after,
+                    thread_ids: vec!["streaming".into()],
+                    timeout_ms: 600_000,
+                    include_text: true,
+                }),
+            )
+        };
+        let first = control.request(poll(None)).await.result.unwrap();
+        let mut at = first["cursor"].as_str().unwrap().to_owned();
+        let before = control
+            .waits
+            .observations
+            .load(std::sync::atomic::Ordering::Relaxed);
+        for offset in 0..200 {
+            control.stream_delta("streaming", "attempt", "x", false, offset);
+            let value = control
+                .request(poll(Some(at.clone())))
+                .await
+                .result
+                .unwrap();
+            assert_eq!(value["status"], "text");
+            at = value["cursor"].as_str().unwrap().to_owned();
+        }
+        assert_eq!(
+            control
+                .waits
+                .observations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            before,
+            "text deltas and events.wait completions must not re-observe a parked wait"
+        );
+        // A saved change still reaches it.
+        owner
+            .db
+            .call(|db| {
+                db.execute_batch("UPDATE turn SET state='completed' WHERE id='ta'")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        control.changed("a");
+        let value = crate::test_watchdog::watchdog("parked wait", observer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(value["status"], "satisfied");
+        owner.shutdown().await.unwrap();
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn output_notifications_do_not_reobserve_lifecycle_waits_but_terminal_changes_do() {
         for case in 0..4 {

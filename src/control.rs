@@ -159,14 +159,24 @@ pub struct Control {
 struct RequestGuard {
     control: Arc<Control>,
     changes_context: bool,
+    /// False for `events.wait`: it saves nothing, so its completion has no news for a `wait`,
+    /// and a client looping it would otherwise re-observe every parked `wait` per reply.
+    completion_wakes_waits: bool,
 }
 impl Drop for RequestGuard {
     fn drop(&mut self) {
-        self.control.active_requests.fetch_sub(1, Ordering::AcqRel);
+        // A shutdown drain still needs this wake. All four operations are SeqCst: this
+        // decrement then the close load here, the close store then the count load in
+        // `work_is_drained`. With weaker orders both loads could read old values (store
+        // buffering): the wake skipped and the drain parked for good. In one total order,
+        // a load here that misses the close puts the decrement before the drain's load.
+        self.control.active_requests.fetch_sub(1, Ordering::SeqCst);
         if self.changes_context {
             self.control.context_requests.fetch_sub(1, Ordering::SeqCst);
         }
-        self.control.changed.notify_waiters();
+        if self.completion_wakes_waits || self.control.admission_closed.load(Ordering::SeqCst) {
+            self.control.changed.notify_waiters();
+        }
     }
 }
 /// Trigger- and deadline-driven maintenance requester (storage design #171).
@@ -328,6 +338,11 @@ impl Control {
             config_write: Arc::new(Mutex::new(())),
         })
     }
+    fn admit_request(self: &Arc<Self>, command: &Command) -> Result<RequestGuard, ApiError> {
+        let mut guard = self.admit(command.changes_context())?;
+        guard.completion_wakes_waits = !matches!(command, Command::EventsWait(_));
+        Ok(guard)
+    }
     fn admit(self: &Arc<Self>, changes_context: bool) -> Result<RequestGuard, ApiError> {
         // Close and the context count share a SeqCst order: either this guard is
         // counted before capture, or the second close check rejects admission.
@@ -345,6 +360,7 @@ impl Control {
         let guard = RequestGuard {
             control: self.clone(),
             changes_context,
+            completion_wakes_waits: true,
         };
         if self.stop.is_cancelled() || self.admission_closed.load(Ordering::SeqCst) {
             drop(guard);
@@ -442,7 +458,7 @@ impl Control {
                 // Capture the admission field explicitly: disjoint closure capture
                 // must not drop it with the transport/dispatcher iteration.
                 let _admission = invocation.admission;
-                let _guard = match control.admit(invocation.request.command.changes_context()) {
+                let _guard = match control.admit_request(&invocation.request.command) {
                     Ok(guard) => guard,
                     Err(error) => {
                         let _ = invocation
@@ -490,7 +506,7 @@ impl Control {
         let usage_context = crate::usage_totals::read_context();
         tokio::spawn(
             crate::usage_totals::READ_CONTEXT.scope(usage_context, async move {
-                let _guard = match control.admit(request.command.changes_context()) {
+                let _guard = match control.admit_request(&request.command) {
                     Ok(guard) => guard,
                     Err(error) => return Response::failure(request.operation_id, error),
                 };
@@ -1316,7 +1332,7 @@ impl Control {
         live_empty
             && operations_empty
             && compactions_empty
-            && self.active_requests.load(Ordering::Acquire) == 0
+            && self.active_requests.load(Ordering::SeqCst) == 0
     }
 
     pub async fn shutdown(self: &Arc<Self>) -> Result<(), ApiError> {
