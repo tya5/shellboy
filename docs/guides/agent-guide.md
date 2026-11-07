@@ -735,3 +735,7 @@ page. Each page is capped at 10,000 candidates and 168 groups, over a maximum
 statistics; do not combine percentiles across pages or mistake them for complete
 period usage. Unknown is not zero, and these measurements are not a bill or a
 reason to automatically compact unfinished work.
+
+`index remove` commits deletion without computing exact index-size counts: `counts_exact` is false and pending
+quantities/segments are null (unknown). Request `--dry-run` explicitly for exact projected counts; it may scan the
+index. `removed: true` still means the durable decision, and `reclaim_pending: true` means maintenance owns cleanup.

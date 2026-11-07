@@ -787,3 +787,9 @@ then job/input, group pointers and orphan vector rows. Each successful unit comm
 rolls back only itself. Empty vec-table DROP and fixed per-space metadata removal finish reclamation. Remaining rows
 and the durable state are the restart cursor; no new worker, queue or epoch table is required. Database file size
 still requires explicit `storage vacuum` to shrink; logical usage decreases as chunks are reclaimed.
+
+#267 review clarification: exact counts are requested only by `dry_run`. Actual removal returns
+`counts_exact: false`, `segments: null`, `vector_payload_bytes_pending: null` and
+`unfinished_jobs_pending: null`. Actual freed/deleted counts remain zero. A null quantity is unknown, not zero.
+Dry-run returns `counts_exact: true` and exact numeric projections, and can take time proportional to index size.
+The actual decision never calls these COUNT queries, even before its short write transaction.

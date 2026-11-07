@@ -10720,3 +10720,11 @@ removing historical schema objects from a fresh database, leaving the new lookup
 creates its two indexes idempotently, matching the fresh schema, and the explicit cache-diagnostic schema assertion
 advances to 35. These are treated as real missing migration coverage, not flaky tests. Focused migration reruns and
 a new exact-tip CI pair are required; the failed CI remains evidence and is not rerun.
+
+### #267 W8 P2: exclude diagnostic COUNT from actual removal
+
+Actual removal previously called the exact preview on the single DB worker before its transaction. That still
+blocked foreground work in proportion to space size. Exact counts are now dry-run-only; actual removal returns
+unknown quantities explicitly as null and `counts_exact: false`. A SQLite authorizer regression denies COUNT:
+dry-run must fail under that guard while actual removal succeeds and commits its durable decision. This tests the
+SQL boundary deterministically instead of relying on a timing threshold. Focused/CI validation is pending.
