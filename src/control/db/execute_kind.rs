@@ -65,7 +65,7 @@ named_jobs! {
     ThreadUnarchive => thread_unarchive, ThreadSet => thread_set,
     MessageSend => message_send, MessageReply => message_reply, MessageCancel => message_cancel, MessageGet => message_get,
     OperationGet => operation_get, RunGet => run_get, RunRetry => run_retry, RunStop => run_stop,
-    TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryGet => history_get,
+    TurnGet => turn_get, Wait => wait, EventsWait => events_wait, HistoryList => history_list, HistoryWindow => history_window, HistoryGet => history_get,
     HistorySearch => history_search, HistoryRelations => history_relations, ShellGet => shell_get,
     ShellRead => shell_read, ShellWrite => shell_write, ShellEof => shell_eof, ShellStop => shell_stop,
     AttachmentAdd => attachment_add, AttachmentList => attachment_list, AttachmentRemove => attachment_remove,
@@ -119,6 +119,7 @@ impl Kind {
             | Kind::RunGet
             | Kind::TurnGet
             | Kind::HistoryList
+            | Kind::HistoryWindow
             | Kind::HistoryGet
             | Kind::HistoryRelations
             | Kind::AttachmentList => PureRead,
@@ -198,7 +199,7 @@ mod tests {
         }
         assert_eq!(
             Kind::ALL.len(),
-            56,
+            57,
             "classify new kinds and update this ratchet"
         );
     }

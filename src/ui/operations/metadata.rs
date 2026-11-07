@@ -38,6 +38,10 @@ impl Form {
             "attempt" => FieldId::Attempt,
             "node" => FieldId::Node,
             "before" => FieldId::Before,
+            "ordinal" => FieldId::Ordinal,
+            "expect_node" => FieldId::ExpectNode,
+            "items_before" => FieldId::ItemsBefore,
+            "items_after" => FieldId::ItemsAfter,
             "parent" => FieldId::Parent,
             "message" => FieldId::Message,
             "messages" => FieldId::Messages,
@@ -627,6 +631,7 @@ fn operation_label_for(id: OperationId, language: crate::config::UiLanguage) -> 
         OperationId::TurnGet => local!(language, "応答処理 · 詳細", "Turn · Details"),
         OperationId::Wait => local!(language, "待機 · 条件を観測", "Wait · Observe conditions"),
         OperationId::HistoryList => local!(language, "履歴 · 一覧", "History · List"),
+        OperationId::HistoryWindow => local!(language, "履歴 · 位置で読む", "History · Window"),
         OperationId::HistoryGet => local!(language, "履歴 · 原文", "History · Original"),
         OperationId::HistorySearch => local!(language, "履歴 · 検索", "History · Search"),
         OperationId::HistoryRelations => local!(language, "履歴 · 関係", "History · Relationships"),
@@ -862,6 +867,11 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
             "指定Threadの採用経路を、出典のRun・日時・関連shell状態で絞り込んで表示します。",
             "Show a Thread's adopted path filtered by source Run, time, and related shell state."
         ),
+        OperationId::HistoryWindow => local!(
+            language,
+            "採用経路を位置（末尾・位置・ノード）を基準に前後の件数だけ読み、全体の件数と経路の版を返します。",
+            "Read the adopted path around an end, position or node by item counts, returning the total length and path revision."
+        ),
         OperationId::HistoryGet => local!(
             language,
             "指定ノードの保存原文と出典を取得します。終了メッセージのみを選ぶと推論や途中説明を除きます。",
@@ -1073,6 +1083,14 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Turn => local!(language, "応答処理ID（Turn）", "Turn ID"),
         FieldId::Node => local!(language, "履歴ノードID", "History node ID"),
         FieldId::Before => local!(language, "この履歴ノードより前", "Before this history node"),
+        FieldId::Ordinal => local!(language, "採用経路の位置", "Selected-path position"),
+        FieldId::ExpectNode => local!(
+            language,
+            "位置にあるはずのノード",
+            "Node expected at the position"
+        ),
+        FieldId::ItemsBefore => local!(language, "基準より前の件数", "Items before the anchor"),
+        FieldId::ItemsAfter => local!(language, "基準より後の件数", "Items after the anchor"),
         FieldId::Parent => local!(language, "親の会話ID", "Parent Thread ID"),
         FieldId::Message => local!(language, "入力ID", "Message ID"),
         FieldId::Messages => local!(language, "取消対象の入力ID", "Message IDs to cancel"),
@@ -1279,6 +1297,26 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "原文または関係を調べる保存ノードIDを指定します。",
             "Specify the saved node ID whose original or relationships to inspect."
+        ),
+        FieldId::Ordinal => local!(
+            language,
+            "0から数える採用経路上の位置です。省略するとノード指定も含め末尾を基準にします。",
+            "A zero-based position on the selected path. Omit it, and the node, to anchor at the end."
+        ),
+        FieldId::ExpectNode => local!(
+            language,
+            "位置指定と併用します。そこに別のノードがあれば、経路が変わったものとして失効を返します。",
+            "Use with a position. If another node sits there, the read fails as stale because the path changed."
+        ),
+        FieldId::ItemsBefore => local!(
+            language,
+            "基準の前に読む件数です。前後と基準の合計は200件までで、CLI既定は20です。",
+            "Items to read before the anchor. Before, after and the anchor total at most 200; CLI default is 20."
+        ),
+        FieldId::ItemsAfter => local!(
+            language,
+            "基準の後に読む件数です。前後と基準の合計は200件までで、CLI既定は20です。",
+            "Items to read after the anchor. Before, after and the anchor total at most 200; CLI default is 20."
         ),
         FieldId::Before => local!(
             language,

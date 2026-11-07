@@ -69,6 +69,8 @@ mod history;
 mod history_append;
 #[path = "../history_relations.rs"]
 mod history_relations;
+#[path = "../history_window.rs"]
+mod history_window;
 #[path = "../http_deadlines.rs"]
 mod http_deadlines;
 #[path = "../http_header_measurement.rs"]

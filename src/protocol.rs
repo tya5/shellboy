@@ -673,6 +673,25 @@ args!(HistoryListArgs { #[serde(default = "history_excerpt_chars")] excerpt_char
     #[serde(default, skip_serializing_if = "Option::is_none")] since: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] state: Option<String>
 });
+fn window_side() -> u32 {
+    20
+}
+// Positional read of the selected path: no anchor means its end. `before` and
+// `after` count items around the anchor; `before + after + 1` is capped at
+// `MAX_LIST_LIMIT`. `expect_node_id` pairs with `ordinal` to detect a path
+// that was rewound or compacted since the caller last saw it.
+args!(HistoryWindowArgs { thread_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] ordinal: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] node_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] expect_node_id: Option<String>,
+    #[serde(default = "window_side")] before: u32,
+    #[serde(default = "window_side")] after: u32,
+    #[serde(default = "history_excerpt_chars")] excerpt_chars: u32
+});
+// Items carry their own `selection.ordinal`. `total` is one past the last
+// ordinal; `revision` is the Thread's selected-path revision (it also advances
+// on append, which keeps every earlier position valid).
+args!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
 fn is_false(value: &bool) -> bool {
     !*value
 }
@@ -898,6 +917,8 @@ pub enum Command {
     EventsWait(EventsWaitArgs),
     #[serde(rename = "history.list")]
     HistoryList(HistoryListArgs),
+    #[serde(rename = "history.window")]
+    HistoryWindow(HistoryWindowArgs),
     #[serde(rename = "history.get")]
     HistoryGet(HistoryGetArgs),
     #[serde(rename = "history.search")]

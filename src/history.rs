@@ -7,6 +7,8 @@ use serde_json::Value;
 mod append;
 pub use append::append_existing_nodes;
 mod list;
+mod window;
+pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};
 mod node_row;
 pub(crate) mod observation;
 pub use list::list_nodes;

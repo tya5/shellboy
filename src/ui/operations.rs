@@ -88,6 +88,7 @@ ThreadList,
     StorageCollect,
     ModelList,
     HistoryRelations,
+    HistoryWindow,
     ThreadDeletePreview,
     Status,
     MessageCancel,
@@ -1960,6 +1961,38 @@ impl Form {
                     }))
                 },
             ),
+            OpKind::HistoryWindow => (
+                vec![
+                    thread(),
+                    f("ordinal", "位置（空=末尾）", String::new(), Text),
+                    f("node", "node ID（空=末尾）", String::new(), Text),
+                    f(
+                        "expect_node",
+                        "位置にあるはずのnode ID",
+                        String::new(),
+                        Text,
+                    ),
+                    f("items_before", "前の件数", "20".into(), Number),
+                    f("items_after", "後の件数", "20".into(), Number),
+                    f(
+                        "excerpt_chars",
+                        "抜粋文字数（0=省略）",
+                        "512".into(),
+                        Number,
+                    ),
+                ],
+                |form, _cwd| {
+                    Ok(Command::HistoryWindow(HistoryWindowArgs {
+                        thread_id: form.owned("thread")?,
+                        ordinal: form.optional_number("ordinal")?,
+                        node_id: form.optional("node")?,
+                        expect_node_id: form.optional("expect_node")?,
+                        before: form.number("items_before")?,
+                        after: form.number("items_after")?,
+                        excerpt_chars: form.number("excerpt_chars")?,
+                    }))
+                },
+            ),
             OpKind::ThreadDeletePreview => (
                 vec![
                     thread(),
@@ -2628,6 +2661,11 @@ mod tests {
                 json!({"node_id":id(2),"relation":"previous","limit":50}),
             ),
             (
+                OpKind::HistoryWindow,
+                "history.window",
+                json!({"thread_id":id(1),"before":20,"after":20}),
+            ),
+            (
                 OpKind::ThreadDeletePreview,
                 "thread.delete_preview",
                 json!({"thread_id":id(1),"descendants":false}),
@@ -2825,6 +2863,7 @@ mod tests {
                         | "run.get"
                         | "turn.get"
                         | "history.list"
+                        | "history.window"
                         | "history.get"
                         | "history.search"
                         | "history.relations"
@@ -3407,10 +3446,10 @@ mod entry_tests {
         let mut operations = Operations::new(recovery());
         let rows = operations.rows();
         assert_eq!(rows[0], OpKind::RunRetry);
-        assert_eq!(rows.len(), 66);
+        assert_eq!(rows.len(), 67);
         assert_eq!(
             rows.iter().collect::<std::collections::HashSet<_>>().len(),
-            66
+            67
         );
         operations.paste("/retry");
         assert_eq!(operations.rows(), vec![OpKind::RunRetry]);
@@ -3422,7 +3461,7 @@ mod entry_tests {
         assert!(!operations.filter.is_empty());
         operations.key(key(KeyCode::Esc));
         assert!(operations.filter.is_empty());
-        assert_eq!(operations.rows().len(), 66);
+        assert_eq!(operations.rows().len(), 67);
         operations.paste("no-such-operation-不存在");
         assert!(operations.rows().is_empty());
         operations.key(key(KeyCode::Enter));

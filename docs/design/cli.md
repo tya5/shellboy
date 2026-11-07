@@ -27,6 +27,7 @@ shellboy run (get|retry|stop) --run ID
 shellboy turn get --turn ID
 shellboy wait --conditions-json JSON [--timeout-ms 30000]
 shellboy history list --thread ID [--limit 50] [--cursor TOKEN]
+shellboy history window --thread ID [--ordinal N [--expect-node ID] | --node ID] [--before 20] [--after 20] [--excerpt-chars 512]
 shellboy history get --node ID [--limit-bytes 65536] [--cursor TOKEN] [--encoding UTF-8]
 shellboy history search --query TEXT [--limit 10] [--thread ID] [--kind KIND]... [--exclude-kind KIND]... [--from RFC3339] [--to RFC3339]
 shellboy history relations --node ID --relation (previous|next|sources|replacements) [--limit 50] [--cursor TOKEN]

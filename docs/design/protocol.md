@@ -62,6 +62,15 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 
 `HistoryRelationsArgs` はnode_id、必須relation（previous/next/sources/replacements）、limit既定50・最大200、任意cursor。`Page<RelationItem>` の各要素はnode_id/provenanceと、置換関係に限るreplacement_id/source_revision/source_hashを持つ。previous/nextは会話辺、sourcesはcompleted置換出力→出典、replacementsは出典→completed置換出力である。relation item直下のsource_revision/hashは置換記録時の出典witness、provenance.source_revisionは返却nodeの現在版であり区別する。cursorは対象node・relation・revisionとwatermarkに束縛し、追加関係を途中pageへ混入させない。履歴変更・無制限の祖先/子孫探索は含めない。採用経路は既存history.listで取得する。
 
+#### history.window（#268）
+
+`HistoryWindowArgs` はthread_id、任意のordinal又はnode_id（両方は不可。どちらも無ければ末尾が基準）、任意のexpect_node_id（ordinalと併用のみ）、before・after（各既定20）、excerpt_chars（history.listと同じ）。`before + after + 1` は最大200（`MAX_LIST_LIMIT`）で、超過は`invalid_argument`。結果`HistoryWindow`は`{thread_id, revision, total, items}`で、itemsはhistory.listと同じ`HistorySnippet`（`selection.ordinal`が位置）を位置の昇順に並べる。cursorは持たず、絞り込み（run/since/state）も受けない。history.listの引数・結果は変えない。
+
+- `total` は採用経路の最後のordinal+1、`revision` はThreadのselection_revisionである。ordinalは全ての本番writer（追記はMAX+1、経路の採用＝rewind・compactionは0..nの書き直し、forkは接頭部の複製、中断tool結果の挿入は後続を後ろへ移して連続を保つ）で0から欠番なく連続するため、totalは件数と一致する。欠番は書き手のバグであり、windowは存在する行だけを返し、totalは最後の位置+1のままとする。
+- 追記でrevisionは進むが既存の位置は変わらない。rewind・compactionはrevisionを進め、位置が移動又は消える（pruneは本文だけを回収し経路と位置を変えない）。revisionだけでは追記と巻き戻しを区別できないので、呼び出し側は保持している位置のnodeを`expect_node_id`として渡す。
+- 失効：ordinalが末尾より後、nodeが採用経路上に無い、`expect_node_id`が一致しない場合は`cursor_expired`を返し、`details`に現在の`revision`と`total`を付ける。呼び出し側は基準無し（末尾）又はtotal内の位置で読み直す。存在しないThreadは`thread_not_found`。
+- 費用：総数は`thread_path`の主キー末尾の1回のseek、基準nodeはUNIQUE(thread_id,node_id)の1回のseek、窓は主キー範囲（`ordinal>=? AND ordinal<=?`）で、経路の長さに依存しない。EXPLAIN QUERY PLANとVM step数（経路100行と100,000行で同等）はtests/history_window.rsで検査する。read laneで実行し、writer laneを使わない（`PureRead`）。
+
 ## 操作追跡・context・削除影響の採用済み拡張
 
 現行操作数は37。`thread.delete_preview` は既存ThreadDeleteArgsを用いる読み取り専用操作で、CLIは `thread delete-preview --thread ID [--descendants]`。同snapshotの阻害Run・直接参照・対象件数を返し、実削除の再判定は維持する。`reclaimable_bytes` はnullと理由を返し、GC到達性や物理容量を推定しない。[全体設計](observability-and-deletion.md)、[削除影響](deletion-impact.md)を参照。

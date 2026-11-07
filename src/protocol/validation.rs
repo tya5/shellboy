@@ -512,6 +512,27 @@ impl HistorySearchArgs {
     }
 }
 
+impl HistoryWindowArgs {
+    fn validate(&self) -> Result<(), ApiError> {
+        nonempty(&self.thread_id, "thread_id")?;
+        optional_nonempty(self.node_id.as_deref(), "node_id")?;
+        optional_nonempty(self.expect_node_id.as_deref(), "expect_node_id")?;
+        if self.ordinal.is_some() && self.node_id.is_some() {
+            return Err(invalid("give at most one of ordinal and node_id"));
+        }
+        if self.expect_node_id.is_some() && self.ordinal.is_none() {
+            return Err(invalid("expect_node_id needs ordinal"));
+        }
+        if u64::from(self.before) + u64::from(self.after) + 1 > u64::from(MAX_LIST_LIMIT) {
+            return Err(invalid("before + after + 1 must be at most 200"));
+        }
+        if self.excerpt_chars > MAX_HISTORY_EXCERPT_CHARS {
+            return Err(invalid("excerpt-chars must be in 0..=4096"));
+        }
+        Ok(())
+    }
+}
+
 impl HistoryRelationsArgs {
     fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.node_id, "node_id")?;
@@ -685,6 +706,7 @@ impl Command {
             Self::TurnGet(a) => nonempty(&a.turn_id, "turn_id"),
             Self::Wait(a) => a.validate(),
             Self::HistoryList(a) => a.validate(),
+            Self::HistoryWindow(a) => a.validate(),
             Self::HistoryGet(a) => a.validate(),
             Self::HistorySearch(a) => a.validate(),
             Self::HistoryRelations(a) => a.validate(),
