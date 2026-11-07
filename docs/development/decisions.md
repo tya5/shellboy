@@ -4101,3 +4101,16 @@ dependency or migration is added (`toml_edit` and `toml` are already dependencie
   confusion it removes. (7) The credential read runs inside `wait_headers`, so cancel and the header deadline apply to it.
   (8) A header-only connection with no key is reported by the setup hints. (9) The `credentials.set` replay limit across an
   owner restart is documented and the conflict hint explains it.
+
+
+### D-251: Reject oversized final reduce cache entries
+
+An otherwise reusable final reduce entry exceeding the current summary character
+limit is regenerated on a later explicit or permitted automatic attempt. Map and
+intermediate reduce caches remain reusable; each regeneration consumes the
+existing reduce-request budget and all size, progress, cancellation, provenance
+and adoption checks remain in force. This avoids deterministically replaying an
+unacceptable cached final answer without creating an unbounded retry. Revisit if
+provider measurements show repeated oversized results or a stricter shared
+cache invalidation policy is adopted. No production frequency is inferred from
+synthetic fixtures.

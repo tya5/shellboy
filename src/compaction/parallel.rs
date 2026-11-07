@@ -32,8 +32,13 @@ pub(super) struct Job {
     round: u32,
     retries: u32,
     delay: Duration,
+    cached_max_chars: Option<u64>,
 }
 impl Job {
+    pub(super) fn cached_max_chars(mut self, limit: u64) -> Self {
+        self.cached_max_chars = Some(limit);
+        self
+    }
     pub(super) fn reduce_round(mut self, round: u32) -> Self {
         self.round = round;
         self
@@ -54,6 +59,7 @@ impl Job {
             round: 0,
             retries: 0,
             delay: Duration::ZERO,
+            cached_max_chars: None,
         }
     }
 }
@@ -206,7 +212,12 @@ impl Compactor {
                 .call(move |db| CachedPart::load(db, &lookup))
                 .await
                 .map_err(storage_error)?;
-            if let Some(part) = cached.filter(CachedPart::reusable) {
+            if let Some(part) = cached.filter(|part| {
+                part.reusable()
+                    && job
+                        .cached_max_chars
+                        .is_none_or(|limit| part.text.chars().count() as u64 <= limit)
+            }) {
                 return Ok(Some((job.path, part)));
             }
         }

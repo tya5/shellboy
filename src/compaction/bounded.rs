@@ -106,6 +106,7 @@ impl Compactor {
                 .await?;
             let mut jobs = Vec::new();
             let mut batch_sources: Vec<Vec<String>> = Vec::new();
+            let final_batch = batches.len() == 1;
             for (position, (text, members)) in batches.into_iter().enumerate() {
                 // Ordered union of the inputs' sources, without duplicates.
                 let mut union: Vec<String> = Vec::new();
@@ -134,10 +135,13 @@ impl Compactor {
                     snapshot.effort.as_deref(),
                     false,
                 );
-                jobs.push(
+                let mut job =
                     super::parallel::Job::new(vec![position], cache_key, request, union, (0, 0, 0))
-                        .reduce_round(round as u32 + 1),
-                );
+                        .reduce_round(round as u32 + 1);
+                if final_batch {
+                    job = job.cached_max_chars(budget.limit);
+                }
+                jobs.push(job);
             }
             // The whole round runs together; its results return in batch order.
             let outcome = self

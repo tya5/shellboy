@@ -282,10 +282,12 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
 }
 
 #[tokio::test]
-async fn bounded_summary_retries_oversize_then_rejects_without_adopting_and_reuses_audit() {
+async fn bounded_summary_retries_oversize_cache_then_adopts_valid_result() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
-    let (f, server) = setup(vec!["あ".repeat(2001); 5], &log).await;
+    let mut replies = vec!["あ".repeat(2001); 5];
+    replies.push("valid concise summary".into());
+    let (f, server) = setup(replies, &log).await;
     f.text("n0", &"source".repeat(5000)).await;
     let before = f.path().await;
     let mut a = args("n0");
@@ -297,14 +299,10 @@ async fn bounded_summary_retries_oversize_then_rejects_without_adopting_and_reus
     assert_eq!(d["model_requests"], 5);
     assert_eq!(lines(&log), 5);
     assert_eq!(f.path().await, before);
-    let e = edit(&f, &a).await.unwrap_err();
-    assert_eq!(e.details.unwrap()["model_requests"], 0);
-    assert_eq!(
-        lines(&log),
-        5,
-        "cached failed-size attempt must not call the mock again"
-    );
-    assert_eq!(f.path().await, before);
+    let result = edit(&f, &a).await.unwrap();
+    assert!(result.compact.summary_node_id.is_some());
+    assert_eq!(lines(&log), 6);
+    assert_ne!(f.path().await, before);
     finish(f, server).await;
 }
 
