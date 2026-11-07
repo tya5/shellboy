@@ -1099,6 +1099,11 @@ pub fn require_disk_free(config: &Config, free: Option<u64>, adding: u64) -> Res
     Ok(())
 }
 
+/// Free bytes of the volume holding this connection's database (`None` = unknown).
+pub(crate) fn database_free_bytes(db: &Connection) -> Option<u64> {
+    disk::database_volume_free(db)
+}
+
 pub(crate) fn logical_total_tx(db: &Connection) -> Result<u64> {
     Ok(logical_usage(db)?.total())
 }

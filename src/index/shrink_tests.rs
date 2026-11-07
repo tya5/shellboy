@@ -956,6 +956,75 @@ async fn reaching_the_logical_cap_fails_only_the_conversion() {
     f.db.shutdown().await.unwrap();
 }
 
+/// Free disk space bounds a conversion like the logical level does: refused at
+/// start, failed (not paused) mid-run, candidate given back, resumable.
+#[tokio::test]
+async fn low_free_disk_refuses_and_fails_only_the_conversion() {
+    let f = fixture(clustered(40, 8), vec![1.0; 8]).await;
+    let source = f.source.id.clone();
+    let mut config = (*f.config).clone();
+    config.limits.disk_free_min_bytes = 1000;
+    let service = IndexService::new(f.db.clone(), Arc::new(config.clone()));
+    let dir = f.temp.path();
+    // 40 vectors x 8 bytes added: 1_200 free would leave 880 < 1_000.
+    crate::gc::force_free_for_test(dir, Some(1_200));
+    let dry = IndexShrinkArgs {
+        dry_run: true,
+        ..Default::default()
+    };
+    let preview = service.shrink(dry).await.unwrap();
+    assert_eq!(preview["state"], "low_disk");
+    assert_eq!(preview["filesystem_free_bytes"], 1_200);
+    let message = preview["low_disk"].as_str().unwrap();
+    assert!(message.contains("disk_free_min_bytes") && message.contains("index remove"));
+    assert!(service.shrink(Default::default()).await.is_err());
+    assert!(f.record().await.is_none(), "nothing changed");
+    // Unknown free space does not refuse.
+    crate::gc::force_free_for_test(dir, None);
+    let dry = IndexShrinkArgs {
+        dry_run: true,
+        ..Default::default()
+    };
+    assert_eq!(service.shrink(dry).await.unwrap()["state"], "ready");
+    // Room at start, then the disk fills while converting.
+    crate::gc::force_free_for_test(dir, Some(1_000_000));
+    service.shrink(Default::default()).await.unwrap();
+    crate::gc::force_free_for_test(dir, Some(500));
+    while service.shrink_unit().await.unwrap() {}
+    let failed = f.record().await.unwrap();
+    assert_eq!(failed.error.as_ref().unwrap()["code"], "storage_limit");
+    assert!(
+        failed.error.as_ref().unwrap()["message"]
+            .as_str()
+            .unwrap()
+            .contains("free disk space")
+    );
+    assert_eq!(failed.target, None, "the partial candidate was given back");
+    assert_eq!(f.active().await.id, source);
+    let pauses =
+        f.db.call(|db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key>='index.pause.' AND key<'index.pause/'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(pauses, 0);
+    // A resume with the disk still short changes nothing; with room it completes.
+    assert!(service.shrink(Default::default()).await.is_err());
+    assert!(f.record().await.unwrap().error.is_some());
+    crate::gc::force_free_for_test(dir, Some(1_000_000));
+    assert_eq!(
+        service.shrink(Default::default()).await.unwrap()["state"],
+        "resumed"
+    );
+    while service.shrink_unit().await.unwrap() {}
+    assert_ne!(f.active().await.id, source);
+    f.db.shutdown().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_failed_run_is_released_when_the_source_stops_being_active() {
     let f = fixture(clustered(40, 8), vec![1.0; 8]).await;

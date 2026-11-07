@@ -78,7 +78,7 @@ Resume point: all-OS CI on the final SHA, then owner review.
 from the OS on every call (`src/gc/disk.rs`), no cache, no worker/queue. Unknown free space never
 holds. `storage status` adds `disk_free_min_bytes` and `disk_free_state` (`ok|warning|held|unknown`,
 warning below 2x the minimum); the TUI storage view carries the same as `physical_observation.sample.disk_guard`
-(no new glyph). Stop, terminal records, observation, GC and `storage collect` stay un-gated. Index worker: `disk_free_low` saves no pause and keeps the queue (claims deferred, 30 s re-check); only the logical limit pauses. Not
+(no new glyph). Stop, terminal records, observation, GC and `storage collect` stay un-gated. `index shrink` also refuses (`low_disk`) and fails alone on a short disk. Index worker: `disk_free_low` saves no pause and keeps the queue (claims deferred, 30 s re-check); only the logical limit pauses. Not
 stopped: commands a model's shell already runs. `src/control/driver.rs:1` comment fixed. Tests:
 `gc::disk::tests::*`, `low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns`,
 `disk_free_minimum_defaults_and_old_data_limits_still_load`. Cost and checks are in
