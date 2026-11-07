@@ -159,12 +159,18 @@ output, a multibyte character split across network reads, a retry as a new `atte
 (checked against `model_attempt`), slow reader `gap` with exact offsets, filter, plain poll sees no text
 and is not ended by it, change hints reach a text watcher mid-stream, and disconnect and shutdown ending a
 pending text poll. `src/control/change_clock.rs` units: bound for any delta size, oversized delta cut
-on a character boundary, attempt cap and re-entry with a gap, paged reply, largest reply fits a frame, a delta
+on a character boundary, newcomers refused past the attempt cap with incumbents keeping their previews, later entry with a gap, paged reply, largest reply fits a frame, a delta
 wakes only `text_changed`, and 3000 lock-step deltas with an hour-long poll timeout, so only a wake-up can end a poll.
 
 A stalled reader: a parked poll in-process and, on Unix, two real sockets that send a text poll holding about 48 KiB or more of
 retained text and never read; the driver finishes 2 MiB of deltas. Whether those server writes were
 really blocked was not observed; that depends on the OS socket buffer.
+
+Parked `wait` observations (`waits.observations`), one parked `wait`, 200 deltas with a client looping `events.wait` with text:
+reviewer's probe before the fix +200, after it +0 in `a_looping_text_client_does_not_reobserve_parked_waits`; with the fix removed that test failed: 108 extra observations in that run (fewer than 200 because wakes coalesce while an observation is in flight).
+Shutdown wake: `shutdown_drains_while_text_polls_are_finishing` passes on arm64, but a test cannot prove a memory ordering; that rests on the SeqCst
+reasoning in `RequestGuard`. Stop and interrupt freeing an entry with the provider stream still open:
+`the_entry_is_freed_when_the_attempt_is_stopped_or_interrupted`.
 
 Test-hang record: an earlier version of the stalled-reader test ran for 2h14m until killed. Cause, measured:
 retained text stopped at 61440 bytes (15 pieces, `gap:true`, first offset 4096), and the test's unbounded loop waited for
@@ -176,7 +182,7 @@ Measured facts on that machine, no bound asserted:
 - Delta latency on a debug build, provider socket write to reply at a client looping one poll, 400 one-character deltas
   5 ms apart, two runs: in-process p50 516 and 534 us, p95 922 and 814 us, max 1.2 ms in both; local IPC (Unix socket, new
   connection per poll) p50 713 and 691 us, p95 1090 and 1235 us, max 2.0 and 11.2 ms. One poll per delta at this rate. No real
-  provider, browser or bridge is involved. Command: `cargo test --test integration events_text::measure -- --ignored --nocapture`.
+  provider, browser or bridge is involved. After the review fixes, one run: in-process p50 351 us, p95 662 us, max 1.4 ms; local IPC p50 635 us, p95 1525 us, max 8.5 ms. Command: `cargo test --test integration events_text::measure -- --ignored --nocapture`.
 - Memory, requested heap bytes from a counting allocator (allocator overhead excluded), optimized build of
   `change_clock.rs` in a throwaway harness, not committed. The limit counts text bytes plus 40 bytes per delta, at most 1 MiB in total,
   and is not a memory bound. Live heap for one attempt after far more than the limit was written: 84055 (1-byte deltas), 93377 (8), 81817 (64),
@@ -194,7 +200,7 @@ Flaky landed tests, found while validating this change (macOS arm64, this machin
 
 Both fixes shipped in v0.10.0.
 
-Not fixed and not investigated, seen in full-suite runs under this load, left to be filed: on main only,
+Not fixed and not investigated, seen in full-suite runs under this load, tracked in #260. With the review fixes, in 8 more full-suite runs: no test failed, including the four below that had failed only with E3. That does not show they are gone; machine load was not controlled. The earlier list: on main only,
 `response_retries::overflow_trim_keeps_every_user_input_of_the_active_turn`, `gc::history_gc_budget_measurement_with_concurrent_writes`; with E3 only,
 `runtime::background_read_keeps_target_raw_separate_from_message_send_and_observer_output`,
 `runtime::slow_database_batches_binary_shell_output_without_losing_natural_exit_tail`, two `turn_interrupt` tests (the three read show a shell ending `failed`

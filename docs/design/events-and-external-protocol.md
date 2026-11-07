@@ -274,10 +274,14 @@ Client rule, complete:
 3. For each `live_text` entry: if `attempt_id` differs from the preview's or `gap` is true, discard
    the preview first. Append `deltas`. A `gap` means text was lost: show the tail as incomplete or
    hide it until saved output exists.
-4. A Thread with a preview and no entry in a reply: no text is held for it (the attempt ended, or was
-   dropped at the attempt bound). Discard the preview and read saved facts; a `changes` hint follows
-   the commit of any ended attempt. Text not yet read when an attempt ends is lost, by design.
+4. A Thread with a preview and no entry in a reply: no text is held for it, because the attempt ended.
+   Discard the preview and read saved facts; a `changes` hint follows the commit of any ended attempt. Text not yet read when an attempt ends is lost, by design.
 5. A Thread added to the filter later: take a new baseline, as with changes.
+6. Start with a baseline that asks for text. A cursor from a plain poll returns only text after that position, with no
+   `gap`, so an attempt already under way would seem to begin at a later offset.
+7. "Local IPC work capacity is busy" (`invalid_state`, `request_may_have_been_applied:false`) can come back at
+   once when the ordinary slots are full (`src/ipc/server.rs`). It is routine for a looping client: nothing was
+   applied, so keep the preview and poll again with the same cursor.
 
 Cursor: unchanged, opaque, one position. Each delta takes the next value of the clock's `seq`, without
 becoming a change entry. A plain poll's cursor moves past text it never sees, as it does past filtered
@@ -290,8 +294,10 @@ attempt (the TUI's window size), which counts text bytes plus a 40-byte record p
 `MAX_LIVE_TEXT_ATTEMPTS` 16, so at most 1 MiB counted. These limit retained text; they are not a memory
 bound. The count leaves out deque capacity, IDs, map storage and allocator overhead: requested heap reached
 1,489,848 bytes for 16 attempts when measured (acceptance.md). Oldest deltas go first and raise that attempt's
-`floor`; past 16 attempts the least recently written loses its entry and re-enters with a gap on its
-next delta. Concurrent attempts have no other limit today, so this bound can bite. A compile-time
+`floor`. While 16 attempts hold text a further attempt is refused and not listed; those holding text keep their
+previews. When one ends, the next refused attempt to write enters with `gap:true` from its current offset. Evicting
+instead made attempts take turns: 17 Threads in round robin gave 3184 of 3200 entries `gap:true`. Concurrent attempts
+have no other limit today, so a silent attempt can hold a place until it ends. A compile-time
 assertion keeps 16 x 64 KiB x 6 (the JSON worst case, control characters) plus 1 MiB inside the 8 MiB
 frame, so all retained text fits one reply and text needs no paging. Termination: an RAII guard in
 `stream_response` frees the entry on every exit (return, cancel, dropped future), before the outcome
@@ -301,7 +307,11 @@ Write path: `Control::stream_delta` appends under the lock, publishes the existi
 `notify_waiters` on a separate `text_changed` Notify. No DB work and no await. The lock is held for memory
 updates and copies, never across `.await` or I/O; JSON encoding and socket writes happen outside it,
 so a reader that stops reading holds nothing the driver needs. Deltas do not touch `changed`, which
-wakes `wait` loops and plain polls. Only polls with `include_text` wait on `text_changed`. Each new delta
+wakes `wait` loops and plain polls. Only polls with `include_text` wait on `text_changed`. A finished request
+normally notifies `changed` too (`RequestGuard`), so a looping client would re-observe every parked `wait`, a database
+transaction each, once per reply. An `events.wait` completion therefore notifies only once admission is closed, for
+the shutdown drain; the guard and the drain use SeqCst on both atomics so the wake cannot be missed (comment in
+`RequestGuard`). Other requests still notify on completion. Each new delta
 ends a waiting text poll, so a client's request rate follows the model's delta rate at most, one
 round trip at a time; deltas arriving meanwhile merge. A bridge may pace itself.
 
@@ -464,8 +474,8 @@ A2 and D must land before `shellboy-web` depends on the RPC.
   chats plus a bridge reduce capacity. A dedicated small class would change the
   documented 28-permit budget; decide after measurement (Q6, answered for now: shared slots).
 - Coalescing hides intermediate states; documented, durable facts remain.
-- E3's preview is lossy by design (2.5): more than 16 attempts streaming at once, or a reader behind by
-  more than 64 KiB charged, sees gaps. Polling per delta costs a connection per reply on the current transport.
+- E3's preview is lossy by design (2.5): attempts past the first 16 show no text until one ends, and a reader behind by
+  more than 64 KiB counted sees a gap. Polling per delta costs a connection per reply on the current transport.
 - Protocol 3 breaks every mixed-release pair once (acceptable pre-1.0 under
   the current same-release rule, but it is a visible break).
 - Schema truthfulness is limited by `Value` fields until they are typed.

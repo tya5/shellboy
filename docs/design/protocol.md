@@ -652,7 +652,8 @@ Absent unless asked. `status` gains `text`, returned when text is new and no cha
 `resync_required` carry everything retained. `offset` counts Unicode scalar values already streamed by
 that attempt, reasoning and refusal included; it restarts with each attempt, and a retry has a new
 `attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
-`live_text` holds no text. The text is never saved, not a position in saved output and not part of any
+`live_text` holds no text: its attempt ended, or 16 others hold text and it enters later with `gap:true`. Start with a baseline.
+A looping client can get "work capacity is busy" at once when ordinary slots are full; nothing was applied, so poll again with the same cursor. The text is never saved, not a position in saved output and not part of any
 receipt; retained text is limited to 64 KiB per attempt, counting 40 bytes per delta, and 16 attempts, and all of it
 fits one frame. Those limits are not a memory bound; the measured heap is in the validation record. Client rule
 and state record: [events-and-external-protocol](events-and-external-protocol.md) 2.5.

@@ -348,8 +348,11 @@ Example: `{"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,
 | `deltas[].offset` | Unicode scalar values (not bytes, not UTF-16 units) already streamed by this attempt, reasoning and refusal text included. Not a position in saved output |
 | `deltas[].reasoning` | `true` for model reasoning text |
 
-A Thread you were showing that is missing from `live_text` holds no text: its attempt ended, or it was
-dropped because more than 16 attempts were streaming. Discard the preview and read saved facts. Each
+Start with a baseline (`--text` without `--after`): it returns the text already retained, so you join an answer under way.
+A Thread you were showing that is missing from `live_text` holds no text because its attempt ended. Discard the preview
+and read saved facts. While 16 attempts hold text, further attempts show no text; one enters later with `gap:true` when
+room frees up. A looping client can get `Local IPC work capacity is busy` at once when the ordinary request slots are full.
+That is routine and nothing was applied: keep the preview and poll again with the same cursor. Each
 attempt keeps at most 64 KiB of text; text unread when an attempt ends is gone. When you add a Thread to
 `--thread`, take a new baseline.
 

@@ -3940,12 +3940,16 @@ Why this shape, smallest first:
   two of the 24 shared slots, or loses hints while waiting for text. One lock makes the pair consistent.
 - Deltas take clock sequence numbers, so the existing one cursor positions both, with no per-Thread
   positions in the cursor or request, no client-side offset bookkeeping and no cursor version change.
-- A separate `text_changed` Notify, because `changed` wakes every `wait` loop, some of which read the
-  database. A delta rate on `changed` would turn model speed into DB load for clients that never asked.
+- A separate `text_changed` Notify, because `changed` wakes every `wait` loop, and each one runs a database
+  transaction. A delta rate on `changed` would turn model speed into DB load for clients that never asked. That alone was
+  not enough: review found each finished request also notified `changed`, so a looping text client re-observed a parked
+  `wait` once per reply (200 of 200 in the reviewer's probe). `events.wait` completions now notify only once admission is
+  closed. The reviewer read that as race-free by order; it is not with AcqRel and Acquire, which permit store buffering, so
+  the guard's decrement and close load and the drain's count load are SeqCst.
 - The whole retained state fits one frame by constants (compile-time assertion), so text needs no
   paging, no `more` of its own and no second truncation rule.
 - Whether an attempt is live is level-triggered: absent from `live_text` means no text held. There are no
-  tombstones, no "ended" event to retain, and the same rule covers ended and dropped attempts.
+  tombstones and no "ended" event to retain.
 
 State record (need, limits, owner, termination): events-and-external-protocol.md 2.5. Limits are constants:
 64 KiB per attempt, counting 40 bytes per delta so one-byte deltas cannot escape it, and 16 attempts. They limit
@@ -3954,9 +3958,10 @@ retained text and are not a memory bound: deque capacity and the rest are not co
 
 Weaker judgments, with their recheck conditions:
 
-- 16 attempts is a choice, not derived from a limit: concurrent attempts have no other cap. Past it the least
-  recently written attempt loses its entry and re-enters with `gap:true`, and under sustained overload they
-  take turns. Recheck if Web users stream more than 16 Threads at once.
+- 16 attempts is a choice, not derived from a limit: concurrent attempts have no other cap. Past it a newcomer is refused
+  until an attempt ends, then enters with `gap:true`. The first design evicted the least recently written, and 17 Threads in round
+  robin gave 3184 of 3200 entries `gap:true`. The cost now: a Thread can show no text for a whole attempt, and a silent
+  attempt holds its place until it ends. Recheck if Web users stream more than 16 Threads at once.
 - 64 KiB counted holds about 1500 small deltas. A client that loops one poll stays ahead in the mock
   measurement; recheck if real clients report gaps.
 - Reasoning text is included because `EngineEvent::Stream` already carries it, marked per delta. A client
