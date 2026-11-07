@@ -2,6 +2,11 @@
 use serde::{Deserialize, Deserializer};
 pub const MAX_CHARS: usize = 80;
 
+#[derive(schemars::JsonSchema)]
+#[schemars(transparent)]
+#[allow(dead_code)]
+pub(crate) struct DescriptionSchema(#[schemars(length(max = 80))] String);
+
 pub(crate) fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Option::<String>::deserialize(d).map(|s| s.map(|s| s.chars().take(MAX_CHARS).collect()))
 }

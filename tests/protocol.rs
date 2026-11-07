@@ -1020,3 +1020,66 @@ fn attempt_usage_wire_validation_rejects_aggregate_options_and_blank_ids() {
         assert!(Command::UsageGet(args).validate().is_err());
     }
 }
+
+#[test]
+fn exported_schema_matches_committed_protocol_schema() {
+    assert_eq!(
+        shellboy::protocol::schema_json().trim(),
+        include_str!("../docs/reference/protocol.schema.json").trim(),
+        "run `shellboy protocol schema > docs/reference/protocol.schema.json`",
+    );
+}
+
+#[test]
+fn exported_schema_local_references_resolve() {
+    fn visit(value: &Value, document: &Value, path: &str) {
+        match value {
+            Value::Object(object) => {
+                if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
+                    if reference.starts_with("#/") {
+                        let mut current = document;
+                        for token in reference[2..].split('/') {
+                            let token = token.replace("~1", "/").replace("~0", "~");
+                            current = if let Some(object) = current.as_object() {
+                                object.get(&token)
+                            } else if let (Some(array), Ok(index)) =
+                                (current.as_array(), token.parse::<usize>())
+                            {
+                                array.get(index)
+                            } else {
+                                None
+                            }
+                            .unwrap_or_else(|| panic!("unresolved {reference} at {path}"));
+                        }
+                    }
+                }
+                for (key, child) in object {
+                    visit(child, document, &format!("{path}/{key}"));
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    visit(child, document, &format!("{path}/{index}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    let schema: Value = serde_json::from_str(&shellboy::protocol::schema_json()).unwrap();
+    visit(&schema, &schema, "#");
+}
+
+#[test]
+fn protocol_v3_handshake_advertises_capabilities_and_tolerates_additive_metadata() {
+    let welcome: Value = serde_json::from_str(
+        r#"{"protocol_version":3,"instance_id":"i","capabilities":[],"future_metadata":true}"#,
+    )
+    .unwrap();
+    let decoded: shellboy::ipc::Welcome = serde_json::from_value(welcome).unwrap();
+    assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
+    assert!(decoded.capabilities.is_empty());
+    let schema: Value = serde_json::from_str(&shellboy::protocol::schema_json()).unwrap();
+    assert_eq!(schema["protocol_version"], PROTOCOL_VERSION);
+    assert_eq!(schema["capabilities"], serde_json::json!([]));
+    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 62);
+}

@@ -20,6 +20,14 @@ wait条件は `type` tagの `turn_completed/run_ended/shell_ended/shell_output` 
 
 一覧は `Page<T>`。既定50/最大200、検索既定10/最大50、本文既定/最大65,536 bytes。抜粋512 Unicode文字、多バイト境界、raw stream独立decoderは各取得実装の責務。`PageCursor` はbase64url(JSON)のopaque version1 token。scope/filter/selection又はbody revision/encoding/watermark/last sort keyを保持する。query/revision変更はcursor_expired、encoding変更はcursor_encoding_mismatch。ページsizeをtokenへ含めず変更可能とする。これは改ざん防止署名ではなく個人ローカル操作の整合境界。shell raw cursorはsequence/stream/offset/retention/decode持越しを必要とするため、PageCursorへ無理に流用せずshell実装の専用型とする。
 
+## External client stability and versioning (Issue #244 A2)
+
+The local owner handshake is the compatibility boundary for external clients, including a Web UI in a separate repository. Protocol 3 adds an explicit capability list to `Welcome`; this baseline advertises no post-v3 additions, so the list starts empty. Clients must compare `protocol_version` first, then use only capabilities the owner advertises. There is no silent protocol-2 downgrade. `Endpoint` and `Welcome` tolerate unknown additive fields so metadata readers can ignore future fields, but typed RPC results tolerate additive fields only on the records explicitly marked as open result records. Request args remain strict: unknown operations/fields/types are rejected before dispatch with A1's typed `invalid_argument` and `request_may_have_been_applied: false`.
+
+A wire change that a supported peer cannot safely ignore requires a protocol version bump and coordinated release. Use additive result fields only where the older client uses tolerant decoding; never infer compatibility from syntactic JSON parsing. External clients may rely on documented commands/arguments, response fields and omission rules, enumerated errors, cursor behavior, sender provenance, capabilities, and documented bounds. They must not depend on SQLite tables, internal logs, undocumented `details`, implementation module names, event timing, or incidental ordering not stated here. Operation receipts make retries safe only with the same operation ID and same request; transport uncertainty is not evidence a mutation was unapplied. Cursor tokens are opaque and scoped to the issuing owner/query; restart or expiry requires resynchronization, not decoding or editing the token.
+
+`protocol schema` exports the handshake, envelope, per-operation args/results, capabilities, and version from Rust types to `docs/reference/protocol.schema.json`. Results still represented by `serde_json::Value` are explicitly opaque. The committed document is exact-compared with generated output in the existing test suite; it is a client aid, not a replacement for these behavioral rules.
+
 ## P1 fixture 対応
 
 `tests/protocol.rs` の匿名fixtureが入力/出力契約を固定する。
@@ -218,7 +226,7 @@ OSごとの所有対象を型の構成で明確にする。Windowsの実機受�
 
 ### 同じwire版の旧ownerと未知操作（PR1-10）
 
-Historical older-owner guidance is superseded by Issue #33. Current request/response envelopes use `protocol_version=2`. Other versions are rejected, and current required fields are not made optional for older owners. Use the same release for CLI and owner. A version mismatch reports `details.client_protocol_version` and `details.owner_protocol_version` and requires aligning releases; retrying the same binaries cannot fix it. Endpoint metadata and Welcome version checks reject before command dispatch. Endpoint/instance changes remain a distinct reconnect diagnostic. A lost response after sending a mutation remains an uncertain result and retains receipt lookup guidance. Unknown operations remain errors; a connection loss is still not proof that a mutation did not execute. No capability negotiation or old status wrapper is added.
+Historical protocol-2 behavior (superseded by Issue #244 A2): protocol-2 request/response envelopes rejected all other versions; current required fields were not made optional for older owners. That version-mismatch diagnostic and receipt guidance remain, but protocol 3 adds the capability list and tolerant output records described above. For external clients, the 62-operation generated contract is `docs/reference/protocol.schema.json`; its `events.wait` result is intentionally excluded and dynamic JSON results are opaque. The exact drift test keeps it synchronized with the wire types. Additive result fields are accepted by open records; unknown request arguments remain typed `invalid_argument` errors before dispatch. Any incompatible protocol change requires a new `PROTOCOL_VERSION`, exact handshake match, regenerated schema, and an explicit migration note; no silent downgrade is supported.
 
 ## R3-3 / R3-4: Command分類・語彙・既定値の正本
 
@@ -294,13 +302,13 @@ request and never deletes a space. `index.remove` takes `space_id` and optional 
 one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
 source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
 and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
-the element size. Additive; protocol version unchanged. See
+the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 
 thread.create/set/fork accept optional `agents`; thread.get returns required
-`agents_path`. Existing protocol 2 is retained for this pre-1.0 additive change.
+`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
 
@@ -435,7 +443,7 @@ filters. Existing any-condition results keep their shape, with a Thread cursor
 and snapshot.changes/more when these conditions are present. ThreadSummary and
 ThreadDetails add last_end_message/last_input optional saved-fact objects. They do not
 change lifecycle, authorization, MessageSender identity or model-facing tools.
-Schema16 contains only derived indexes; protocol version remains2.
+At the time this historical section was written, Schema16 contained only derived indexes and protocol version remained 2; Issue #244 A2 later advanced the wire handshake to protocol 3.
 
 ## Terminal-free startup rows (#5 stage 2)
 

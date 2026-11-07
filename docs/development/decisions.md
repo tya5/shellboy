@@ -4181,3 +4181,22 @@ no new persisted cursor, worker, queue or paid provider work is introduced.
 `removed` means the decision committed, not reclamation finished; return `reclaim_pending` and pending quantities.
 Exact dry-run/count diagnostics remain read-only and may scale with the target space; they are not repeated inside
 the decision transaction. Per-unit row budgets do not promise a fixed wall-clock duration or full-disk tolerance.
+## D-244-2: Protocol 3 external-client contract and generated schema (2026-11-07)
+
+The Web UI is an independent RPC client. Keep request argument records strict so
+unknown input cannot be silently ignored, while adding a distinct tolerant
+`record!` macro for output records so future additive result fields are ignored.
+`Hello`/`Welcome`/`Endpoint` also ignore additive metadata; protocol versions
+must still match exactly. Protocol 3 adds `Welcome.capabilities`, and starts empty (all current operations are the v3 baseline). Future additive
+request features must be gated by an advertised capability. No protocol-2 downgrade
+or guessed compatibility from parseability.
+
+Use Schemars 1.0.4 (exact pin; MIT/Apache-2.0) to derive JSON Schema from the
+serde wire types. It adds `schemars_derive`, `serde_derive_internals`,
+`dyn-clone`, and `ref-cast` to the lock; generation is a CLI-only operation and
+the test is an exact comparison against the committed artifact. The schema
+maps the 62 published operations to result schemas (excluding `events.wait`);
+genuinely dynamic `Value` results stay
+opaque rather than encoding observed examples as guarantees. Follow-up issues
+may type result families actually used by the external client. Recheck the
+mapping whenever a command or response type changes.

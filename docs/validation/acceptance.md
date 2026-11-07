@@ -10728,3 +10728,12 @@ blocked foreground work in proportion to space size. Exact counts are now dry-ru
 unknown quantities explicitly as null and `counts_exact: false`. A SQLite authorizer regression denies COUNT:
 dry-run must fail under that guard while actual removal succeeds and commits its durable decision. This tests the
 SQL boundary deterministically instead of relying on a timing threshold. Focused/CI validation is pending.
+
+## External RPC contract and schema export (#244 A2/D)
+
+Environment: local macOS, synthetic tests only. `cargo fmt --all --check`,
+`cargo check --locked --tests`, the 62-operation coverage test, exact schema drift
+test, local `$ref` resolution test, and protocol-3 handshake test passed. The
+language audit passed for 416 files. The generated Draft 2020-12 artifact contains
+62 operation mappings (excluding `events.wait`) and all 1,532 local references
+resolve. Cross-OS CI remains pending. No real API or user data used.
