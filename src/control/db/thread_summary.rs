@@ -236,7 +236,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         awaiting_human_count: if raw.awaiting_reply_exact {
             raw.awaiting_reply
         } else {
-            MAX_PENDING_REPLY_DUTIES as u64 + 1
+            MAX_PENDING_REPLY_DUTIES + 1
         },
         awaiting_human_count_exact: raw.awaiting_reply_exact,
         awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
