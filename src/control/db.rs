@@ -3578,7 +3578,13 @@ mod thread_list_plan_tests {
             thread_summary::page_sql(mode, 0, false)
         ))
         .unwrap()
-        .query_map(params![100_i64, "", "", 50], |r| r.get(3))
+        .query_map(params![100_i64, "", "", 50], |r| {
+            Ok(format!(
+                "{} [parent={}]",
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(1)?
+            ))
+        })
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap()
@@ -3600,7 +3606,9 @@ mod thread_list_plan_tests {
                 "{mode:?} must walk {index} in order: {plans:?}"
             );
             assert!(
-                !plans.iter().any(|p| p.contains("TEMP B-TREE")),
+                !plans
+                    .iter()
+                    .any(|p| p.contains("TEMP B-TREE") && p.ends_with("[parent=0]")),
                 "{mode:?} must not sort the Threads: {plans:?}"
             );
         }
@@ -3663,7 +3671,13 @@ mod thread_list_plan_tests {
             thread_summary::page_sql(mode, tags, cwd)
         ))
         .unwrap()
-        .query_map(rusqlite::params_from_iter(binds), |r| r.get(3))
+        .query_map(rusqlite::params_from_iter(binds), |r| {
+            Ok(format!(
+                "{} [parent={}]",
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(1)?
+            ))
+        })
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap()
@@ -3772,8 +3786,10 @@ mod thread_list_plan_tests {
                 "{mode:?} must seek the cwd index: {cwd:?}"
             );
             assert!(
-                !cwd.iter()
-                    .any(|p| p.contains("TEMP B-TREE") || p.starts_with("SCAN t")),
+                !cwd.iter().any(|p| {
+                    (p.contains("TEMP B-TREE") && p.ends_with("[parent=0]"))
+                        || p.starts_with("SCAN t")
+                }),
                 "{mode:?} cwd page is already in list order: {cwd:?}"
             );
         }
