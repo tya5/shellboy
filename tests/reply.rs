@@ -440,7 +440,6 @@ async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_
     store.database.call(move|db| {
         db.execute("UPDATE turn SET state='recovery_wait' WHERE id=?1",[&recovering])?;
         assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",[recovery_id],|r|r.get::<_,String>(0))?,"pending");
-        db.execute("UPDATE turn SET state='running' WHERE id=?1",[recovering])?;
         Ok(())
     }).await.unwrap();
     store.execute(request(Command::RunRetry(RunTarget{run_id:accepted["run_id"].as_str().unwrap().into()})),None).await.unwrap();
