@@ -253,14 +253,12 @@ async fn frontend_delivers_background_and_child_recovery_without_selecting_them(
     }
     expect_bell(&incoming).await;
     let thread = snapshot.thread.clone();
-    let run = snapshot.run.clone();
     let turn = snapshot.turn.clone();
     control.store.database.call(move |db| {
-        // A real parent/child ownership relation exercises owner_event too.
+        // Thread organization does not redirect the local recovery bell.
         db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at) SELECT 'bell-parent','parent',cwd,agents_path,profile_id,model_id,updated_at FROM thread WHERE id=?1", [&thread])?;
         db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('bell-parent-run','bell-parent','live','now')", [])?;
         db.execute("UPDATE thread SET parent_thread_id='bell-parent' WHERE id=?1", [&thread])?;
-        db.execute("UPDATE run SET owner_run_id='bell-parent-run' WHERE id=?1", [&run])?;
         db.execute("UPDATE turn SET state='running',generation=generation+1 WHERE id=?1", [&turn])?;
         Ok(())
     }).await.unwrap();

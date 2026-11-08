@@ -1839,7 +1839,7 @@ async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_end_separately() {
+async fn real_shell_cli_starts_independent_child_without_parent_retention_or_lifecycle_notices() {
     let (url, mut requests, server) = proxy().await;
     let (_directory, owner, control) = runtime(&url).await;
     let (send, receive) = mpsc::channel(32);
@@ -1899,61 +1899,18 @@ async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_en
         "completed",
     )
     .await;
-    let child_thread = child_id.clone();
-    let parent_run = parent.run_id.clone().unwrap();
-    control
-        .store
-        .database
-        .call(move |db| {
-            let owner: String = db.query_row(
-                "SELECT owner_run_id FROM run WHERE thread_id=?1",
-                [child_thread],
-                |row| row.get(0),
-            )?;
-            assert_eq!(
-                owner, parent_run,
-                "shell CLI origin creates execution ownership, not just Thread lineage"
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
+    state(&control,"run",parent.run_id.as_deref().unwrap(),"completed").await;
+    let child_query=child_id.clone();
+    let child_run:String=control.store.database.call(move|db|Ok(db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'",[child_query],|r|r.get(0))?)).await.unwrap();
     child_request
         .unwrap()
         .reply
         .send(final_answer("child final answer"))
         .ok()
         .unwrap();
-    let run = parent.run_id.clone().unwrap();
-    for _ in 0..4 {
-        let done = control
-            .store
-            .database
-            .call({
-                let run = run.clone();
-                move |db| {
-                    Ok(db.query_row(
-                        "SELECT state='completed' FROM run WHERE id=?1",
-                        [run],
-                        |row| row.get::<_, bool>(0),
-                    )?)
-                }
-            })
-            .await
-            .unwrap();
-        if done {
-            break;
-        }
-        tokio::select! {
-            request=requests.recv()=>{
-                let request=request.unwrap();assert!(!is_child(&request.body));
-                assert!(request.body.to_string().contains("child_turn_completed")||request.body.to_string().contains("child_run_ended"));
-                request.reply.send(final_answer("child status observed")).ok().unwrap();
-            },
-            _=state(&control,"run",&run,"completed")=>break,
-        }
-    }
-    state(&control, "run", &run, "completed").await;
+    state(&control,"run",&child_run,"completed").await;
+    let run=parent.run_id.clone().unwrap();
+    assert!(requests.try_recv().is_err(),"child completion must not synthesize a parent request");
     control
         .store
         .database
@@ -1968,7 +1925,7 @@ async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_en
                 [run],
                 |row| row.get(0),
             )?;
-            assert_eq!((turn_events, run_events), (1, 1));
+            assert_eq!((turn_events, run_events), (0, 0));
             Ok(())
         })
         .await

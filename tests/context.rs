@@ -13,7 +13,6 @@ async fn fixture() -> (tempfile::TempDir, DbWorker) {
             INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES
                 ('owner','origin','completed','2026-10-25T00:00:00Z','2026-10-25T00:00:10Z',NULL),
                 ('child','fork','stopped','2026-10-25T00:00:01Z','2026-10-25T00:00:04.125Z','explicit_stop');
-            UPDATE run SET owner_run_id='owner' WHERE id='child';
             INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at) VALUES
                 ('turn','origin','owner','completed','2026-10-25T00:00:01Z','2026-10-25T00:00:03Z');
             INSERT INTO node(id,turn_id,kind,created_at,payload_json) VALUES
@@ -34,7 +33,7 @@ async fn closed_lifetimes_preserve_saved_times_and_distinguish_parent_from_owner
     db.call(|db| {
         let child = context::for_run(db, "child").unwrap();
         assert_eq!(child.lifetime_ms, Some(3125));
-        assert_eq!(child.owner_run_id.as_deref(), Some("owner"));
+        assert!(child.owner_run_id.is_none());
         assert_eq!(child.stop_reason.as_deref(), Some("explicit_stop"));
         assert!(child.started_at.is_none() && child.parent_thread_id.is_none());
         let thread = context::for_thread(db, "fork").unwrap();

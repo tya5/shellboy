@@ -5395,8 +5395,6 @@ mod driverless_child_stop_notification_tests {
                     tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,format!("2026-10-25T00:00:0{}Z",index+1)])?;
                     tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'recovery_wait','2026-10-25T00:00:00Z')",params![turn,thread,run])?;
                 }
-                let oldest=tx.prepare("SELECT id FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping') ORDER BY created_at,id LIMIT 3")?.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                assert_eq!(oldest,["run-0","run-1","run-2"],"target run-3 is outside the bounded display dependencies");
                 assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2','run-3') AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,4);
                 if fail_drain {
                     tx.execute_batch("CREATE TRIGGER reject_child_drain BEFORE UPDATE OF state ON run WHEN OLD.id='run-3' AND NEW.state='stopped' BEGIN SELECT RAISE(ABORT,'synthetic stopped-child rollback'); END;")?;

@@ -331,7 +331,7 @@ async fn ancestor_walk_is_bounded_and_ends_at_a_stored_cycle() {
 }
 
 #[tokio::test]
-async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() {
+async fn moving_a_live_thread_changes_organization_without_run_ownership() {
     let (_dir, store) = store().await;
     let (old, new) = (create(&store, None).await, create(&store, None).await);
     let child = create(&store, Some(&old)).await;
@@ -359,24 +359,6 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
         .unwrap()
         .result;
     let child_run = delegated["run_id"].as_str().unwrap().to_owned();
-    let owner = |store: &Store, run: String| {
-        let db = store.database.clone();
-        async move {
-            db.call(move |db| {
-                Ok(
-                    db.query_row("SELECT owner_run_id FROM run WHERE id=?1", [run], |r| {
-                        r.get::<_, Option<String>>(0)
-                    })?,
-                )
-            })
-            .await
-            .unwrap()
-        }
-    };
-    assert_eq!(
-        owner(&store, child_run.clone()).await.as_deref(),
-        old_run["run_id"].as_str()
-    );
     // Move the busy child: allowed, and the live Run is reported with its old owner.
     let moved = store
         .execute(request(set_parent(&child, &new)), None)
@@ -390,25 +372,13 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
         moved.result["parent_change"]["live_run_id"],
         json!(child_run)
     );
-    assert_eq!(
-        moved.result["parent_change"]["live_run_owner_run_id"],
-        old_run["run_id"]
-    );
-    assert_eq!(
-        owner(&store, child_run.clone()).await.as_deref(),
-        old_run["run_id"].as_str(),
-        "ownership of a live Run is never transferred"
-    );
+    assert!(moved.result["parent_change"].get("live_run_owner_run_id").is_none());
     // The new parent may send while the old live Run keeps its stored owner.
     let accepted = store
         .execute(request(send(&child, "from new")), Some(new_origin.clone()))
         .await
         .unwrap();
     assert_eq!(accepted.result["assignment"], json!("existing_turn"));
-    assert_eq!(
-        owner(&store, child_run.clone()).await.as_deref(),
-        old_run["run_id"].as_str()
-    );
     // Stopping the old owner's Run cascades to the child Run it still owns, although the
     // child no longer has it as parent.
     let stopped = store
@@ -421,8 +391,8 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
         .await
         .unwrap();
     assert!(
-        stopped.stop_runs.contains(&child_run),
-        "the owner's stop reaches the moved child's Run: {:?}",
+        !stopped.stop_runs.contains(&child_run),
+        "stop must not cascade through old or current Thread parentage: {:?}",
         stopped.stop_runs
     );
     // Once the Run has ended, the new parent's send starts a Run it owns.
@@ -450,12 +420,6 @@ async fn a_live_run_keeps_its_owner_and_the_new_parent_owns_only_the_next_run() 
         .unwrap()
         .result;
     assert_eq!(next["assignment"], json!("new_run"));
-    assert_eq!(
-        owner(&store, next["run_id"].as_str().unwrap().into())
-            .await
-            .as_deref(),
-        new_run["run_id"].as_str()
-    );
     store.database.shutdown().await.unwrap();
 }
 
