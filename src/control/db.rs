@@ -3351,9 +3351,13 @@ mod thread_list_plan_tests {
             ).unwrap();
             let sql = awaiting_human_sql(ArchivedFilter::Exclude);
             let mut stmt = db.prepare(&sql).unwrap();
-            let rows = stmt.query_map(params!["", i64::MAX, 2], |r|
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            let rows = stmt
+                .query_map(params!["", i64::MAX, 2], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
             let page = thread_list_awaiting_human(
                 &db,
                 &ThreadListArgs {
@@ -3365,29 +3369,57 @@ mod thread_list_plan_tests {
                     tags: Vec::new(),
                     cwd: None,
                 },
-            ).unwrap();
-            (stmt.get_status(rusqlite::StatementStatus::VmStep), rows,
-             page.items.into_iter().map(|item| item.thread_id).collect::<Vec<_>>(),
-             page.next_cursor.is_some())
+            )
+            .unwrap();
+            (
+                stmt.get_status(rusqlite::StatementStatus::VmStep),
+                rows,
+                page.items
+                    .into_iter()
+                    .map(|item| item.thread_id)
+                    .collect::<Vec<_>>(),
+                page.next_cursor.is_some(),
+            )
         }
         let (small_steps, small_rows, small_page, small_cursor) = page_steps(20);
         let (large_steps, large_rows, large_page, large_cursor) = page_steps(5_000);
         let plan_db = Connection::open_in_memory().unwrap();
-        plan_db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        plan_db
+            .execute_batch(crate::storage::CURRENT_SCHEMA)
+            .unwrap();
         let sql = awaiting_human_sql(ArchivedFilter::Exclude);
-        let plan: Vec<String> = plan_db.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap().query_map(params!["", i64::MAX, 2], |row| row.get(3))
-            .unwrap().collect::<rusqlite::Result<_>>().unwrap();
-        assert!(plan.iter().any(|line| line.contains("receipt_human_reply_pending") && line.contains("SEARCH")), "{plan:?}");
+        let plan: Vec<String> = plan_db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map(params!["", i64::MAX, 2], |row| row.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|line| {
+                line.contains("receipt_human_reply_pending") && line.contains("SEARCH")
+            }),
+            "{plan:?}"
+        );
         assert!(!plan.iter().any(|line| line.contains("SCAN r")), "{plan:?}");
         assert_eq!(small_rows, large_rows);
-        assert_eq!(large_rows, vec![("thread-00001".into(), 1, "00001".into()),
-                                    ("thread-00002".into(), 1, "00002".into())]);
+        assert_eq!(
+            large_rows,
+            vec![
+                ("thread-00001".into(), 1, "00001".into()),
+                ("thread-00002".into(), 1, "00002".into())
+            ]
+        );
         assert_eq!(small_page, large_page);
         assert_eq!(large_page, vec!["thread-00001"]);
-        assert!(small_cursor && large_cursor, "candidate pagination must continue past excluded archived Threads");
-        assert_eq!(small_steps, large_steps,
-            "VM steps must not grow with off-page pending Threads or archived exclusions");
+        assert!(
+            small_cursor && large_cursor,
+            "candidate pagination must continue past excluded archived Threads"
+        );
+        assert_eq!(
+            small_steps, large_steps,
+            "VM steps must not grow with off-page pending Threads or archived exclusions"
+        );
         assert_eq!(large_steps, 328, "SQLite VM-step contract changed");
     }
 
