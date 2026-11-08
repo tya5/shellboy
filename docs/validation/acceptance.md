@@ -10866,3 +10866,12 @@ The revised fixture emits the same 2 MiB, then waits for stdin EOF. It waits for
 performs the control probe while the shell is held, and explicitly releases EOF. Natural exit, exact output and
 batching assertions remain; no deadline or drain budget increases. Focused interrupt/background/output checks are
 pending. This does not establish the cause of every historical E3 `failed` shell or real-user failure frequency.
+
+### #260 initial focused results
+
+On macOS arm64, all six turn-interruption tests, background-read isolation and the revised slow-DB binary output
+fixture passed. The slow fixture completed in 0.50 s with every byte committed before the control liveness assertion;
+this is not an unmodified-baseline run (the slot acquired after the fixture edit). The historical E3-only failed
+shells were not reproduced by these eight cases, and no product defect or drain-deadline cause is inferred from
+those passes. TUI/nested-owner targeted checks and repeated output-fixture runs are pending. The existing GC budget
+measurement is an ignored observational workload, not a default-CI synchronization regression.
