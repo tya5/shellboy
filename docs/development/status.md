@@ -5297,3 +5297,6 @@ Implementation is being developed against schema 34. It reuses the pending reply
 Implementing explicit `extra_instructions`, bounded fail-closed observation in the existing file lane, next-Turn
 snapshot/live config adoption and source inspection. Focused fixtures cover ordered prefixes, captured-body reuse,
 file bounds and live edits across a tool continuation. Full validation and CI evidence are pending; no green claim.
+
+#270 focused six regressions and the full local standard check pass. The remaining handoff gate is the pushed tip's
+normal and all-OS CI. Explicit common files use existing snapshot/file-worker/config adoption paths; no schema added.

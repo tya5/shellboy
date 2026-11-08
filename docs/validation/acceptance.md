@@ -10757,3 +10757,10 @@ four unit cases and two integration cases, including a real mock-HTTP tool conti
 updates and a visible missing-file failure with no provider request/snapshot. Python 206 tests, layout/watchdog,
 language classification and append-only record checks passed. The initial standard check found test-only unused
 Results and a clippy initializer warning; these are corrected and the full standard check is running again.
+
+### #270 full local standard check
+
+Shared-slot `sh scripts/check.sh` passed on macOS arm64: default unit tests 2423 passed/25 ignored, integration
+1335 passed/19 ignored, plus doc/feature variants and the DB-observation feature regression. Strict clippy, format,
+Python and layout checks in the standard script also passed. This establishes synthetic behavior only; no real
+provider request or cache-hit-rate measurement was performed. Exact branch-tip CI remains the handoff gate.
