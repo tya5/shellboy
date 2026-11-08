@@ -10820,3 +10820,12 @@ new spill creation. Migration 36 leaves legacy metadata unknown. A 16 MiB fixtur
 small payload; a separate authorizer forbids payload access and EXPLAIN/opcode assertions prohibit table hydration
 and JSON calls. Full zero-excerpt history-window calls also compare small/large payload VM counts. These guards are
 implemented, not passing evidence yet. The earlier no-SCAN assertion alone was insufficient to bound JSON work.
+
+### #274 P2 focused runtime evidence
+
+On macOS arm64, metadata unit tests (3), history-window module (9) and storage/migration integration module (24)
+passed. The new 16 MiB metadata lookup succeeds with payload-column reads denied and equal VM counts; its query is a
+covering SEARCH with neither DeferredSeek nor JSON function opcodes. Full zero-excerpt window calls also have equal
+steady-state VM counts for 16-byte and 16 MiB payloads (statement caches warmed equally). Migration unit tests passed
+21 cases with one ignored. Python 206 tests passed after completing fresh/migrated schema-36 version records. A
+clippy-only nested-if finding is corrected; final strict clippy and exact-tip CI remain pending.

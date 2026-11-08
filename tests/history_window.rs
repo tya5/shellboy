@@ -555,7 +555,8 @@ fn spill_tool_sources_window_vm_steps_do_not_grow_with_sixteen_mib_payload() {
                 observed.fetch_add(1, Ordering::Relaxed);
                 false
             }),
-        ).unwrap();
+        )
+        .unwrap();
         let mut request = args();
         request.excerpt_chars = 0;
         let mut measured = Vec::new();
