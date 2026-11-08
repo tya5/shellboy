@@ -840,8 +840,8 @@ pub(super) async fn stop_without_driver(
     Ok(())
 }
 
-/// Freeze ownership first; cancel processes and child drivers; record terminal
-/// state only after every owned resource has actually released its live handle.
+/// Freeze this Run, drain its shells, then record terminal state only after
+/// every owned shell has released its live handle.
 async fn drain_and_stop(
     control: &Arc<Control>,
     run_id: &str,

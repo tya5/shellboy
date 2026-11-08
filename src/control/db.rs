@@ -5238,15 +5238,8 @@ mod independent_run_notification_tests {
                 }),
             );
             let result = store.execute(request.clone(), caller.clone()).await;
-            if matches!(mode, "stopping-owner" | "rollback") {
-                assert_eq!(
-                    result.unwrap_err().code,
-                    if mode == "rollback" {
-                        ErrorCode::SaveFailed
-                    } else {
-                        ErrorCode::InvalidState
-                    }
-                );
+            if mode == "rollback" {
+                assert_eq!(result.unwrap_err().code,ErrorCode::SaveFailed);
                 db.call(|db| {
                     assert_eq!(
                         db.query_row(
