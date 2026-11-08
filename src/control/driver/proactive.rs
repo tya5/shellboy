@@ -25,22 +25,37 @@ pub(super) struct ProactiveBudget {
 }
 
 /// A summary stage that failed (not cancelled) is not tried again in the same
-/// Turn while the forecast is unknown, until that stage adopts a summary. The
+/// Turn while the forecast is unknown, until that stage adopts a summary. With
+/// known marks, closed rejection survives unrelated spill/active adoption until
+/// a new closed-summary source appears. The
 /// Run-local state is simply lost on restart (one more attempt is allowed).
 #[derive(Default)]
 struct Blocks {
     turn: String,
     closed: bool,
     active: bool,
+    closed_marks: Option<Vec<String>>,
 }
 
 impl Blocks {
-    fn note(&mut self, turn: &str, closed: Option<&str>, active: Option<&str>) {
+    fn note(
+        &mut self,
+        turn: &str,
+        closed: Option<&str>,
+        active: Option<&str>,
+        marks: Option<&[String]>,
+    ) {
         if self.turn != turn {
             *self = Self {
                 turn: turn.to_owned(),
                 ..Self::default()
             };
+        }
+        if closed == Some("rejected") {
+            self.closed_marks = marks.map(<[String]>::to_vec);
+        }
+        if closed == Some("adopted") {
+            self.closed_marks = None;
         }
         for (flag, outcome) in [(&mut self.closed, closed), (&mut self.active, active)] {
             match outcome {
@@ -50,8 +65,17 @@ impl Blocks {
             }
         }
     }
-    fn closed_for(&self, turn: &str) -> bool {
-        self.turn == turn && self.closed
+    fn closed_for(&self, turn: &str, marks: Option<&[String]>) -> bool {
+        self.turn == turn
+            && self.closed
+            && match (&self.closed_marks, marks) {
+                (Some(previous), Some(current)) => {
+                    !super::proactive_guard::has_new_marks(previous, current, "summary:")
+                }
+                // Unknown coverage keeps the #248 per-stage Turn block.
+                (_, None) => true,
+                (None, Some(_)) => false,
+            }
     }
     fn active_for(&self, turn: &str) -> bool {
         self.turn == turn && self.active
@@ -327,7 +351,7 @@ pub(super) async fn maybe_compact(
     // Under known marks the per-source evidence already separates new from tried.
     let unknown = marks.is_none();
     let (closed_blocked, active_blocked) = (
-        unknown && budget.blocks.closed_for(&snapshot.turn),
+        budget.blocks.closed_for(&snapshot.turn, marks.as_deref()),
         unknown && budget.blocks.active_for(&snapshot.turn),
     );
     let has_kind = |kind: &str| match &budget.guard {
@@ -431,6 +455,7 @@ pub(super) async fn maybe_compact(
         .and_then(|input| input.latest_tool_anchor())
         .map(str::to_owned);
     let preserve_guard_after_spill = !any_summary_new && budget.guard.is_some();
+    let stage_marks = marks.clone();
     let mut candidate_guard = Guard::new(
         snapshot,
         marks,
@@ -737,6 +762,7 @@ pub(super) async fn maybe_compact(
         &snapshot.turn,
         stages["closed_summary"]["outcome"].as_str(),
         stages["active_summary"]["outcome"].as_str(),
+        stage_marks.as_deref(),
     );
     observation["stages"] = stages;
     observation["steps"] = json!({"spill_attempted": target_plan.is_some() || (spill_new && !open_loop), "spill_adopted": spill_counts.spilled > 0, "fresh_measurement": target_plan.is_some(), "summary_selection": !summary_scope.is_empty(), "summary_bundling": observation["summary"]["model_requests"].as_u64().is_some_and(|n| n > 0)});
@@ -1213,16 +1239,48 @@ mod block_tests {
     #[test]
     fn only_failed_uncancelled_stages_block_until_they_adopt_or_the_turn_changes() {
         let mut blocks = Blocks::default();
-        blocks.note("t1", Some("cancelled"), Some("no_target"));
-        assert!(!blocks.closed_for("t1") && !blocks.active_for("t1"));
-        blocks.note("t1", Some("rejected"), None);
-        assert!(blocks.closed_for("t1") && !blocks.active_for("t1"));
-        blocks.note("t1", None, Some("rejected"));
-        assert!(blocks.closed_for("t1") && blocks.active_for("t1"));
-        assert!(!blocks.closed_for("t2"), "another Turn is never blocked");
-        blocks.note("t1", Some("adopted"), None);
-        assert!(!blocks.closed_for("t1") && blocks.active_for("t1"));
-        blocks.note("t2", None, None);
+        blocks.note("t1", Some("cancelled"), Some("no_target"), None);
+        assert!(!blocks.closed_for("t1", None) && !blocks.active_for("t1"));
+        blocks.note("t1", Some("rejected"), None, None);
+        assert!(blocks.closed_for("t1", None) && !blocks.active_for("t1"));
+        blocks.note("t1", None, Some("rejected"), None);
+        assert!(blocks.closed_for("t1", None) && blocks.active_for("t1"));
+        assert!(
+            !blocks.closed_for("t2", None),
+            "another Turn is never blocked"
+        );
+        blocks.note("t1", Some("adopted"), None, None);
+        assert!(!blocks.closed_for("t1", None) && blocks.active_for("t1"));
+        blocks.note("t2", None, None, None);
         assert!(!blocks.active_for("t1") && !blocks.active_for("t2"));
+    }
+}
+
+#[cfg(test)]
+mod known_block_tests {
+    use super::Blocks;
+    #[test]
+    fn known_closed_rejection_survives_spill_and_active_adoption_but_not_new_closed_sources() {
+        let mark = |kind: &str, id: char, chars: u64| {
+            format!("{kind}:{}:{chars:016x}", id.to_string().repeat(64))
+        };
+        let old = vec![mark("summary", 'a', 50)];
+        let mut blocks = Blocks::default();
+        blocks.note("t", Some("rejected"), None, Some(&old));
+        for i in 1..20 {
+            let mut current = vec![mark("middle", 'b', i), mark("spill", 'c', i)];
+            current.extend(old.clone());
+            blocks.note("t", None, Some("adopted"), Some(&current));
+            assert!(blocks.closed_for("t", Some(&current)));
+        }
+        assert!(!blocks.closed_for("next", Some(&old)));
+        let grown = vec![mark("summary", 'a', 51)];
+        assert!(!blocks.closed_for("t", Some(&grown)));
+        let new = vec![mark("summary", 'd', 50)];
+        assert!(!blocks.closed_for("t", Some(&new)));
+        blocks.note("t", Some("adopted"), None, Some(&old));
+        assert!(!blocks.closed_for("t", Some(&old)));
+        blocks.note("t", Some("cancelled"), None, Some(&old));
+        assert!(!blocks.closed_for("t", Some(&old)));
     }
 }

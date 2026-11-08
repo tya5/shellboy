@@ -1216,3 +1216,17 @@ and `[0,0,1,1,1,1,1]` after. A simplified serialized-input prefix/epoch cache
 model measured 134077 versus 111650 uncached bytes; these are synthetic modeled
 bytes, not provider-reported tokens or a real-world cost estimate. The fixture
 also verifies that spill resumes after crossing the same threshold.
+
+### Known-coverage closed-summary rejection (#252)
+
+A non-cancelled automatic closed-summary rejection retains its own bounded candidate-mark baseline for the current
+Turn, independently of the general no-progress guard. Tool spill adoption or active-summary adoption can clear that
+general guard, but cannot make an unchanged closed range worth retrying. With known coverage, a new closed-summary
+source or increased source characters permits another attempt. New middle/partial sources still permit ordinary
+active-stage attempts; the unknown-coverage per-stage Turn block from #248 is unchanged. A new Turn resets the
+Run-local stage baseline. Restart may allow one additional attempt; this change adds no durable record or worker.
+
+`compact list` stage records continue to use `blocked_by_earlier_rejection` when a retained rejection suppresses a
+stage. Explicit compact is not blocked. This is duplicate-work suppression, not an assertion about real-world
+rejection frequency or summary adoption rates. Empty forecast/no-safe-reduction record deduplication and smaller-range
+summary size policy remain separate concerns.

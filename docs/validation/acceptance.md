@@ -10833,3 +10833,11 @@ clippy-only nested-if finding is corrected; final strict clippy and exact-tip CI
 The final strict all-target clippy pass and rerun metadata unit tests (3) plus history-window tests (9) succeeded.
 The only intervening edits are formatting and the equivalent let-chain save guard. No wire/schema-export shape
 changed; protocol source metadata remains the same additive field. Exact-tip full CI follows on the review branch.
+
+### #252 known-coverage rejection regression (validation pending)
+
+Unit coverage targets a known closed rejection surviving 19 unrelated spill/active adoptions, then allowing a new or
+grown closed source and resetting after adoption/new Turn. Mock-HTTP growing-Turn fixtures cover known coverage with
+spillable outputs and known coverage with short non-spillable outputs, preserving active retries as new middle
+sources arrive. Existing #248 unknown-coverage empty/provider-failure and explicit-compact checks remain in place.
+No passing execution or real-user frequency/cost measurement is claimed yet.

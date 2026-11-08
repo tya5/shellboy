@@ -772,3 +772,8 @@ unchanged. Explicit source-relation/history-get inspection remains available whe
 
 #274 metadata lookup uses a bounded separate column and covering index; it never parses the spill payload. Older
 spills remain unknown after migration; no automatic payload backfill or source traversal occurs.
+
+Automatic compaction does not repeat a rejected closed-range summary in the same Turn merely because tool results
+were spilled or the active Turn was summarized. Under known coverage it retries when eligible closed-summary sources
+grow/change, while new active sources remain eligible for active summarization. `compact list` can show
+`blocked_by_earlier_rejection`; explicit compact remains available. Unknown-coverage #248 blocking is unchanged.

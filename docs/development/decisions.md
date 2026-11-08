@@ -4254,3 +4254,17 @@ row lookup: an appended small column alone could still require overflow-page tra
 Write metadata atomically with spill creation; migrate old nodes with NULL and no payload extraction/backfill.
 Regression guards combine a 16 MiB payload with equal VM-step counts, an authorizer rejecting payload-column reads,
 EXPLAIN covering SEARCH/no SCAN, and opcode checks rejecting DeferredSeek/JSON functions. The wire shape is unchanged.
+
+### D-252 implementation: retain known closed-stage rejection across unrelated adoption
+
+The earlier D-252 measurement note does not fix behavior and does not estimate real rejection frequency. Synthetic
+reproduction and the #248 source history establish a narrower deterministic defect: successful spill/active adoption
+clears the shared no-progress guard, while the independent stage-block state previously applied only with unknown
+coverage. Consequently unchanged closed-summary marks can be attempted again as though unseen.
+
+Retain the known closed stage's bounded marks separately in the existing Run-local Blocks state. Compare only
+`summary:` marks; unchanged/shrunk/removed candidates remain blocked, but a new source or increased characters
+permits retry. Spill/middle/partial changes alone do not. An adopted closed summary clears the block, a new Turn
+resets it, cancellation does not establish a rejection. Active known-source growth and unknown-coverage rules are
+unchanged. No new table, configuration, queue or background task is needed. Restart can allow one extra attempt.
+Do not broaden this into suppressing all known active retries or claim measured savings from synthetic usage.

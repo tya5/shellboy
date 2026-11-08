@@ -3814,7 +3814,7 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 /// once in the Turn, however long the Turn keeps growing above the threshold.
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
-    let counts = growing_turn_with_failing_summaries(|| (200, answer(" "))).await;
+    let counts = growing_turn_with_failing_summaries(true, false, || (200, answer(" "))).await;
     assert_eq!(
         counts,
         (1, 1, 2),
@@ -3826,7 +3826,7 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
 /// must not turn into one real request per tool round.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
-    let counts = growing_turn_with_failing_summaries(|| {
+    let counts = growing_turn_with_failing_summaries(true, false, || {
         (
             400,
             json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
@@ -3843,6 +3843,8 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
 /// (tool-free) requests over 16 rounds. Also checks that an explicit compact
 /// is not subject to the proactive block.
 async fn growing_turn_with_failing_summaries(
+    oversized: bool,
+    spilling: bool,
     summary_reply: fn() -> (u16, Value),
 ) -> (u32, u32, u32) {
     crate::test_watchdog::watchdog("proactive rejected summary gate", async move {
@@ -3857,9 +3859,9 @@ async fn growing_turn_with_failing_summaries(
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, &"protected current ".repeat(70_000)).await;
+        send(&control, &target, &"protected current ".repeat(if oversized {70_000}else{1})).await;
         // An unknown tool name returns a short error, so no spill can shrink it.
-        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"nope","arguments":"{}"}]});
+        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
         let mut summaries = 0;
         for index in 0..19 {
             let request = incoming(&control, &mut receive).await;
@@ -3891,7 +3893,7 @@ async fn growing_turn_with_failing_summaries(
             let record: Value = serde_json::from_str(&record).unwrap();
             record["stages"]["closed_summary"]["skipped"] == "blocked_by_earlier_rejection"
         };
-        assert!(blocked, "the stage record must say it was blocked: {events:#?}");
+        if oversized { assert!(blocked, "the stage record must say it was blocked: {events:#?}"); }
         // The block is proactive-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
         let explicit = incoming(&control, &mut receive).await;
@@ -5309,7 +5311,7 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         let owner = proactive_owner(root.path(), &url, "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
-        send(&control, &target, &"protected current ".repeat(70_000)).await;
+        send(&control, &target, &"protected current ".repeat(if oversized {70_000}else{1})).await;
         let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
         for index in 0..2 {
             incoming(&control, &mut receive).await.reply.send((200, json!({
@@ -5443,4 +5445,23 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
+}
+
+#[tokio::test]
+async fn proactive_known_closed_rejection_survives_every_spill_reaching_target() {
+    let counts = growing_turn_with_failing_summaries(false, true, || (200, answer(" "))).await;
+    assert_eq!(
+        counts.0, 1,
+        "closed rejection repeated after spill: {counts:?}"
+    );
+}
+
+#[tokio::test]
+async fn proactive_known_new_middle_sources_still_allow_active_summary() {
+    let counts = growing_turn_with_failing_summaries(false, false, || (200, answer(" "))).await;
+    assert_eq!(counts.0, 1, "closed rejection repeated: {counts:?}");
+    assert!(
+        counts.1 > 1,
+        "new eligible active sources must permit retries: {counts:?}"
+    );
 }
