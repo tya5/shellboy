@@ -47,7 +47,7 @@ A shell starts in the cwd saved on its Thread. Different Threads separate histor
 
 When you want the user to open a file or folder, write its absolute `file://` URL (for example, `file:///Users/me/report.md`); ordinary mentions of paths do not need this prefix.
 
-Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Ownership and human operations](delegation.md#ownership-and-human-operations).
+Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Identity and operations](delegation.md#identity-and-operations).
 
 Add attachments through the shell as well, using `shellboy attachment add --path PATH --kind image`. Inspect the returned array's `source_node_id` and `delivery_status`; acceptance is not proof that the model has read the attachment. It is applied to a dedicated node after all results in your tool group are ready. Older attachments are resent at their original provenance positions, so do not treat one as a new image if the current message has no attachment. Shellboy metadata distinguishes the currently read revision and update notifications. See [Attachments](attachments.md).
 
@@ -579,8 +579,7 @@ one during that Turn.
 
 If no Run is live when it is sent (for example your parent sends one to a child
 that already finished), it is delivered immediately like an ordinary message and
-starts a new Run. A parent may send one to its owned child under the ordinary
-message rules.
+starts an independent new Run under the ordinary message rules.
 
 A waiting complete-delivery message never outlives its Run. If the Run ends
 some other way, it is released at that moment as ordinary input: after `/stop`,
@@ -596,9 +595,8 @@ complete-delivery message. Core cannot identify questions. If one arrives while
 waiting for the user, end briefly without starting extra work. A false trigger
 can cost an additional model request.
 
-`child_turn_completed` is progress, not completion of a child Run. A child with
-complete-delivery messages can send several such notifications; wait for
-`child_run_ended` before treating the child as finished.
+There are no automatic child Turn/Run lifecycle notices. Request a specific reply with `--expect-reply`, end the
+sender Turn, and inspect the saved reply/message when it is delivered. Progress is an ordinary message.
 
 ## Inspect a delegation sender
 
