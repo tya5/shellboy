@@ -5239,7 +5239,7 @@ mod independent_run_notification_tests {
             );
             let result = store.execute(request.clone(), caller.clone()).await;
             if mode == "rollback" {
-                assert_eq!(result.unwrap_err().code,ErrorCode::SaveFailed);
+                assert_eq!(result.unwrap_err().code, ErrorCode::SaveFailed);
                 db.call(|db| {
                     assert_eq!(
                         db.query_row(
