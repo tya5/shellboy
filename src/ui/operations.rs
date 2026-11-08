@@ -1152,6 +1152,12 @@ impl Form {
                     let mut v = list();
                     v.push(f("query", "絞込み", String::new(), Text));
                     v.push(f(
+                        "awaiting",
+                        "Awaiting",
+                        String::new(),
+                        Choice(&["", "human"]),
+                    ));
+                    v.push(f(
                         "archived",
                         "アーカイブ済み（空=隠す）",
                         String::new(),
@@ -1171,7 +1177,7 @@ impl Form {
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                         query: form.optional("query")?,
-                        awaiting: None,
+                        awaiting: form.optional("awaiting")?,
                         archived: form
                             .optional("archived")?
                             .and_then(|value| ArchivedFilter::parse(&value))
@@ -3793,6 +3799,33 @@ mod language_rendering_tests {
                     .collect::<Vec<_>>(),
                 "language selection changed command field values for {operation:?}"
             );
+        }
+    }
+
+    #[test]
+    fn thread_list_form_wires_human_filter_and_rejects_invalid_values() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let mut form = Form::new(OpKind::ThreadList, &Context::default());
+            form.language = language;
+            let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
+                panic!("thread list command");
+            };
+            assert_eq!(args.awaiting, None);
+            for (value, accepted) in [("human", true), ("thread", false)] {
+                form.fields
+                    .iter_mut()
+                    .find(|field| field.name == "awaiting")
+                    .unwrap()
+                    .value = value.into();
+                if accepted {
+                    let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
+                        panic!("thread list command");
+                    };
+                    assert_eq!(args.awaiting.as_deref(), Some("human"));
+                } else {
+                    assert!(form.command(Path::new("/")).is_err());
+                }
+            }
         }
     }
 

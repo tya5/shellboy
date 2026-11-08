@@ -10979,3 +10979,16 @@ fingerprint matches the current scanner inventory. The two new labels have
 matching En/Ja field-label/help arms. Thus the 1,064-line manifest diff is scoped
 source-token pin maintenance, not an unrelated category rollback. The prior
 34-record approval alone was not evidence for this full-branch comparison.
+
+### #262 TUI Awaiting form follow-up
+
+Independent review identified that the Thread-list catalogue/CLI exposed
+`awaiting=human`, but the hand-written TUI form always sent None. The form now
+uses the existing bilingual Awaiting field metadata and blank/human choices,
+and passes the selected value through existing protocol validation. The focused
+bilingual test checks blank=None, human=Some("human"), and rejection of an
+invalid value. No new filter semantics, enum or admission-limit change is made.
+Re-reviewed 127 existing src/ui/operations.rs labels: only their enclosing
+source-token pin changes; all reasons and categories are preserved and the
+English/Japanese label/help paths remain unchanged. Final exact-tip CI and
+independent review are required again; 35103a6c CI does not qualify this change.
