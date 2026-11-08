@@ -10803,3 +10803,11 @@ Synthetic regressions cover spill creation capturing call/execution/source IDs, 
 execution IDs, legacy unknown metadata, oversized metadata, shared list/window output with zero excerpts and
 unchanged direct execution counts. EXPLAIN for the new lookup must show one node index SEARCH and no SCAN. Existing
 window step-bound and compaction suites remain the broader compatibility checks. No passing result is asserted yet.
+
+### #274 focused execution evidence
+
+On macOS arm64 in the shared Rust slot, `cargo check --locked --tests` passed. Spill-source unit tests (2), existing
+spill projection regression (1), full history-window integration module (8, including VM-step bounds), and protocol
+schema export regressions (2) passed. The metadata point lookup's EXPLAIN has a node index SEARCH and no SCAN.
+Strict all-target clippy, Python 206 tests, layout/watchdog and language/record audits passed. The committed protocol
+schema is regenerated with this branch's CLI. No real API/user data was used. Exact-tip full CI is the handoff gate.

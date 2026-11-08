@@ -493,21 +493,46 @@ fn read_cost_does_not_grow_with_path_length() {
 #[test]
 fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
     on_db(|db| {
-        let payload=json!({"output":[],"spill_version":1,"spill_tools":{"status":"known","items":[{"call_id":"c","execution_id":"e","original_node_id":"source"}],"truncated":false}});
-        let tx=db.transaction().unwrap();
-        append_node(&tx,"t","spill",None,"spill",&payload,"now").unwrap();
-        append_node(&tx,"t","legacy",None,"spill",&json!({"output":[],"spill_version":1}),"now").unwrap();
+        let payload = json!({"output":[],"spill_version":1,"spill_tools":{"status":"known","items":[{"call_id":"c","execution_id":"e","original_node_id":"source"}],"truncated":false}});
+        let tx = db.transaction().unwrap();
+        append_node(&tx, "t", "spill", None, "spill", &payload, "now").unwrap();
+        append_node(
+            &tx,
+            "t",
+            "legacy",
+            None,
+            "spill",
+            &json!({"output":[],"spill_version":1}),
+            "now",
+        )
+        .unwrap();
         tx.commit().unwrap();
-        let mut list=shellboy::protocol::HistoryListArgs { thread_id:"t".into(),excerpt_chars:0,limit:200,cursor:None,run_id:None,since:None,state:None };
-        list.excerpt_chars=0;
-        let listed=shellboy::history::list_nodes(db,&list).unwrap();
-        let mut request=args();request.excerpt_chars=0;
-        let positional=window(db,&request).unwrap();
-        assert_eq!(serde_json::to_value(&listed.items).unwrap(),serde_json::to_value(&positional.items).unwrap());
-        let sources=listed.items[0].spill_tools.as_ref().unwrap();
-        assert_eq!(sources.items[0].call_id,"c");assert_eq!(sources.items[0].execution_id.as_deref(),Some("e"));
-        assert_eq!(listed.items[1].spill_tools.as_ref().unwrap().status,"unknown");
-        assert_eq!(listed.items[0].execution_count,0);
+        let mut list = shellboy::protocol::HistoryListArgs {
+            thread_id: "t".into(),
+            excerpt_chars: 0,
+            limit: 200,
+            cursor: None,
+            run_id: None,
+            since: None,
+            state: None,
+        };
+        list.excerpt_chars = 0;
+        let listed = shellboy::history::list_nodes(db, &list).unwrap();
+        let mut request = args();
+        request.excerpt_chars = 0;
+        let positional = window(db, &request).unwrap();
+        assert_eq!(
+            serde_json::to_value(&listed.items).unwrap(),
+            serde_json::to_value(&positional.items).unwrap()
+        );
+        let sources = listed.items[0].spill_tools.as_ref().unwrap();
+        assert_eq!(sources.items[0].call_id, "c");
+        assert_eq!(sources.items[0].execution_id.as_deref(), Some("e"));
+        assert_eq!(
+            listed.items[1].spill_tools.as_ref().unwrap().status,
+            "unknown"
+        );
+        assert_eq!(listed.items[0].execution_count, 0);
         assert!(listed.items[0].executions.is_empty());
     });
 }

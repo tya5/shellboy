@@ -2167,6 +2167,16 @@
         },
         "selection": {
           "$ref": "#/definitions/HistorySelection"
+        },
+        "spill_tools": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SpillToolSources"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -5607,6 +5617,51 @@
         "state"
       ],
       "title": "ShellWriteResult",
+      "type": "object"
+    },
+    "SpillToolSource": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "original_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "call_id"
+      ],
+      "type": "object"
+    },
+    "SpillToolSources": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/SpillToolSource"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status",
+        "items",
+        "truncated"
+      ],
       "type": "object"
     },
     "StatusArgs": {

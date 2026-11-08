@@ -99,25 +99,54 @@ mod tests {
     #[test]
     fn spill_tool_sources_bound_output_and_keep_missing_execution_unknown() {
         let output=(0..10).map(|i|json!({"type":"function_call_output","call_id":format!("call-{i}"),"output":json!({"execution_id":format!("exec-{i}"),"original_node_id":format!("node-{i}")}).to_string()})).collect::<Vec<_>>();
-        let sources=from_outputs(&output);
-        assert_eq!(sources.status,"known"); assert_eq!(sources.items.len(),8); assert!(sources.truncated);
-        assert_eq!(sources.items[0].execution_id.as_deref(),Some("exec-0"));
-        let unknown=from_outputs(&[json!({"type":"function_call_output","call_id":"call","output":"not json"})]);
-        assert_eq!(unknown.items[0].call_id,"call");assert!(unknown.items[0].execution_id.is_none());
+        let sources = from_outputs(&output);
+        assert_eq!(sources.status, "known");
+        assert_eq!(sources.items.len(), 8);
+        assert!(sources.truncated);
+        assert_eq!(sources.items[0].execution_id.as_deref(), Some("exec-0"));
+        let unknown = from_outputs(&[
+            json!({"type":"function_call_output","call_id":"call","output":"not json"}),
+        ]);
+        assert_eq!(unknown.items[0].call_id, "call");
+        assert!(unknown.items[0].execution_id.is_none());
     }
     #[test]
     fn spill_tool_sources_lookup_is_one_index_seek_and_bounded_legacy_projection() {
-        let db=Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE node(id TEXT PRIMARY KEY,payload_json TEXT);").unwrap();
-        let sources=from_outputs(&[json!({"type":"function_call_output","call_id":"a","output":"{\"execution_id\":\"e\"}"})]);
-        db.execute("INSERT INTO node VALUES('s',?1)",[json!({"spill_tools":sources}).to_string()]).unwrap();
-        assert_eq!(load(&db,"s").unwrap().items[0].execution_id.as_deref(),Some("e"));
-        db.execute("INSERT INTO node VALUES('old','{}')",[]).unwrap();
-        assert_eq!(load(&db,"old").unwrap().status,"unknown");
-        db.execute("UPDATE node SET payload_json=?1 WHERE id='old'",[json!({"spill_tools":"x".repeat(20_000)}).to_string()]).unwrap();
-        assert!(load(&db,"old").unwrap().truncated);
-        let plan=db.prepare(&format!("EXPLAIN QUERY PLAN {LOOKUP_SQL}")).unwrap().query_map(["s"],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-        assert!(plan.iter().any(|s|s.contains("SEARCH node USING INDEX")),"{plan:?}");
-        assert!(!plan.iter().any(|s|s.contains("SCAN")),"{plan:?}");
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE node(id TEXT PRIMARY KEY,payload_json TEXT);")
+            .unwrap();
+        let sources = from_outputs(&[
+            json!({"type":"function_call_output","call_id":"a","output":"{\"execution_id\":\"e\"}"}),
+        ]);
+        db.execute(
+            "INSERT INTO node VALUES('s',?1)",
+            [json!({"spill_tools":sources}).to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            load(&db, "s").unwrap().items[0].execution_id.as_deref(),
+            Some("e")
+        );
+        db.execute("INSERT INTO node VALUES('old','{}')", [])
+            .unwrap();
+        assert_eq!(load(&db, "old").unwrap().status, "unknown");
+        db.execute(
+            "UPDATE node SET payload_json=?1 WHERE id='old'",
+            [json!({"spill_tools":"x".repeat(20_000)}).to_string()],
+        )
+        .unwrap();
+        assert!(load(&db, "old").unwrap().truncated);
+        let plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {LOOKUP_SQL}"))
+            .unwrap()
+            .query_map(["s"], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|s| s.contains("SEARCH node USING INDEX")),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|s| s.contains("SCAN")), "{plan:?}");
     }
 }

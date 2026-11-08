@@ -2132,10 +2132,16 @@ mod tests {
                 serde_json::from_str(output[1]["output"].as_str().unwrap()).unwrap();
             assert_eq!(placeholder["omitted"], true);
             assert_eq!(placeholder["original_node_id"], format!("result-{i}"));
-            assert_eq!(payload["spill_tools"]["status"],"known");
-            assert_eq!(payload["spill_tools"]["items"][0]["call_id"],format!("c-{i}"));
-            assert_eq!(payload["spill_tools"]["items"][0]["execution_id"],"e");
-            assert_eq!(payload["spill_tools"]["items"][0]["original_node_id"],format!("result-{i}"));
+            assert_eq!(payload["spill_tools"]["status"], "known");
+            assert_eq!(
+                payload["spill_tools"]["items"][0]["call_id"],
+                format!("c-{i}")
+            );
+            assert_eq!(payload["spill_tools"]["items"][0]["execution_id"], "e");
+            assert_eq!(
+                payload["spill_tools"]["items"][0]["original_node_id"],
+                format!("result-{i}")
+            );
             assert_eq!(
                 placeholder["retrieve"],
                 "shellboy history get --node <original_node_id>"
