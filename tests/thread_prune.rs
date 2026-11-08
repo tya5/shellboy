@@ -9,7 +9,7 @@ use shellboy::{
     control::db::Store,
     gc::GcService,
     history::{get_node, prune::prune_thread, reachability_for_tests},
-    protocol::{Command, ErrorCode, HistoryGetArgs, Request, StorageCategory, ThreadPruneArgs},
+    protocol::{Command, ErrorCode, HistoryGetArgs, Request, ThreadPruneArgs},
     storage::DbWorker,
 };
 use std::sync::Arc;
@@ -96,8 +96,7 @@ impl Fixture {
             .unwrap()
     }
     async fn collect(&self) {
-        self.gc
-            .collect(StorageCategory::History, now())
+        crate::history_collection::collect_history(&self.gc, now())
             .await
             .unwrap();
     }

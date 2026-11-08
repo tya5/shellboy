@@ -1,3 +1,4 @@
+use crate::history_collection::collect_history;
 use chrono::{TimeZone, Utc};
 use rusqlite::{Connection, params};
 use shellboy::{
@@ -96,7 +97,7 @@ async fn received_audits_survive_live_thread_gc_then_release_all_paid_channels_o
     }).await.unwrap();
     f.job().await;
     assert_eq!(
-        f.gc.collect(StorageCategory::History, now())
+        collect_history(&f.gc, now())
             .await
             .unwrap()
             .nodes_tombstoned,
@@ -109,7 +110,7 @@ async fn received_audits_survive_live_thread_gc_then_release_all_paid_channels_o
         Ok(())
     }).await.unwrap();
     assert_eq!(
-        f.gc.collect(StorageCategory::History, now())
+        collect_history(&f.gc, now())
             .await
             .unwrap()
             .nodes_tombstoned,
@@ -250,17 +251,17 @@ async fn history_keeps_shared_prefix_recursive_sources_live_creator_and_pending_
         f.node(id, None).await;
     }
     f.node("unselected_live", Some("turn")).await;
-    f.db.call(|db|{db.execute_batch("INSERT INTO thread_path VALUES('live',0,'prefix'),('live',1,'summary'),('deleted',0,'prefix'),('deleted',1,'deleted_suffix'); INSERT INTO edge VALUES('prefix','deleted_suffix'); INSERT INTO replacement VALUES('r1','summary','1','1','1','adopted','now'),('r2','nested_summary','2','1','1','adopted','now'); INSERT INTO replacement_source VALUES('r1',0,'nested_summary',0,NULL),('r2',0,'source',0,NULL); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('receipt','op','{}','deleted','pending','held','now',json_object('reply',json_object('state','pending'))); INSERT INTO runtime_pin VALUES('pin','fixture','node','pinned',0,'now');")?;Ok(())}).await.unwrap();
+    f.db.call(|db|{db.execute_batch("INSERT INTO thread_path VALUES('live',0,'prefix'),('live',1,'summary'),('deleted',0,'prefix'),('deleted',1,'deleted_suffix'); INSERT INTO edge VALUES('prefix','deleted_suffix'); INSERT INTO replacement VALUES('r1','summary','1','1','1','adopted','now'),('r2','nested_summary','2','1','1','adopted','now'); INSERT INTO replacement_source VALUES('r1',0,'nested_summary',0,NULL),('r2',0,'source',0,NULL); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('receipt','op','{}','live','pending','held','now',json_object('reply',json_object('state','pending'))); INSERT INTO runtime_pin VALUES('pin','fixture','node','pinned',0,'now');")?;Ok(())}).await.unwrap();
     // No explicit deletion job: even unreachable old payloads are not collected.
     assert_eq!(
-        f.gc.collect(StorageCategory::History, now())
+        collect_history(&f.gc, now())
             .await
             .unwrap()
             .nodes_tombstoned,
         0
     );
     f.job().await;
-    let report = f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    let report = collect_history(&f.gc, now()).await.unwrap();
     assert_eq!(report.nodes_tombstoned, 1);
     f.db.call(|db| {
         assert_eq!(
@@ -333,7 +334,7 @@ async fn real_vectors_and_node_tombstone_roll_back_together_and_duplicate_payloa
     f.node("dead", None).await;
     f.db.call(|db|{db.execute_batch("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','turn',0,0,'p','m',0,'completed','{}','now'); INSERT INTO output_item VALUES('attempt',0,NULL,'message',NULL,'completed','{\"secret\":\"duplicate\"}','dead'); CREATE VIRTUAL TABLE shellboy_vec_00000000000000000000000000000000 USING vec0(embedding float[2]); INSERT INTO index_space(id,profile_id,model_id,dimension,splitter_version,state,vec_table_name) VALUES('space','p','m',2,'1','inactive','shellboy_vec_00000000000000000000000000000000'); INSERT INTO shellboy_vec_00000000000000000000000000000000(rowid,embedding)VALUES(1,'[1,2]'); INSERT INTO embedding_job(id,space_id,source_node_id,source_revision,body_kind,source_hash,span_start,span_end,state)VALUES('embed','space','dead',0,'text','hash',0,2,'completed'); INSERT INTO embedding_chunk VALUES('chunk','embed','space','dead',0,0,2,'hash',1); CREATE TRIGGER fail_node BEFORE UPDATE OF payload_json ON node WHEN NEW.payload_json IS NULL BEGIN SELECT RAISE(ABORT,'injected'); END;")?;Ok(())}).await.unwrap();
     f.job().await;
-    assert!(f.gc.collect(StorageCategory::History, now()).await.is_err());
+    assert!(collect_history(&f.gc, now()).await.is_err());
     f.db.call(|db| {
         assert_eq!(
             scalar(
@@ -356,7 +357,7 @@ async fn real_vectors_and_node_tombstone_roll_back_together_and_duplicate_payloa
     .await
     .unwrap();
     assert_eq!(
-        f.gc.collect(StorageCategory::History, now())
+        collect_history(&f.gc, now())
             .await
             .unwrap()
             .nodes_tombstoned,
@@ -558,14 +559,14 @@ async fn summary_parts_count_toward_quota_and_explicitly_deleted_sources_invalid
     );
     // Partial successful summaries remain reusable while original source is live.
     assert_eq!(
-        f.gc.collect(StorageCategory::History, now())
+        collect_history(&f.gc, now())
             .await
             .unwrap()
             .summary_cache_parts_collected,
         0
     );
     f.job().await;
-    let result = f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    let result = collect_history(&f.gc, now()).await.unwrap();
     assert_eq!(result.nodes_tombstoned, 1);
     assert_eq!(result.summary_cache_parts_collected, 2);
     assert!(result.summary_cache_bytes_collected > 0);
@@ -617,7 +618,7 @@ async fn summary_parts_without_traceable_sources_are_collected_as_stale() {
     .await
     .unwrap();
     f.job().await;
-    let result = f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    let result = collect_history(&f.gc, now()).await.unwrap();
     assert_eq!(result.summary_cache_parts_collected, 3);
     f.db.call(|db| {
         let kept: Vec<String> = db
@@ -679,7 +680,7 @@ async fn detached_pending_attachment_sources_are_roots_until_cancelled_or_target
         Ok(())
     }).await.unwrap();
     f.job().await;
-    let report = f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    let report = collect_history(&f.gc, now()).await.unwrap();
     assert_eq!(report.nodes_tombstoned, 2);
     f.db.call(|db| {
         assert_eq!(scalar(db,"SELECT count(*) FROM node WHERE id IN ('accepted','held') AND payload_json IS NOT NULL")?,2);
@@ -902,7 +903,7 @@ async fn changed_roots_protect_old_recursive_sources_and_leave_later_jobs_pendin
         Ok(())
     }).await.unwrap();
     assert_eq!(
-        f.gc.collect(StorageCategory::History, now())
+        collect_history(&f.gc, now())
             .await
             .unwrap()
             .nodes_tombstoned,
@@ -1061,7 +1062,7 @@ async fn history_maintenance_collects_dead_deliveries_without_losing_history_or_
         "#)?;
         Ok(())
     }).await.unwrap();
-    f.gc.collect(StorageCategory::History, now()).await.unwrap();
+    collect_history(&f.gc, now()).await.unwrap();
     f.db.call(|db| {
         assert_eq!(
             scalar(db, "SELECT count(*) FROM delivery WHERE event_id='context'")?,
@@ -1112,7 +1113,7 @@ async fn deleted_receipts_are_collected_in_finite_batches_but_live_parties_and_p
         for (id,target,sender,state) in [
             ("live-target","live","null","replied"),
             ("live-sender","deleted",r#"{"kind":"model","thread_id":"live"}"#,"recipient_deleted"),
-            ("pending","deleted","null","pending"),
+            ("pending","live","null","pending"),
         ] {
             db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",[id])?;
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,?2,?3,?1,'applied','now',?4)",params![id,sender,target,serde_json::json!({"reply":{"state":state}}).to_string()])?;

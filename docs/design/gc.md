@@ -123,8 +123,9 @@ policy. Existing SQLite pages are reusable but not automatically returned to OS.
 ## Deleted-Thread message receipts (#197, #194 step 3)
 
 The history-GC requester owns receipt reclamation. Thread deletion first commits
-recipient pending-reply terminal transitions and outcome notices in its deletion
-transaction, with indexed lookups bounded by the per-recipient 128 cap. Sender
+up to 16 recipient pending-reply terminal transitions and outcome notices across
+its selected cascade. Remaining legacy duties continue in receipt batches as
+specified below; the per-recipient admission cap is independently 16. Sender
 cancellation is deferred to this receipt phase: each of at most 128 scanned rows
 is checked by receipt primary key for a deleted model sender, then conditionally
 terminalized with cancel_reason=sender_deleted and a recipient cancellation

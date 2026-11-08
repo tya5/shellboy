@@ -832,7 +832,7 @@ Integration tests on temporary stores with the local HTTP mock: send with each
 `--deliver` timing; reply by the recipient model through the shell CLI; reply by
 a human (no Origin); delivery to a model sender (new Run, existing Turn, held);
 rejection paths (double reply, not applied, foreign Thread, fork, self target,
-cap 128/129); Run-end reminder then `ignored` with sender notice and wait
+cap 16/17); Run-end reminder then `ignored` with sender notice and wait
 release; ordering with waiting `complete` messages; cancel before and after
 admission; recipient deletion; restart with a pending wait; multiple waiters;
 cycle rejection; exec in each `--result` mode (success, `ignored`, timeout,

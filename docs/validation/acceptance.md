@@ -10948,3 +10948,34 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 - Synthetic fixtures only; no real database, provider or paid API is used. Studio
   behavior and non-host OS local execution are not dynamically tested; exact-tip
   normal and all-OS CI remain the cross-platform gate.
+
+### #262 CI fixture repair (2026-11-09, verification pending)
+
+The 38fe69b standard run 42522587870 failed in tests; it is not a green gate.
+Its logs exposed independent RAG-schema SQL contamination, invalid conversation
+schema downgrade DDL, a removed baseline migration-37 additive-column guard,
+and fixtures still assuming admission 128 or single-pass history completion.
+Repairs retain admission 16, summary 17+/exact=false, synchronous deletion 16,
+and durable receipt batches 128. The shared test-only history observer calls
+successive bounded passes; rollback, row-bound and retained-body assertions
+remain enabled. Pending-root fixtures now target live recipients; the existing
+large deleted-recipient restart test checks eventual terminalization separately.
+
+Local macOS synthetic fixtures (no live owner/provider): startup migrations,
+activity migrations, RAG lock/ingest, owner preparation, retained-event upgrade,
+client dispatch, F8 attachment projection, and schema14/15 upgrades pass.
+Integration storage (24), hot-query migrations (6), reply (9), history GC (35,
+plus one pre-existing manual measurement ignored), prune (13), and RAG store
+(25) pass. Python policy/unit tests: 206 pass. The final focused run and exact-SHA
+normal/all-OS CI remain required; these results do not qualify another SHA.
+
+Full-branch language metadata audit against origin/main 292ccca (distinct from
+reviewing only the 34-record follow-up): 495 changed records, all in #262-touched
+sources: src/operations.rs 334 (including two new Awaiting label/help records),
+src/ui/operations.rs 127, src/ui/threads.rs 34. All 493 existing categories are
+unchanged; no records are removed. Outside the 34 explicitly re-reviewed Thread
+rendering records, existing reasons are byte-identical. Every changed source
+fingerprint matches the current scanner inventory. The two new labels have
+matching En/Ja field-label/help arms. Thus the 1,064-line manifest diff is scoped
+source-token pin maintenance, not an unrelated category rollback. The prior
+34-record approval alone was not evidence for this full-branch comparison.

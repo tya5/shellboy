@@ -61,7 +61,7 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
     let control = Control::new(&owner, root.path().into());
     control.store.database.call(|db| {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('u','t','r','completed','now','now');")?;
-        for i in 0..128 {
+        for i in 0..16 {
             let id=format!("message-{i:03}");
             db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",[&id])?;
             let sender = if i == 0 {
@@ -102,7 +102,7 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
     ));
     control.store.database.call(|db| {
         assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,0);
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0))?,128);
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0))?,16);
         db.execute("UPDATE turn SET state='completed' WHERE id='u'",[])?;
         Ok(())
     }).await.unwrap();
@@ -129,7 +129,7 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
                 |r| r.get(0),
             )?;
             let value: serde_json::Value = serde_json::from_str(&payload).unwrap();
-            assert_eq!(value["messages"].as_array().unwrap().len(), 128);
+            assert_eq!(value["messages"].as_array().unwrap().len(), 16);
             for (i, row) in value["messages"].as_array().unwrap().iter().enumerate() {
                 assert_eq!(row["message_id"], format!("message-{i:03}"));
                 if i == 0 {
@@ -140,7 +140,7 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
             }
             assert!(
                 payload.len() < 65536,
-                "bounded 128-duty reminder: {}",
+                "bounded 16-duty reminder: {}",
                 payload.len()
             );
             // Esc completes a Turn without an end message. The next boundary is still normal completion.
@@ -161,7 +161,7 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
         Next::Done
     ));
     control.store.database.call(|db| {
-        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?,128);
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?,16);
         assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_reminder'",[],|r|r.get::<_,i64>(0))?,1);
         Ok(())
     }).await.unwrap();

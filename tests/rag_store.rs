@@ -1479,7 +1479,7 @@ async fn legacy_chunks_migrate_without_duplicate_text_and_embed_utf8_ranges() {
     assert_eq!(index(root, None, IndexMode::Keyword).await["ok"], true);
     {
         let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();
-        db.execute_batch("ALTER TABLE chunks ADD COLUMN text TEXT; UPDATE chunks SET text=(SELECT CAST(substr(CAST(b.text AS BLOB),chunks.start+1,chunks.end-chunks.start) AS TEXT) FROM blocks b WHERE b.revision_id=chunks.revision_id AND b.ordinal=0); DROP TRIGGER IF EXISTS receipt_arrival_sequence; DROP TABLE IF EXISTS receipt_arrival_clock; ALTER TABLE receipt DROP COLUMN arrival_seq; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=3;").unwrap();
+        db.execute_batch("ALTER TABLE chunks ADD COLUMN text TEXT; UPDATE chunks SET text=(SELECT CAST(substr(CAST(b.text AS BLOB),chunks.start+1,chunks.end-chunks.start) AS TEXT) FROM blocks b WHERE b.revision_id=chunks.revision_id AND b.ordinal=0); PRAGMA user_version=3;").unwrap();
     }
     {
         let db = rusqlite::Connection::open(root.join("knowledge.db")).unwrap();

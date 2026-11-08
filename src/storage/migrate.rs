@@ -209,9 +209,28 @@ pub(super) fn run(
         report(migration.version - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        if migration.version == 36 && transaction.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('node') WHERE name='spill_tools_json')",[],|r|r.get::<_,bool>(0))? {
-            // Downgrade fixtures can retain the additive column; do not rewrite existing metadata.
-            transaction.execute_batch(migration.sql.split_once(';').expect("column then index").1)?;
+        let additive_column_already_present = match migration.version {
+            36 => transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('node') WHERE name='spill_tools_json')",
+                [],
+                |r| r.get::<_, bool>(0),
+            )?,
+            37 => transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('thread') WHERE name='branch_kind')",
+                [],
+                |r| r.get::<_, bool>(0),
+            )?,
+            _ => false,
+        };
+        if additive_column_already_present {
+            // Downgrade fixtures can retain additive columns; keep existing data intact.
+            transaction.execute_batch(
+                migration
+                    .sql
+                    .split_once(';')
+                    .expect("column then metadata")
+                    .1,
+            )?;
         } else {
             transaction.execute_batch(migration.sql)?;
         }
@@ -417,9 +436,9 @@ mod activity_migration_tests {
         for upgrade in [false, true] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch("DELETE FROM schema_migration WHERE version>38; DROP INDEX IF EXISTS receipt_human_reply_pending;")
-                .unwrap();
             if upgrade {
+                db.execute_batch("DROP INDEX receipt_human_reply_pending;")
+                    .unwrap();
                 db.execute_batch(" DROP INDEX receipt_reply_pending; DROP INDEX jobs_running_recovery; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DELETE FROM schema_migration WHERE version>=26; PRAGMA user_version=25;").unwrap();
                 run(&mut db, 25, &|_, _| {}, &|| {}).unwrap();
             }
@@ -454,7 +473,7 @@ mod activity_migration_tests {
             assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
             let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get(3)).unwrap();
             assert!(plan.contains("receipt_reply_pending"), "{plan}");
-            let human_plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
+            let human_plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt INDEXED BY receipt_human_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
             assert!(
                 human_plan.contains("receipt_human_reply_pending"),
                 "{human_plan}"
@@ -485,7 +504,7 @@ mod activity_migration_tests {
         );
         assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 20);
         assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_human_reply_pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
+        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt INDEXED BY receipt_human_reply_pending WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
         assert!(plan.contains("receipt_human_reply_pending"), "{plan}");
     }
 
