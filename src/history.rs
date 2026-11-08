@@ -942,3 +942,5 @@ fn sql_error(error: rusqlite::Error) -> ApiError {
 fn storage_error(error: StorageError) -> ApiError {
     error.into_api_error()
 }
+
+pub(crate) mod spill_tools;

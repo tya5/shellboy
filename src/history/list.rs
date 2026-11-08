@@ -207,6 +207,11 @@ pub(super) fn history_snippet(
     let ordinal = row.get::<_, i64>(4).map_err(sql_error)? as u64;
     let (executions, execution_count) = execution_links(connection, &node_id)?;
     let item = HistorySnippet {
+        spill_tools: if row.get::<_, String>(1).map_err(sql_error)? == "spill" {
+            Some(super::spill_tools::load(connection, &node_id)?)
+        } else {
+            None
+        },
         payload_chars: row
             .get::<_, Option<i64>>(6)
             .map_err(sql_error)?

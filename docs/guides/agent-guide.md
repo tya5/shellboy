@@ -763,3 +763,9 @@ If a registered common file breaks preparation across Threads, do not wait for a
 still runs. Repair the named file or use `config get` and hash-checked `config.set` to remove that entry (preserving
 others); `[]` clears the list. Then explicitly retry/resume the affected Run. Already saved Turn instructions remain
 unchanged. Raw AGENTS JSON is literal text, never a declaration of internal instruction sources.
+
+For `history.list` / `history.window` spill items, use additive `spill_tools.items` to associate compressed tool
+results with saved `call_id`, optional `execution_id` and optional `original_node_id`. At most eight sources are
+included; honor `truncated`. `status:"unknown"` on legacy spills means unavailable provenance, not zero calls.
+Do not globally search a call ID or assume an execution is still running. Existing direct `executions` metadata is
+unchanged. Explicit source-relation/history-get inspection remains available when needed; source bodies can be gone.

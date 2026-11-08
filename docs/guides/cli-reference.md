@@ -1082,3 +1082,15 @@ storage status for logical index bytes. Reclamation resumes after restart.
 ## Message Ask
 
 `message ask --text TEXT` asks the human for a decision and ends the current Turn without waiting. The question is available in `thread get` → `awaiting_replies`; answer with `message reply`.
+
+### Spill tool sources (#274)
+
+`history list` / `history window` spill items include `spill_tools` with `status`, at most eight `items` and a
+`truncated` flag. Items contain `call_id`, plus `execution_id`/`original_node_id` when captured. This lets clients put
+a compressed result inside its original tool block without loading source bodies. These are saved IDs, not live
+status. Existing `executions` fields retain their direct-node meaning. Non-spill items omit `spill_tools`.
+
+Old spills without saved metadata report `status:"unknown"` and an empty list; do not label them as having zero
+calls. For explicit investigation, read source relations and retrieve a source node; missing retained bodies may be
+tombstoned. Metadata stays visible when `--excerpt-chars 0` is used. More than eight sources sets `truncated:true`;
+there is no implicit expansion or global search for matching call IDs.

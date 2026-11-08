@@ -1389,7 +1389,8 @@ fn spill_payload(group: &Group) -> Option<Value> {
     if output.is_empty() {
         return None;
     }
-    let payload = json!({"output":output,"reasoning_epoch":group.sources.first().and_then(|n|n.payload.get("reasoning_epoch")).cloned().unwrap_or(Value::Null),"spill_version":1,"source_node_ids":group.sources.iter().map(|s|&s.id).collect::<Vec<_>>()});
+    let spill_tools = crate::history::spill_tools::from_outputs(&output);
+    let payload = json!({"spill_tools":spill_tools,"output":output,"reasoning_epoch":group.sources.first().and_then(|n|n.payload.get("reasoning_epoch")).cloned().unwrap_or(Value::Null),"spill_version":1,"source_node_ids":group.sources.iter().map(|s|&s.id).collect::<Vec<_>>()});
     Some(payload)
 }
 
@@ -2131,6 +2132,10 @@ mod tests {
                 serde_json::from_str(output[1]["output"].as_str().unwrap()).unwrap();
             assert_eq!(placeholder["omitted"], true);
             assert_eq!(placeholder["original_node_id"], format!("result-{i}"));
+            assert_eq!(payload["spill_tools"]["status"],"known");
+            assert_eq!(payload["spill_tools"]["items"][0]["call_id"],format!("c-{i}"));
+            assert_eq!(payload["spill_tools"]["items"][0]["execution_id"],"e");
+            assert_eq!(payload["spill_tools"]["items"][0]["original_node_id"],format!("result-{i}"));
             assert_eq!(
                 placeholder["retrieve"],
                 "shellboy history get --node <original_node_id>"

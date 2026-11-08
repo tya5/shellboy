@@ -10796,3 +10796,10 @@ CI `42444754237` on `f3f802c1d4` failed only the exported-protocol-schema equali
 schema export must include the added optional `ThreadDetails.instruction_sources` field. The schema is regenerated
 with the branch's built CLI and its export regressions are rerun. This is a missing derived artifact, not a flaky
 runtime test. The failed run remains evidence; a new tip and fresh CI pair are required.
+
+### #274 acceptance (validation pending)
+
+Synthetic regressions cover spill creation capturing call/execution/source IDs, eight-item truncation, absent
+execution IDs, legacy unknown metadata, oversized metadata, shared list/window output with zero excerpts and
+unchanged direct execution counts. EXPLAIN for the new lookup must show one node index SEARCH and no SCAN. Existing
+window step-bound and compaction suites remain the broader compatibility checks. No passing result is asserted yet.

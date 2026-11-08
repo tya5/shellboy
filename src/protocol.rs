@@ -1525,7 +1525,14 @@ record!(HistorySelection {
     ordinal: u64,
     current_cwd: String
 });
+record!(SpillToolSource {
+    call_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] original_node_id: Option<String>
+});
+record!(SpillToolSources { status: String, items: Vec<SpillToolSource>, truncated: bool });
 record!(HistorySnippet {
+    #[serde(default, skip_serializing_if = "Option::is_none")] spill_tools: Option<SpillToolSources>,
     #[serde(default)] payload_chars: Option<u64>,
     node_id: String,
     kind: String,

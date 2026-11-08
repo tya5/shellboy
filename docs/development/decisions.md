@@ -4234,3 +4234,12 @@ the existing digest field carries its algorithm/representation namespace, not a 
 The review accepted static bounds and fail-closed semantics but required an operational recovery path. Retain the
 policy: repair the file or remove just its entry with hash-checked live config.set, then explicitly retry preparation.
 The control/config CLI remains available without model execution. Already saved Turns deliberately do not change.
+
+### D-274: capture bounded spill tool provenance at creation
+
+Store up to eight source links (256 UTF-8 bytes per identifier) in the existing spill payload while building its
+replay projection. Read only that captured metadata with a node-PK lookup. Keep legacy direct execution links and
+counts unchanged; no recursive source walk or global call-ID inference is safe or needed for the UI projection.
+Older spills are explicitly unknown until a new spill projection captures metadata; no paid/backfill job or schema
+change is introduced. A lookup returns at most 16384 metadata bytes and validates its source count/IDs. JSON parsing
+of the selected saved payload is not claimed to be constant-time. The plan must add no SCAN.

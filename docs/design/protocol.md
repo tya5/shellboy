@@ -827,3 +827,28 @@ matches the instruction-prefix order. No schema migration or new daemon task is 
 persisted digest-kind namespace; no JSON field in a user file activates source decoding. `instruction_sources` omits
 raw snapshots even when they contain an `extra` JSON field. Repair/remove broken common-file registrations through
 the model-independent config CLI, then explicitly retry; fail-closed semantics are unchanged.
+
+## #274 spill-to-tool provenance
+
+`history.list` and `history.window` retain all existing fields and add `spill_tools` only for spill nodes:
+
+```json
+{"spill_tools":{"status":"known","items":[{"call_id":"call-id","execution_id":"execution-id","original_node_id":"source-node-id"}],"truncated":false}}
+```
+
+This is immutable saved provenance, not the current execution state. Each spill records at most eight tool-output
+sources in replay order; more sources set `truncated:true`. Identifiers are limited to 256 UTF-8 bytes each. `call_id`
+is required per item; `execution_id` and `original_node_id` are omitted when absent, never inferred from a global
+call-ID match. Non-shell tool results may have only a call ID. Existing `executions`, `execution_count` and their
+truncation flag keep their original direct-node meaning and are not silently broadened to replacement sources.
+
+Legacy spills without this captured metadata return `{"status":"unknown","items":[],"truncated":false}`;
+unknown is not proof of no tool execution. No history backfill, source-payload traversal or reverse lookup is run.
+Use `history relations --relation sources`/`history get` for explicit forensic exploration. Source IDs can outlive
+source payload retention; tombstones do not invalidate captured IDs. `excerpt_chars:0` still includes provenance.
+
+Creation reuses the already assembled spill projection; reading performs one node-primary-key seek per spill and
+projects only the saved metadata (maximum 16384 bytes). Corrupt/oversized metadata is unknown rather than an
+unbounded allocation. There is no new table, index, migration or queue; the page/window plans are unchanged and the
+added lookup has no SCAN. JSON extraction still parses the selected node's saved JSON; no constant wall-time bound
+for arbitrarily large legacy payloads is asserted.
