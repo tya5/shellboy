@@ -218,7 +218,7 @@ mod bounded_tests {
                 observed.fetch_add(1, Ordering::Relaxed);
                 false
             }),
-        );
+        ).unwrap();
         let mut counts = Vec::new();
         for id in ["small", "large"] {
             steps.store(0, Ordering::Relaxed);
