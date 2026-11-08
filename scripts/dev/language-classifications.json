@@ -724,11 +724,6 @@
     "reason": "Reviewed WatchText::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
     "source_tokens_sha256": "8c0a3f87c17fefb427727965b866564852cfb217eb46ee5df155b55d6cb6b0cb"
   },
-  "src/ui/watch.rs:6570d98bd30c26e1:1": {
-    "category": "a",
-    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
-    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
-  },
   "src/ui/watch.rs:6b99c45c7c891267:1": {
     "category": "a",
     "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged. Re-reviewed for #276: child Run count/notice branches removed; this remaining shell/source or explicit Japanese Watch arm retains its existing English typed projection.",
@@ -758,11 +753,6 @@
     "category": "a",
     "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged. Re-reviewed for #276: child Run count/notice branches removed; this remaining shell/source or explicit Japanese Watch arm retains its existing English typed projection.",
     "source_tokens_sha256": "c1aebd84dc41908371edc2966fff744eb25403107a1aff8acc59bbf9b322de7a"
-  },
-  "src/ui/watch.rs:9ee5b566af764e4d:1": {
-    "category": "a",
-    "reason": "Reviewed WatchMessage::render: this literal is in the UiLanguage::Ja arm; the matching UiLanguage::En arm renders the same typed variant separately. Dynamic values and glyph policy remain unchanged.",
-    "source_tokens_sha256": "e4149fea504c3db87e6da3c674bde2b8ddf3f6447a977847a3644bfdd82bc591"
   },
   "src/ui/watch.rs:a11d38283bd0d638:1": {
     "category": "a",
@@ -6343,26 +6333,6 @@
     "category": "a",
     "reason": "Japanese branch of CommandNotice background rendering; Message::CommandNotice has the English Background request not recorded arm. Re-reviewed for #276: child Run count/notice branches removed; this remaining shell/source or explicit Japanese Watch arm retains its existing English typed projection.",
     "source_tokens_sha256": "c6039ac13544ec443f40115fe52a2ec1d499a285f264a5d538cbf8951650df7e"
-  },
-  "src/frontend/notices.rs:e285f7c02c03aa54:1": {
-    "category": "a",
-    "reason": "Japanese fallback in NoticeText::text, consumed by Message::Text variants that provide the English Referenced conversation was deleted projection.",
-    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
-  },
-  "src/frontend/notices.rs:6a641957091defc7:1": {
-    "category": "a",
-    "reason": "Japanese fallback in NoticeText::text, consumed by Message::Text variants that provide the English Referenced conversation is unavailable projection.",
-    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
-  },
-  "src/frontend/notices.rs:bb26c4dbc7825158:1": {
-    "category": "a",
-    "reason": "Japanese fallback in NoticeText::text, consumed by ThreadNotice; Text::NoticeUntitled supplies the English Untitled fallback.",
-    "source_tokens_sha256": "58e992b32461658bdee8362460079df3baef4c81b0990769e4369604105fb6cb"
-  },
-  "src/frontend/notices.rs:a0773a30228a28bd:1": {
-    "category": "a",
-    "reason": "Japanese ThreadNotice display title; Message::ThreadNotice renders the paired English Current name label while leaving the saved thread title unchanged.",
-    "source_tokens_sha256": "fcb0b0122e86945ae834af656f5ff2c4144fbd5fd718525ecd74663bd76b3e5f"
   },
   "src/frontend/received.rs:4e7f9ba5488f7a1d:1": {
     "category": "a",
