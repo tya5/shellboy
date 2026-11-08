@@ -11154,3 +11154,20 @@ startup Full check remain unchanged. New synthetic tests require a genuine FK-vi
 Run schema/index, version 38, absent ledger-39 entry and saved rows intact with enforcement ON; a separate panic
 fixture requires rollback of a changed witness row and enforcement ON. Normal 38->39 and DDL-error checks remain.
 These tests use disposable synthetic connections only; no further real DB access is involved.
+
+### Final train follow-up: cache window and migration startup expectations
+
+Base `9a63ad76972d01c7e50644345a33d7b80da94a2a`: the cache-window failure was the fixture's stale schema-38
+assertion, not the comparison SQL. The production path still uses the shared bounded 33-turn completed-attempt CTE,
+selects the current attempt and predecessor from that same window, and does not fall back after a missing entry.
+Only the asserted schema version changes to 39; every existing window, coverage, missing-entry and VM-bound assertion
+remains. Both cache comparison tests pass on the dedicated follow-up branch.
+
+The startup failure is not just a 38->39 expectation bump: the approved migration-39 precommit FK check now rolls
+back migration 39 for the synthetic orphan, so the failed upgrade correctly remains at schema 38 rather than the
+latest schema 39. The fixture now requires pending Full metadata, a failing explicit Full check, preserved orphan
+content, absent ledger 39 and another failed reopen retaining pending Full. Only after deleting the synthetic orphan
+does the upgrade reach schema 39 and clear pending metadata. All four active migration-startup tests pass; the
+manual snapshot benchmark remains ignored. No production cache, migration or integrity code changes are necessary.
+Focused tests and `cargo fmt --all -- --check` pass through the shared Rust slot; language inventory passes with the
+19 pre-existing pending entries unchanged. These are component results, not final-train all-OS evidence.

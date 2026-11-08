@@ -46,7 +46,35 @@ fn real_upgrade_without_metadata_checks_full_and_keeps_pending_on_failure() {
     assert!(open_connection(&path, None, None, true).is_err());
     let db = Connection::open(&path).unwrap();
     assert_eq!(pending(&db).unwrap(), Some(Check::Full));
+    // Migration 39 now rejects the orphan before commit, leaving version 38.
+    assert_eq!(schema_version(&db).unwrap(), 38);
+    assert!(Check::Full.run(&db).is_err());
+    assert_eq!(
+        db.query_row("SELECT thread_id FROM run WHERE id='orphan'", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap(),
+        "missing"
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM schema_migration WHERE version=39",
+            [],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    drop(db);
+    assert!(open_connection(&path, None, None, true).is_err());
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(pending(&db).unwrap(), Some(Check::Full));
+    assert_eq!(schema_version(&db).unwrap(), 38);
+    db.execute("DELETE FROM run WHERE id='orphan'", []).unwrap();
+    drop(db);
+    let db = open_connection(&path, None, None, true).unwrap();
     assert_eq!(schema_version(&db).unwrap(), SCHEMA_VERSION);
+    assert_eq!(pending(&db).unwrap(), None);
 }
 
 #[test]
