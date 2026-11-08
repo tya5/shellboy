@@ -847,8 +847,9 @@ unknown is not proof of no tool execution. No history backfill, source-payload t
 Use `history relations --relation sources`/`history get` for explicit forensic exploration. Source IDs can outlive
 source payload retention; tombstones do not invalidate captured IDs. `excerpt_chars:0` still includes provenance.
 
-Creation reuses the already assembled spill projection; reading performs one node-primary-key seek per spill and
-projects only the saved metadata (maximum 16384 bytes). Corrupt/oversized metadata is unknown rather than an
-unbounded allocation. There is no new table, index, migration or queue; the page/window plans are unchanged and the
-added lookup has no SCAN. JSON extraction still parses the selected node's saved JSON; no constant wall-time bound
-for arbitrarily large legacy payloads is asserted.
+Creation reuses the already assembled spill projection and writes a separate bounded `node.spill_tools_json` column
+in the same transaction. Migration 36 adds the nullable column and `node_spill_tools(id,spill_tools_json)` covering
+index without extracting or backfilling old payload JSON. Legacy columns remain NULL/unknown. Reading forces that
+covering index: it accesses neither the node table record nor the payload/JSON functions. At most 16384 metadata
+bytes are parsed, independent of spill payload size. No new table, worker or queue is added. A plain indexed node
+lookup was insufficient: parsing payload JSON before applying substring limits still scaled with its size.

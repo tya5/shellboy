@@ -1094,3 +1094,6 @@ Old spills without saved metadata report `status:"unknown"` and an empty list; d
 calls. For explicit investigation, read source relations and retrieve a source node; missing retained bodies may be
 tombstoned. Metadata stays visible when `--excerpt-chars 0` is used. More than eight sources sets `truncated:true`;
 there is no implicit expansion or global search for matching call IDs.
+
+#274 metadata lookup uses a bounded separate column and covering index; it never parses the spill payload. Older
+spills remain unknown after migration; no automatic payload backfill or source traversal occurs.

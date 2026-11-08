@@ -56,7 +56,8 @@ CREATE TABLE node(
  id TEXT PRIMARY KEY NOT NULL, turn_id TEXT REFERENCES turn(id), kind TEXT NOT NULL,
  created_at TEXT NOT NULL, payload_revision INTEGER NOT NULL DEFAULT 0 CHECK(payload_revision>=0),
  payload_json TEXT CHECK(payload_json IS NULL OR json_valid(payload_json)), payload_bytes INTEGER NOT NULL DEFAULT 0 CHECK(payload_bytes>=0),
- body_hash TEXT, deleted_reason TEXT);
+ body_hash TEXT, deleted_reason TEXT, spill_tools_json TEXT CHECK(spill_tools_json IS NULL OR octet_length(spill_tools_json)<=16384));
+CREATE INDEX node_spill_tools ON node(id,spill_tools_json);
 
 CREATE TABLE edge(
  src TEXT NOT NULL REFERENCES node(id), dst TEXT NOT NULL REFERENCES node(id),

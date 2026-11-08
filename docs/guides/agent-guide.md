@@ -769,3 +769,6 @@ results with saved `call_id`, optional `execution_id` and optional `original_nod
 included; honor `truncated`. `status:"unknown"` on legacy spills means unavailable provenance, not zero calls.
 Do not globally search a call ID or assume an execution is still running. Existing direct `executions` metadata is
 unchanged. Explicit source-relation/history-get inspection remains available when needed; source bodies can be gone.
+
+#274 metadata lookup uses a bounded separate column and covering index; it never parses the spill payload. Older
+spills remain unknown after migration; no automatic payload backfill or source traversal occurs.

@@ -10811,3 +10811,12 @@ spill projection regression (1), full history-window integration module (8, incl
 schema export regressions (2) passed. The metadata point lookup's EXPLAIN has a node index SEARCH and no SCAN.
 Strict all-target clippy, Python 206 tests, layout/watchdog and language/record audits passed. The committed protocol
 schema is regenerated with this branch's CLI. No real API/user data was used. Exact-tip full CI is the handoff gate.
+
+
+### #274 W8 P2 correction (validation pending)
+
+Replace the payload JSON-extraction lookup with a bounded nullable column plus covering index, initialized only on
+new spill creation. Migration 36 leaves legacy metadata unknown. A 16 MiB fixture compares exact VM counts with a
+small payload; a separate authorizer forbids payload access and EXPLAIN/opcode assertions prohibit table hydration
+and JSON calls. Full zero-excerpt history-window calls also compare small/large payload VM counts. These guards are
+implemented, not passing evidence yet. The earlier no-SCAN assertion alone was insufficient to bound JSON work.

@@ -166,6 +166,7 @@ pub fn append_node(
         "INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,?3,?4,?5,?6,?7)",
         params![node_id,turn_id,kind,now,body,body.len() as i64,hash],
     )?;
+    if kind=="spill" { spill_tools::save(tx,node_id,payload)?; }
     if let Some(previous) = previous {
         tx.execute(
             "INSERT INTO edge(src,dst) VALUES(?1,?2)",

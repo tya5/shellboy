@@ -161,7 +161,7 @@ mod bounded_comparison_tests {
     #[test]
     fn cache_comparison_is_exactly_the_shared_33_turn_window_and_never_falls_back() {
         let db = fixture();
-        assert_eq!(crate::storage::SCHEMA_VERSION, 35);
+        assert_eq!(crate::storage::SCHEMA_VERSION, 36);
         assert_eq!(last_response_id(&db, "t").unwrap(), None);
         for n in 1..=33 {
             turn(&db, &format!("z{n:02}"));

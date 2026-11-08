@@ -179,6 +179,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0035_index_reclaim_lookup.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration { version:36, sql:include_str!("../../migrations/0036_spill_tool_metadata.sql"), foreign_keys:Some(Impact::IndexOnly) },
 ];
 
 pub(super) fn run(
@@ -194,7 +195,12 @@ pub(super) fn run(
         report(migration.version - version, super::SCHEMA_VERSION - version);
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        transaction.execute_batch(migration.sql)?;
+        if migration.version == 36 && transaction.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('node') WHERE name='spill_tools_json')",[],|r|r.get::<_,bool>(0))? {
+            // Downgrade fixtures can retain the additive column; do not rewrite existing metadata.
+            transaction.execute_batch(migration.sql.split_once(';').expect("column then index").1)?;
+        } else {
+            transaction.execute_batch(migration.sql)?;
+        }
         if migration.version == 4 {
             migrate_attachment_sources(&transaction)?;
         }

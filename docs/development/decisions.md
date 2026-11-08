@@ -4243,3 +4243,14 @@ counts unchanged; no recursive source walk or global call-ID inference is safe o
 Older spills are explicitly unknown until a new spill projection captures metadata; no paid/backfill job or schema
 change is introduced. A lookup returns at most 16384 metadata bytes and validates its source count/IDs. JSON parsing
 of the selected saved payload is not claimed to be constant-time. The plan must add no SCAN.
+
+
+### D-274 review: bounded metadata needs physical separation from spill payload
+
+W8 correctly found that the original JSON extraction parsed the whole spill payload before truncation. A point
+lookup and constant VM opcode count alone did not constrain work within the JSON function. Add a nullable 16 KiB
+node metadata column and a covering `(id,spill_tools_json)` index. Readers force the covering index, not merely a
+row lookup: an appended small column alone could still require overflow-page traversal after a large record field.
+Write metadata atomically with spill creation; migrate old nodes with NULL and no payload extraction/backfill.
+Regression guards combine a 16 MiB payload with equal VM-step counts, an authorizer rejecting payload-column reads,
+EXPLAIN covering SEARCH/no SCAN, and opcode checks rejecting DeferredSeek/JSON functions. The wire shape is unchanged.
