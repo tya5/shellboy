@@ -387,7 +387,6 @@ fn inspect(
                     snapshots.push(json!({"type":"reply","message_id":message_id,"state":state,"reply_node_id":reply["node_id"],"at":reply["at"],"by":reply["by"]}));
                     if state != "pending" {
                         observation.matched.push(condition.clone());
-                    } else {
                     }
                 } else {
                     missing(&mut observation, initial, "Message", message_id)?;
