@@ -5796,7 +5796,7 @@ mod thread_deletion_notification_tests {
             .unwrap();
         let control = Control::new(&reopened, root.path().into());
         control.start().await.unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        crate::test_watchdog::watchdog("reopened existing history worker drains bounded continuation", async {
             loop {
                 let pending = reopened.db.call(|db| Ok(db.query_row(
                     "SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='pending'",
