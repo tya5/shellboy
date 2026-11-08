@@ -55,7 +55,7 @@ class CompactionEffectTests(unittest.TestCase):
             before = db.execute('SELECT count(*) FROM model_attempt').fetchone()[0]
             version, rows = effect.read_attempts(db_path)
             result = effect.analyze(rows, '2026-11-03T00:00:00Z', 200000)
-            self.assertEqual(version, 38)
+            self.assertEqual(version, 39)
             self.assertEqual(db.execute('SELECT count(*) FROM model_attempt').fetchone()[0], before)
             self.assertEqual(result['before']['profile/m1']['model_requests'], 3)
             self.assertEqual(result['before']['profile/m1']['provider_input_tokens']['median'], 200000)
