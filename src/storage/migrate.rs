@@ -333,15 +333,30 @@ mod activity_migration_tests {
 
     #[test]
     fn foreign_key_check_detects_violations_with_enforcement_disabled() {
-        let mut db=Connection::open_in_memory().unwrap();
+        let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE parent(id TEXT PRIMARY KEY); CREATE TABLE child(parent_id TEXT REFERENCES parent(id));").unwrap();
-        db.pragma_update(None,"foreign_keys",false).unwrap();
-        let tx=db.transaction().unwrap();
-        tx.execute("INSERT INTO child VALUES('missing')",[]).unwrap();
-        assert_eq!(tx.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        db.pragma_update(None, "foreign_keys", false).unwrap();
+        let tx = db.transaction().unwrap();
+        tx.execute("INSERT INTO child VALUES('missing')", [])
+            .unwrap();
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            1
+        );
         tx.rollback().unwrap();
-        db.pragma_update(None,"foreign_keys",true).unwrap();
-        assert_eq!(db.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
+        );
     }
 
     #[test]

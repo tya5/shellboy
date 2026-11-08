@@ -3007,3 +3007,79 @@ async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_r
         close(control, owner, server).await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
+    for terminal in ["completed", "stopped", "failed"] {
+        let (url, mut incoming_requests, server) = proxy().await;
+        let (_directory, owner, control) = runtime(&url).await;
+        let mut threads = Vec::new();
+        for _ in 0..3 {
+            let created = control
+                .store
+                .execute(
+                    Request::new(
+                        uuid::Uuid::new_v4().to_string(),
+                        Command::ThreadCreate(ThreadCreateArgs {
+                            agents: None,
+                            connection: None,
+                            cwd: None,
+                            model: None,
+                            effort: None,
+                            parent_id: None,
+                        }),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap();
+            threads.push(created.result["thread_id"].as_str().unwrap().to_owned());
+        }
+        let sender1 = threads[0].clone();
+        let sender2 = threads[1].clone();
+        let target = threads[2].clone();
+        control.store.database.call(move|db| {
+            let tx=db.transaction()?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('terminal-backlog',?1,?2,'0','1')",rusqlite::params![target,terminal])?;
+            for n in 0..261 {
+                let id=format!("backlog-{n}");
+                let sender=json!({"kind":"model","instance_id":"synthetic","thread_id":if n%2==0 {&sender1}else{&sender2},"run_id":"prior-run","turn_id":"prior-turn","execution_id":"prior-shell"});
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user','0','{}')",[&id])?;
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,path_admission,created_at,result_json) VALUES(?1,?1,?2,?3,?1,'terminal-backlog','applied','admitted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",rusqlite::params![id,sender.to_string(),target])?;
+            }
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        // No stop command or run-ended signal: a fresh maintenance start finds durable work.
+        control.start().await.unwrap();
+        let mut seen_http = false;
+        watchdog("bounded terminal startup sweep",async {
+            loop {
+                let settled=control.store.database.call(|db|Ok(db.query_row("SELECT count(*) FROM receipt WHERE run_id='terminal-backlog' AND json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?)).await.unwrap();
+                if settled==261 && seen_http {break;}
+                tokio::select! {
+                    request=incoming_requests.recv()=>{
+                        let request=request.unwrap();
+                        assert!(request.body["input"].to_string().contains("reply_outcome"));
+                        seen_http=true;
+                        request.reply.send(final_answer("terminal backlog observed")).ok().unwrap();
+                    }
+                    _=tokio::task::yield_now()=>{}
+                }
+            }
+        }).await.unwrap();
+        assert_eq!(
+            control
+                .store
+                .database
+                .call(|db| Ok(db.query_row(
+                    "SELECT count(*) FROM event WHERE kind='reply_outcome'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?))
+                .await
+                .unwrap(),
+            261
+        );
+        close(control, owner, server).await;
+    }
+}

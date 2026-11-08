@@ -1232,7 +1232,12 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
         )
         .unwrap();
     let plans=legacy.prepare("EXPLAIN QUERY PLAN UPDATE event SET kind='recovery_wait' WHERE kind='child_recovery_wait'").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-    assert!(plans.iter().any(|p|p.contains("USING INDEX wait_recovery_thread")),"{plans:?}");
+    assert!(
+        plans
+            .iter()
+            .any(|p| p.contains("USING INDEX wait_recovery_thread")),
+        "{plans:?}"
+    );
     legacy.close().unwrap();
     for _ in 0..2 {
         let db = DbWorker::open(&path).await.unwrap();
