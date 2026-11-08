@@ -1003,7 +1003,7 @@ mod contract_tests {
         let (request_id, draft_id, generation) =
             (request_id.clone(), draft_id.clone(), *generation);
         ui.insert("newer draft text", false);
-        let details:ThreadDetails=serde_json::from_value(serde_json::json!({"agents_path":"/role.md","thread_id":"created","title":"","cwd":"/","connection":"fixture","model":"fixture","children_count":0,"shells_count":0})).unwrap();
+        let details:ThreadDetails=serde_json::from_value(serde_json::json!({"agents_path":"/role.md","thread_id":"created","title":"","cwd":"/","connection":"fixture","model":"fixture","shells_count":0})).unwrap();
         ui.apply(UiUpdate::AgentsSelected {
             request_id: request_id.clone(),
             draft_id: draft_id.clone(),

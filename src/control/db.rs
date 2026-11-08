@@ -1948,7 +1948,6 @@ impl Store {
             status,
             reason,
             wake,
-            owner_changed,
         } = if args.to_human {
             MessageAssignment {
                 run: None,
@@ -1957,7 +1956,6 @@ impl Store {
                 status: DeliveryStatus::Accepted,
                 reason: None,
                 wake: false,
-                owner_changed: None,
             }
         } else {
             assign_message(
@@ -2023,9 +2021,6 @@ impl Store {
         bump_roots(tx)?;
         let accepted_thread = accepted.thread_id.clone();
         let mut result = MutationResult::value(accepted)?;
-        if let Some(owner) = owner_changed {
-            result.changed_threads.push(owner);
-        }
         if wake {
             if args.deliver == Deliver::Now {
                 result.wake_threads.push(id);
@@ -2051,7 +2046,6 @@ struct MessageAssignment {
     status: DeliveryStatus,
     reason: Option<&'static str>,
     wake: bool,
-    owner_changed: Option<String>,
 }
 
 fn assign_message(
@@ -2086,7 +2080,6 @@ fn assign_message(
     let mut status = DeliveryStatus::Accepted;
     let mut reason = None;
     let mut wake = false;
-    let owner_changed = None;
     if let Some((run_id, state)) = run {
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
@@ -2174,8 +2167,8 @@ fn assign_message(
         // New work on an archived Thread makes it visible again (#222).
         archive::clear_for_new_run(tx, id, actor(caller), now).map_err(sql_error)?;
         let turn_id = super::state::create_turn_tx(tx, id, &run_id, now, now).map_err(sql_error)?;
-        // A human's new instruction, or an owning parent's explicit terminal
-        // child restart, is the resume boundary for unassigned saved input.
+        // A human's new instruction resumes unassigned saved input.
+        // An independent model send does not silently admit recovery input.
         // Previously assigned receipts keep their original Run/Turn forever.
         if caller.is_none() {
             super::message_delivery::recover_on_resume_tx(
@@ -2205,7 +2198,6 @@ fn assign_message(
         status,
         reason,
         wake,
-        owner_changed,
     })
 }
 

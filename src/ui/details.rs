@@ -2547,7 +2547,7 @@ mod tests {
                 .any(|field| field.value == "running")
         );
         let changed = || {
-            serde_json::from_value(serde_json::json!({"thread_id":"anonymous","title":"changed","cwd":"/synthetic","connection":"fixture","model":"fixture","agents_path":"","children_count":0,"shells_count":0})).unwrap()
+            serde_json::from_value(serde_json::json!({"thread_id":"anonymous","title":"changed","cwd":"/synthetic","connection":"fixture","model":"fixture","agents_path":"","shells_count":0})).unwrap()
         };
         ui.apply(super::super::UiUpdate::Thread {
             generation,

@@ -497,7 +497,6 @@ fn scalar_id(value: &Value) -> Option<&str> {
 fn identity(value: &Value, array: &str) -> Option<(String, String)> {
     if let Some(id) = scalar_id(value) {
         let kind = match array {
-            "owned_run_ids" => "run",
             "owned_execution_ids" => "execution",
             _ => return None,
         };
@@ -663,10 +662,10 @@ mod tests {
 
     #[test]
     fn semantic_entities_survive_reorder_and_ambiguous_indices_do_not() {
-        let source = serde_json::json!({"items":[{"kind":"run","id":"r1","state":"live"},{"kind":"run","id":"r2","state":"stopped"}],"owned_run_ids":["child"],"unknown":["value"],"numeric":{"0":"object property"}});
+        let source = serde_json::json!({"items":[{"kind":"run","id":"r1","state":"live"},{"kind":"run","id":"r2","state":"stopped"}],"owned_execution_ids":["shell"],"unknown":["value"],"numeric":{"0":"object property"}});
         let fields = [
             field("/items/1/state"),
-            field("/owned_run_ids/0"),
+            field("/owned_execution_ids/0"),
             field("/unknown/0"),
             field("/numeric/0"),
         ];
@@ -674,7 +673,7 @@ mod tests {
         assert_eq!(result[0].entity, Some(("run".into(), "r2".into())));
         assert_eq!(result[0].relative_pointer, "/state");
         assert!(result[0].stable);
-        assert_eq!(result[1].entity, Some(("run".into(), "child".into())));
+        assert_eq!(result[1].entity, Some(("execution".into(), "shell".into())));
         assert!(result[1].stable);
         assert!(!result[2].stable);
         assert!(result[3].stable);
