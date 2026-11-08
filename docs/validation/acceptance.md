@@ -10781,3 +10781,11 @@ then replays each saved raw snapshot after file edits and checks that thread met
 Generated bundles use a writer-owned persisted digest-kind namespace; plain saved SHA-256 bodies are always literal.
 Standalone request inspection follows the same saved-kind boundary. Fail-closed policy is retained with an explicit
 model-independent repair/remove/retry procedure. New focused/CI evidence is required before handoff.
+
+### #270 W8 correction focused results
+
+On macOS arm64 against main `d138d162`, `cargo check --locked --tests`, five filtered extra-instruction unit tests,
+two live-configuration integration tests, the request-inspection integration regression and strict all-target
+clippy passed. The new unit regression exercises fresh preparation, saved raw snapshot replay after file changes,
+source metadata and standalone request inspection for each of three colliding text fixtures. These results replace
+any assumption that the first branch's CI covered content-kind collisions; new exact-tip full CI is the final gate.
