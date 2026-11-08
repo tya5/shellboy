@@ -10789,3 +10789,10 @@ two live-configuration integration tests, the request-inspection integration reg
 clippy passed. The new unit regression exercises fresh preparation, saved raw snapshot replay after file changes,
 source metadata and standalone request inspection for each of three colliding text fixtures. These results replace
 any assumption that the first branch's CI covered content-kind collisions; new exact-tip full CI is the final gate.
+
+### #270 review branch first CI feedback
+
+CI `42444754237` on `f3f802c1d4` failed only the exported-protocol-schema equality regression: main's newly committed
+schema export must include the added optional `ThreadDetails.instruction_sources` field. The schema is regenerated
+with the branch's built CLI and its export regressions are rerun. This is a missing derived artifact, not a flaky
+runtime test. The failed run remains evidence; a new tip and fresh CI pair are required.

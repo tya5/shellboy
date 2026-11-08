@@ -5981,6 +5981,7 @@
             "null"
           ]
         },
+        "instruction_sources": true,
         "last_compaction": true,
         "last_end_message": {
           "default": null
@@ -7955,6 +7956,7 @@
             "null"
           ]
         },
+        "instruction_sources": true,
         "last_compaction": true,
         "last_end_message": {
           "default": null
@@ -8166,6 +8168,7 @@
             "null"
           ]
         },
+        "instruction_sources": true,
         "last_compaction": true,
         "last_end_message": {
           "default": null
