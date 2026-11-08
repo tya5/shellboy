@@ -43,6 +43,7 @@ Each row names its issue, landed implementation SHA and acceptance section. CI `
 | #272; `10a7fa0ec5`; `acceptance.md`: #272 model-grouped bounded usage | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #270; `7aa2ef3dd1`; `acceptance.md`: #270 planned/implemented acceptance | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #273; `c54ed50c98`; `acceptance.md`: #273 branch-relative usage and kind | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #264; `e7a7242d55`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #262 reply queue; landing SHA pending; `acceptance.md`: pending | Yes | Awaiting landing | Awaiting landing | Unverified |
 
 Evidence links refer to `docs/validation/acceptance.md` section names. Where no uniquely matching section is identified, the evidence is pending rather than a confirmed acceptance reference. Final release CI and 32-to-37 binary migration validation remain pending.
