@@ -75,6 +75,8 @@ Run; retry by generation CAS; one reply per message; reply only after applicatio
 | #256 (closed) | Stop, retry and shell write/EOF/stop have no caller authority check; landed at `5e140d3011` | This is not an OS boundary |
 | #259 (closed) | Removes the listed non-boundary restrictions on message actors/recipients and `exec` input size; landed at `dfffde451f` | OS/user-account permissions remain the boundary |
 | #261 (closed) | Data cap defaults to 50 GiB, warning at 40 GiB, and admission floor at 5 GiB; landed at `facc05669c` | Already-running command writes are not stopped |
+| #263 (closed) | Recovery-wait external CLI messages and explicit `--resume-recovery`; landed at `9a07276e5a` | Studio/provider behavior was not exercised in its acceptance |
+| #275 | Protocol 4 adds separately opt-in reasoning activity to `events.wait`; landed on main at `482e7ead` | Exact-tip standard/all-OS CI was pending in the main status record snapshot |
 | #262 (closed) | `message ask`, human-recipient reply duties, per-Thread inbox and TUI region; landed at `6960a27e3f` | No cross-Thread inbox; real Studio behavior was not exercised in its acceptance |
 | #272/#273 | Model-grouped usage (grouped compaction totals at `16784db966`) and `--since-node` branch-relative usage with branch kind (#273 at `c54ed50c98`, finalized `dc98c52cb3`) | Grouped compaction follow-up is represented by open PR #223; its reviewed delta is separate from already-landed behavior |
 
