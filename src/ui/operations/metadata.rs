@@ -1099,6 +1099,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "Conversation observation states"
         ),
         FieldId::Until => local!(language, "終了日時（未満）", "End time (exclusive)"),
+        FieldId::SinceNode => local!(language, "開始履歴ノードID", "Starting history node ID"),
         FieldId::After => local!(language, "前回の待機cursor", "Previous wait cursor"),
         FieldId::Memory => local!(language, "メモリ状態", "Memory status"),
         FieldId::CommandContains => local!(language, "コマンドを含む", "Command contains"),
@@ -1281,6 +1282,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "thread_settledのstatesを空白で区切ります。フォーム初期値はcompleted recovery_wait failed stoppedです。CLIではconditions-jsonのstates配列で明示します。",
             "Space-separated thread_settled states. The form defaults to completed recovery_wait failed stopped; CLI uses the states array in conditions-json."
+        ),
+        FieldId::SinceNode => local!(
+            language,
+            "分岐上の最初のノード境界です。--sinceの時刻境界とは併用できません。",
+            "The first-node boundary on a branch. Cannot be combined with the --since time boundary."
         ),
         FieldId::Until => local!(
             language,

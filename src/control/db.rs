@@ -1316,7 +1316,7 @@ impl Store {
                     };
                     let at: String = tx.query_row("SELECT n.created_at FROM node n JOIN thread_path p ON p.node_id=n.id AND p.thread_id=?2 WHERE n.id=?1 AND n.deleted_reason IS NULL", params![node_id,scope_thread], |r| r.get(0)).optional().map_err(sql_error)?
                         .ok_or_else(|| error(ErrorCode::TargetUnavailable, "Usage start node is unavailable on the selected Thread path"))?;
-                    args.since = Some(at);
+                    args.since = Some(at.into_boxed_str());
                     args.since_node_id = None;
                     // Grouped requests otherwise default to every Thread; anchor them to this path.
                     if args.group_by.is_some()
@@ -1324,7 +1324,7 @@ impl Store {
                         && args.run_id.is_none()
                         && args.turn_id.is_none()
                     {
-                        args.thread_id = Some(scope_thread);
+                        args.thread_id = Some(scope_thread.into_boxed_str());
                     }
                 }
                 if let Some(attempt) = &args.attempt_id {

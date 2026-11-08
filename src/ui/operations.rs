@@ -1269,10 +1269,10 @@ impl Form {
                 |form, _cwd| {
                     Ok(Command::UsageGet(UsageGetArgs {
                         attempt_id: form.optional("attempt")?.map(String::into_boxed_str),
-                        since: form.optional("since")?,
+                        since: form.optional("since")?.map(String::into_boxed_str),
                         since_node_id: None,
                         until: form.optional("until")?,
-                        thread_id: form.thread_target()?.thread_id,
+                        thread_id: form.thread_target()?.thread_id.map(String::into_boxed_str),
                         run_id: form.optional("run")?,
                         turn_id: form.optional("turn")?,
                         include_children: form.boolean("children")?,

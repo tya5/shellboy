@@ -234,6 +234,14 @@ fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
             expected,
             "{path}"
         );
+        if path == "usage get" {
+            assert!(spec.fields.contains(&FieldId::SinceNode));
+            assert!(
+                binding.arguments.iter().any(|arg| {
+                    arg.spelling == "--since-node" && arg.field == FieldId::SinceNode
+                })
+            );
+        }
         for declared in &binding.arguments {
             assert!(
                 spec.fields.contains(&declared.field),

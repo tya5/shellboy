@@ -1017,7 +1017,7 @@ fn attempt_usage_wire_validation_rejects_aggregate_options_and_blank_ids() {
         },
         UsageGetArgs {
             attempt_id: Some("a".into()),
-            since: Some("2026-11-01T00:00:00Z".into()),
+            since: Some(Box::from("2026-11-01T00:00:00Z")),
             ..Default::default()
         },
     ] {
@@ -1030,8 +1030,8 @@ fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
     use shellboy::protocol::{Command, UsageGetArgs};
     assert!(
         Command::UsageGet(UsageGetArgs {
-            since_node_id: Some("node".into()),
-            since: Some("2026-11-01T00:00:00Z".into()),
+            since_node_id: Some(Box::from("node")),
+            since: Some(Box::from("2026-11-01T00:00:00Z")),
             ..Default::default()
         })
         .validate()
@@ -1039,7 +1039,7 @@ fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
     );
     assert!(
         Command::UsageGet(UsageGetArgs {
-            since_node_id: Some("node".into()),
+            since_node_id: Some(Box::from("node")),
             until: Some("2026-11-02T00:00:00Z".into()),
             ..Default::default()
         })
@@ -1048,7 +1048,7 @@ fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
     );
     assert!(
         Command::UsageGet(UsageGetArgs {
-            since_node_id: Some("node".into()),
+            since_node_id: Some(Box::from("node")),
             group_by: Some("shell-exit".into()),
             ..Default::default()
         })
@@ -1057,7 +1057,7 @@ fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
     );
     assert!(
         Command::UsageGet(UsageGetArgs {
-            since_node_id: Some(" ".into()),
+            since_node_id: Some(Box::from(" ")),
             ..Default::default()
         })
         .validate()
@@ -1065,7 +1065,7 @@ fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
     );
     assert!(
         Command::UsageGet(UsageGetArgs {
-            since_node_id: Some("node".into()),
+            since_node_id: Some(Box::from("node")),
             group_by: Some("thread".into()),
             cursor: Some("saved-page".into()),
             ..Default::default()

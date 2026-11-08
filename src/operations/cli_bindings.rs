@@ -58,6 +58,7 @@ const MEANINGS: &[Meaning] = &[
             ("limit", FieldId::GroupLimit),
             ("cursor", FieldId::Cursor),
             ("since", FieldId::Since),
+            ("since_node_id", FieldId::SinceNode),
             ("until", FieldId::Until),
             ("thread_id", FieldId::Thread),
             ("run_id", FieldId::Run),

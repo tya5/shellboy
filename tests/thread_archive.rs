@@ -384,7 +384,7 @@ async fn archived_threads_stay_readable_countable_and_can_receive_messages() {
     let usage = run(
         &store,
         Command::UsageGet(UsageGetArgs {
-            thread_id: Some(parent.clone()),
+            thread_id: Some(parent.clone().into_boxed_str()),
             include_children: true,
             ..Default::default()
         }),

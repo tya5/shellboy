@@ -73,11 +73,11 @@ fn window(a: &UsageGetArgs, saved: Option<&Scan>) -> Result<crate::readback::Win
     let since = a
         .since
         .clone()
-        .or_else(|| saved.map(|s| s.since.clone()))
+        .or_else(|| saved.map(|s| s.since.clone().into_boxed_str()))
         .map(Ok)
         .unwrap_or_else(|| {
             end.checked_sub_signed(Duration::hours(24))
-                .map(|t| t.to_rfc3339())
+                .map(|t| t.to_rfc3339().into_boxed_str())
                 .ok_or_else(|| invalid("invalid default period"))
         })?;
     let w = crate::readback::Window::new(Some(&since), Some(&until))?;
@@ -627,7 +627,7 @@ pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<
         Some(Scope::Run(id.clone()))
     } else {
         a.thread_id.as_ref().map(|id| Scope::Thread {
-            id: id.clone(),
+            id: id.to_string(),
             children: a.include_children,
         })
     };

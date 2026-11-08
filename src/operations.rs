@@ -207,6 +207,7 @@ pub(crate) enum FieldId {
     Limit,
     Cursor,
     Since,
+    SinceNode,
     Until,
     After,
     Memory,
@@ -608,6 +609,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         help: "タイムゾーン付きRFC3339です。操作の保存時刻の意味に従います。",
         kind: FieldType::Timestamp,
         discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::SinceNode,
+        default_origin: DefaultOrigin::None,
+        label: "開始履歴ノードID",
+        help: "分岐上の最初のノード境界です。--sinceの時刻境界とは併用できません。",
+        kind: FieldType::Id(IdKind::Node),
+        discovery: Discovery::HistoryList,
     },
     FieldSpec {
         id: FieldId::States,
@@ -1254,6 +1263,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
         route: Route::Owner,
         fields: &[
             FieldId::Since,
+            FieldId::SinceNode,
             FieldId::Until,
             FieldId::Thread,
             FieldId::Run,

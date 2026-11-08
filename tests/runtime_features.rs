@@ -3991,7 +3991,7 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
     let totals = request(
         &control,
         Command::UsageGet(UsageGetArgs {
-            thread_id: Some(thread.clone()),
+            thread_id: Some(thread.clone().into_boxed_str()),
             ..Default::default()
         }),
     )

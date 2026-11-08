@@ -2108,7 +2108,7 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     assert_eq!(turn["usage_totals"]["run"]["status"], "not_applicable");
     assert_eq!(turn["usage_totals"]["turn_lifetime_ms"], 1000);
     let req = request(Command::UsageGet(UsageGetArgs {
-        thread_id: Some(parent.thread_id.clone()),
+        thread_id: Some(parent.thread_id.clone().into_boxed_str()),
         include_children: true,
         ..Default::default()
     }));
@@ -2128,8 +2128,8 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     let after_node = store
         .execute(
             request(Command::UsageGet(UsageGetArgs {
-                thread_id: Some(parent.thread_id.clone()),
-                since_node_id: Some("usage-marker".into()),
+                thread_id: Some(parent.thread_id.clone().into_boxed_str()),
+                since_node_id: Some(Box::from("usage-marker")),
                 ..Default::default()
             })),
             None,
@@ -2144,8 +2144,8 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     let grouped_node = store
         .execute(
             request(Command::UsageGet(UsageGetArgs {
-                thread_id: Some(parent.thread_id.clone()),
-                since_node_id: Some("usage-marker".into()),
+                thread_id: Some(parent.thread_id.clone().into_boxed_str()),
+                since_node_id: Some(Box::from("usage-marker")),
                 group_by: Some("thread".into()),
                 ..Default::default()
             })),
@@ -2163,8 +2163,8 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     let until = store
         .execute(
             request(Command::UsageGet(UsageGetArgs {
-                thread_id: Some(parent.thread_id.clone()),
-                since_node_id: Some("usage-marker".into()),
+                thread_id: Some(parent.thread_id.clone().into_boxed_str()),
+                since_node_id: Some(Box::from("usage-marker")),
                 until: Some("2026-10-30T00:00:00.500Z".into()),
                 ..Default::default()
             })),
@@ -2177,8 +2177,8 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     let foreign_node = store
         .execute(
             request(Command::UsageGet(UsageGetArgs {
-                thread_id: Some(parent.thread_id.clone()),
-                since_node_id: Some("usage-child-marker".into()),
+                thread_id: Some(parent.thread_id.clone().into_boxed_str()),
+                since_node_id: Some(Box::from("usage-child-marker")),
                 ..Default::default()
             })),
             None,

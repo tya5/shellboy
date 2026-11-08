@@ -426,7 +426,7 @@ async fn core_retries_tools_context_reduction_and_saved_cache_usage_are_shared()
             assert!(sent.ok,"{sent:?}");let turn=sent.result.unwrap()["turn_id"].as_str().unwrap().to_owned();
             wait_turn(&control,&owner.instance_id,&turn,&mut changes).await;
         }
-        let usage=control.request(req(Command::UsageGet(UsageGetArgs{thread_id:Some(thread.clone()),..Default::default()}))).await;
+        let usage=control.request(req(Command::UsageGet(UsageGetArgs{thread_id:Some(thread.clone().into_boxed_str()),..Default::default()}))).await;
         assert!(usage.ok,"{usage:?}");let usage=usage.result.unwrap();
         assert_eq!(usage["model_attempts"]["completed"]["count"],3,"{usage}");
         assert_eq!(usage["model_attempts"]["completed"]["cached_tokens"]["known_sum"],200,"{usage}");

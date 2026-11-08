@@ -947,7 +947,7 @@ pub(super) fn read_usage_tx(
                 Scope::Run(id.clone())
             } else {
                 Scope::Thread {
-                    id: args.thread_id.clone().expect("explicit scope"),
+                    id: args.thread_id.clone().expect("explicit scope").into(),
                     children: args.include_children,
                 }
             }
@@ -2232,7 +2232,7 @@ mod grouped_usage_reader_tests {
         let args = crate::protocol::UsageGetArgs {
             group_by: Some("thread".into()),
             timezone: Some("UTC".into()),
-            since: Some("2026-10-31T00:00:00Z".into()),
+            since: Some(Box::from("2026-10-31T00:00:00Z")),
             until: Some("2026-11-01T00:00:00Z".into()),
             ..Default::default()
         };

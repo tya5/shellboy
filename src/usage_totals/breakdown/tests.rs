@@ -33,7 +33,7 @@ fn args(group: &str) -> UsageGetArgs {
     UsageGetArgs {
         group_by: Some(group.into()),
         timezone: Some("UTC".into()),
-        since: Some("2026-10-31T00:00:00Z".into()),
+        since: Some(Box::from("2026-10-31T00:00:00Z")),
         until: Some("2026-11-01T00:00:00Z".into()),
         ..Default::default()
     }
@@ -490,7 +490,11 @@ fn fractional_boundaries_are_exact_after_coarse_utc_string_comparison() {
 
 #[test]
 fn grouped_arguments_keep_the_shared_command_under_the_enum_size_budget() {
-    assert!(std::mem::size_of::<crate::protocol::Command>() <= 200);
+    assert!(
+        std::mem::size_of::<crate::protocol::Command>() <= 200,
+        "Command is {} bytes",
+        std::mem::size_of::<crate::protocol::Command>()
+    );
     let value = serde_json::to_value(args("thread")).unwrap();
     assert_eq!(value["group_by"], "thread");
     assert_eq!(value["timezone"], "UTC");
