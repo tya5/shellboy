@@ -1,6 +1,11 @@
 # Development status
 
 Snapshot: `origin/main` at `482e7eadb39b0bed4059135842c9b148c162f70d` (2026-11-08). This page describes the checked-out main state, not release certification. The exact base commit and open PR were checked against Git history and GitHub on this date.
+## v0.11.0 preparation
+
+Release preparation updates the package version and synthetic upgrade checker from public schema 32 to 35. Publication, tagging, exact-candidate upgrade and installation remain separate reviewer-controlled gates. See [draft notes](release-v0.11.0-draft.md).
+
+## Model-grouped usage (#272; W8 approved, latest-main revalidation)
 
 ## Main
 

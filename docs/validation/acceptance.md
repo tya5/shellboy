@@ -1,5 +1,9 @@
 # Validation record
 
+## v0.11.0 synthetic schema upgrade
+
+On macOS arm64 with SQLite 3.51.0, a two-Thread, one-node in-memory synthetic fixture applied migrations 33-35 in 3.017 ms (one run). Ledger, original records and new indexes were checked. This is not a public-binary upgrade, production-scale timing or Windows hardware validation; those remain separate gates.
+
 ## No stop/retry authority check (#256)
 
 Local, synthetic DB and mock-proxy tests only (no real API): a non-owner Run stops an

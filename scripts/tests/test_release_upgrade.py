@@ -354,6 +354,16 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'list indexes'):
             checks.check_migration(db, before, 33, 34)
 
+    def test_schema32_to35_preserves_rows_and_reclaim_indexes(self):
+        db = self.fixture(17)
+        self.upgrade(db, 17, 32)
+        before, records = self.upgrade(db, 32, 35)
+        self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(33, 36)])
+        self.assertEqual(checks.snapshot(db), records)
+        db.execute("DROP INDEX index_reclaim_state")
+        with self.assertRaisesRegex(AssertionError, 'index_reclaim_state'):
+            checks.check_migration(db, before, 32, 35)
+
     def test_schema37_to38_checks_only_the_human_pending_index(self):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
@@ -365,11 +375,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'human reply targets'):
             checks.check_migration(db, before, 37, 38)
 
-    def test_arguments_default_to_public_v090_schema31_and_target38(self):
+    def test_arguments_default_to_public_v0100_schema32_and_target38(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.9.0', 31, checks.CARGO_VERSION, 38))
+                         ('0.10.0', 32, checks.CARGO_VERSION, 38))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])

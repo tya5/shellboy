@@ -24,7 +24,7 @@ CARGO_VERSION = next(line.split('"')[1] for line in (Path(__file__).resolve().pa
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38)}
-PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29, '0.9.0': 31}
+PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29, '0.9.0': 31, '0.10.0': 32}
 
 
 def read_only_uri(path, stopped=False):
@@ -180,6 +180,12 @@ def check_migration(db, before, start, target):
         assert index is not None and 'target_thread_id,created_at' in index[0], 'migration 38 must index human reply targets and timestamps'
         assert "json_extract(result_json,'$.reply.state')='pending'" in index[0] and "json_extract(result_json,'$.to_human')=1" in index[0], 'migration 38 must index only pending human replies'
 
+    if target >= 35:
+        for name in ('index_reclaim_state', 'index_reclaim_group_value'):
+            expected = next(line.rstrip(';') for line in DERIVED[35].read_text().splitlines() if f' {name} ' in line).replace('IF NOT EXISTS ', '')
+            row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+            assert row and ' '.join(row[0].split()) == ' '.join(expected.split()), f'{name} differs from migration 35'
+
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
@@ -197,7 +203,7 @@ def parse_args(argv=None):
     parser.add_argument('--old', type=Path, required=True)
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
-    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.9.0')
+    parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
     parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
