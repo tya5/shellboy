@@ -36,7 +36,6 @@ fn phase_label(state: &str, language: UiLanguage) -> Option<&'static str> {
 #[derive(Clone, Copy)]
 enum WorkMessage<'a> {
     State(&'a str),
-    ChildState(&'a str),
     Heading {
         empty: bool,
         folded: bool,
@@ -57,18 +56,12 @@ enum WorkMessage<'a> {
 }
 impl<'a> WorkMessage<'a> {
     fn state(row: &'a LiveWorkRow) -> Self {
-        if matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
-            Self::ChildState(&row.state)
-        } else {
-            Self::State(&row.state)
-        }
+        Self::State(&row.state)
     }
+
     fn render(self, language: UiLanguage) -> String {
         use UiLanguage::{En, Ja};
         let rendered: String = match (language, self) {
-            (_, Self::ChildState(state)) => phase_label(state, language)
-                .map(str::to_owned)
-                .unwrap_or_else(|| Self::State(state).render(language)),
             (En, Self::State(state)) => phase_label(state, language)
                 .unwrap_or(match state {
                     "starting" => "Starting",
@@ -100,7 +93,7 @@ impl<'a> WorkMessage<'a> {
                     children,
                     waits: Some(waits),
                 },
-            ) => format!("Shells: {shells} | Child runs: {children} | Waits: {waits}"),
+            ) => format!("Shells: {shells} | Waits: {waits}"),
             (
                 En,
                 Self::Counts {
@@ -108,7 +101,7 @@ impl<'a> WorkMessage<'a> {
                     children,
                     waits: None,
                 },
-            ) => format!("Shells: {shells} | Child runs: {children} | Waits: unknown"),
+            ) => format!("Shells: {shells} | Waits: unknown"),
             (
                 Ja,
                 Self::Counts {
@@ -116,7 +109,7 @@ impl<'a> WorkMessage<'a> {
                     children,
                     waits: Some(waits),
                 },
-            ) => format!("shell {shells} | 子 {children} | 待機 {waits}"),
+            ) => format!("shell {shells} | 待機 {waits}"),
             (
                 Ja,
                 Self::Counts {
@@ -124,7 +117,7 @@ impl<'a> WorkMessage<'a> {
                     children,
                     waits: None,
                 },
-            ) => format!("shell {shells} | 子 {children} | 待機 未取得"),
+            ) => format!("shell {shells} | 待機 未取得"),
             (En, Self::More(1)) => "1 more item".into(),
             (En, Self::More(count)) => format!("{count} more items"),
             (Ja, Self::More(count)) => format!("他{count}件"),
@@ -186,10 +179,6 @@ pub enum LiveWorkTarget {
     Shell {
         execution_id: String,
         turn_id: Option<String>,
-    },
-    ChildRun {
-        run_id: String,
-        thread_id: String,
     },
     Wait {
         operation_id: String,
@@ -274,8 +263,8 @@ fn counts_text(snapshot: &LiveWorkSnapshot, language: UiLanguage) -> String {
         .into()
     });
     match language {
-        UiLanguage::En => format!("Shells: {shells} | Child runs: {children} | Waits: {waits}"),
-        UiLanguage::Ja => format!("shell {shells} | 子 {children} | 待機 {waits}"),
+        UiLanguage::En => format!("Shells: {shells} | Waits: {waits}"),
+        UiLanguage::Ja => format!("shell {shells} | 待機 {waits}"),
     }
 }
 
@@ -758,7 +747,6 @@ pub(super) fn draw(
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
             LiveWorkTarget::Shell { .. } => glyphs::SHELL,
-            LiveWorkTarget::ChildRun { .. } => glyphs::CHILD,
             LiveWorkTarget::Wait { .. } => glyphs::WAIT,
         };
         let last_item = index + 1 == view.region.visible_rows;
@@ -813,12 +801,6 @@ pub(super) fn draw(
                     .position(|other| match (target, &other.target) {
                         (WaitTarget::Shell(a), LiveWorkTarget::Shell { execution_id, .. }) => {
                             a == execution_id
-                        }
-                        (WaitTarget::Run(a), LiveWorkTarget::ChildRun { run_id, .. }) => {
-                            a == run_id
-                        }
-                        (WaitTarget::Thread(a), LiveWorkTarget::ChildRun { thread_id, .. }) => {
-                            a == thread_id
                         }
                         _ => false,
                     })
@@ -993,15 +975,6 @@ impl UiState {
             KeyCode::Char(' ') => {
                 self.active_view_mut().live_work.toggle();
             }
-            KeyCode::Char('o') => {
-                if let Some(LiveWorkRow {
-                    target: LiveWorkTarget::ChildRun { thread_id, .. },
-                    ..
-                }) = self.view().live_work.selected()
-                {
-                    return Some(self.select_thread(thread_id.clone()));
-                }
-            }
             KeyCode::F(6) => {
                 let Some(target) = self
                     .view()
@@ -1016,10 +989,6 @@ impl UiState {
                     LiveWorkTarget::Shell { execution_id, .. } => {
                         context.set_reference(operations::TargetKind::Execution, execution_id);
                         operations::OpKind::ShellGet
-                    }
-                    LiveWorkTarget::ChildRun { run_id, .. } => {
-                        context.set_reference(operations::TargetKind::Run, run_id);
-                        operations::OpKind::RunGet
                     }
                     LiveWorkTarget::Wait { operation_id, .. } => {
                         context.set_reference(operations::TargetKind::Operation, operation_id);
@@ -1139,10 +1108,7 @@ mod tests {
                 },
                 LiveWorkRow {
                     description: None,
-                    target: LiveWorkTarget::ChildRun {
-                        run_id: "child-run".into(),
-                        thread_id: "child-thread".into(),
-                    },
+                    target: LiveWorkTarget::Wait { operation_id: "child-run".into(), execution_id: "child-thread".into() },
                     label: "child task".into(),
                     state: "live".into(),
                     started_at: None,
@@ -1333,7 +1299,7 @@ mod tests {
             // A child row alone has no ticking seconds: only the blink can move.
             let mut work = snapshot(at);
             work.rows
-                .retain(|row| matches!(row.target, LiveWorkTarget::ChildRun { .. }));
+                .retain(|row| matches!(row.target, LiveWorkTarget::Wait { .. }));
             ui.apply(UiUpdate::Activity {
                 thread_id: "thread".into(),
                 generation: ui.view().generation,
@@ -2268,10 +2234,7 @@ mod language_tests {
                 execution_id: "shell-id".into(),
                 turn_id: None,
             },
-            LiveWorkTarget::ChildRun {
-                run_id: "child-run".into(),
-                thread_id: "child-thread".into(),
-            },
+            LiveWorkTarget::Wait { operation_id: "child-run".into(), execution_id: "child-thread".into() },
             LiveWorkTarget::Wait {
                 operation_id: "wait-id".into(),
                 execution_id: "shell-id".into(),
@@ -2406,23 +2369,17 @@ mod language_tests {
             row.state = crate::activity::ActivityPhase::Recovery
                 .column_label()
                 .into();
-            if !matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
                 assert_eq!(
                     WorkMessage::state(&row).render(UiLanguage::En),
                     "Recovery needed"
                 );
                 assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
-            } else {
-                row.state = "live".into();
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), "Running");
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), "実行中");
-                assert_eq!(row.state, "live");
-            }
+
         }
         crate::ui::text_width::clear_terminal_width();
     }
     #[test]
-    fn canonical_child_states_render_at_both_widths_for_one_two_and_many() {
+    fn canonical_wait_states_render_at_both_widths_for_one_two_and_many() {
         fn children<const COUNT: usize>(ui: &mut UiState) {
             populate(ui);
             let view = &mut ui.active_view_mut().live_work;
@@ -2431,10 +2388,7 @@ mod language_tests {
             data.rows = (0..COUNT)
                 .map(|index| {
                     let mut row = child.clone();
-                    row.target = LiveWorkTarget::ChildRun {
-                        run_id: format!("child-run-{index}"),
-                        thread_id: format!("child-thread-{index}"),
-                    };
+                    row.target = LiveWorkTarget::Wait { operation_id: format!("child-run-{index}"), execution_id: format!("child-thread-{index}") };
                     row.state = crate::activity::ActivityPhase::Recovery
                         .column_label()
                         .into();

@@ -15,7 +15,6 @@ pub(super) struct Selection {
     pub(super) tool_scope: Option<ToolObservation>,
     refresh_not_before: Option<tokio::time::Instant>,
     // Only the selected projection's bounded child rows are dependencies.
-    live_children: Vec<String>,
     notice_children: Vec<String>,
 }
 impl Selection {
@@ -97,7 +96,6 @@ impl Selection {
     }
     fn replace_token(&mut self) {
         self.tool_scope = None;
-        self.live_children.clear();
         self.notice_children.clear();
         self.refresh_not_before = None;
         self.cancel.cancel();
@@ -140,10 +138,7 @@ impl Selection {
         }
     }
     pub(super) fn dependent_parent(&self, changed: &str) -> Option<String> {
-        (self
-            .live_children
-            .iter()
-            .chain(&self.notice_children)
+        (self.notice_children.iter()
             .any(|child| child == changed)
             || self.tool_scope.as_ref().is_some_and(|scope| {
                 scope.nodes.iter().any(|node| {
@@ -156,24 +151,7 @@ impl Selection {
         .then(|| self.active_thread.clone())
         .flatten()
     }
-    fn observe_live_children(&mut self, snapshot: &crate::ui::activity::ActivitySnapshot) {
-        self.live_children = snapshot
-            .live_work
-            .as_ref()
-            .map(|work| {
-                work.rows
-                    .iter()
-                    .take(10)
-                    .filter_map(|row| match &row.target {
-                        crate::ui::live_work::LiveWorkTarget::ChildRun { thread_id, .. } => {
-                            Some(thread_id.clone())
-                        }
-                        _ => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-    }
+
     pub(super) fn changed(&mut self, thread: &str) {
         if self.active_thread.as_deref() == Some(thread) {
             self.refresh();
@@ -210,7 +188,6 @@ impl Selection {
         }
         match result {
             Ok(projection) => {
-                self.observe_live_children(&projection.snapshot);
                 self.progress_running = projection.poll_running;
                 update(updates, projection.progress_update(&thread)).await;
                 update(
@@ -220,8 +197,7 @@ impl Selection {
                 .await;
             }
             Err(error) => {
-                self.live_children.clear();
-                self.progress_running = false;
+                        self.progress_running = false;
                 update(
                     updates,
                     UiUpdate::ActivityUnavailable {
@@ -407,9 +383,9 @@ mod live_child_tests {
                 run_id: "parent-run".into(),
                 rows: vec![LiveWorkRow {
                     description: None,
-                    target: LiveWorkTarget::ChildRun {
-                        run_id: "child-run".into(),
-                        thread_id: "child".into(),
+                    target: LiveWorkTarget::Wait {
+                        operation_id: "child-work".into(),
+                        execution_id: "child-shell".into(),
                     },
                     label: "child".into(),
                     state: "実行中".into(),
@@ -518,7 +494,7 @@ mod live_child_tests {
     fn only_visible_child_dependencies_route_to_parent_and_switch_clears_them() {
         let mut selection = Selection::default();
         selection.select_thread("parent".into(), 2);
-        selection.observe_live_children(&snapshot());
+        selection.observe_notices("parent",2,selection.progress_epoch,vec!["child".into()]);
         assert_eq!(
             selection.dependent_parent("child").as_deref(),
             Some("parent")
@@ -531,9 +507,9 @@ mod live_child_tests {
             selection.changed(&parent);
         }
         assert!(!selection.refresh_ready(&parent, start + std::time::Duration::from_millis(499)));
-        selection.observe_live_children(&ActivitySnapshot::default());
+        selection.observe_notices("parent",2,selection.progress_epoch,vec![]);
         assert!(selection.dependent_parent("child").is_none());
-        selection.observe_live_children(&snapshot());
+        selection.observe_notices("parent",2,selection.progress_epoch,vec!["child".into()]);
         selection.select_thread("other".into(), 3);
         assert!(selection.dependent_parent("child").is_none());
     }

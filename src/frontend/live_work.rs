@@ -284,16 +284,6 @@ pub(super) fn prepare_in(
                         ),
                     ),
                 ),
-                "child" => (
-                    LiveWorkTarget::ChildRun {
-                        run_id: row.id,
-                        thread_id: row.related.expect("saved child Thread"),
-                    },
-                    label(
-                        row.label.as_deref(),
-                        crate::ui::i18n::local!(language, "名称未設定", "Untitled"),
-                    ),
-                ),
                 _ => (
                     LiveWorkTarget::Wait {
                         operation_id: row.id,
