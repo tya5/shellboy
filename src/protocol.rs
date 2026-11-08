@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
