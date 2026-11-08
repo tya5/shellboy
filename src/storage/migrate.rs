@@ -376,7 +376,7 @@ mod activity_migration_tests {
     fn rebuild_fk_violation_rejects_commit_preserves_old_rows_and_restores_enforcement() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.pragma_update(None,"foreign_keys",false).unwrap();
+        db.pragma_update(None, "foreign_keys", false).unwrap();
         db.execute_batch("ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id); CREATE INDEX runs_by_owner ON run(owner_run_id,state); CREATE TABLE synthetic_reference(run_id TEXT REFERENCES run(id)); INSERT INTO synthetic_reference VALUES('missing'); DELETE FROM schema_migration WHERE version=39; PRAGMA user_version=38;").unwrap();
         db.pragma_update(None, "foreign_keys", true).unwrap();
         let before: Vec<String> = db
