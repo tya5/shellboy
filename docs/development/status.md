@@ -4709,7 +4709,7 @@ The final local UI integration subset passed (86 tests; 1 existing ignored).
 Handoff still requires the final pushed tip's 3-OS CI, not an earlier run.
 ### #194 Step 2: Explicit Reply Core
 
-The reply-expected send flag, ordered durable admission notices, 128 pending
+The reply-expected send flag, ordered durable admission notices, pending reply duties
 reply cap, explicit reply mutation, reply receipt fields, reply waits, admitted
 duty cancellation, and Thread awaiting-reply projection are implemented on the
 step-1 base. Migration 25 is provisional until integration ordering is known.
@@ -5297,3 +5297,11 @@ Adds `usage get --since-node NODE`, resolving one selected-path node timestamp t
 ### #275 live reasoning activity
 
 `events.wait --reasoning-activity` returns bounded active-attempt metadata independently of `--text`: request attempt elapsed time and cumulative observed reasoning UTF-8 bytes (unknown until deltas arrive), without reasoning content. It reuses the existing in-memory change clock, attempt cap and stream guard; no saved data or worker added. `events.reasoning_activity` advertises support. `cargo check --locked --tests` and focused clippy pass. Clock/runtime unit regressions pass. The first standard CI found a missing generated schema registration and a test expectation mismatch; both are fixed. Protocol-v4 schema is regenerated with the `events.wait` request option and the `events.reasoning_activity` capability; all 32 protocol integration tests pass. Exact-tip focused change-clock (19), events-text (9 plus 1 ignored), and events-wait (17) suites pass; the CLI independent-opt-in test passes. The language audit scanned 417 files with no inventory change. Push and exact-tip standard/all-OS CI remain pending.
+
+## Issue #262 reply duty cap revision (2026-11-08)
+
+User decision supersedes the former read-time saturation contract: pending
+reply duties are limited to 16 per recipient Thread at write admission. The
+17th send/ask returns typed `reply_limit` with `limit` and `current_count`; the
+count is selected from the pending index with LIMIT 17 in the same transaction.
+Existing excess data is retained and read through bounded indexes.

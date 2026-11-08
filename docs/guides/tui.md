@@ -687,7 +687,7 @@ Child navigation uses the saved Thread ID, never a similar short name.
 
 ## Replying to a request
 
-`/replies` reuses the pending-message popup and shows up to 128 pending requests
+`/replies` reuses the pending-message popup and shows up to 16 pending requests
 for the current conversation, with sender, time and original excerpt. Enter
 selects an applied request; queued or held requests cannot yet be replied to.
 The composer shows `Replying to` and the original excerpt. Type text and use the

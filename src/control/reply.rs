@@ -108,36 +108,43 @@ pub(crate) fn awaiting_replies_tx(
     thread: &str,
     human_only: Option<bool>,
 ) -> rusqlite::Result<Vec<Value>> {
-    let mut statement = db.prepare("SELECT r.message_node_id,r.sender_json,r.target_thread_id,r.created_at,r.state,r.result_json,n.payload_json,CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND (?2 IS NULL OR COALESCE(json_extract(r.result_json,'$.to_human'),0)=?2) ORDER BY r.created_at,r.rowid LIMIT 128")?;
+    let mut statement = db.prepare("SELECT r.message_node_id,r.sender_json,r.target_thread_id,r.created_at,r.state,r.result_json,n.payload_json,CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND (?2 IS NULL OR COALESCE(json_extract(r.result_json,'$.to_human'),0)=?2) ORDER BY r.created_at,r.rowid LIMIT ?3")?;
     statement
-        .query_map(rusqlite::params![thread, human_only.map(i64::from)], |r| {
-            let saved: String = r.get(5)?;
-            let saved: Value = serde_json::from_str(&saved)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let sender: String = r.get(1)?;
-            let payload: Option<String> = r.get(6)?;
-            let excerpt = payload
-                .and_then(|body| serde_json::from_str::<Value>(&body).ok())
-                .map(|value| crate::history::conversation_excerpt(&value, 512))
-                .unwrap_or_default();
-            let excerpt =
-                crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""), 0)
-                    .0
-                    .chars()
-                    .take(512)
-                    .collect::<String>();
-            Ok(json!({
-                "message_id":r.get::<_,String>(0)?,
-                "recipient_kind":if saved["to_human"] == true {"human"} else {"thread"},
-                "recipient_thread_id":r.get::<_,String>(2)?,
-                "sender":crate::protocol::MessageSender::from_saved(Some(&sender)),
-                "created_at":r.get::<_,String>(3)?,
-                "elapsed_ms":r.get::<_,i64>(7)?.max(0),
-                "delivery_status":r.get::<_,String>(4)?,
-                "excerpt":excerpt.lines().next().unwrap_or(""),
-                "reminded":saved["reply"].get("reminded_at").is_some()
-            }))
-        })?
+        .query_map(
+            rusqlite::params![
+                thread,
+                human_only.map(i64::from),
+                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+            ],
+            |r| {
+                let saved: String = r.get(5)?;
+                let saved: Value = serde_json::from_str(&saved)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                let sender: String = r.get(1)?;
+                let payload: Option<String> = r.get(6)?;
+                let excerpt = payload
+                    .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+                    .map(|value| crate::history::conversation_excerpt(&value, 512))
+                    .unwrap_or_default();
+                let excerpt =
+                    crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""), 0)
+                        .0
+                        .chars()
+                        .take(512)
+                        .collect::<String>();
+                Ok(json!({
+                    "message_id":r.get::<_,String>(0)?,
+                    "recipient_kind":if saved["to_human"] == true {"human"} else {"thread"},
+                    "recipient_thread_id":r.get::<_,String>(2)?,
+                    "sender":crate::protocol::MessageSender::from_saved(Some(&sender)),
+                    "created_at":r.get::<_,String>(3)?,
+                    "elapsed_ms":r.get::<_,i64>(7)?.max(0),
+                    "delivery_status":r.get::<_,String>(4)?,
+                    "excerpt":excerpt.lines().next().unwrap_or(""),
+                    "reminded":saved["reply"].get("reminded_at").is_some()
+                }))
+            },
+        )?
         .collect()
 }
 

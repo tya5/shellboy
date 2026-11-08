@@ -1936,9 +1936,19 @@ impl Store {
             }
         }
         if args.expect_reply {
-            let pending: i64 = tx.query_row("SELECT count(*) FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending'", [&id], |row| row.get(0)).map_err(sql_error)?;
-            if pending >= 128 {
-                return Err(error(ErrorCode::InputLimit, "too many pending replies"));
+            let limit = crate::protocol::MAX_PENDING_REPLY_DUTIES;
+            let pending: i64 = tx.query_row(
+                "SELECT count(*) FROM (SELECT 1 FROM receipt INDEXED BY receipt_reply_pending \
+                 WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' LIMIT ?2)",
+                params![id, (limit + 1) as i64],
+                |row| row.get(0),
+            ).map_err(sql_error)?;
+            if pending >= limit as i64 {
+                return Err(ApiError::new(
+                    ErrorCode::ReplyLimit,
+                    format!("target Thread has {pending} pending reply duties (limit {limit}); reply to or cancel one before sending another"),
+                ).details(json!({"limit":limit,"current_count":pending}))
+                 .hint("Reply to or cancel an outstanding request in the target Thread, then retry; the rejected message was not accepted"));
             }
         }
         let MessageAssignment {
@@ -2574,9 +2584,11 @@ fn thread_list_awaiting_human(
             .map_err(|_| error(ErrorCode::CursorExpired, "invalid reply watermark"))?
     } else {
         connection
-            .query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT seq FROM receipt_arrival_clock WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
             .map_err(sql_error)?
     };
     let after = decoded
@@ -2602,7 +2614,6 @@ fn thread_list_awaiting_human(
     for item in &mut items {
         if let Some((_, counts)) = candidates.iter().find(|(id, _)| id == &item.thread_id) {
             item.awaiting_human_count = counts.count;
-            item.awaiting_human_count_saturated = counts.saturated;
             item.awaiting_human_oldest_at = counts.oldest.clone();
         }
     }
@@ -2643,7 +2654,6 @@ fn thread_list_awaiting_human(
 struct AwaitingHumanCount {
     count: u64,
     oldest: Option<String>,
-    saturated: bool,
 }
 
 /// Read a bounded page of pending Thread keys and exact page-local aggregates.
@@ -2658,7 +2668,12 @@ fn awaiting_human_candidates(
         .map_err(sql_error)?;
     let rows = statement
         .query_map(
-            params![after, i64::from(limit) + 1, aggregate_watermark],
+            params![
+                after,
+                i64::from(limit) + 1,
+                aggregate_watermark,
+                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+            ],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .map_err(sql_error)?;
@@ -2673,9 +2688,8 @@ fn awaiting_human_candidates(
                     (
                         id,
                         AwaitingHumanCount {
-                            count: count.min(128),
+                            count: count.min(crate::protocol::MAX_PENDING_REPLY_DUTIES),
                             oldest,
-                            saturated: count > 128,
                         },
                     )
                 })
@@ -2685,20 +2699,26 @@ fn awaiting_human_candidates(
 }
 
 fn awaiting_human_candidates_sql() -> &'static str {
-    "WITH page AS MATERIALIZED (\
-             SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
-             WHERE r.target_thread_id>?1 AND r.rowid<=?3 \
+    "WITH RECURSIVE page(target_thread_id) AS (\
+             SELECT (SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
+             WHERE r.target_thread_id>?1 AND r.arrival_seq<=?3 \
                AND json_extract(r.result_json,'$.reply.state')='pending' \
                AND json_extract(r.result_json,'$.to_human')=1 \
-             GROUP BY r.target_thread_id ORDER BY r.target_thread_id LIMIT ?2\
-         ) \
+             ORDER BY r.target_thread_id,r.arrival_seq LIMIT 1) \
+             UNION ALL \
+             SELECT (SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
+             WHERE r.target_thread_id>page.target_thread_id AND r.arrival_seq<=?3 \
+               AND json_extract(r.result_json,'$.reply.state')='pending' \
+               AND json_extract(r.result_json,'$.to_human')=1 \
+             ORDER BY r.target_thread_id,r.arrival_seq LIMIT 1) \
+             FROM page WHERE page.target_thread_id IS NOT NULL LIMIT ?2) \
          SELECT page.target_thread_id, \
                 (SELECT json_group_array(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending \
-                 WHERE r.target_thread_id=page.target_thread_id \
+                 WHERE r.target_thread_id=page.target_thread_id AND r.arrival_seq<=?3 \
                    AND json_extract(r.result_json,'$.reply.state')='pending' \
                    AND json_extract(r.result_json,'$.to_human')=1 \
-                   AND r.rowid<=?3 ORDER BY r.created_at LIMIT 129) q) \
-         FROM page ORDER BY page.target_thread_id"
+                 ORDER BY r.arrival_seq LIMIT ?4) q) \
+         FROM page WHERE page.target_thread_id IS NOT NULL ORDER BY page.target_thread_id"
 }
 
 /// The cursor's filter: the text query alone when nothing else narrows the list,
@@ -3334,7 +3354,15 @@ mod thread_list_plan_tests {
             let sql = awaiting_human_candidates_sql();
             let mut stmt = db.prepare(sql).unwrap();
             let rows = stmt
-                .query_map(params!["", 2, i64::MAX], |r| Ok((r.get(0)?, r.get(1)?)))
+                .query_map(
+                    params![
+                        "",
+                        2,
+                        i64::MAX,
+                        (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+                    ],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
@@ -3372,7 +3400,15 @@ mod thread_list_plan_tests {
         let plan: Vec<String> = plan_db
             .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
             .unwrap()
-            .query_map(params!["", 2, i64::MAX], |row| row.get(3))
+            .query_map(
+                params![
+                    "",
+                    2,
+                    i64::MAX,
+                    (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+                ],
+                |row| row.get(3),
+            )
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
@@ -3401,7 +3437,7 @@ mod thread_list_plan_tests {
             small_steps, large_steps,
             "VM steps must not grow with off-page pending Threads or archived exclusions"
         );
-        assert_eq!(large_steps, 159, "SQLite VM-step contract changed");
+        assert_eq!(large_steps, 164, "SQLite VM-step contract changed");
     }
 
     #[test]
@@ -3425,7 +3461,14 @@ mod thread_list_plan_tests {
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','1','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("receipt-{n:04}"), thread, node]).unwrap();
         }
         let mut statement = db.prepare(awaiting_human_candidates_sql()).unwrap();
-        let mut candidate_rows = statement.query(params!["", 2, i64::MAX]).unwrap();
+        let mut candidate_rows = statement
+            .query(params![
+                "",
+                2,
+                i64::MAX,
+                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+            ])
+            .unwrap();
         while candidate_rows.next().unwrap().is_some() {}
         drop(candidate_rows);
         let vm_steps = statement.get_status(rusqlite::StatementStatus::VmStep);
@@ -3466,36 +3509,58 @@ mod thread_list_plan_tests {
     }
 
     #[test]
-    fn awaiting_human_count_saturates_only_above_128() {
-        for (receipt_count, expected_count, saturated) in [(128, 128, false), (129, 128, true)] {
-            let db = Connection::open_in_memory().unwrap();
-            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread','','','p','m','now')", []).unwrap();
-            for index in 0..receipt_count {
-                let node = format!("node-{index}");
-                db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'message',?1,'{}')", [&node]).unwrap();
-                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','thread',?2,'applied',?1,'{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("receipt-{index}"), node]).unwrap();
-            }
-            let page = thread_list_awaiting_human(
-                &db,
-                &ThreadListArgs {
-                    limit: 1,
-                    cursor: None,
-                    query: None,
-                    awaiting: Some("human".into()),
-                    archived: ArchivedFilter::Include,
-                    tags: Vec::new(),
-                    cwd: None,
-                },
+    fn awaiting_human_legacy_excess_is_bounded_and_readable() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread','','','p','m','now')", []).unwrap();
+        for index in 0..1000 {
+            let node = format!("node-{index}");
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'message',?1,'{}')",
+                [&node],
             )
             .unwrap();
-            assert_eq!(page.items[0].awaiting_human_count, expected_count);
-            assert_eq!(page.items[0].awaiting_human_count_saturated, saturated);
-            assert_eq!(
-                page.items[0].awaiting_human_oldest_at.as_deref(),
-                Some("receipt-0")
-            );
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','thread',?2,'applied',?1,'{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("receipt-{index}"), node]).unwrap();
         }
+        let page = thread_list_awaiting_human(
+            &db,
+            &ThreadListArgs {
+                limit: 1,
+                cursor: None,
+                query: None,
+                awaiting: Some("human".into()),
+                archived: ArchivedFilter::Include,
+                tags: Vec::new(),
+                cwd: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            page.items[0].awaiting_human_count,
+            crate::protocol::MAX_PENDING_REPLY_DUTIES
+        );
+        assert_eq!(
+            page.items[0].awaiting_human_oldest_at.as_deref(),
+            Some("receipt-0")
+        );
+        let sql = awaiting_human_candidates_sql();
+        let plan = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap();
+        let details: Vec<String> = plan
+            .query_map(
+                params!["", 1, i64::MAX, (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64],
+                |r| r.get(3),
+            )
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            details
+                .iter()
+                .any(|x| x.contains("receipt_human_reply_pending") && x.contains("SEARCH")),
+            "{details:?}"
+        );
     }
 
     #[test]
@@ -4525,6 +4590,83 @@ mod agents_reference_tests {
             .await
             .unwrap()
             .result
+    }
+
+    #[tokio::test]
+    async fn pending_reply_admission_rejects_seventeenth_and_reopens_after_reply() {
+        let (root, store) = fixture().await;
+        let thread = store
+            .execute(req(create(None, None, None)), None)
+            .await
+            .unwrap()
+            .result["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let send = |text: String| {
+            Command::MessageSend(MessageSendArgs {
+                human: false,
+                resume_recovery: false,
+                to_human: false,
+                expect_reply: true,
+                sender_label: None,
+                thread_id: Some(thread.clone()),
+                text,
+                deliver: Deliver::Next,
+            })
+        };
+        let mut messages = Vec::new();
+        for n in 0..crate::protocol::MAX_PENDING_REPLY_DUTIES {
+            let result = store
+                .execute(req(send(format!("question {n}"))), None)
+                .await
+                .unwrap()
+                .result;
+            messages.push(result["message_id"].as_str().unwrap().to_owned());
+        }
+        let error = store
+            .execute(req(send("seventeenth".into())), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::ReplyLimit);
+        assert_eq!(error.details.as_ref().unwrap()["limit"], 16);
+        assert_eq!(error.details.as_ref().unwrap()["current_count"], 16);
+        assert!(error.message.contains("reply to or cancel"));
+        let reply_store = store.clone();
+        let message = messages[0].clone();
+        store
+            .database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                tx.execute(
+                    "UPDATE receipt SET state='applied' WHERE message_node_id=?1",
+                    [&message],
+                )?;
+                reply_store
+                    .reply(
+                        &tx,
+                        &MessageReplyArgs {
+                            message_id: message,
+                            text: "done".into(),
+                            sender_label: None,
+                        },
+                        None,
+                        "fixture:reply",
+                        "now",
+                    )
+                    .map_err(StorageError::from)?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let accepted = store
+            .execute(req(send("after reply".into())), None)
+            .await
+            .unwrap();
+        assert!(!accepted.result["message_id"].as_str().unwrap().is_empty());
+        drop(store);
+        let _ = root;
     }
 
     #[tokio::test]

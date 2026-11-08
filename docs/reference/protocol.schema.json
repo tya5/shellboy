@@ -1623,6 +1623,7 @@
         "cursor_encoding_mismatch",
         "output_expired",
         "input_limit",
+        "reply_limit",
         "storage_limit",
         "save_failed",
         "io_failed"
@@ -6580,15 +6581,10 @@
         },
         "awaiting_human_count": {
           "default": 0,
-          "description": "Pending human-directed replies, exact through 128 and capped at 128 above that limit.",
+          "description": "Pending human-directed replies, limited to 16 for newly accepted requests; legacy excess is read with a bounded count.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
-        },
-        "awaiting_human_count_saturated": {
-          "default": false,
-          "description": "True exactly when awaiting_human_count exceeds 128; the count is not an estimate.",
-          "type": "boolean"
         },
         "awaiting_human_oldest_at": {
           "type": [
