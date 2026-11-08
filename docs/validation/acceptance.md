@@ -11110,3 +11110,22 @@ and equality with the catalogue label in each language. The strict coverage
 assertion remains unchanged. All integration/termination/crash-recovery targets
 in that failed normal run passed; they do not make the entire run successful.
 A new exact-SHA pair of CI runs and independent review are still required.
+
+### #276 schema-39 follow-up after #262
+
+Main `65dc4574` lands #262 as schema 38 (`0038_human_reply_pending`). #276 now follows it as schema **39**
+(`0039_independent_runs`), retaining protocol **5** as directed. The SQL body is unchanged except version/name
+metadata: Run rebuild, event UPDATE before old partial-index DROP, and `receipt_reply_run_pending` remain intact.
+FK-disable/restore selection and the synthetic upgrade/rollback fixtures now target 38->39. Main's human pending
+index, reply-limit behavior, count exactness and oldest timestamp are retained; these are upstream integration,
+not invented changes to terminal continuation. The unified reply list and removed Run ownership fields remain.
+
+The schema-38 evidence earlier in this record is historical, not validation of schema 39. A fresh synthetic run
+uses base `65dc4574`, the previously authorized counts 3303/22537/49, and no new user DB reads. Environment remains
+macOS 26.3.1 arm64 / Python 3.12.7 / SQLite 3.51.0. Seed: 3,600,384 bytes. Run-DDL-only rebuild:
+0.018501916085369885 seconds, 3303 copied rows; full migration-39 SQL transaction: 0.03841533395461738 seconds,
+3353 changed rows; result: 3,837,952 bytes, FK violations zero. Legacy recovery 49->0, local recovery 0->49,
+unrelated events 22488 unchanged. DROP COLUMN fails on the existing owner CHECK after 0.0073168749222531915 seconds.
+Old partial-index UPDATE plan and new recovery lookup plan remain indexed. Timing excludes fixture setup/copy and
+separate FK checks, is not application startup or real-user DB timing, and matches counts only, not distributions.
+Fresh final-SHA focused validation, normal/all-OS CI and W8 delta review are required separately.

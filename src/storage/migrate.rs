@@ -198,7 +198,6 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         version: 39,
         sql: include_str!("../../migrations/0039_independent_runs.sql"),
         foreign_keys: None,
-
     },
 ];
 

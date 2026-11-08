@@ -4344,3 +4344,11 @@ samples, advancing across examined candidates. Live changes may add or remove
 future keys; keys inserted before the cursor require a fresh listing. No new
 table or aggregate cache is permitted. W8 independent review may revise these
 provisional public semantics.
+
+### #276 after #262 schema 38
+
+Independent Runs move from the unlanded schema-38 proposal to schema 39 after #262 lands as 38. Keep #262 human
+reply pending index/count exactness and protocol 5. Preserve #276 SQL semantics and bounded terminal continuation;
+update migration identity, FK rebuild selector, fixtures and measurement labels. Merge upstream without rewriting
+published task history. Prior schema-38 CI is not schema-39 evidence; refresh focused checks and both CI at the same
+final SHA, followed by independent W8 delta review. Landing remains after v0.11.0, not authorized by this renumbering.
