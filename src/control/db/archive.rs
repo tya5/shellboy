@@ -108,7 +108,7 @@ pub(super) fn run(
 
 /// A new Run is the one event that makes an archived Thread visible again.
 pub(super) fn clear_for_new_run(
-    tx: &Transaction<'_>,
+    tx: &rusqlite::Connection,
     thread: &str,
     actor: serde_json::Value,
     now: &str,

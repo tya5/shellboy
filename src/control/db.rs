@@ -2149,24 +2149,7 @@ fn assign_message(
             }
         }
     } else {
-        let run_id = uuid::Uuid::new_v4().to_string();
-        tx.execute(
-            "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
-            params![run_id, id, now],
-        )
-        .map_err(sql_error)?;
-        super::context::record(
-            tx,
-            id,
-            "run_started",
-            actor(caller),
-            json!({"run_id":run_id}),
-            now,
-        )
-        .map_err(sql_error)?;
-        // New work on an archived Thread makes it visible again (#222).
-        archive::clear_for_new_run(tx, id, actor(caller), now).map_err(sql_error)?;
-        let turn_id = super::state::create_turn_tx(tx, id, &run_id, now, now).map_err(sql_error)?;
+        let (run_id,turn_id)=start_run_tx(tx,id,actor(caller),now).map_err(sql_error)?;
         // A human's new instruction resumes unassigned saved input.
         // An independent model send does not silently admit recovery input.
         // Previously assigned receipts keep their original Run/Turn forever.
@@ -2199,6 +2182,16 @@ fn assign_message(
         reason,
         wake,
     })
+}
+
+/// Shared ordinary Run activation for messages and explicit reply outcome delivery.
+pub(super) fn start_run_tx(tx:&Connection,thread:&str,source:Value,at:&str)->rusqlite::Result<(String,String)> {
+    let run=uuid::Uuid::new_v4().to_string();
+    tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,at])?;
+    super::context::record(tx,thread,"run_started",source.clone(),json!({"run_id":run}),at)?;
+    archive::clear_for_new_run(tx,thread,source,at)?;
+    let turn=super::state::create_turn_tx(tx,thread,&run,at,at)?;
+    Ok((run,turn))
 }
 
 fn actor(caller: Option<&Origin>) -> Value {

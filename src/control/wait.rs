@@ -153,14 +153,22 @@ async fn observe_inner(
         return Err(invalid("wait requires at least one condition"));
     }
     crate::thread_observation::validate(&args.conditions, args.after.as_deref())?;
-    if let Some(origin)=&caller {
-        let own=args.conditions.iter().any(|condition|match condition {
-            WaitCondition::RunEnded{run_id} => run_id==&origin.run_id,
-            WaitCondition::TurnCompleted{turn_id} => turn_id==&origin.turn_id,
-            WaitCondition::ShellEnded{execution_id}|WaitCondition::ShellOutput{execution_id,..} => execution_id==&origin.execution_id,
-            _=>false,
+    if let Some(origin) = &caller {
+        let own = args.conditions.iter().any(|condition| match condition {
+            WaitCondition::RunEnded { run_id } => run_id == &origin.run_id,
+            WaitCondition::TurnCompleted { turn_id } => turn_id == &origin.turn_id,
+            WaitCondition::ShellEnded { execution_id }
+            | WaitCondition::ShellOutput { execution_id, .. } => {
+                execution_id == &origin.execution_id
+            }
+            _ => false,
         });
-        if own {return Err(ApiError::new(ErrorCode::SelfWait,"Cannot wait for the invoking Run, Turn or shell"));}
+        if own {
+            return Err(ApiError::new(
+                ErrorCode::SelfWait,
+                "Cannot wait for the invoking Run, Turn or shell",
+            ));
+        }
     }
     let mut thread_after = args.after.clone();
     let duration = Duration::from_millis(args.timeout_ms);
@@ -815,9 +823,31 @@ mod tests {
             .unwrap();
             assert_eq!(result["status"], "timeout");
         }
-        for condition in [WaitCondition::RunEnded{run_id:"ra".into()},WaitCondition::TurnCompleted{turn_id:"ta".into()},WaitCondition::ShellEnded{execution_id:"sa".into()},WaitCondition::ShellOutput{execution_id:"sa".into(),cursor:String::new()}] {
-            let error=observe(control.clone(),uuid::Uuid::new_v4().to_string(),args(condition,30_000),Some(a.clone()),CancellationToken::new()).await.unwrap_err();
-            assert_eq!(error.code,ErrorCode::SelfWait);
+        for condition in [
+            WaitCondition::RunEnded {
+                run_id: "ra".into(),
+            },
+            WaitCondition::TurnCompleted {
+                turn_id: "ta".into(),
+            },
+            WaitCondition::ShellEnded {
+                execution_id: "sa".into(),
+            },
+            WaitCondition::ShellOutput {
+                execution_id: "sa".into(),
+                cursor: String::new(),
+            },
+        ] {
+            let error = observe(
+                control.clone(),
+                uuid::Uuid::new_v4().to_string(),
+                args(condition, 30_000),
+                Some(a.clone()),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::SelfWait);
         }
         let other = observe(
             control.clone(),

@@ -16,7 +16,7 @@ pub(super) fn now() -> String {
 /// Create the Turn and its existing context observation in the caller's
 /// transaction. Admission predicates and wake/recovery policy stay with callers.
 pub(super) fn create_turn_tx(
-    tx: &rusqlite::Transaction<'_>,
+    tx: &rusqlite::Connection,
     thread: &str,
     run: &str,
     created_at: &str,
