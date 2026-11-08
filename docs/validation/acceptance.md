@@ -10925,7 +10925,7 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 ## #279 saved attempt response references — pending verification
 
 - Separate #279 branch/worktree based on current `origin/main`; #278 remains untouched.
-- Added an ordered, item-level `response_nodes` projection for durable attempt WorkItems from existing `output_item`→`assistant_response` nodes. Repeated node references preserve distinct output items; explicit 64-item cap reports `response_nodes_truncated` and has no nested continuation.
+- Added an ordered, item-level `response_nodes` projection for durable attempt WorkItems from existing `output_item`→`assistant_response` nodes. Repeated node references preserve distinct output items; 64 eligible refs and 256 examined candidate rows are capped; `response_nodes_truncated` means an unexamined candidate or eligible overflow may remain, including when the published list is empty. There is no nested continuation.
 - `end_message_node_id` remains final-Turn-only. No schema table, migration, worker, or adapter added. Protocol remains v4 because `status` was an opaque result and request/event contracts are unchanged.
-- Synthetic tests cover commentary and final nodes, duplicate output items sharing a node, null and no-row results, explicit overflow, selected-path readback eligibility, the composite-key query plan, status projection, and durable change-clock cursor advancement.
-- No live owner or billing APIs are used. CI/review are a later delivery unit.
+- Synthetic tests cover commentary and final nodes, duplicate output items sharing a node, null and no-row results, eligible tails after 256 noneligible candidates, all-noneligible exact/overflow boundaries, VM-step counts before/after 100k extra rows, selected-path readback eligibility, the composite-key query plan, status projection, and durable change-clock cursor advancement.
+- No live owner or billing APIs are used. Re-run review, light checks, push, and both CI matrices on the repaired SHA; the earlier e39c658 CI is not evidence for this P1 repair.

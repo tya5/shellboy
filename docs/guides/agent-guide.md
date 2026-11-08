@@ -367,7 +367,7 @@ Use the same current release for the owner and CLI. The local RPC handshake uses
 
 ## Resolve saved model response items
 
-For a durable `status` attempt, `response_nodes` links each saved assistant output item to `history.window` by `node_id`. The list preserves output order and item kind/phase; distinct items may share a node ID. It is capped at 64 entries; `response_nodes_truncated=true` means additional saved items are omitted with no continuation cursor. `end_message_node_id` remains only the Turn's final answer reference, not an intermediate attempt response.
+For a durable `status` attempt, `response_nodes` links each saved assistant output item to `history.window` by `node_id`. The list preserves output order and item kind/phase; distinct items may share a node ID. The query inspects at most 256 output-item candidates and returns at most 64 eligible refs. `response_nodes_truncated=true` means uninspected candidates or eligible refs remain possible; it does not assert that an omitted response node definitely exists. An empty list with this flag false is complete for the attempt; an empty list with it true is unknown/incomplete, not proof that nothing was saved. There is no continuation cursor in this field. `end_message_node_id` remains only the Turn's final answer reference, not an intermediate attempt response.
 
 ## List models and change your Thread's model
 

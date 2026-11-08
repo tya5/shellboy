@@ -313,28 +313,44 @@ struct PagePosition {
     after: SortKey,
     watermark: DateTime<FixedOffset>,
 }
+const RESPONSE_CANDIDATE_LIMIT: usize = 256;
 const RESPONSE_NODE_LIMIT: usize = 64;
 fn response_nodes(db: &Connection, attempt_id: &str) -> Result<(Vec<ResponseNodeRef>, bool)> {
-    // (attempt_id, ordinal) is the primary key, so each bounded page lookup
-    // examines only this attempt's items. Preserve duplicate-node items/order.
+    // Limit the PK range before node lookup/filtering. A candidate may be a
+    // tool/reasoning/null node; candidates after the fixed window are unknown.
     let mut statement = db.prepare(
-        "SELECT oi.ordinal,oi.item_id,oi.item_type,oi.phase,oi.node_id FROM output_item oi JOIN node n ON n.id=oi.node_id WHERE oi.attempt_id=?1 AND n.kind='assistant_response' ORDER BY oi.ordinal LIMIT ?2",
+        "SELECT oi.ordinal,oi.item_id,oi.item_type,oi.phase,oi.node_id,n.kind FROM (SELECT ordinal,item_id,item_type,phase,node_id FROM output_item WHERE attempt_id=?1 ORDER BY ordinal LIMIT ?2) oi LEFT JOIN node n ON n.id=oi.node_id ORDER BY oi.ordinal",
     ).map_err(sql)?;
     let mut rows = statement
-        .query(params![attempt_id, (RESPONSE_NODE_LIMIT + 1) as i64])
+        .query(params![attempt_id, (RESPONSE_CANDIDATE_LIMIT + 1) as i64])
         .map_err(sql)?;
     let mut nodes = Vec::new();
+    let mut candidates = 0;
+    let mut truncated = false;
     while let Some(row) = rows.next().map_err(sql)? {
+        candidates += 1;
+        if candidates > RESPONSE_CANDIDATE_LIMIT {
+            truncated = true;
+            break;
+        }
+        let node_id: Option<String> = row.get(4).map_err(sql)?;
+        let node_kind: Option<String> = row.get(5).map_err(sql)?;
+        if node_kind.as_deref() != Some("assistant_response") {
+            continue;
+        }
+        if nodes.len() == RESPONSE_NODE_LIMIT {
+            truncated = true;
+            break;
+        }
+        let Some(node_id) = node_id else { continue };
         nodes.push(ResponseNodeRef {
             ordinal: row.get::<_, i64>(0).map_err(sql)? as u64,
             item_id: row.get(1).map_err(sql)?,
             kind: row.get(2).map_err(sql)?,
             phase: row.get(3).map_err(sql)?,
-            node_id: row.get(4).map_err(sql)?,
+            node_id,
         });
     }
-    let truncated = nodes.len() > RESPONSE_NODE_LIMIT;
-    nodes.truncate(RESPONSE_NODE_LIMIT);
     Ok((nodes, truncated))
 }
 
@@ -588,7 +604,7 @@ mod response_node_tests {
     use super::*;
 
     #[test]
-    fn response_nodes_preserve_order_kind_and_cap_items() {
+    fn response_nodes_bound_candidates_and_disclose_incomplete_results() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(
             "CREATE TABLE node(id TEXT PRIMARY KEY, kind TEXT NOT NULL);
@@ -627,31 +643,102 @@ mod response_node_tests {
             );
         }
 
-        // No saved output rows (pre-save or failed attempt) is an explicit empty ref list.
+        // No rows is a complete empty list; empty plus truncated below is explicitly unknown.
         let (none, truncated) = response_nodes(&db, "pre-save-or-failed").unwrap();
         assert!(none.is_empty());
         assert!(!truncated);
 
-        for ordinal in 5..=69 {
-            let id = format!("node-{ordinal}");
+        // 256 noneligible rows come first, followed by eligible nodes: the
+        // eligible tail must not cause an unbounded scan, and [] is not absence.
+        for ordinal in 0..RESPONSE_CANDIDATE_LIMIT as i64 {
+            db.execute(
+                "INSERT INTO output_item VALUES ('prefix',?1,NULL,'function_call','tool',NULL)",
+                [ordinal],
+            )
+            .unwrap();
+        }
+        for ordinal in RESPONSE_CANDIDATE_LIMIT as i64..(RESPONSE_CANDIDATE_LIMIT as i64 + 10) {
+            let id = format!("tail-{ordinal}");
             db.execute("INSERT INTO node VALUES (?1,'assistant_response')", [&id])
                 .unwrap();
             db.execute(
-                "INSERT INTO output_item VALUES ('many',?1,NULL,'message','final',?2)",
+                "INSERT INTO output_item VALUES ('prefix',?1,NULL,'message','final',?2)",
                 params![ordinal, id],
             )
             .unwrap();
         }
-        let (nodes, truncated) = response_nodes(&db, "many").unwrap();
-        assert_eq!(nodes.len(), RESPONSE_NODE_LIMIT);
+        let (nodes, truncated) = response_nodes(&db, "prefix").unwrap();
+        assert!(nodes.is_empty());
         assert!(
             truncated,
-            "overflow must be disclosed, never silently treated as complete"
+            "unexamined candidate tail makes an empty result incomplete"
         );
-        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT oi.ordinal,oi.item_id,oi.item_type,oi.phase,oi.node_id FROM output_item oi JOIN node n ON n.id=oi.node_id WHERE oi.attempt_id='many' AND n.kind='assistant_response' ORDER BY oi.ordinal LIMIT 65", [], |row| row.get(3)).unwrap();
+
+        // Boundary: exactly the candidate cap is complete; cap+1 is unknown.
+        for ordinal in 0..RESPONSE_CANDIDATE_LIMIT as i64 {
+            db.execute(
+                "INSERT INTO output_item VALUES ('boundary',?1,NULL,'function_call','tool',NULL)",
+                [ordinal],
+            )
+            .unwrap();
+        }
+        let (nodes, truncated) = response_nodes(&db, "boundary").unwrap();
+        assert!(nodes.is_empty());
+        assert!(!truncated);
+        db.execute(
+            "INSERT INTO output_item VALUES ('boundary',?1,NULL,'function_call','tool',NULL)",
+            [RESPONSE_CANDIDATE_LIMIT as i64],
+        )
+        .unwrap();
+        let (nodes, truncated) = response_nodes(&db, "boundary").unwrap();
+        assert!(nodes.is_empty());
+        assert!(truncated);
+        let plan: Vec<String> = {
+            let mut statement = db.prepare("EXPLAIN QUERY PLAN SELECT ordinal,item_id,item_type,phase,node_id FROM output_item WHERE attempt_id=?1 ORDER BY ordinal LIMIT ?2").unwrap();
+            let rows = statement
+                .query_map(
+                    params!["boundary", (RESPONSE_CANDIDATE_LIMIT + 1) as i64],
+                    |row| row.get(3),
+                )
+                .unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        let plan = plan.join(" | ");
         assert!(
             plan.contains("output_item_1") && plan.contains("attempt_id=?"),
-            "expected attempt/ordinal range scan: {plan}"
+            "expected PK range scan: {plan}"
+        );
+
+        // Count VM instructions for the complete production lookup (candidate
+        // read plus node joins/filter). Growing rows past the LIMIT must not add work.
+        let steps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let measured = steps.clone();
+        db.progress_handler(
+            1,
+            Some(move || {
+                measured.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                false
+            }),
+        )
+        .unwrap();
+        let (_, truncated) = response_nodes(&db, "prefix").unwrap();
+        assert!(truncated);
+        let bounded_steps = steps.swap(0, std::sync::atomic::Ordering::Relaxed);
+        for ordinal in 266..100_266 {
+            db.execute(
+                "INSERT INTO output_item VALUES ('prefix',?1,NULL,'function_call','tool',NULL)",
+                [ordinal],
+            )
+            .unwrap();
+        }
+        steps.store(0, std::sync::atomic::Ordering::Relaxed);
+        let (_, truncated) = response_nodes(&db, "prefix").unwrap();
+        assert!(truncated);
+        let large_steps = steps.load(std::sync::atomic::Ordering::Relaxed);
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        assert_eq!(
+            large_steps, bounded_steps,
+            "actual lookup VM steps must remain fixed after the 256-candidate prefix despite 100k later rows"
         );
     }
 }
