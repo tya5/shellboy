@@ -833,7 +833,7 @@ mod tests {
         let path = root.path().join("fixture.db");
         let mut db = Connection::open(&path).unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('m','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES('m','m','{\"kind\":\"human\"}','t','m','applied','admitted','0','{\"reply\":{\"state\":\"pending\"}}');").unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','0'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('m','user','0','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,path_admission,created_at,result_json)VALUES('m','m','{\"kind\":\"human\"}','t','m','r','applied','admitted','0','{\"reply\":{\"state\":\"pending\"}}');").unwrap();
         let tx = db.transaction().unwrap();
         assert!(
             complete_tx(&tx, "t", "r", "one", &mut Vec::new())
@@ -857,6 +857,7 @@ mod tests {
         drop(db);
         let mut db = Connection::open(path).unwrap();
         let tx = db.transaction().unwrap();
+        terminal_batch_tx(&tx, None, "restart").unwrap();
         assert!(
             complete_tx(&tx, "t", "new-run", "three", &mut Vec::new())
                 .unwrap()
