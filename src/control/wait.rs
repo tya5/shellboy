@@ -204,21 +204,21 @@ async fn observe_inner(
             .waits
             .observations
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let (observation, edges) = control
+        let observation = control
             .store
             .database
             .call(move |db| {
                 let tx=db.transaction()?;
                 let observation=inspect(&tx,&query,origin.as_ref(),initial);
-                let edges=if origin.is_some() && (initial || query.conditions.iter().any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. }))) {ownership_edges(&tx)} else {Ok(Vec::new())};
-                if initial&&observation.as_ref().is_ok_and(|observation|outcome(&query,observation,None).is_ok_and(|value|value.is_none()))&&edges.is_ok(){
+
+                if initial&&observation.as_ref().is_ok_and(|observation|outcome(&query,observation,None).is_ok_and(|value|value.is_none())){
                     let caller=origin.as_ref().map(|origin|json!({"thread_id":origin.thread_id,"run_id":origin.run_id,"turn_id":origin.turn_id,"execution_id":origin.execution_id}));
                     let body=json!({"operation_id":durable_id,"caller":caller,"conditions":query.conditions,"timeout_ms":query.timeout_ms,"after_cursor":observation.as_ref().ok().and_then(|o|o.cursor.as_ref()),"accepted_at":chrono::Utc::now().to_rfc3339()}).to_string();
-                    if body.len().saturating_add(WAIT_BINDING_BYTES)>MAX_FRAME_BYTES{return Ok((Err(ApiError::new(ErrorCode::InputLimit,"Wait observation metadata exceeds the public frame bound")),edges));}
+                    if body.len().saturating_add(WAIT_BINDING_BYTES)>MAX_FRAME_BYTES{return Ok(Err(ApiError::new(ErrorCode::InputLimit,"Wait observation metadata exceeds the public frame bound")));}
                     tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![WaitKeys::new(&durable_id).pending(),body])?;
                 }
                 tx.commit()?;
-                Ok((observation,edges))
+                Ok(observation)
             })
             .await
             .map_err(crate::app::storage_error)?;
@@ -241,21 +241,6 @@ async fn observe_inner(
                 source: format!("shell:{}", caller.execution_id),
                 targets: observation.targets.clone(),
             };
-            let mut edges = edges?;
-            for (_, previous) in entries.iter().filter(|(id, _)| *id != &operation_id) {
-                for target in &previous.targets {
-                    edges.push((previous.source.clone(), target.clone()));
-                }
-            }
-            for target in &registration.targets {
-                edges.push((registration.source.clone(), target.clone()));
-            }
-            if cycle(&edges) {
-                return Err(ApiError::new(
-                    ErrorCode::WaitCycle,
-                    "wait would create a cycle with ownership or another wait",
-                ));
-            }
             entries.insert(operation_id.clone(), registration);
             if guard.is_none() {
                 guard = Some(Guard {
@@ -369,34 +354,8 @@ fn inspect(
     db: &Connection,
     args: &WaitArgs,
     caller: Option<&Origin>,
-    initial: bool,
+    _initial: bool,
 ) -> Result<Observation> {
-    if initial && let Some(caller) = caller {
-        let mut statement=db.prepare("WITH RECURSIVE owners(id) AS(SELECT owner_run_id FROM run WHERE id=?1 AND owner_run_id IS NOT NULL UNION SELECT r.owner_run_id FROM run r JOIN owners o ON r.id=o.id WHERE r.owner_run_id IS NOT NULL) SELECT id FROM owners").map_err(sql_error)?;
-        let ancestors = statement
-            .query_map([&caller.run_id], |row| row.get::<_, String>(0))
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
-        for condition in &args.conditions {
-            let target = match condition {
-                WaitCondition::RunEnded { run_id } => Some(run_id.clone()),
-                WaitCondition::TurnCompleted { turn_id } => db
-                    .query_row("SELECT run_id FROM turn WHERE id=?1", [turn_id], |row| {
-                        row.get::<_, String>(0)
-                    })
-                    .optional()
-                    .map_err(sql_error)?,
-                _ => None,
-            };
-            if target.is_some_and(|run| ancestors.contains(&run)) {
-                return Err(ApiError::new(
-                    ErrorCode::WaitCycle,
-                    "synchronous wait on an owning ancestor's Run or Turn is forbidden",
-                ));
-            }
-        }
-    }
     let mut observation = Observation {
         matched: vec![],
         snapshot: Value::Null,
@@ -569,67 +528,6 @@ fn missing(observation: &mut Observation, initial: bool, kind: &str, id: &str) -
 fn terminal(state: &str) -> bool {
     matches!(state, "completed" | "stopped" | "failed" | "exited")
 }
-fn ownership_edges(db: &Connection) -> Result<Vec<(String, String)>> {
-    let mut edges = Vec::new();
-    let mut statement = db
-        .prepare("SELECT id,owner_run_id,thread_id FROM run INDEXED BY one_live_run WHERE state IN ('live','stopping')")
-        .map_err(sql_error)?;
-    let mut rows = statement.query([]).map_err(sql_error)?;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let owner: Option<String> = row.get(1).map_err(sql_error)?;
-        let thread: String = row.get(2).map_err(sql_error)?;
-        edges.push((format!("thread:{thread}"), format!("run:{id}")));
-        if let Some(owner) = owner {
-            edges.push((format!("run:{owner}"), format!("run:{id}")));
-        }
-    }
-    let mut statement=db.prepare("SELECT id,run_id FROM turn INDEXED BY one_open_turn WHERE state IN ('preparing','running','waiting','recovery_wait')").map_err(sql_error)?;
-    let mut rows = statement.query([]).map_err(sql_error)?;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let run: String = row.get(1).map_err(sql_error)?;
-        edges.push((format!("run:{run}"), format!("turn:{id}")));
-    }
-    let mut statement=db.prepare("SELECT id,owner_run_id,turn_id FROM shell_execution INDEXED BY shell_active_owner WHERE state IN ('starting','running','stopping')").map_err(sql_error)?;
-    let mut rows = statement.query([]).map_err(sql_error)?;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let run: String = row.get(1).map_err(sql_error)?;
-        let turn: String = row.get(2).map_err(sql_error)?;
-        edges.push((format!("run:{run}"), format!("shell:{id}")));
-        edges.push((format!("turn:{turn}"), format!("shell:{id}")));
-    }
-    Ok(edges)
-}
-fn cycle(edges: &[(String, String)]) -> bool {
-    let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
-    let mut incoming: HashMap<&str, usize> = HashMap::new();
-    for (source, target) in edges {
-        adjacency.entry(source).or_default().push(target);
-        incoming.entry(source).or_default();
-        *incoming.entry(target).or_default() += 1;
-    }
-    let mut ready: std::collections::VecDeque<&str> = incoming
-        .iter()
-        .filter_map(|(node, count)| (*count == 0).then_some(*node))
-        .collect();
-    let mut visited = 0;
-    while let Some(node) = ready.pop_front() {
-        visited += 1;
-        if let Some(targets) = adjacency.get(node) {
-            for target in targets {
-                let count = incoming.get_mut(target).expect("known wait graph target");
-                *count -= 1;
-                if *count == 0 {
-                    ready.push_back(target);
-                }
-            }
-        }
-    }
-    visited != incoming.len()
-}
-
 fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidArgument, message)
 }

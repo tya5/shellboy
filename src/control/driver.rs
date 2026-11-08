@@ -609,7 +609,7 @@ async fn next_with_clients(
         let mut events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND e.kind<>'context_changed' ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         if turn.is_none()&&(!events.is_empty()||attachment_count>0){turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);}
         if turn.is_none() {
-            let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
+            let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping'))",[&run],|r|r.get(0))?;
             if owned{return Ok(Next::Idle);}
             // During shutdown, waiting Revisit messages are handed off at the next start.
             if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&thread)? { return Ok(Next::Done); }
@@ -849,7 +849,7 @@ async fn drain_and_stop(
     let run_id = run_id.to_owned();
     let owned = control.store.database.call(move |db| {
         let tx = db.transaction()?;
-        let owned: Vec<(String,String)> = tx.prepare("WITH RECURSIVE owned(id,thread_id,depth) AS(SELECT id,thread_id,0 FROM run WHERE id=?1 UNION ALL SELECT r.id,r.thread_id,o.depth+1 FROM run r JOIN owned o ON r.owner_run_id=o.id WHERE r.state IN ('live','stopping')) SELECT id,thread_id FROM owned ORDER BY depth DESC,id")?.query_map([run_id],|row|Ok((row.get(0)?,row.get(1)?)))?.collect::<Result<_,_>>()?;
+        let owned: Vec<(String,String)> = tx.prepare("SELECT id,thread_id FROM run WHERE id=?1")?.query_map([run_id],|row|Ok((row.get(0)?,row.get(1)?)))?.collect::<Result<_,_>>()?;
         for (run,_) in &owned {
             super::attachment_delivery::hold_run_tx(&tx,run).map_err(crate::storage::StorageError::from)?;
             tx.execute("UPDATE run SET state='stopping' WHERE id=?1 AND state='live'",[run])?;

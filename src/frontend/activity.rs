@@ -212,7 +212,7 @@ pub(super) fn read_tx_with_limit(
         });
     };
     let turn = db.query_row("SELECT id,state,generation,recovery_reason_json FROM turn INDEXED BY activity_turn_run WHERE run_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1",[run_id],|r|Ok(SavedTurn { id:r.get(0)?,state:r.get(1)?,generation:r.get(2)?,recovery_reason:r.get(3)? })).optional()?;
-    let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[run_id],|r|r.get(0))?;
+    let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping'))",[run_id],|r|r.get(0))?;
     let revisit = if matches!(run_state.as_str(), "live" | "stopping") {
         crate::control::revisit::summary_for_run(db, run_id)?
     } else {

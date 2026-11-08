@@ -63,8 +63,7 @@ pub(super) struct Projected {
     pub seen: BTreeMap<String, String>,
 }
 const SQL:&str="SELECT t.id,substr(t.title,1,1024),r.id,r.state,u.state,r.ended_at,
- EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=r.id AND state IN ('starting','running','stopping'))
- OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=r.id AND state IN ('live','stopping')),
+ EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=r.id AND state IN ('starting','running','stopping')),
  a.state,CASE WHEN a.state='failed' AND a.generation=u.generation AND json_valid(a.error_json) THEN json_extract(a.error_json,'$.automatic_retry') END,
  CASE WHEN r.state='live' AND u.state='running' THEN EXISTS(SELECT 1 FROM tool_group WHERE turn_id=u.id AND state='running') ELSE 0 END,
  CASE WHEN json_valid(u.recovery_reason_json) THEN substr(json_extract(u.recovery_reason_json,'$.message'),1,4096) ELSE '' END,

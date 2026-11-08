@@ -2063,7 +2063,7 @@ fn assign_message(
     resume_recovery: bool,
     now: &str,
 ) -> Result<MessageAssignment> {
-    let parent: Option<String> = tx
+    let _parent: Option<String> = tx
         .query_row(
             "SELECT parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",
             [id],
@@ -2086,7 +2086,7 @@ fn assign_message(
     let mut status = DeliveryStatus::Accepted;
     let mut reason = None;
     let mut wake = false;
-    let mut owner_changed = None;
+    let owner_changed = None;
     if let Some((run_id, state)) = run {
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
@@ -2156,25 +2156,12 @@ fn assign_message(
             }
         }
     } else {
-        let owner = if let Some(caller) =
-            caller.filter(|caller| parent.as_deref() == Some(caller.thread_id.as_str()))
-        {
-            let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND thread_id=?2 AND state='live')",params![caller.run_id,caller.thread_id],|row| row.get(0)).map_err(sql_error)?;
-            if !live {
-                return Err(error(
-                    ErrorCode::InvalidState,
-                    "owner Run is stopping or ended",
-                ));
-            }
-            Some(caller.run_id.clone())
-        } else {
-            None
-        };
-        owner_changed = caller
-            .filter(|_| owner.is_some())
-            .map(|origin| origin.thread_id.clone());
         let run_id = uuid::Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at) VALUES(?1,?2,?3,'live',?4)",params![run_id,id,owner,now]).map_err(sql_error)?;
+        tx.execute(
+            "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
+            params![run_id, id, now],
+        )
+        .map_err(sql_error)?;
         super::context::record(
             tx,
             id,
@@ -2190,7 +2177,7 @@ fn assign_message(
         // A human's new instruction, or an owning parent's explicit terminal
         // child restart, is the resume boundary for unassigned saved input.
         // Previously assigned receipts keep their original Run/Turn forever.
-        if caller.is_none() || owner.is_some() {
+        if caller.is_none() {
             super::message_delivery::recover_on_resume_tx(
                 tx,
                 id,
@@ -2288,11 +2275,6 @@ pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails
     details.last_input = crate::thread_observation::last_input(connection, id)?;
     details.awaiting_replies =
         super::reply::awaiting_replies_tx(connection, id, None).map_err(sql_error)?;
-    details.awaiting_reply =
-        super::reply::awaiting_replies_tx(connection, id, Some(true)).map_err(sql_error)?;
-    details.awaiting_thread_replies =
-        super::reply::awaiting_replies_tx(connection, id, Some(false)).map_err(sql_error)?;
-    details.awaiting_human = details.awaiting_reply.clone();
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
         .query_row(
@@ -2308,11 +2290,7 @@ pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails
             details.recovery_reason = recovery_status(connection, &details.thread_id, &id, reason)?;
             details.turn_id = Some(id);
         }
-        details.children_count = count(
-            connection,
-            "SELECT count(*) FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping')",
-            run,
-        )?;
+
         details.shells_count = count(
             connection,
             "SELECT count(*) FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')",
@@ -2725,12 +2703,7 @@ fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult>
     let details = run_details(tx, id)?;
     let mut result = MutationResult::default();
     if matches!(details.state, RunState::Live | RunState::Stopping) {
-        let mut statement=tx.prepare("WITH RECURSIVE owned(id,depth) AS(SELECT ?1,0 UNION ALL SELECT r.id,o.depth+1 FROM run r JOIN owned o ON r.owner_run_id=o.id WHERE r.state IN ('live','stopping')) SELECT id FROM owned ORDER BY depth DESC,id").map_err(sql_error)?;
-        result.stop_runs = statement
-            .query_map([id], |row| row.get::<_, String>(0))
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
+        result.stop_runs = vec![id.to_owned()];
         for run in &result.stop_runs {
             tx.execute("UPDATE run SET state='stopping',stop_reason='explicit_stop' WHERE id=?1 AND state='live'",[run]).map_err(sql_error)?;
             tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run]).map_err(sql_error)?;
