@@ -128,8 +128,7 @@ Unanswered-request reminders at Run completion remain. See [Delegation](delegati
 ### Waiting for a shell, and leaving shells behind
 
 A background shell has no time limit. A shell that never ends keeps your Run
-live after your Turn ends, and a parent waiting on `thread_settled` for your
-Thread keeps waiting. Shellboy does not stop it automatically, because that
+live after your Turn ends. An explicit `thread_settled` observer keeps waiting. Shellboy does not stop it automatically, because that
 would also stop correct long commands.
 
 - Wait for a shell with `shellboy wait` and `shell_ended` for its
@@ -138,12 +137,12 @@ would also stop correct long commands.
   timeout, and a timeout leaves the shell running.
 - Do not wait for other work (another process, a build, a child) by polling
   `pgrep`, `ps`, or similar. Wait on the Shellboy target: the shell's
-  `execution_id`, a child's `thread_settled`, or a reply.
+  `execution_id`. For child requests, end your Turn and await normal reply delivery.
 - Before you end a Turn, stop owned shells you no longer need with
   `shellboy shell stop --execution EXECUTION_ID`, and confirm with `shell get`
   that the state is terminal. Leave one running only on purpose, and say so in
   your answer with its `execution_id`.
-- If you wait for a child with `thread_settled` and the wait times out, read
+- If an explicit inspection wait with `thread_settled` times out, read
   `result.snapshot.conditions[].owned_shells` (execution ID, Run, elapsed
   milliseconds) and run `shellboy shell list --thread CHILD_THREAD_ID --state running`.
   A child's finished Turn with a live shell is not a settled Thread. Inspect it
@@ -184,7 +183,7 @@ shellboy events wait --after 'CURSOR' --thread CHILD_A --thread CHILD_B --timeou
 
 Models: pass `--thread` with other Threads' IDs and never your own. Your own adoption of input,
 tool start and finish all change your Thread and would wake you every round at a token cost. To
-supervise children prefer `wait` with `thread_settled` (next section); use `events wait` mainly
+delegate to children, use `--expect-reply` and end the Turn; use `events wait` mainly
 for tools and clients outside a model Turn.
 
 `status:"changed"` lists the Threads that changed (`changes[].thread_id`); then read
@@ -196,9 +195,10 @@ must not miss a transition, use `wait` with `thread_settled` (see below). Detail
 
 `events wait --reasoning-activity` is for UI clients that want progress metadata without receiving model text. It reports active local request attempts in `reasoning_activity`, including before content arrives. `elapsed_ms` measures time since the local stream attempt started; `received_bytes` is absent until reasoning deltas arrive and then counts their UTF-8 bytes, not tokens. No reasoning content is exposed. `events wait --text` is a separate opt-in that returns unsaved answer deltas; reasoning content is excluded from `live_text` even when this flag is set. Do not use either option to follow another Thread: the text remains unsaved/lossy and retries replace it. Wait for the Thread to settle and read saved history.
 
-### Wait for any child Thread
+### Explicit inspection of Thread completion
 
-Use one wait for several child Threads, not a repeated ThreadList comparison:
+For external inspection, use one bounded wait instead of repeated ThreadList comparisons. This is not the child
+request lifecycle: models send `--expect-reply` and finish their Turn to receive the reply normally.
 
 ```sh
 shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
@@ -423,7 +423,7 @@ Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`cl
 
 Query a lost operation result with `shellboy operation get --operation OPERATION_ID`. Distinguish its receipt state/outcome from downstream completion, and follow targets to their get commands. Check downstream for message and compact. Repeating compact with the same ID returns its original queued acceptance even after downstream completion. pending/result_uncertain do not prove that side effects never occurred or that retrying with a new ID is safe. The query itself creates no receipt; its operation ID does not guarantee replay of the observation. Repeating attachment.add with the same ID returns the original result before mutable preflight, while preserving authentication and request-equality checks.
 
-Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` means execution ownership. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
+Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` exists for shell ownership only; Runs do not have parent owners. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
 
 To move a conversation back to an earlier point, `shellboy thread rewind --thread THREAD --node NODE` cuts that Thread's selected path to end at NODE and keeps the removed part as a child Thread (`branch_thread_id` in the result; opening it undoes the rewind). It rewinds the conversation only: shell side effects are not undone, and the result lists the shell executions and child Threads started after NODE. It is refused while the target has a live or stopping Run or messages with unknown path admission; definitely unadmitted queued messages are allowed. Because you always run inside a live Run, omitting `--thread` (your own Thread) is refused; rewind only another idle Thread, or continue from an earlier point with `shellboy thread fork --thread THREAD --node NODE`, or ask the user to run `/rewind`. `--exclude-node` ends the path just before NODE. The result also lists unanswered replies to messages the Thread sent (`pending_replies_to_sent_messages`); background shells from the removed part may still report `shell_ended`. Going back into a summarized range works only while the originals exist (not after `thread prune`).
 

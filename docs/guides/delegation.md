@@ -85,8 +85,8 @@ shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE
 Inspect `matched` and `snapshot.conditions` and wait again for outstanding
 requests. A wait can also combine `reply_received` with `thread_settled` for
 `recovery_wait`, `failed`, or `stopped`. `interrupted` and `unavailable` require
-inspection, not an assumption of success. Model waits are cycle-checked; do not
-work around `wait_cycle` with sleep loops. Ctrl+C or connection loss releases
+inspection, not an assumption of success. Waits do not detect cycles or reject self-waits; a dependency cycle can simply time out. Do not replace
+normal reply delivery with a sleep loop. Ctrl+C or connection loss releases
 the observation, not the target. Follow `next_cursor` for long reply nodes.
 
 ## Progress reports and lifetime
@@ -104,7 +104,9 @@ This is an ordinary message notification. A child need not wait for a reply to e
 shellboy wait --conditions-json '[{"type":"run_ended","run_id":"CHILD_RUN_ID"}]' --timeout-ms 30000
 ```
 
-Even after the parent's Turn answers, its Run remains live while it owns child/grandchild Runs or shells. Normal Run completion is finalized only after confirming that no owned work, unprocessed instructions, or similar obligations remain. Explicitly stopping the parent Run or exiting the application stops and reclaims its owned descendants. Do not use a child as a persistent daemon that survives application exit. Independent Runs on independent Threads are outside the parent Run's ownership cleanup.
+A parent Run can complete while the child independently continues. Stopping the parent stops only its own shells,
+not child or grandchild Runs. Application exit stops every live Run independently. Never rely on a Thread's tree
+position as a cleanup policy; select the exact Run or shell when a stop is needed.
 
 After reading the results and waiting for the child's Runs to end, the parent or user decides whether to retain the child.
 Preview with `shellboy thread delete-preview --thread CHILD_THREAD_ID` (optionally `--descendants`), then use `shellboy thread delete --thread CHILD_THREAD_ID` with the same descendant selection only if deletable; deletion rechecks live/stopping Runs.
@@ -131,9 +133,10 @@ Retry and stop are alternatives; the example does not instruct running both cons
 
 In PowerShell, use `$env:SHELLBOY_THREAD_ID`. Adapt single-quoted JSON examples to the shell's argument passing; see [Shell](shell.md). These delegation command examples have not been verified on physical Windows hardware.
 
-## Waiting for several Threads
+## Explicit observation of several Threads
 
-For completed work or a recovery decision in any child, use one bounded wait:
+For human/client inspection of completed or recovery-waiting work, an explicit bounded wait remains available.
+Models delegating tasks normally finish their Turn and await reply delivery instead:
 
 ```sh
 shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
@@ -167,7 +170,8 @@ Labels remain self-asserted; inspect originals by node ID when needed.
 ## Leader's operating flow
 
 Send an instruction with `message send --thread T --expect-reply` and retain its
-message ID. Wait for `reply_received`; after a timeout, reissue the wait rather
+message ID. End the current Turn when only the result remains; the explicit reply is delivered to the sender
+Thread normally. An external observer can wait for `reply_received`; after a timeout, reissue that observation rather
 than the instruction. Inspect `message get` and retrieve `reply.node_id` for a
 `replied` result. For `ignored`, inspect `last_end_message` and history for
 diagnosis; it is not a substitute for a reply. Use `thread_settled`/`status`
