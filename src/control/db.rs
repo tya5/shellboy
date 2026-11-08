@@ -2600,12 +2600,10 @@ fn thread_list_awaiting_human(
         items.push(item);
     }
     for item in &mut items {
-        if let Some((_, (count, oldest, saturated))) =
-            candidates.iter().find(|(id, _)| id == &item.thread_id)
-        {
-            item.awaiting_human_count = (*count).min(128);
-            item.awaiting_human_count_saturated = *saturated;
-            item.awaiting_human_oldest_at = oldest.clone();
+        if let Some((_, counts)) = candidates.iter().find(|(id, _)| id == &item.thread_id) {
+            item.awaiting_human_count = counts.count;
+            item.awaiting_human_count_saturated = counts.saturated;
+            item.awaiting_human_oldest_at = counts.oldest.clone();
         }
     }
     items.retain(|item| {
@@ -2641,13 +2639,20 @@ fn thread_list_awaiting_human(
     Ok(Page { items, next_cursor })
 }
 
+#[derive(Debug)]
+struct AwaitingHumanCount {
+    count: u64,
+    oldest: Option<String>,
+    saturated: bool,
+}
+
 /// Read a bounded page of pending Thread keys and exact page-local aggregates.
 fn awaiting_human_candidates(
     connection: &Connection,
     after: &str,
     aggregate_watermark: i64,
     limit: u32,
-) -> Result<Vec<(String, (u64, Option<String>, bool))>> {
+) -> Result<Vec<(String, AwaitingHumanCount)>> {
     let mut statement = connection
         .prepare(awaiting_human_candidates_sql())
         .map_err(sql_error)?;
@@ -2665,7 +2670,7 @@ fn awaiting_human_candidates(
                         serde_json::from_str(&timestamps_json).unwrap_or_default();
                     let count = timestamps.len() as u64;
                     let oldest = timestamps.first().cloned();
-                    (id, (count.min(128), oldest, count > 128))
+                    (id, AwaitingHumanCount { count: count.min(128), oldest, saturated: count > 128 })
                 })
                 .collect()
         })
