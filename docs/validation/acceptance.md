@@ -11011,3 +11011,12 @@ restores FK enforcement on both success and error. Transaction drop rolls back o
 `failed_run_rebuild_rolls_back_and_restores_foreign_keys` injects a DDL failure; the schema-38 upgrade fixture preserves
 actual shell/Turn references and pending receipt IDs over two reopens. These fixtures support, rather than replace,
 the official transaction/enforcement rationale. No one-off backup shim or writable-schema modification is used.
+
+Matched-count synthetic measurement (same macOS/Python/SQLite environment as the earlier comparison): 3,303 Runs,
+22,537 events with 49 legacy recovery events; seed 3,596,288 bytes, after rebuild 3,833,856 bytes. Run-DDL-only rebuild:
+**0.01050916698295623 seconds**, 3,303 copied rows. Full migration-38 SQL transaction including event conversion,
+indexes and version metadata: **0.011683542048558593 seconds**, legacy recovery 49→0 and local recovery 0→49,
+22,488 unrelated events unchanged, FK violations zero. DROP COLUMN failed after 0.004264333052560687 seconds for the
+same owner CHECK constraint. This successful timing excludes seed/copy setup and the separately reported FK query;
+it is not a measurement of application startup/integrity scans or real DB performance. These small synthetic rows
+match the authorized counts only; no claim is made about real payload sizes or distributions.
