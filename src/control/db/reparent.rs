@@ -1,11 +1,8 @@
 //! Move a Thread under another live Thread, or detach it (#222 stage 2).
 //!
-//! Only `thread.parent_thread_id` changes. Live authority follows `run.owner_run_id`
-//! (stop, retry, recovery and completion notices, wait cycles), which is stored when
-//! a Run starts and never re-derived, so a move leaves every Run, shell, wait and
-//! pending reply untouched. The new parent is read at exactly one point: the next
-//! model send that starts a Run on the moved Thread. `updated_at` is not changed so
-//! list order does not move; `revision` is bumped like every Thread write.
+//! Only Thread organization changes. Runs are independent; shells, pending replies,
+//! observations and recovery decisions remain with their existing Thread/Run IDs.
+//! `updated_at` stays unchanged and `revision` advances like every Thread write.
 use super::{MutationResult, actor, error, sql_error};
 use crate::protocol::{ErrorCode, Origin};
 use rusqlite::{OptionalExtension, Transaction, params};

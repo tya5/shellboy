@@ -1064,13 +1064,13 @@ impl Control {
             .database
             .call(move |db| {
                 Ok(
-                    db.query_row("SELECT child.thread_id,parent.thread_id FROM run child LEFT JOIN run parent ON parent.id=child.owner_run_id AND parent.state IN ('live','stopping') WHERE child.id=?1", [run], |r| {
-                        Ok((r.get::<_, String>(0)?,r.get::<_,Option<String>>(1)?))
+                    db.query_row("SELECT thread_id FROM run WHERE id=?1", [run], |r| {
+                        r.get::<_, String>(0)
                     })?,
                 )
             })
             .await;
-        if let Ok((thread, parent)) = thread {
+        if let Ok(thread) = thread {
             if let Some(token) = self.compact_tasks.lock().await.get(&thread) {
                 token.cancel();
             }
@@ -1079,9 +1079,6 @@ impl Control {
                 match driver::stop_without_driver(self, run_id).await {
                     Ok(()) => {
                         self.store.database.signals().run_ended(run_id);
-                        if let Some(parent) = parent.filter(|parent| parent != &thread) {
-                            self.changed(&parent);
-                        }
                     }
                     Err(error) => {
                         self.fail_storage().await;
@@ -1112,23 +1109,6 @@ impl Control {
             live.stop_shells().await;
         });
         let _ = stop.await;
-    }
-    async fn nudge_owner(self: &Arc<Self>, child_run: &str) {
-        let run = child_run.to_owned();
-        let owner=self.store.database.call(move|db| {
-            use rusqlite::OptionalExtension;
-            Ok(db.query_row("SELECT parent.thread_id,parent.state FROM run child JOIN run parent ON parent.id=child.owner_run_id WHERE child.id=?1 AND parent.state IN ('live','stopping')",[run],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).optional()?)
-        }).await;
-        match owner {
-            Ok(Some((thread, state))) => {
-                self.changed(&thread);
-                if state == "live" {
-                    self.kick_quiet(thread).await;
-                }
-            }
-            Err(_) => self.fail_storage().await,
-            _ => {}
-        }
     }
     pub async fn background(&self, thread_id: &str) -> Result<(), ApiError> {
         self.live.background(thread_id).await
@@ -1227,7 +1207,6 @@ impl Control {
             crate::maintenance::Work::Raw,
         ]);
         signals.run_ended(&slot.run_id);
-        self.nudge_owner(&slot.run_id).await;
         // An accepted send/retry can race the previous driver's final
         // observation and map removal. Recheck after releasing its slot.
         if !self.stop.is_cancelled() {

@@ -5360,7 +5360,7 @@ mod owned_child_notification_tests {
                 if completed {
                     owner.db.call(|db| {db.execute_batch("UPDATE turn SET state='completed' WHERE id='child-turn'; UPDATE run SET state='completed' WHERE id='child-run';")?;Ok(())}).await.unwrap();
                 }
-                control.nudge_owner("child-run").await;
+
                 if parent_state == "completed" {
                     assert!(matches!(
                         events.try_recv(),

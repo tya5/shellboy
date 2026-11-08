@@ -132,7 +132,6 @@ fn prioritize_interruption_identity(p: &mut NodePresentation, value: &Value, kin
         "turns",
         "shells",
         "tool_calls",
-        "owned_children",
         "unreflected_messages",
         "cancelled_waits",
         "pending_operations_with_unknown_targets",

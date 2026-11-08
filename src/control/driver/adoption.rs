@@ -71,6 +71,6 @@ pub(super) async fn adopt_response(
         }).await.map_err(storage_error)?;
     control.index.wake();
     control.changed(&snapshot.thread);
-    control.nudge_owner(&snapshot.run).await;
+
     Ok(may_execute)
 }

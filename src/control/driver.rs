@@ -713,7 +713,7 @@ async fn recover_preparation(
                 execution_id: None,
             });
         control.changed_with_recovery(&target_thread, true);
-        control.nudge_owner(&target_run).await;
+
     }
     // Keep the original typed failure as the one driver error. The recovery
     // reason is persisted above; the caller must not silently report success.
@@ -793,7 +793,7 @@ async fn recover(
         .await
         .map_err(storage_error)?;
     control.changed_with_recovery(&thread_id, recovered);
-    control.nudge_owner(&run_id).await;
+
     Ok(())
 }
 pub(super) async fn stop_without_driver(control: &Control, run_id: &str) -> Result<(), ApiError> {
