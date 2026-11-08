@@ -749,7 +749,7 @@ fn current_lifecycle_details_require_observed_context() {
         ),
         (
             "run",
-            json!({"run_id":"r","thread_id":"t","state":"live","owned_run_ids":[],"owned_execution_ids":[]}),
+            json!({"run_id":"r","thread_id":"t","state":"live","owned_execution_ids":[]}),
         ),
         (
             "turn",

@@ -3722,7 +3722,7 @@ fn saved_thread_recovery_status_shows_message_without_serialized_error_fields() 
         let details = serde_json::from_value(serde_json::json!({
             "agents_path":"/tmp/AGENTS.md", "thread_id":"recovery-thread", "title":"復旧確認", "cwd":"/tmp",
             "connection":"fixture", "model":"fixture", "run_id":"saved-run",
-            "turn_id":"saved-turn", "children_count":0, "shells_count":0,
+            "turn_id":"saved-turn", "shells_count":0,
             "recovery_reason":reason
         }))
         .unwrap();

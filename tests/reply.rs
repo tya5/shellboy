@@ -442,7 +442,15 @@ async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_
         assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",[recovery_id],|r|r.get::<_,String>(0))?,"pending");
         Ok(())
     }).await.unwrap();
-    store.execute(request(Command::RunRetry(RunTarget{run_id:accepted["run_id"].as_str().unwrap().into()})),None).await.unwrap();
+    store
+        .execute(
+            request(Command::RunRetry(RunTarget {
+                run_id: accepted["run_id"].as_str().unwrap().into(),
+            })),
+            None,
+        )
+        .await
+        .unwrap();
     // No live parent Run is required for a reply: delivery starts ordinary new work.
     store
         .database

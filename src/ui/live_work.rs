@@ -1562,8 +1562,9 @@ mod tests {
         let actions = ui
             .live_work_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
             .unwrap();
-        assert!(actions.iter().any(|action|matches!(action,UiAction::SelectThread {thread_id,..} if thread_id=="child-thread")));
-        assert!(!ui.view().live_work.region.active);
+        assert!(actions.is_empty(),"owned-child navigation is no longer an action");
+        assert!(ui.view().live_work.region.active);
+
     }
     #[test]
     fn wait_target_number_and_approximate_deadline_are_visible() {
@@ -2195,7 +2196,7 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].starts_with("├─[1]") && lines[0].contains("$ "));
-        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("↳ child task"));
+        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("⋯ child task"));
         assert!(lines[2].starts_with("└─[3]") && lines[2].contains("⋯ saved wait"));
         // Padding rows carry no connector: same count with fewer items.
         let mut two = snapshot(at);
@@ -2272,11 +2273,10 @@ mod language_tests {
                 UiLanguage::En => &[
                     "Owned work",
                     "Shells: 1",
-                    "Child runs: 1",
                     "Running",
                     "Waiting",
                 ],
-                UiLanguage::Ja => &["抱えている作業", "shell 1", "子 1", "実行中", "待機中"],
+                UiLanguage::Ja => &["抱えている作業", "shell 1", "実行中", "待機中"],
             }
         }
         super::super::i18n::verify_screen(populate, expected);
@@ -2304,7 +2304,7 @@ mod language_tests {
         super::super::i18n::verify_screen(empty, empty_expected);
     }
     #[test]
-    fn child_phase_projection_is_english_without_rewriting_source_states() {
+    fn observed_wait_phase_projection_preserves_source_states() {
         use crate::activity::ActivityPhase::*;
         let expected = [
             (Idle, "Idle"),

@@ -596,7 +596,7 @@ mod tests {
                 "{state}"
             );
             if state != "recovery_wait" {
-                assert_eq!(tx.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id JOIN run r ON r.id=d.recipient_id JOIN turn u ON u.run_id=r.id WHERE e.target_thread_id='s' AND d.state='pending' AND r.state='live' AND u.state='running'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+                assert_eq!(tx.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id JOIN run r ON r.id=d.recipient_id JOIN turn u ON u.run_id=r.id WHERE e.target_thread_id='s' AND d.state='pending' AND r.state='live' AND u.state='preparing'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
                 assert!(terminal_tx(&tx, "recipient", "2").unwrap().is_empty());
                 assert!(
                     !cancel_reply_tx(&tx, "t", "request", "2", &json!({"kind":"human"}), true)
