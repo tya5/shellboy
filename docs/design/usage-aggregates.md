@@ -75,7 +75,7 @@ existing request task into the DB job; it is not a protocol option or setting.
 
 ## Bounded grouped CLI readback (#101)
 
-`usage get --group-by hour|day|thread` uses the existing finite presentation pool
+`usage get --group-by hour|day|thread|model` uses the existing finite presentation pool
 and read-only WAL snapshot, not the write DB worker. Ungrouped totals are unchanged.
 Without an explicit scope, grouped reads cover non-deleted Threads. Thread groups
 provide the multi-conversation alternative; one explicit Thread/Run/Turn filter
@@ -113,3 +113,15 @@ with its Thread/Run/Turn references. Cache ratio is sum(cached)/sum(input) over
 terminal attempts with both fields known; zero denominator is null, inconsistent
 provider measurements are not clamped. Paired/unknown counts expose coverage.
 No money, unrecorded summary/embedding usage or inferred tokens are added.
+
+
+### Thread shell exit grouping (#272)
+
+`usage get --group-by shell-exit` groups terminal shell executions by their owning
+Thread and persisted `exit_code`. Ownership follows `shell_execution.owner_run_id`
+to `run.thread_id`; no attribution is inferred from the current Turn. Missing exit
+codes remain a separate unknown group. The saved `started_at` period is half-open,
+and a page scans at most 200 shell rowids plus a lookahead before applying scope,
+state and period filters. Cursor pages retain the original candidate watermark;
+`scan_truncated` and page-local statistics make partial coverage explicit. No
+schema/index migration or write-side aggregation is added.

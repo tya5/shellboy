@@ -774,3 +774,68 @@ fn large_compaction_records_are_byte_bounded_and_resume_without_loss() {
     assert_eq!(total, 7);
     assert!(pages >= 4);
 }
+
+#[test]
+fn bounded_shell_exit_groups_preserve_unknown_and_scope_to_thread() {
+    let db = fixture();
+    for (id, thread, code, at, state) in [
+        ("s0", "t1", Some(0), "2026-10-31T00:30:00Z", "exited"),
+        ("s7", "t1", Some(7), "2026-10-31T00:31:00Z", "failed"),
+        ("snull", "t1", None, "2026-10-31T00:32:00Z", "stopped"),
+        ("other", "t2", Some(7), "2026-10-31T00:33:00Z", "exited"),
+        ("until", "t1", Some(9), "2026-11-01T00:00:00Z", "exited"),
+    ] {
+        db.execute(
+            "INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code) VALUES(?1,?2,?2,?1,?5,'/','{}','UTF-8','UTF-8','closed',?4,?4,?3)",
+            params![id, thread, code, at, state],
+        ).unwrap();
+    }
+    let mut a = args("shell-exit");
+    a.thread_id = Some("t1".into());
+    let value = read(&db, &a, "fixture").unwrap();
+    assert_eq!(value["matched_shell_executions"], 3);
+    let items = value["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0]["exit_code"], 0);
+    assert_eq!(items[1]["exit_code"], 7);
+    assert_eq!(items[2]["exit_code"], Value::Null);
+    assert_eq!(items[2]["count"], 1);
+    assert_eq!(value["outside_period_count"], 1);
+    let plan = db.prepare("EXPLAIN QUERY PLAN WITH candidates AS MATERIALIZED (SELECT rowid,id FROM shell_execution WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT 201) SELECT * FROM candidates").unwrap()
+        .query_map(params![0_i64, i64::MAX], |r| r.get::<_, String>(3)).unwrap()
+        .map(Result::unwrap).collect::<Vec<_>>();
+    assert!(
+        plan.iter()
+            .any(|line| line.contains("SEARCH shell_execution USING INTEGER PRIMARY KEY")),
+        "{plan:?}"
+    );
+    assert!(
+        !plan
+            .iter()
+            .any(|line| line.starts_with("SCAN shell_execution")),
+        "{plan:?}"
+    );
+}
+
+#[test]
+fn shell_exit_group_cursor_pages_groups_and_keeps_scope_bound() {
+    let db = fixture();
+    for (id, thread) in [("s0", "t1"), ("s1", "t1"), ("s2", "t2")] {
+        db.execute(
+            "INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at,ended_at,exit_code) VALUES(?1,?2,?2,?1,'exited','/','{}','UTF-8','UTF-8','closed','2026-10-31T00:30:00Z','2026-10-31T00:31:00Z',?3)",
+            params![id, thread, id.strip_prefix('s').unwrap().parse::<i64>().unwrap()],
+        ).unwrap();
+    }
+    let mut a = args("shell-exit");
+    a.thread_id = Some("t1".into());
+    a.limit = Some(1);
+    let first = read(&db, &a, "fixture").unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first["more"], true);
+    a.cursor = Some(first["next_cursor"].as_str().unwrap().to_owned().into());
+    let second = read(&db, &a, "fixture").unwrap();
+    assert_eq!(second["items"].as_array().unwrap().len(), 1);
+    assert_eq!(second["more"], false);
+    assert_eq!(first["items"][0]["thread_id"], "t1");
+    assert_eq!(second["items"][0]["thread_id"], "t1");
+}

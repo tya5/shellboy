@@ -472,13 +472,15 @@ feeds the TUI, without a new Run/Turn state or protocol-version change (#102).
 
 ## Grouped saved usage (#101)
 
-`usage.get` optionally accepts `group_by` (`hour`, `day`, `thread`), `timezone`
+`usage.get` optionally accepts `group_by` (`hour`, `day`, `thread`, `shell-exit`), `timezone`
 (`local`, `UTC`, fixed signed HH:MM), `limit` (1..168), and `cursor`.
 Timezone/limit/cursor require grouping; existing scope exclusivity still applies.
 Grouped unscoped reads span non-deleted Threads, not an implicitly selected Thread.
 The default last24h/max31day saved-start period, 10,000+1 candidate scan bound,
 group/scan cursor, page-local statistics, unknown coverage and max-attempt
 references are defined in [usage aggregates](usage-aggregates.md#bounded-grouped-cli-readback-101).
+For `shell-exit`, items count terminal shell executions by owning Thread and persisted exit code; a null code is `unknown`, never zero. Its candidate page is at most 200 primary-rowid records before scope/time filtering, and its cursor binds scope/filter and insertion watermark.
+
 The response exposes `items`, `more`, `next_cursor`, `requested_period`,
 `scanned_candidates`, `matched_attempts`, `scan_truncated`, `scope_complete`,
 `statistics_scope`, `excluded_time_count`, `outside_period_count`, coverage and

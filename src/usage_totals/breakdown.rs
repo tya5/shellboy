@@ -40,8 +40,8 @@ fn offset(zone: &str) -> Result<Option<FixedOffset>, ApiError> {
 }
 pub(crate) fn validate(a: &UsageGetArgs) -> Result<(), ApiError> {
     if let Some(group) = &a.group_by {
-        if !matches!(group.as_ref(), "hour" | "day" | "thread") {
-            return Err(invalid("group_by must be hour, day, or thread"));
+        if !matches!(group.as_ref(), "hour" | "day" | "thread" | "shell-exit") {
+            return Err(invalid("group_by must be hour, day, thread, or shell-exit"));
         }
         offset(a.timezone.as_deref().unwrap_or("local"))?;
         if !(1..=GROUP_LIMIT).contains(&a.limit.unwrap_or(GROUP_LIMIT)) {
@@ -336,8 +336,210 @@ fn compaction_query() -> String {
     )
 }
 
+#[derive(Serialize, Deserialize)]
+struct ShellScan {
+    since: String,
+    until: String,
+    after: i64,
+    group_offset: usize,
+    continued: bool,
+}
+fn read_shell_exits(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<Value, ApiError> {
+    let started = std::time::Instant::now();
+    let mut filters = a.clone();
+    filters.cursor = None;
+    let filter = Sha256::digest(serde_json::to_vec(&(instance, &filters)).unwrap())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    let cursor = a
+        .cursor
+        .as_deref()
+        .map(|v| PageCursor::decode(v, "usage.shell-exits.v1", &filter, 0, None))
+        .transpose()?;
+    let saved: Option<ShellScan> = cursor
+        .as_ref()
+        .map(|c| serde_json::from_str(&c.last_sort_key).map_err(|_| expired()))
+        .transpose()?;
+    let w = window(a, None)?;
+    let mut scan = saved.unwrap_or_else(|| ShellScan {
+        since: w.since.unwrap().to_rfc3339(),
+        until: w.until.unwrap().to_rfc3339(),
+        after: 0,
+        group_offset: 0,
+        continued: false,
+    });
+    if scan.group_offset > ROW_LIMIT {
+        return Err(expired());
+    }
+    let watermark = match &cursor {
+        Some(c) => i64::try_from(c.watermark).map_err(|_| expired())?,
+        None => db
+            .query_row(
+                "SELECT COALESCE(max(rowid),0) FROM shell_execution",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(error)?,
+    };
+    let w = crate::readback::Window::new(Some(&scan.since), Some(&scan.until))?;
+    let scope_kind = if a.turn_id.is_some() {
+        "turn"
+    } else if a.run_id.is_some() {
+        "run"
+    } else if a.thread_id.is_some() {
+        "thread"
+    } else {
+        "all"
+    };
+    let selected_threads = if scope_kind == "thread" {
+        let id = a.thread_id.as_deref().unwrap();
+        let sql = if a.include_children {
+            "WITH RECURSIVE selected(id) AS (SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL UNION SELECT t.id FROM thread t JOIN selected s ON t.parent_thread_id=s.id WHERE t.deleted_at IS NULL LIMIT ?2) SELECT id FROM selected"
+        } else {
+            "SELECT id FROM thread WHERE id=?1 AND deleted_at IS NULL"
+        };
+        let mut st = db.prepare(sql).map_err(error)?;
+        let values = if a.include_children {
+            st.query_map(params![id, crate::protocol::MAX_LIST_LIMIT + 1], |r| {
+                r.get::<_, String>(0)
+            })
+            .map_err(error)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(error)?
+        } else {
+            st.query_map([id], |r| r.get::<_, String>(0))
+                .map_err(error)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(error)?
+        };
+        if values.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::TargetUnavailable,
+                "Usage scope is unavailable",
+            ));
+        }
+        if values.len() > crate::protocol::MAX_LIST_LIMIT as usize {
+            return Err(invalid("shell exit thread scope exceeds bounded selection"));
+        }
+        values
+    } else {
+        Vec::new()
+    };
+    if scope_kind == "run"
+        && !db.query_row("SELECT EXISTS(SELECT 1 FROM run r JOIN thread t ON t.id=r.thread_id WHERE r.id=?1 AND t.deleted_at IS NULL)", [a.run_id.as_deref().unwrap()], |r| r.get::<_, bool>(0)).map_err(error)?
+    {
+        return Err(ApiError::new(ErrorCode::TargetUnavailable, "Usage scope is unavailable"));
+    }
+    if scope_kind == "turn"
+        && !db.query_row("SELECT EXISTS(SELECT 1 FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1 AND t.deleted_at IS NULL)", [a.turn_id.as_deref().unwrap()], |r| r.get::<_, bool>(0)).map_err(error)?
+    {
+        return Err(ApiError::new(ErrorCode::TargetUnavailable, "Usage scope is unavailable"));
+    }
+    let scan_cap = ROW_LIMIT.min(crate::protocol::MAX_LIST_LIMIT as usize);
+    let sql = format!(
+        "WITH candidates AS MATERIALIZED (SELECT rowid rid,id FROM shell_execution WHERE rowid>?1 AND rowid<=?2 ORDER BY rowid LIMIT {scan_cap}+1) SELECT c.rid,s.owner_run_id,r.thread_id,t.deleted_at,s.turn_id,s.state,s.exit_code,s.started_at FROM candidates c LEFT JOIN shell_execution s ON s.id=c.id LEFT JOIN run r ON r.id=s.owner_run_id LEFT JOIN thread t ON t.id=r.thread_id ORDER BY c.rid"
+    );
+    let mut st = db.prepare(&sql).map_err(error)?;
+    let mut rows = st.query(params![scan.after, watermark]).map_err(error)?;
+    let mut groups: BTreeMap<(String, String), u64> = BTreeMap::new();
+    let (mut last, mut scanned, mut matched, mut excluded, mut outside) =
+        (scan.after, 0u64, 0u64, 0u64, 0u64);
+    while let Some(row) = rows.next().map_err(error)? {
+        let rid: i64 = row.get(0).map_err(error)?;
+        if scanned as usize == scan_cap {
+            break;
+        }
+        scanned += 1;
+        last = rid;
+        let Some(thread) = row.get::<_, Option<String>>(2).map_err(error)? else {
+            continue;
+        };
+        let deleted: Option<String> = row.get(3).map_err(error)?;
+        if deleted.is_some() {
+            continue;
+        }
+        let turn: Option<String> = row.get(4).map_err(error)?;
+        let state: Option<String> = row.get(5).map_err(error)?;
+        if !matches!(state.as_deref(), Some("exited" | "failed" | "stopped")) {
+            continue;
+        }
+        let scope_matches = match scope_kind {
+            "thread" => selected_threads.iter().any(|id| id == &thread),
+            "run" => {
+                row.get::<_, Option<String>>(1).map_err(error)?.as_deref() == a.run_id.as_deref()
+            }
+            "turn" => turn.as_deref() == a.turn_id.as_deref(),
+            _ => true,
+        };
+        if !scope_matches {
+            continue;
+        }
+        let code: Option<i64> = row.get(6).map_err(error)?;
+        let raw: Option<String> = row.get(7).map_err(error)?;
+        let Some(raw) = raw else {
+            excluded += 1;
+            continue;
+        };
+        if raw.len() > 64 {
+            excluded += 1;
+            continue;
+        }
+        let Some(at) = DateTime::parse_from_rfc3339(&raw).ok() else {
+            excluded += 1;
+            continue;
+        };
+        if at.with_timezone(&Utc) < *w.since.as_ref().unwrap()
+            || at.with_timezone(&Utc) >= *w.until.as_ref().unwrap()
+        {
+            outside += 1;
+            continue;
+        }
+        matched += 1;
+        let key = code
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "unknown".into());
+        *groups.entry((thread, key)).or_default() += 1;
+    }
+    let row_more = (scanned as usize) == scan_cap && rows.next().map_err(error)?.is_some();
+    let size = a.limit.unwrap_or(GROUP_LIMIT) as usize;
+    let more_groups = groups.len() > scan.group_offset + size;
+    let items=groups.into_iter().skip(scan.group_offset).take(size).map(|((thread,code),count)|json!({"thread_id":thread,"exit_code":if code=="unknown" {Value::Null}else{json!(code.parse::<i64>().unwrap())},"count":count})).collect::<Vec<_>>();
+    let more = more_groups || row_more;
+    let continued = scan.continued;
+    let next = if more {
+        if more_groups {
+            scan.group_offset += items.len()
+        } else {
+            scan.after = last;
+            scan.group_offset = 0;
+            scan.continued = true;
+        }
+        Some(
+            PageCursor {
+                version: 1,
+                scope: "usage.shell-exits.v1".into(),
+                filter,
+                last_sort_key: serde_json::to_string(&scan).unwrap(),
+                watermark: watermark as u64,
+                revision: 0,
+                encoding: None,
+            }
+            .encode()?,
+        )
+    } else {
+        None
+    };
+    Ok(
+        json!({"group_by":"shell-exit","requested_period":w.json(),"items":items,"more":more,"next_cursor":next,"scanned_candidates":scanned,"matched_shell_executions":matched,"excluded_time_count":excluded,"outside_period_count":outside,"row_limit":ROW_LIMIT,"group_limit":size,"scan_truncated":row_more||continued,"statistics_scope":"current_candidate_window","coverage":{"exit_code_null":"unknown, not zero","shell_states":"terminal only"},"elapsed_ms":started.elapsed().as_secs_f64()*1000.0}),
+    )
+}
+
 pub(crate) fn read(db: &Connection, a: &UsageGetArgs, instance: &str) -> Result<Value, ApiError> {
     validate(a)?;
+    if a.group_by.as_deref() == Some("shell-exit") {
+        return read_shell_exits(db, a, instance);
+    }
     let started = std::time::Instant::now();
     let mut filter_args = a.clone();
     filter_args.cursor = None;

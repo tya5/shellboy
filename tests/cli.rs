@@ -1216,7 +1216,7 @@ async fn thread_wait_after_cursor_maps_to_the_shared_contract_and_bounds_targets
 
 #[tokio::test]
 async fn grouped_usage_cli_preserves_scope_timezone_limit_and_cursor() {
-    for group in ["hour", "day", "thread"] {
+    for group in ["hour", "day", "thread", "shell-exit"] {
         let command = convert(&[
             "usage",
             "get",
