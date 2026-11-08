@@ -756,5 +756,8 @@ inherent migration bookkeeping, not application-table changes requiring a scan.
 
 Schema 36 adds `receipt_human_reply_pending(target_thread_id, created_at)`
 for cross-Thread human inbox pagination. It is partial on pending human-directed
-reply receipts only, and is distinct from the per-recipient `receipt_reply_pending`
-index used for bounded Thread inbox and lifecycle operations.
+reply receipts only. The inbox keyset-seeks candidate Thread IDs from this index,
+then computes exact count/oldest aggregates only for the bounded candidate page;
+archived/deleted filtering also stays within that page. This is distinct from
+the per-recipient `receipt_reply_pending` index used for bounded Thread inbox and
+lifecycle operations.
