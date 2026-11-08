@@ -1133,7 +1133,7 @@ fn exported_schema_local_references_resolve() {
 fn protocol_v4_handshake_advertises_reasoning_activity_capability_and_tolerates_additive_metadata()
 {
     let welcome: Value = serde_json::from_str(
-        r#"{"protocol_version":4,"instance_id":"i","capabilities":["events.reasoning_activity"],"future_metadata":true}"#,
+        r#"{"protocol_version":5,"instance_id":"i","capabilities":["events.reasoning_activity"],"future_metadata":true}"#,
     )
     .unwrap();
     let decoded: shellboy::ipc::Welcome = serde_json::from_value(welcome).unwrap();

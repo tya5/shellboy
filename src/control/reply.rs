@@ -345,8 +345,8 @@ pub(crate) fn complete_tx(
     at: &str,
     wakes: &mut Vec<String>,
 ) -> rusqlite::Result<Option<String>> {
-    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 AND state='applied' ORDER BY created_at,rowid LIMIT 128")?
-        .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 AND state='applied' ORDER BY created_at,rowid LIMIT ?2")?
+        .query_map(rusqlite::params![thread, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     if !rows.is_empty() {
         db.execute(
             "UPDATE thread SET revision=revision+1 WHERE id=?1",
@@ -424,8 +424,8 @@ fn outcome_tx(
     Ok(None)
 }
 
-// Per-recipient pending duties are capped at 128 by send admission.
-const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT 128";
+// Per-recipient pending duties are capped at 16 by send admission.
+const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT ?2";
 
 /// All selected Threads are already marked deleted. No sender-side scan here.
 pub(crate) fn deleted_threads_tx(

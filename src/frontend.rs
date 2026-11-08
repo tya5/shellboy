@@ -4563,6 +4563,7 @@ mod stream_tests {
             ThreadSummary {
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
+                awaiting_human_count_exact: true,
                 awaiting_human_count: 0,
                 awaiting_thread_count: 0,
                 awaiting_human_oldest_at: None,
@@ -4585,6 +4586,7 @@ mod stream_tests {
             ThreadSummary {
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
+                awaiting_human_count_exact: true,
                 awaiting_human_count: 0,
                 awaiting_thread_count: 0,
                 awaiting_human_oldest_at: None,

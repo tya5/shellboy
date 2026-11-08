@@ -1,5 +1,5 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v4.json",
+  "$id": "https://shellboy.dev/schema/protocol-v5.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "capabilities": [
     "events.reasoning_activity"
@@ -6581,10 +6581,13 @@
         },
         "awaiting_human_count": {
           "default": 0,
-          "description": "Pending human-directed replies, limited to 16 for newly accepted requests; legacy excess is read with a bounded count.",
+          "description": "Pending human-directed replies: exact through 16; 17 with exact=false means 17 or more.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "awaiting_human_count_exact": {
+          "type": "boolean"
         },
         "awaiting_human_oldest_at": {
           "type": [
@@ -8954,6 +8957,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 4,
+  "protocol_version": 5,
   "title": "Shellboy local RPC protocol v4"
 }

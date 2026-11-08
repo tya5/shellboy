@@ -908,7 +908,7 @@ Turn is not permission to revive stale/imported assignments from another Turn.
 
 A model may ask the user for a decision with `shellboy message ask --text ...`.
 The question reuses a reply-expected receipt; no new table, worker, queue or
-timeout is introduced. Schema 36 adds a partial index solely for bounded
+timeout is introduced. Schema 38 adds a partial index solely for bounded
 cross-Thread human inbox paging; see [storage](storage.md). The pending receipt
 records `to_human=true`; reply state remains `pending` until a human reply,
 sender cancellation or recipient Thread deletion. Questions do not
@@ -948,19 +948,23 @@ needed for per-Thread details. The caller must observe `recipient_kind`, not
 infer it from sender or Thread identity. A thread-targeted duty is not a human notification.
 
 For cross-Thread web inboxes, `thread.list awaiting=human` pages only Threads
-with human-directed pending receipts. Schema 36 adds
+with human-directed pending receipts. Schema 38 adds
 `receipt_human_reply_pending(target_thread_id, created_at)` as a partial index
 on pending human replies, so the listing starts from qualifying receipts and
-never scans the Thread table. Recursive keyset seeks select at most one page of
-candidate Thread IDs from the ordered index before any count/min aggregation;
-counts and oldest times are computed only for those page candidates. Archived
-and deleted candidates are filtered from that bounded page, and the cursor
-advances by the last examined candidate so exclusions do not trigger an
-unbounded search. Items expose the human wait count and oldest saved receipt
-time; other-Thread duties are excluded. The filter is exclusive with query,
-tags, and cwd and uses an opaque keyset cursor with archived mode and receipt
-watermark. A fixture with 5,000 pending Threads pins VM steps against a 20-Thread
-fixture, including archived candidates.
+never scans the Thread table. Recursive indexed keyset seeks select at most
+`limit+1` candidate Thread IDs. Each candidate's aggregate reads at most 17
+pending rows. Counts through 16 are exact; a 17-row result is the lower bound
+17+ with `awaiting_human_count_exact=false`, never an assertion of exactly 17.
+The minimum `created_at` is reported only when the full pending set was observed
+(up to 16); with 17+ rows oldest is unknown/null, not an arrival-order guess.
+Archived/deleted candidates are filtered from the bounded candidate page, and
+the cursor advances by the last examined key, so exclusions cannot cause an
+unbounded search. The cursor is live, not a snapshot: v2 is scoped to the human
+inbox and archived mode; v1 snapshot cursors are rejected. Keys arriving before
+the cursor are deferred to a fresh listing; future keys may be seen in the
+current traversal. The filter is exclusive with query, tags, and cwd. Stress
+fixtures pin candidate-query VM steps with many late-arrival Threads and exercise
+state churn.
 
 
 The TUI `Pending replies` region is the same unified per-Thread list. It uses the

@@ -18,7 +18,7 @@ pub(super) fn query(
     )?;
     // SQLite returns bounded text fragments; never load 128 full message blobs
     // merely to draw a preview. Full canonical content stays source-addressable.
-    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,substr(r.sender_json,1,8193),r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id),COALESCE(json_extract(r.result_json,'$.reply.state')='pending',0),COALESCE(json_extract(r.result_json,'$.deliver')='complete' AND (r.hold_reason='run_completion' OR json_extract(r.result_json,'$.delivery_context.reason')='run_completion'),0) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 128"))?;
+    let mut stmt=db.prepare(&format!("SELECT r.message_node_id,r.client_operation_id,substr(r.sender_json,1,8193),r.created_at,r.state,r.hold_reason,r.path_admission,COALESCE(json_extract(r.result_json,'$.deliver')='now',0),COALESCE((SELECT substr(group_concat(fragment,''),1,513) FROM (SELECT substr(json_extract(j.value,'$.text'),1,513) AS fragment FROM json_each(n.payload_json,'$.content') j WHERE json_extract(j.value,'$.type') IN ('input_text','output_text') LIMIT 128)),''),(SELECT count(*) FROM attachment_ref a WHERE a.source_node_id=n.id),COALESCE(json_extract(r.result_json,'$.reply.state')='pending',0),COALESCE(json_extract(r.result_json,'$.deliver')='complete' AND (r.hold_reason='run_completion' OR json_extract(r.result_json,'$.delivery_context.reason')='run_completion'),0) FROM receipt r JOIN node n ON n.id=r.message_node_id WHERE {ELIGIBLE} ORDER BY r.created_at,r.rowid LIMIT 16"))?;
     let items = stmt
         .query_map([thread], |row| {
             let sender: String = row.get(2)?;
@@ -57,41 +57,44 @@ pub(super) fn query(
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let mut query = db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),''),COALESCE(json_extract(r.result_json,'$.to_human')=1,0),CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending WHERE r.target_thread_id=?1 AND r.state IN ('applied','accepted','held') AND json_extract(r.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 ORDER BY r.created_at,r.rowid LIMIT 128")?;
+    let mut query = db.prepare("SELECT r.message_node_id,substr(r.sender_json,1,8193),r.created_at,r.state,COALESCE((SELECT substr(json_extract(n.payload_json,'$.content[0].text'),1,513) FROM node n WHERE n.id=r.message_node_id),''),COALESCE(json_extract(r.result_json,'$.to_human')=1,0),CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending WHERE r.target_thread_id=?1 AND r.state IN ('applied','accepted','held') AND json_extract(r.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(r.result_json,'$.to_human'),0)=1 ORDER BY r.created_at,r.rowid LIMIT ?2")?;
     let awaiting_replies = query
-        .query_map([thread], |r| {
-            let sender_json: String = r.get(1)?;
-            let sender = crate::protocol::MessageSender::from_saved(Some(&sender_json));
-            let to_human: bool = r.get(5)?;
-            let label = if to_human {
-                "Human decision".to_owned()
-            } else {
-                sender
-                    .label
-                    .or(sender.thread_id)
-                    .unwrap_or_else(|| format!("{:?}", sender.kind))
-            };
-            let excerpt: String = r.get(4)?;
-            Ok(crate::ui::ReplyTarget {
-                message_id: r.get(0)?,
-                sender: crate::presentation::sanitize_plain(&label, 0)
-                    .0
-                    .replace(['\n', '\r'], " ")
-                    .chars()
-                    .take(128)
-                    .collect(),
-                created_at: r.get::<_, String>(2)?.chars().take(128).collect(),
-                applied: r.get::<_, String>(3)? == "applied",
-                to_human,
-                recipient_thread_id: thread.to_owned(),
-                elapsed_ms: r.get::<_, i64>(6)?.max(0) as u64,
-                excerpt: crate::presentation::sanitize_plain(&excerpt, 0)
-                    .0
-                    .chars()
-                    .take(512)
-                    .collect(),
-            })
-        })?
+        .query_map(
+            rusqlite::params![thread, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64],
+            |r| {
+                let sender_json: String = r.get(1)?;
+                let sender = crate::protocol::MessageSender::from_saved(Some(&sender_json));
+                let to_human: bool = r.get(5)?;
+                let label = if to_human {
+                    "Human decision".to_owned()
+                } else {
+                    sender
+                        .label
+                        .or(sender.thread_id)
+                        .unwrap_or_else(|| format!("{:?}", sender.kind))
+                };
+                let excerpt: String = r.get(4)?;
+                Ok(crate::ui::ReplyTarget {
+                    message_id: r.get(0)?,
+                    sender: crate::presentation::sanitize_plain(&label, 0)
+                        .0
+                        .replace(['\n', '\r'], " ")
+                        .chars()
+                        .take(128)
+                        .collect(),
+                    created_at: r.get::<_, String>(2)?.chars().take(128).collect(),
+                    applied: r.get::<_, String>(3)? == "applied",
+                    to_human,
+                    recipient_thread_id: thread.to_owned(),
+                    elapsed_ms: r.get::<_, i64>(6)?.max(0) as u64,
+                    excerpt: crate::presentation::sanitize_plain(&excerpt, 0)
+                        .0
+                        .chars()
+                        .take(512)
+                        .collect(),
+                })
+            },
+        )?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PendingMessages {
         items,
@@ -153,7 +156,7 @@ pub(super) async fn archives(
         "COALESCE(current.thread_id,?1)",
     );
     let result=control.store.database.call(move|db|{
-        let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 128"))?;
+        let mut stmt=db.prepare(&format!("SELECT id,json_extract(body_json,'$.kind'),json_extract(body_json,'$.source_message_id'),substr(json_extract(body_json,'$.text'),1,80) FROM draft current WHERE state IN ('archived','submitting') AND (current.thread_id IS NULL OR EXISTS(SELECT 1 FROM thread t WHERE t.id=current.thread_id AND t.deleted_at IS NULL)) AND (thread_id=?1 OR thread_id IS NULL) AND (state<>'submitting' OR NOT {submission_fence}) ORDER BY updated_at DESC,id DESC LIMIT 16"))?;
         let rows=stmt.query_map([thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<String>>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)))?.collect::<Result<Vec<_>,_>>()?;
         let result=rows.into_iter().map(|(id,kind,source,text)|{let separator=crate::ui::text_width::glyphs::separator(); let label=if kind.as_deref()==Some("cancelled_message") {match language { UiLanguage::Ja=>format!("取消した入力{separator}{}",source.as_deref().unwrap_or("不明")),UiLanguage::En=>format!("Cancelled input{separator}{}",source.as_deref().unwrap_or("unknown")) }} else {match language {UiLanguage::Ja=>format!("未確定の送信{separator}{}",text.as_deref().unwrap_or("")),UiLanguage::En=>format!("Unconfirmed send{separator}{}",text.as_deref().unwrap_or(""))}};(id,label)}).collect();
         Ok(result)
@@ -515,7 +518,10 @@ mod tests {
             );
             db.execute("UPDATE receipt SET result_json=json_set(json_set(result_json,'$.reply.state','pending'),'$.to_human',1) WHERE message_node_id=?1",[id]).unwrap();
         }
-        assert_eq!(query(&db, "thread").unwrap().awaiting_replies.len(), 128);
+        assert_eq!(
+            query(&db, "thread").unwrap().awaiting_replies.len(),
+            crate::protocol::MAX_PENDING_REPLY_DUTIES as usize
+        );
     }
     #[test]
     fn cancellation_summary_uses_english_for_all_outcomes_and_counts() {

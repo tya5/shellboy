@@ -1562,7 +1562,7 @@ impl Store {
                         .query_row(
                             "SELECT cwd,revision FROM thread WHERE id=?1 AND deleted_at IS NULL",
                             [&id],
-                            |r| Ok((r.get(0)?, r.get(1)?)),
+                            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
                         )
                         .optional()?;
                     let Some((base, revision)) = value else {
@@ -2570,37 +2570,42 @@ fn thread_list_awaiting_human(
     connection: &Connection,
     args: &ThreadListArgs,
 ) -> Result<Page<ThreadSummary>> {
-    const SCOPE: &str = "thread.list.awaiting_human";
+    const SCOPE: &str = "thread.list.awaiting_human.live.v2";
     let archived_filter = format!("human:{}", args.archived.as_str());
     let decoded = args
         .cursor
         .as_ref()
-        .map(|token| PageCursor::decode(token, SCOPE, &archived_filter, 0, None))
+        .map(|token| PageCursor::decode_live(token, SCOPE, &archived_filter, 0, None))
         .transpose()?;
-    let watermark: i64 = if let Some(cursor) = &decoded {
-        cursor
-            .watermark
-            .try_into()
-            .map_err(|_| error(ErrorCode::CursorExpired, "invalid reply watermark"))?
-    } else {
-        connection
-            .query_row(
-                "SELECT seq FROM receipt_arrival_clock WHERE id=1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(sql_error)?
-    };
     let after = decoded
         .as_ref()
-        .map_or_else(String::new, |cursor| cursor.last_sort_key.clone());
-    // Cap the indexed candidate set before checking Thread visibility. This
-    // limits both excluded-row work and per-page aggregate reads.
-    let candidates = awaiting_human_candidates(connection, &after, watermark, args.limit)?;
+        .map_or("", |cursor| cursor.last_sort_key.as_str());
+    let candidates = awaiting_human_candidates(connection, after, args.limit)?;
     let has_more = candidates.len() > args.limit as usize;
     let examined = &candidates[..candidates.len().min(args.limit as usize)];
     let candidate_ids: Vec<String> = examined.iter().map(|(id, _)| id.clone()).collect();
-    let raw = thread_summary::read_ids_tx(connection, &candidate_ids).map_err(storage_error)?;
+    let mut visible_ids = Vec::with_capacity(candidate_ids.len());
+    for id in &candidate_ids {
+        let row: Option<Option<String>> = connection
+            .query_row(
+                "SELECT archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sql_error)?;
+        let Some(archived_at) = row else {
+            continue;
+        };
+        if matches!(
+            (args.archived, archived_at.is_some()),
+            (ArchivedFilter::Exclude, true) | (ArchivedFilter::Only, false)
+        ) {
+            continue;
+        }
+        visible_ids.push(id.clone());
+    }
+    let raw = thread_summary::read_ids_tx(connection, &visible_ids).map_err(storage_error)?;
     let mut items = Vec::with_capacity(raw.len());
     for raw in raw {
         let id = raw.thread_id.clone();
@@ -2614,18 +2619,12 @@ fn thread_list_awaiting_human(
     for item in &mut items {
         if let Some((_, counts)) = candidates.iter().find(|(id, _)| id == &item.thread_id) {
             item.awaiting_human_count = counts.count;
+            item.awaiting_human_count_exact = counts.exact;
             item.awaiting_human_oldest_at = counts.oldest.clone();
         }
     }
-    items.retain(|item| {
-        item.awaiting_human_count > 0
-            && match args.archived {
-                ArchivedFilter::Exclude => item.archived_at.is_none(),
-                ArchivedFilter::Only => item.archived_at.is_some(),
-                ArchivedFilter::Include => true,
-            }
-    });
-    let mut tagged = tags::for_threads(connection, &candidate_ids)?;
+    items.retain(|item| item.awaiting_human_count > 0);
+    let mut tagged = tags::for_threads(connection, &visible_ids)?;
     for item in &mut items {
         item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
     }
@@ -2633,11 +2632,11 @@ fn thread_list_awaiting_human(
         let last = examined.last().expect("continued page has candidates");
         Some(
             PageCursor {
-                version: 1,
+                version: 2,
                 scope: SCOPE.into(),
                 filter: archived_filter,
                 last_sort_key: last.0.clone(),
-                watermark: watermark as u64,
+                watermark: 0,
                 revision: 0,
                 encoding: None,
             }
@@ -2653,6 +2652,7 @@ fn thread_list_awaiting_human(
 #[derive(Debug)]
 struct AwaitingHumanCount {
     count: u64,
+    exact: bool,
     oldest: Option<String>,
 }
 
@@ -2660,7 +2660,6 @@ struct AwaitingHumanCount {
 fn awaiting_human_candidates(
     connection: &Connection,
     after: &str,
-    aggregate_watermark: i64,
     limit: u32,
 ) -> Result<Vec<(String, AwaitingHumanCount)>> {
     let mut statement = connection
@@ -2671,25 +2670,28 @@ fn awaiting_human_candidates(
             params![
                 after,
                 i64::from(limit) + 1,
-                aggregate_watermark,
                 (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
             ],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
         )
         .map_err(sql_error)?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
         .map(|rows| {
             rows.into_iter()
-                .map(|(id, timestamps_json)| {
-                    let timestamps: Vec<String> =
-                        serde_json::from_str(&timestamps_json).unwrap_or_default();
-                    let count = timestamps.len() as u64;
-                    let oldest = timestamps.first().cloned();
+                .map(|(id, count, oldest)| {
+                    let exact = count < (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64;
                     (
                         id,
                         AwaitingHumanCount {
-                            count: count.min(crate::protocol::MAX_PENDING_REPLY_DUTIES),
-                            oldest,
+                            count: count.max(0) as u64,
+                            exact,
+                            oldest: if exact { oldest } else { None },
                         },
                     )
                 })
@@ -2698,27 +2700,21 @@ fn awaiting_human_candidates(
         .map_err(sql_error)
 }
 
+/// Each candidate costs at most one index seek; per-Thread aggregates stop at 17.
 fn awaiting_human_candidates_sql() -> &'static str {
     "WITH RECURSIVE page(target_thread_id) AS (\
-             SELECT (SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
-             WHERE r.target_thread_id>?1 AND r.arrival_seq<=?3 \
-               AND json_extract(r.result_json,'$.reply.state')='pending' \
-               AND json_extract(r.result_json,'$.to_human')=1 \
-             ORDER BY r.target_thread_id,r.arrival_seq LIMIT 1) \
-             UNION ALL \
-             SELECT (SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
-             WHERE r.target_thread_id>page.target_thread_id AND r.arrival_seq<=?3 \
-               AND json_extract(r.result_json,'$.reply.state')='pending' \
-               AND json_extract(r.result_json,'$.to_human')=1 \
-             ORDER BY r.target_thread_id,r.arrival_seq LIMIT 1) \
-             FROM page WHERE page.target_thread_id IS NOT NULL LIMIT ?2) \
-         SELECT page.target_thread_id, \
-                (SELECT json_group_array(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending \
-                 WHERE r.target_thread_id=page.target_thread_id AND r.arrival_seq<=?3 \
-                   AND json_extract(r.result_json,'$.reply.state')='pending' \
-                   AND json_extract(r.result_json,'$.to_human')=1 \
-                 ORDER BY r.arrival_seq LIMIT ?4) q) \
-         FROM page WHERE page.target_thread_id IS NOT NULL ORDER BY page.target_thread_id"
+       SELECT (SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
+         WHERE r.target_thread_id>?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.target_thread_id LIMIT 1) \
+       UNION ALL SELECT (SELECT r.target_thread_id FROM receipt r INDEXED BY receipt_human_reply_pending \
+         WHERE r.target_thread_id>page.target_thread_id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.target_thread_id LIMIT 1) FROM page WHERE page.target_thread_id IS NOT NULL LIMIT ?2) \
+     SELECT page.target_thread_id,\
+       (SELECT count(*) FROM (SELECT 1 FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=page.target_thread_id \
+         AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 LIMIT ?3)),\
+       CASE WHEN (SELECT count(*) FROM (SELECT 1 FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=page.target_thread_id \
+         AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 LIMIT ?3))<?3 \
+         THEN (SELECT min(r.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=page.target_thread_id \
+         AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.created_at LIMIT ?3) r) END \
+     FROM page WHERE page.target_thread_id IS NOT NULL ORDER BY page.target_thread_id"
 }
 
 /// The cursor's filter: the text query alone when nothing else narrows the list,
@@ -3216,7 +3212,7 @@ pub(crate) fn operation_details(
             .query_row(
                 "SELECT state,hold_reason FROM receipt WHERE message_node_id=?1",
                 [message],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
             )
             .optional()
             .map_err(sql_error)?;
@@ -3320,192 +3316,72 @@ fn saved_operation(
 mod thread_list_plan_tests {
     use super::*;
 
-    type AwaitingHumanPageFixture = (i32, Vec<(String, String)>, Vec<String>, bool);
-
     #[test]
-    fn awaiting_human_page_has_fixed_vm_steps_with_thousands_of_pending_threads() {
-        fn page_steps(thread_count: usize) -> AwaitingHumanPageFixture {
+    fn awaiting_human_late_arrivals_do_not_increase_page_vm_steps_and_live_cursor_recovers() {
+        fn setup(late: usize) -> Connection {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute(
-                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?1)
-                 INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at)
-                 SELECT printf('thread-%05d',x),'/','','p','m','now',
-                        CASE WHEN x%2=0 THEN 'archived' ELSE NULL END FROM n",
-                [thread_count as i64 + 1],
-            )
-            .unwrap();
-            db.execute(
-                "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?1)
-                 INSERT INTO node(id,kind,created_at,payload_json)
-                 SELECT printf('node-%05d',x),'message',printf('%05d',x),'{}' FROM n",
-                [thread_count as i64 + 1],
-            )
-            .unwrap();
-            db.execute(
-                r#"WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?1)
-                 INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
-                 SELECT printf('receipt-%05d',x),printf('op-%05d',x),'{}',
-                        printf('thread-%05d',x),printf('node-%05d',x),'applied',printf('%05d',x),
-                        '{"reply":{"state":"pending"},"to_human":true}' FROM n"#,
-                [thread_count as i64 + 1],
-            )
-            .unwrap();
-            let sql = awaiting_human_candidates_sql();
-            let mut stmt = db.prepare(sql).unwrap();
-            let rows = stmt
-                .query_map(
-                    params![
-                        "",
-                        2,
-                        i64::MAX,
-                        (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
-                    ],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            let vm_steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
-            let page = thread_list_awaiting_human(
-                &db,
-                &ThreadListArgs {
-                    limit: 1,
-                    cursor: None,
-                    query: None,
-                    awaiting: Some("human".into()),
-                    archived: ArchivedFilter::Exclude,
-                    tags: Vec::new(),
-                    cwd: None,
-                },
-            )
-            .unwrap();
-            (
-                vm_steps,
-                rows,
-                page.items
-                    .into_iter()
-                    .map(|item| item.thread_id)
-                    .collect::<Vec<_>>(),
-                page.next_cursor.is_some(),
-            )
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('a','','','p','m','now'),('b','','','p','m','now'),('z','','','p','m','now'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('na','message','1','{}'),('nb','message','2','{}'),('nz','message','3','{}');").unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('ra','oa','{}','a','na','applied','10','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')",[]).unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('rb','ob','{}','b','nb','applied','11','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')",[]).unwrap();
+            let tx = db.unchecked_transaction().unwrap();
+            for n in 0..late {
+                let id = format!("m{n:06}");
+                let node = format!("n{n:06}");
+                tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'','','p','m','now')",[&id]).unwrap();
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'message','1','{}')",[&node]).unwrap();
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','1','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')",params![format!("r{n}"),id,node]).unwrap();
+            }
+            tx.commit().unwrap();
+            db
         }
-        let (small_steps, small_rows, small_page, small_cursor) = page_steps(20);
-        let (large_steps, large_rows, large_page, large_cursor) = page_steps(5_000);
-        let plan_db = Connection::open_in_memory().unwrap();
-        plan_db
-            .execute_batch(crate::storage::CURRENT_SCHEMA)
-            .unwrap();
-        let sql = awaiting_human_candidates_sql();
-        let plan: Vec<String> = plan_db
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap()
-            .query_map(
-                params![
-                    "",
-                    2,
-                    i64::MAX,
-                    (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
-                ],
-                |row| row.get(3),
-            )
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        assert!(
-            plan.iter().any(|line| {
-                line.contains("receipt_human_reply_pending") && line.contains("SEARCH")
-            }),
-            "{plan:?}"
-        );
-        assert!(!plan.iter().any(|line| line.contains("SCAN r")), "{plan:?}");
-        assert_eq!(small_rows, large_rows);
-        assert_eq!(
-            large_rows,
-            vec![
-                ("thread-00001".into(), "[\"00001\"]".into()),
-                ("thread-00002".into(), "[\"00002\"]".into())
-            ]
-        );
-        assert_eq!(small_page, large_page);
-        assert_eq!(large_page, vec!["thread-00001"]);
-        assert!(
-            small_cursor && large_cursor,
-            "candidate pagination must continue past excluded archived Threads"
-        );
-        assert_eq!(
-            small_steps, large_steps,
-            "VM steps must not grow with off-page pending Threads or archived exclusions"
-        );
-        assert_eq!(large_steps, 164, "SQLite VM-step contract changed");
-    }
-
-    #[test]
-    fn awaiting_human_candidate_query_caps_archived_exclusions_before_scanning_a_long_run() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at) VALUES('a','','','p','m','now','archived'),('b','','','p','m','now',NULL)", []).unwrap();
-        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('na','message','1','{}'),('nb','message','2','{}')", []).unwrap();
-        for (id, thread, node) in [("ra", "a", "na"), ("rb", "b", "nb")] {
-            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','1','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![id, thread, node]).unwrap();
-        }
-        for n in 0..1_000 {
-            let thread = format!("excluded-{n:04}");
-            let node = format!("node-{n:04}");
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,archived_at) VALUES(?1,'','','p','m','now','archived')", [&thread]).unwrap();
-            db.execute(
-                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'message','1','{}')",
-                [&node],
-            )
-            .unwrap();
-            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','1','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("receipt-{n:04}"), thread, node]).unwrap();
-        }
-        let mut statement = db.prepare(awaiting_human_candidates_sql()).unwrap();
-        let mut candidate_rows = statement
-            .query(params![
-                "",
-                2,
-                i64::MAX,
-                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
-            ])
-            .unwrap();
-        while candidate_rows.next().unwrap().is_some() {}
-        drop(candidate_rows);
-        let vm_steps = statement.get_status(rusqlite::StatementStatus::VmStep);
-        assert_eq!(
-            vm_steps, 159,
-            "candidate seek work must be independent of exclusions"
-        );
-        let page = thread_list_awaiting_human(
-            &db,
-            &ThreadListArgs {
+        let mut steps = Vec::new();
+        for late in [0, 100, 2_000] {
+            let db = setup(late);
+            let args = |cursor| ThreadListArgs {
                 limit: 1,
-                cursor: None,
+                cursor,
                 query: None,
                 awaiting: Some("human".into()),
-                archived: ArchivedFilter::Exclude,
-                tags: Vec::new(),
+                archived: ArchivedFilter::Include,
+                tags: vec![],
                 cwd: None,
-            },
-        )
-        .unwrap();
+            };
+            let mut stmt = db.prepare(awaiting_human_candidates_sql()).unwrap();
+            let mut rows = stmt.query(params!["", 2, 17]).unwrap();
+            while rows.next().unwrap().is_some() {}
+            drop(rows);
+            let page_steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
+            let first = thread_list_awaiting_human(&db, &args(None)).unwrap();
+            assert_eq!(first.items[0].thread_id, "a");
+            steps.push(page_steps);
+            let cursor = first.next_cursor.unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('rz','oz','{}','z','nz','applied','0','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')",[]).unwrap();
+            let second = thread_list_awaiting_human(&db, &args(Some(cursor))).unwrap();
+            assert_eq!(second.items[0].thread_id, "b");
+            let mut next = thread_list_awaiting_human(&db, &args(second.next_cursor)).unwrap();
+            if late > 0 {
+                assert!(next.items[0].thread_id.starts_with("m"));
+                for _ in 1..late {
+                    next = thread_list_awaiting_human(&db, &args(next.next_cursor)).unwrap();
+                }
+                assert!(next.items[0].thread_id.starts_with("m"));
+                next = thread_list_awaiting_human(&db, &args(next.next_cursor)).unwrap();
+            }
+            assert_eq!(next.items[0].thread_id, "z");
+            assert!(
+                next.next_cursor.is_none(),
+                "cursor terminates after the final key"
+            );
+        }
         assert!(
-            page.items.is_empty(),
-            "candidate window is bounded before archived filtering"
+            steps.iter().all(|steps| *steps <= 300),
+            "page candidate VM steps exceed fixed bound: {steps:?}"
         );
         assert!(
-            page.next_cursor.is_some(),
-            "cursor advances across bounded excluded window"
+            steps[2] <= steps[1] + 2,
+            "VM steps scale with late-arrival population: {steps:?}"
         );
-        let decoded = PageCursor::decode(
-            page.next_cursor.as_ref().unwrap(),
-            "thread.list.awaiting_human",
-            "human:exclude",
-            0,
-            None,
-        )
-        .unwrap();
-        assert_eq!(decoded.last_sort_key, "a");
     }
 
     #[test]
@@ -3535,13 +3411,14 @@ mod thread_list_plan_tests {
             },
         )
         .unwrap();
-        assert_eq!(
-            page.items[0].awaiting_human_count,
-            crate::protocol::MAX_PENDING_REPLY_DUTIES
+        assert_eq!(page.items[0].awaiting_human_count, 17);
+        assert!(
+            !page.items[0].awaiting_human_count_exact,
+            "17 is a lower bound, not an exact count"
         );
-        assert_eq!(
-            page.items[0].awaiting_human_oldest_at.as_deref(),
-            Some("receipt-0")
+        assert!(
+            page.items[0].awaiting_human_oldest_at.is_none(),
+            "oldest is unknown when the bounded sample is inexact"
         );
         let sql = awaiting_human_candidates_sql();
         let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
@@ -3550,7 +3427,6 @@ mod thread_list_plan_tests {
                 params![
                     "",
                     1,
-                    i64::MAX,
                     (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
                 ],
                 |r| r.get(3),
@@ -3567,38 +3443,187 @@ mod thread_list_plan_tests {
     }
 
     #[test]
-    fn awaiting_human_pages_keep_watermark_when_a_new_receipt_arrives_between_pages() {
+    fn awaiting_human_cursor_observes_receipt_state_churn_between_pages() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('a','','','p','m','now'),('b','','','p','m','now'),('c','','','p','m','now'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('na','message','1','{}'),('nb','message','2','{}'),('nc','message','3','{}');").unwrap();
-        let sql = "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?2,'{}',?3,?4,'applied','1','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')";
-        db.execute(sql, params!["ra", "oa", "a", "na"]).unwrap();
-        db.execute(sql, params!["rb", "ob", "b", "nb"]).unwrap();
+        for id in ["a", "b", "c"] {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?1,'','','p','m','now')", [id]).unwrap();
+            let node = format!("n{id}");
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'message','now','{}')",
+                [&node],
+            )
+            .unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied','now','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("r{id}"), id, node]).unwrap();
+        }
         let args = |cursor| ThreadListArgs {
             limit: 1,
             cursor,
             query: None,
             awaiting: Some("human".into()),
             archived: ArchivedFilter::Include,
-            tags: Vec::new(),
+            tags: vec![],
             cwd: None,
         };
         let first = thread_list_awaiting_human(&db, &args(None)).unwrap();
         assert_eq!(first.items[0].thread_id, "a");
-        let first_cursor = first.next_cursor.expect("second candidate must continue");
-        db.execute(sql, params!["rc", "oc", "c", "nc"]).unwrap();
-        let second = thread_list_awaiting_human(&db, &args(Some(first_cursor))).unwrap();
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','replied') WHERE id='rb'", []).unwrap();
+        let next = thread_list_awaiting_human(&db, &args(first.next_cursor)).unwrap();
+        assert_eq!(next.items[0].thread_id, "c");
+        assert!(next.next_cursor.is_none());
+    }
+
+    #[test]
+    fn awaiting_human_oldest_is_minimum_created_at_and_unknown_when_saturated() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','','','p','m','now')", []).unwrap();
+        for index in 0..17 {
+            let node = format!("node-{index}");
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'message','now','{}')",
+                [&node],
+            )
+            .unwrap();
+            let created = match index {
+                0 => "2030-01-01",
+                1 => "1999-01-01",
+                _ => "2020-01-01",
+            };
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','t',?2,'applied',?3,'{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("receipt-{index}"), node, created]).unwrap();
+        }
+        let page = |db: &Connection| {
+            thread_list_awaiting_human(
+                db,
+                &ThreadListArgs {
+                    limit: 1,
+                    cursor: None,
+                    query: None,
+                    awaiting: Some("human".into()),
+                    archived: ArchivedFilter::Include,
+                    tags: vec![],
+                    cwd: None,
+                },
+            )
+            .unwrap()
+        };
+        let saturated = page(&db);
+        assert_eq!(saturated.items[0].awaiting_human_count, 17);
+        assert!(!saturated.items[0].awaiting_human_count_exact);
+        assert_eq!(saturated.items[0].awaiting_human_oldest_at, None);
+        db.execute("UPDATE receipt SET result_json='{\"reply\":{\"state\":\"replied\"},\"to_human\":true}' WHERE id='receipt-16'", []).unwrap();
+        let exact = page(&db);
+        assert_eq!(exact.items[0].awaiting_human_count, 16);
+        assert!(exact.items[0].awaiting_human_count_exact);
         assert_eq!(
-            second
-                .items
-                .iter()
-                .map(|item| item.thread_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["b"]
+            exact.items[0].awaiting_human_oldest_at.as_deref(),
+            Some("1999-01-01")
+        );
+    }
+
+    #[test]
+    fn awaiting_human_live_cursor_handles_add_reply_cancel_archive_and_scope() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('0','','','p','m','now'),('a','','','p','m','now'),('b','','','p','m','now'),('c','','','p','m','now'),('d','','','p','m','now'); INSERT INTO node(id,kind,created_at,payload_json) VALUES('n0','message','0','{}'),('na','message','1','{}'),('nb','message','2','{}'),('nc','message','3','{}'),('nd','message','4','{}');").unwrap();
+        let insert = "INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}',?2,?3,'applied',?4,'{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')";
+        for (id, thread, node) in [("ra", "a", "na"), ("rb", "b", "nb"), ("rc", "c", "nc")] {
+            db.execute(insert, params![id, thread, node, id]).unwrap();
+        }
+        let args = |cursor, archived| ThreadListArgs {
+            limit: 1,
+            cursor,
+            query: None,
+            awaiting: Some("human".into()),
+            archived,
+            tags: vec![],
+            cwd: None,
+        };
+        let first = thread_list_awaiting_human(&db, &args(None, ArchivedFilter::Exclude)).unwrap();
+        assert_eq!(first.items[0].thread_id, "a");
+        let cursor = first.next_cursor.unwrap();
+        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('r0','o0','{}','0','n0','applied','0','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')",[]).unwrap();
+        db.execute("UPDATE thread SET archived_at='now' WHERE id='b'", [])
+            .unwrap();
+        db.execute("UPDATE thread SET deleted_at='now' WHERE id='c'", [])
+            .unwrap();
+        let next =
+            thread_list_awaiting_human(&db, &args(Some(cursor.clone()), ArchivedFilter::Exclude))
+                .unwrap();
+        assert_eq!(
+            next.items.len(),
+            0,
+            "bounded archived/deleted candidates may yield an empty page"
         );
         assert!(
-            second.next_cursor.is_none(),
-            "late receipt is excluded by the original watermark"
+            next.items.iter().all(|item| item.thread_id != "0"),
+            "a late key before the live cursor is deferred to a fresh listing"
+        );
+        assert!(
+            next.next_cursor.is_some(),
+            "empty page still advances over examined candidate keys"
+        );
+        db.execute(insert, params!["rd", "d", "nd", "0"]).unwrap();
+        let hidden =
+            thread_list_awaiting_human(&db, &args(next.next_cursor, ArchivedFilter::Exclude))
+                .unwrap();
+        assert!(hidden.items.is_empty());
+        assert!(hidden.next_cursor.is_some());
+        let last =
+            thread_list_awaiting_human(&db, &args(hidden.next_cursor, ArchivedFilter::Exclude))
+                .unwrap();
+        assert_eq!(last.items[0].thread_id, "d");
+        let before = thread_list_awaiting_human(&db, &args(None, ArchivedFilter::Exclude)).unwrap();
+        assert_eq!(
+            before.items[0].thread_id, "0",
+            "a fresh listing includes late keys before the old cursor"
+        );
+        let wrong_scope =
+            thread_list_awaiting_human(&db, &args(Some(cursor.clone()), ArchivedFilter::Include));
+        assert!(wrong_scope.is_err());
+        let mut old = PageCursor {
+            version: 1,
+            scope: "thread.list.awaiting_human".into(),
+            filter: "human:include".into(),
+            last_sort_key: "a".into(),
+            watermark: 1,
+            revision: 0,
+            encoding: None,
+        };
+        let token = old.encode().unwrap();
+        assert!(
+            PageCursor::decode_live(
+                &token,
+                "thread.list.awaiting_human.live.v2",
+                "human:include",
+                0,
+                None
+            )
+            .is_err()
+        );
+        old.version = 2;
+        let token = old.encode().unwrap();
+        assert!(
+            PageCursor::decode_live(
+                &token,
+                "thread.list.awaiting_human.live.v2",
+                "human:include",
+                0,
+                None
+            )
+            .is_err(),
+            "wrong scope is rejected"
+        );
+        assert!(
+            PageCursor::decode_live(
+                "not-a-cursor",
+                "thread.list.awaiting_human.live.v2",
+                "human:include",
+                0,
+                None
+            )
+            .is_err(),
+            "malformed cursor is rejected, never silently restarted"
         );
     }
 
@@ -4635,6 +4660,15 @@ mod agents_reference_tests {
         assert_eq!(error.details.as_ref().unwrap()["limit"], 16);
         assert_eq!(error.details.as_ref().unwrap()["current_count"], 16);
         assert!(error.message.contains("reply to or cancel"));
+        let retained_thread = thread.clone();
+        let retained = store.database.call(move |db| Ok(db.query_row(
+            "SELECT count(*) FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0",
+            [&retained_thread], |row| row.get::<_, i64>(0),
+        )?)).await.unwrap();
+        assert_eq!(
+            retained, 16,
+            "refusing the 17th must retain all pre-existing duties"
+        );
         let reply_store = store.clone();
         let message = messages[0].clone();
         store
@@ -5348,7 +5382,7 @@ mod interrupted_message_assignment_tests {
                 .query_row(
                     "SELECT run_id,turn_id FROM receipt WHERE id='input'",
                     [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
                 )
                 .unwrap();
             assert_eq!(original, ("old".into(), "old-turn".into()));

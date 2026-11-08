@@ -5273,9 +5273,9 @@ W2's uncommitted reclaim work was inspected and selectively reused in a new owne
 separates the durable `removing` decision from existing maintenance reclamation and avoids an epoch table. Bounded
 float/int8, reopen/resume, rollback and indexed-lookup regressions are being validated. No passing CI is claimed yet.
 
-## #262 — human decision requests
+## #262 — human decision requests (handoff continuation)
 
-Implementation uses schema 36 and reuses pending reply receipts, with `to_human=true` in `message.ask` acceptance and saved receipts. There is no additional table, migration, worker or queue beyond the human-reply index. The client wire read is `thread.get` → `awaiting_replies` (per Thread, bounded at 128), with `recipient_kind`, `recipient_thread_id`, `excerpt`, `created_at`, `elapsed_ms`, `delivery_status` and `reminded`; answer via `message.reply`. `events.wait --thread` is the change hint. The cross-Thread `thread.list awaiting=human` index query was corrected after W8 found that aggregation and archived exclusions were not page-bounded. A recursive keyset seek now selects the candidate page before exact aggregates; its 20-vs-5,000 pending-Thread VM-step regression and focused checks are pending. Previous focused suites passed on the earlier task SHA; they do not validate this W8 fix.
+The implementation reuses pending reply receipts. Schema 38 adds only the partial human-pending index; schema 37 remains the parent baseline and no new table, queue, or worker is introduced. Admission rejects a 17th pending duty in the same serialized transaction (limit 16). Existing over-limit receipts remain intact: the cross-Thread list reads at most 17 per Thread and reports 17 with `awaiting_human_count_exact=false` as 17+, with no oldest timestamp when the bounded sample is incomplete. Through 16 the count is exact and oldest is minimum `created_at`. Its Thread-ID keyset cursor is live/not a snapshot, v2 scoped to the filter, and rejects the old v1 watermark cursor. Candidate queries are keyed by the partial index and have late-arrival stress VM-step tests. Handoff from W6 preserved 25 confirmed paths in a new worktree; ownership-unknown two script paths were excluded. Exact tip CI/review are still pending; see the task branch and tests for current evidence.
 
 ### #270 common instruction files
 

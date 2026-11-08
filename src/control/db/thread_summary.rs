@@ -23,6 +23,7 @@ LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn
 fn columns_from() -> String {
     let activity_joins = activity_joins();
     let sample_limit = crate::protocol::MAX_PENDING_REPLY_DUTIES + 1;
+    let limit = crate::protocol::MAX_PENDING_REPLY_DUTIES;
     let (revisit_pending, revisit_delivered) =
         crate::control::revisit::summary_sql("t.id", "latest.id");
     format!(
@@ -33,7 +34,7 @@ fn columns_from() -> String {
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' LIMIT {sample_limit})),
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
     (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit})),
-    (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.arrival_seq LIMIT {sample_limit}) q)
+    CASE WHEN (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_human_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit}))<={limit} THEN (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.created_at LIMIT {sample_limit}) q) END
 FROM thread t {activity_joins}
 "
     )
@@ -103,6 +104,7 @@ pub(crate) struct RawSummary {
     revisit_delivered: u64,
     pub(crate) archived_at: Option<String>,
     pub(crate) awaiting_reply: u64,
+    pub(crate) awaiting_reply_exact: bool,
     pub(crate) awaiting_thread_replies: u64,
     pub(crate) awaiting_human_oldest_at: Option<String>,
     pub(crate) awaiting_replies: u64,
@@ -216,16 +218,27 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         archived_at: row.get(21)?,
         awaiting_replies: row.get::<_, i64>(22)?.max(0) as u64,
         awaiting_reply: row.get::<_, i64>(24)?.max(0) as u64,
+        awaiting_reply_exact: row.get::<_, i64>(24)?.max(0)
+            < (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64,
         awaiting_thread_replies: row.get::<_, i64>(23)?.max(0) as u64,
         awaiting_human_oldest_at: row.get(25)?,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
     ThreadSummary {
-        awaiting_reply: raw.awaiting_reply,
+        awaiting_reply: if raw.awaiting_reply_exact {
+            raw.awaiting_reply
+        } else {
+            0
+        },
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
-        awaiting_human_count: raw.awaiting_reply,
+        awaiting_human_count: if raw.awaiting_reply_exact {
+            raw.awaiting_reply
+        } else {
+            MAX_PENDING_REPLY_DUTIES as u64 + 1
+        },
+        awaiting_human_count_exact: raw.awaiting_reply_exact,
         awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
         awaiting_thread_count: raw.awaiting_thread_replies,
         last_end_message: None,
@@ -358,8 +371,57 @@ mod tests {
         assert_eq!(summary.awaiting_thread_replies, 1);
         assert_eq!(summary.awaiting_human_count, 1);
         assert_eq!(summary.awaiting_thread_count, 1);
+        assert!(summary.awaiting_human_count_exact);
     }
 
+    #[test]
+    fn human_count_is_a_bounded_lower_bound_and_oldest_is_minimum_created_at() {
+        let db = fixture();
+        for (n, at) in (0..18).zip((0..18).rev()) {
+            let node = format!("q{n}");
+            let receipt = format!("r{n}");
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'assistant',?2,'{}')",
+                rusqlite::params![node, at],
+            )
+            .unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','t',?2,'applied',?3,'{\"to_human\":true,\"reply\":{\"state\":\"pending\"}}')",rusqlite::params![receipt,node,at]).unwrap();
+        }
+        let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
+        let summary = prepare(raw, "t".into(), String::new());
+        assert_eq!(summary.awaiting_human_count, 17);
+        assert!(!summary.awaiting_human_count_exact);
+        assert!(
+            summary.awaiting_human_oldest_at.is_none(),
+            "17+ must not publish a non-exact minimum"
+        );
+        db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','completed') WHERE id='r0'",[]).unwrap();
+        let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
+        let summary = prepare(raw, "t".into(), String::new());
+        assert_eq!(summary.awaiting_human_count, 17);
+        assert!(!summary.awaiting_human_count_exact);
+    }
+
+    #[test]
+    fn exact_oldest_uses_min_timestamp_not_receipt_arrival_order() {
+        let db = fixture();
+        for (id, at) in [("late", "2026-01-01"), ("early", "2020-01-01")] {
+            let node = format!("q-{id}");
+            db.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'assistant',?2,'{}')",
+                rusqlite::params![node, at],
+            )
+            .unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','t',?2,'applied',?3,'{\"to_human\":true,\"reply\":{\"state\":\"pending\"}}')",rusqlite::params![id,node,if id=="late"{"1"}else{"2"}]).unwrap();
+        }
+        let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
+        let summary = prepare(raw, "t".into(), String::new());
+        assert!(summary.awaiting_human_count_exact);
+        assert_eq!(
+            summary.awaiting_human_oldest_at.as_deref(),
+            Some("2020-01-01")
+        );
+    }
     #[test]
     fn requested_summary_plan_does_not_scale_with_unrelated_threads() {
         let mut db = fixture();

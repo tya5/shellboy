@@ -1,6 +1,6 @@
 # Event subscription and the external RPC contract (#243, #244)
 
-Status: the #243 event-wait stages A1, B, C and E3 plan A, the #244 external-contract stages A1, A2 and D, and #275 reasoning-activity support are implemented on main at `482e7ead`. The current handshake is protocol 4; exact-tip standard/all-OS validation for #275 is still pending in the main status record. Current transport, compatibility and generated-schema behavior is specified in [protocol.md](protocol.md) and `docs/reference/protocol.schema.json`. Proposal-era alternatives below are historical context, not the current contract. The persistent multi-frame stream (E2), persistent digest (E1), durable change log (E4), and E3 plan B remain deferred.
+Status: the #243 event-wait stages A1, B, C and E3 plan A, the #244 external-contract stages A1, A2 and D, and #275 reasoning-activity support are implemented on main at `482e7ead`. The current handshake in this #262 branch is protocol 5; it adds bounded reply-count exactness to `ThreadSummary` (the previous main handshake was protocol 4). exact-tip standard/all-OS validation for #275 is still pending in the main status record. Current transport, compatibility and generated-schema behavior is specified in [protocol.md](protocol.md) and `docs/reference/protocol.schema.json`. Proposal-era alternatives below are historical context, not the current contract. The persistent multi-frame stream (E2), persistent digest (E1), durable change log (E4), and E3 plan B remain deferred.
 User decisions on stage B (#243): long-polls share the ordinary request slots (Q6), models
 may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
 Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved),
@@ -90,7 +90,7 @@ tool start (no condition matches it). Nothing was measured; see §3.
 
 ### 1.5 Versioning and decode strictness (current main)
 
-Protocol 4 is the current version (`src/protocol.rs:11`). It adds independently
+Protocol 5 is current in this branch (`src/protocol.rs:11`); protocol 4 was the pre-#262 baseline. It adds independently
 opt-in `events.reasoning_activity` to the protocol-3 baseline. Owner and client
 require an exact version match; no protocol-2/3 downgrade or version range is
 supported (`src/ipc.rs`, `src/app.rs`). Request argument records remain strict: unknown
@@ -515,3 +515,16 @@ are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protoc
    as in the issue?
 8. Is a durable typed change log (E4, new column/table) ever wanted, or are
    hints + saved-fact reads the permanent model?
+
+
+Protocol 5 adds `awaiting_human_count_exact` to `ThreadSummary`. It defaults to
+true when absent and is omitted when true; false means the accompanying count
+17 is a lower bound (17 or more), never an exact 17. Since the protocol uses
+strict typed result records, this public response change advances the wire
+version.
+
+
+Protocol 5 adds `ThreadSummary.awaiting_human_count_exact`. It defaults to true
+when absent and is omitted when true; false means `awaiting_human_count` 17 is
+a lower bound of 17 or more. The protocol advances because typed result records
+are strict.
