@@ -1453,7 +1453,9 @@ impl Store {
                         .map_err(storage_error)?;
                 let mut result = MutationResult::value(cancelled)?;
                 result.changed_threads = changed;
-                result.quiet_wake_threads=super::reply::cancellation_wakes_tx(tx,&args.message_ids).map_err(sql_error)?;
+                result.quiet_wake_threads =
+                    super::reply::cancellation_wakes_tx(tx, &args.message_ids)
+                        .map_err(sql_error)?;
                 Ok(result)
             }
             Command::OperationGet(args) => MutationResult::value(operation_details(

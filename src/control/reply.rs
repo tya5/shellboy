@@ -163,9 +163,13 @@ pub(crate) fn cancel_reply_tx(
     admitted: bool,
 ) -> rusqlite::Result<bool> {
     let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender"}).to_string(),at])?;
-    if changed==1 {
-        let sender:String=db.query_row("SELECT sender_json FROM receipt WHERE message_node_id=?1",[message],|r|r.get(0))?;
-        outcome_tx(db,message,&sender,"cancelled",at)?;
+    if changed == 1 {
+        let sender: String = db.query_row(
+            "SELECT sender_json FROM receipt WHERE message_node_id=?1",
+            [message],
+            |r| r.get(0),
+        )?;
+        outcome_tx(db, message, &sender, "cancelled", at)?;
     }
     if changed == 1 && admitted {
         // Leave the current selected path and inflight manifest intact. The
@@ -376,21 +380,28 @@ pub(crate) fn complete_tx(
 }
 
 /// Terminal recipient Runs cannot fulfill their applied requests; settle each once.
-pub(crate) fn terminal_tx(db:&Connection,run:&str,at:&str)->rusqlite::Result<Vec<String>> {
-    let mut wakes=Vec::new();
-    let rows=db.prepare("SELECT message_node_id,sender_json FROM receipt WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0 AND EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed')) ORDER BY rowid LIMIT 128")?.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for (message,sender) in rows {
+pub(crate) fn terminal_tx(db: &Connection, run: &str, at: &str) -> rusqlite::Result<Vec<String>> {
+    let mut wakes = Vec::new();
+    let rows=db.prepare("SELECT message_node_id,sender_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=(SELECT thread_id FROM run WHERE id=?1) AND json_extract(result_json,'$.reply.state')='pending' AND run_id=?1 AND state='applied' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0 AND EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed')) ORDER BY rowid LIMIT 128")?.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    for (message, sender) in rows {
         if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
             && let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);}
     }
     Ok(wakes)
 }
 
-pub(crate) fn cancellation_wakes_tx(db:&Connection,messages:&[String])->rusqlite::Result<Vec<String>> {
-    let mut wakes=Vec::new();
+pub(crate) fn cancellation_wakes_tx(
+    db: &Connection,
+    messages: &[String],
+) -> rusqlite::Result<Vec<String>> {
+    let mut wakes = Vec::new();
     for message in messages {
         let thread:Option<String>=db.query_row("SELECT e.target_thread_id FROM event e JOIN delivery d ON d.event_id=e.id JOIN run r ON r.id=d.recipient_id WHERE e.id=?1 AND d.state='pending' AND r.state='live'",[format!("reply-outcome-{message}-cancelled")],|r|r.get(0)).optional()?;
-        if let Some(thread)=thread && !wakes.contains(&thread) {wakes.push(thread);}
+        if let Some(thread) = thread
+            && !wakes.contains(&thread)
+        {
+            wakes.push(thread);
+        }
     }
     Ok(wakes)
 }
@@ -500,6 +511,38 @@ pub(crate) fn deleted_sender_receipt_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn terminal_outcomes_wake_completed_sender_once_but_recovery_wait_keeps_pending() {
+        for state in ["completed","stopped","failed","recovery_wait","cancelled"] {
+            let mut db=Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('s','/','','p','m','0'),('t','/','','p','m','0');
+                INSERT INTO run(id,thread_id,state,created_at) VALUES('sender','s','completed','0'),('recipient','t','live','0');
+                INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('recipient-turn','t','recipient','running','0');
+                INSERT INTO node(id,kind,created_at,payload_json) VALUES('request','user','0','{}');
+                INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,path_admission,created_at,result_json) VALUES('request','request','{\"kind\":\"model\",\"thread_id\":\"s\"}','t','request','recipient','recipient-turn','applied','admitted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');").unwrap();
+            let tx=db.transaction().unwrap();
+            if state=="recovery_wait" {
+                tx.execute("UPDATE turn SET state='recovery_wait' WHERE id='recipient-turn'",[]).unwrap();
+            } else if state!="cancelled" {
+                tx.execute("UPDATE run SET state=?1,ended_at='1' WHERE id='recipient'",[state]).unwrap();
+            }
+            let wakes=if state=="cancelled" {
+                assert!(cancel_reply_tx(&tx,"request","1").unwrap());
+                cancellation_wakes_tx(&tx,&["request".into()]).unwrap()
+            } else {terminal_tx(&tx,"recipient","1").unwrap()};
+            let expected=if state=="recovery_wait" {"pending"} else if state=="cancelled" {"cancelled"} else {"ignored"};
+            assert_eq!(tx.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='request'",[],|r|r.get::<_,String>(0)).unwrap(),expected);
+            assert_eq!(wakes,if state=="recovery_wait" {vec![]} else {vec![String::from("s")]});
+            if state!="recovery_wait" {
+                assert_eq!(tx.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id JOIN run r ON r.id=d.recipient_id JOIN turn u ON u.run_id=r.id WHERE e.target_thread_id='s' AND d.state='pending' AND r.state='live' AND u.state='running'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+                assert!(terminal_tx(&tx,"recipient","2").unwrap().is_empty());
+                assert!(!cancel_reply_tx(&tx,"request","2").unwrap());
+            }
+            tx.commit().unwrap();
+        }
+    }
+
     #[test]
     fn deletion_uses_target_index_and_never_touches_unrelated_pending_replies() {
         let mut db = Connection::open_in_memory().unwrap();

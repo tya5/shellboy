@@ -1057,7 +1057,7 @@ impl Control {
         }
     }
 
-    async fn stop_run(&self, run_id: &str) {
+    async fn stop_run(self: &Arc<Self>, run_id: &str) {
         let run = run_id.to_owned();
         let thread = self
             .store

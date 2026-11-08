@@ -794,7 +794,10 @@ async fn recover(
 
     Ok(())
 }
-pub(super) async fn stop_without_driver(control: &Arc<Control>, run_id: &str) -> Result<(), ApiError> {
+pub(super) async fn stop_without_driver(
+    control: &Arc<Control>,
+    run_id: &str,
+) -> Result<(), ApiError> {
     let run = run_id.to_owned();
     let target: Option<(String, String)> = control
         .store
@@ -869,17 +872,26 @@ async fn drain_and_stop(
         notified.await;
     }
     let stopping_for_shutdown = control.stop.is_cancelled();
-    let wakes=control.store.database.call(move|db| {
-        let tx=db.transaction()?;
-        super::state::stop_drained_runs(&tx,&owned,stopping_for_shutdown)?;
-        let mut wakes=Vec::new();
-        for (run,_) in &owned {wakes.extend(super::reply::terminal_tx(&tx,run,&now())?);}
-        tx.commit()?;
-        Ok(wakes)
-    }).await.map_err(storage_error)?;
-    for thread in wakes {control.changed(&thread);control.kick_quiet(thread).await;}
+    let wakes = control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            super::state::stop_drained_runs(&tx, &owned, stopping_for_shutdown)?;
+            let mut wakes = Vec::new();
+            for (run, _) in &owned {
+                wakes.extend(super::reply::terminal_tx(&tx, run, &now())?);
+            }
+            tx.commit()?;
+            Ok(wakes)
+        })
+        .await
+        .map_err(storage_error)?;
+    for thread in wakes {
+        control.changed(&thread);
+        control.kick_quiet(thread).await;
+    }
     Ok(())
-
 }
 
 async fn save_tool_result(

@@ -4310,3 +4310,10 @@ facts migrate their event kind/index without rewriting payloads. Landing is defe
 Claude's accepted review changes candidate 1 only: keep direct invoking Run/Turn/shell ID rejection with typed
 `self_wait`. Remove the dependency graph, not this constant-time input guard. Ancestor and sibling observations do
 not need classification. The prior self-wait acceptance statement is superseded, not implemented as a fallback.
+
+### D-276 recovery-wait reply duty (leader decision)
+
+A retry-exhausted Turn in `recovery_wait` is not terminal. Keep the same expected-reply receipt pending and allow its
+reply after explicit recovery. Only actual replyless normal completion, explicit stop and terminal failure settle
+as ignored. Do not substitute a recovery notification for an invented terminal outcome. Cancellation is its own
+outcome, delivered normally to the requesting Thread. No Run ownership or parent-forwarding policy is reinstated.

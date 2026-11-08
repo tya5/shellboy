@@ -414,7 +414,7 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
 }
 
 #[tokio::test]
-async fn reply_to_model_is_delivered_once_and_preserves_correlation() {
+async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_once() {
     let (_root, store) = fixture().await;
     let sender = Origin {
         instance_id: "fixture".into(),
@@ -433,6 +433,14 @@ async fn reply_to_model_is_delivered_once_and_preserves_correlation() {
     let applied = id.clone();
     store.database.call(move |db| {
         db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [applied])?;
+        Ok(())
+    }).await.unwrap();
+    let recovering=accepted["turn_id"].as_str().unwrap().to_owned();
+    let recovery_id=id.clone();
+    store.database.call(move|db| {
+        db.execute("UPDATE turn SET state='recovery_wait' WHERE id=?1",[&recovering])?;
+        assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",[recovery_id],|r|r.get::<_,String>(0))?,"pending");
+        db.execute("UPDATE turn SET state='running' WHERE id=?1",[recovering])?;
         Ok(())
     }).await.unwrap();
     // No live parent Run is required for a reply: delivery starts ordinary new work.
