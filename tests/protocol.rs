@@ -1150,4 +1150,16 @@ fn protocol_v4_handshake_advertises_reasoning_activity_capability_and_tolerates_
         "array"
     );
     assert_eq!(schema["operation_results"].as_object().unwrap().len(), 63);
+    assert_ne!(schema["operation_results"]["status"], Value::Bool(true));
+    let item = &schema["definitions"]["WorkItem"]["properties"];
+    assert_eq!(item["response_nodes"]["type"], "array");
+    assert_eq!(item["response_nodes_truncated"]["type"], "boolean");
+    assert_eq!(
+        item["end_message_node_id"]["type"],
+        serde_json::json!(["string", "null"])
+    );
+    assert_eq!(
+        item["response_nodes"]["items"]["$ref"],
+        "#/definitions/ResponseNodeRef"
+    );
 }

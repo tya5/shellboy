@@ -502,6 +502,8 @@ fn canonical_item(
         attempt_id: (fact.key.kind == Kind::Attempt).then(|| id.clone()),
         operation_id: get(10),
         end_message_node_id: get(11),
+        response_nodes: Vec::new(),
+        response_nodes_truncated: false,
         expect_reply: false,
         reply: None,
         reply_to: None,

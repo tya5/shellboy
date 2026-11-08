@@ -4,12 +4,13 @@ use crate::protocol::*;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, FixedOffset};
 use rusqlite::{Connection, OptionalExtension, params};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkItem {
     pub kind: String,
     pub id: String,
@@ -27,6 +28,8 @@ pub struct WorkItem {
     pub attempt_id: Option<String>,
     pub operation_id: Option<String>,
     pub end_message_node_id: Option<String>,
+    pub response_nodes: Vec<ResponseNodeRef>,
+    pub response_nodes_truncated: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expect_reply: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,7 +51,15 @@ pub struct WorkItem {
     pub revisit: Option<RevisitSummary>,
     pub targets: Vec<Command>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ResponseNodeRef {
+    pub ordinal: u64,
+    pub item_id: Option<String>,
+    pub kind: String,
+    pub phase: Option<String>,
+    pub node_id: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusSnapshot {
     pub instance_id: String,
     pub observed_at: String,
@@ -302,6 +313,47 @@ struct PagePosition {
     after: SortKey,
     watermark: DateTime<FixedOffset>,
 }
+const RESPONSE_CANDIDATE_LIMIT: usize = 256;
+const RESPONSE_NODE_LIMIT: usize = 64;
+fn response_nodes(db: &Connection, attempt_id: &str) -> Result<(Vec<ResponseNodeRef>, bool)> {
+    // Limit the PK range before node lookup/filtering. A candidate may be a
+    // tool/reasoning/null node; candidates after the fixed window are unknown.
+    let mut statement = db.prepare(
+        "SELECT oi.ordinal,oi.item_id,oi.item_type,oi.phase,oi.node_id,n.kind FROM (SELECT ordinal,item_id,item_type,phase,node_id FROM output_item WHERE attempt_id=?1 ORDER BY ordinal LIMIT ?2) oi LEFT JOIN node n ON n.id=oi.node_id ORDER BY oi.ordinal",
+    ).map_err(sql)?;
+    let mut rows = statement
+        .query(params![attempt_id, (RESPONSE_CANDIDATE_LIMIT + 1) as i64])
+        .map_err(sql)?;
+    let mut nodes = Vec::new();
+    let mut candidates = 0;
+    let mut truncated = false;
+    while let Some(row) = rows.next().map_err(sql)? {
+        candidates += 1;
+        if candidates > RESPONSE_CANDIDATE_LIMIT {
+            truncated = true;
+            break;
+        }
+        let node_id: Option<String> = row.get(4).map_err(sql)?;
+        let node_kind: Option<String> = row.get(5).map_err(sql)?;
+        if node_kind.as_deref() != Some("assistant_response") {
+            continue;
+        }
+        if nodes.len() == RESPONSE_NODE_LIMIT {
+            truncated = true;
+            break;
+        }
+        let Some(node_id) = node_id else { continue };
+        nodes.push(ResponseNodeRef {
+            ordinal: row.get::<_, i64>(0).map_err(sql)? as u64,
+            item_id: row.get(1).map_err(sql)?,
+            kind: row.get(2).map_err(sql)?,
+            phase: row.get(3).map_err(sql)?,
+            node_id,
+        });
+    }
+    Ok((nodes, truncated))
+}
+
 fn decode_cursor(args: &StatusArgs, instance: &str, filter: &str) -> Result<Option<PagePosition>> {
     let cursor = if let Some(token) = &args.cursor {
         if token.len() > 8192 {
@@ -394,6 +446,8 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         execution_id: (kind == WorkKind::Shell).then_some(id.clone()),
         message_id: (kind == WorkKind::Message).then_some(id.clone()),
         attempt_id: (kind == WorkKind::Attempt).then_some(id.clone()),
+        response_nodes: Vec::new(),
+        response_nodes_truncated: false,
         elapsed_ms: None,
         last_output_at: None,
         revisit: None,
@@ -519,6 +573,12 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     // the durable fingerprint or cursor sort keys.
     let observed = chrono::Utc::now();
     for selected in &mut selected {
+        if selected.item.kind == "attempt" {
+            (
+                selected.item.response_nodes,
+                selected.item.response_nodes_truncated,
+            ) = response_nodes(db, &selected.item.id)?;
+        }
         if selected.item.kind == "shell" {
             let timing =
                 crate::shell::timing::read(db, &selected.item.id, observed).map_err(sql)?;
@@ -537,4 +597,148 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         items: selected.into_iter().map(|p| p.item).collect(),
         next_cursor,
     })
+}
+
+#[cfg(test)]
+mod response_node_tests {
+    use super::*;
+
+    #[test]
+    fn response_nodes_bound_candidates_and_disclose_incomplete_results() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE node(id TEXT PRIMARY KEY, kind TEXT NOT NULL);
+             CREATE TABLE thread_path(thread_id TEXT NOT NULL,ordinal INTEGER NOT NULL,node_id TEXT NOT NULL,PRIMARY KEY(thread_id,ordinal),UNIQUE(thread_id,node_id));
+             CREATE TABLE output_item(attempt_id TEXT NOT NULL, ordinal INTEGER NOT NULL, item_id TEXT, item_type TEXT NOT NULL, phase TEXT, node_id TEXT, PRIMARY KEY(attempt_id,ordinal));",
+        ).unwrap();
+        db.execute("INSERT INTO node VALUES ('commentary-node','assistant_response'),('final-node','assistant_response'),('user-node','user_message')", []).unwrap();
+        db.execute("INSERT INTO thread_path VALUES ('thread',0,'commentary-node'),('thread',1,'final-node')", []).unwrap();
+        db.execute("INSERT INTO output_item VALUES ('attempt',0,'item-c','message','commentary','commentary-node'),('attempt',1,'item-c-part','message','commentary','commentary-node'),('attempt',2,'item-f','message','final','final-node'),('attempt',3,'item-u','message','final','user-node'),('attempt',4,'item-null','message','final',NULL)", []).unwrap();
+
+        let (nodes, truncated) = response_nodes(&db, "attempt").unwrap();
+        assert!(!truncated);
+        assert_eq!(
+            nodes.len(),
+            3,
+            "preserve each output item, including duplicate node links"
+        );
+        assert_eq!(nodes[0].node_id, "commentary-node");
+        assert_eq!(nodes[0].kind, "message");
+        assert_eq!(nodes[0].phase.as_deref(), Some("commentary"));
+        assert_eq!(nodes[1].node_id, "commentary-node");
+        assert_eq!(nodes[1].item_id.as_deref(), Some("item-c-part"));
+        assert_eq!(nodes[2].node_id, "final-node");
+        assert_eq!(nodes[2].phase.as_deref(), Some("final"));
+        for item in &nodes {
+            let ordinal: i64 = db
+                .query_row(
+                    "SELECT ordinal FROM thread_path WHERE thread_id='thread' AND node_id=?1",
+                    [&item.node_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                ordinal >= 0,
+                "every published ID is a history.window anchor"
+            );
+        }
+
+        // No rows is a complete empty list; empty plus truncated below is explicitly unknown.
+        let (none, truncated) = response_nodes(&db, "pre-save-or-failed").unwrap();
+        assert!(none.is_empty());
+        assert!(!truncated);
+
+        // 256 noneligible rows come first, followed by eligible nodes: the
+        // eligible tail must not cause an unbounded scan, and [] is not absence.
+        for ordinal in 0..RESPONSE_CANDIDATE_LIMIT as i64 {
+            db.execute(
+                "INSERT INTO output_item VALUES ('prefix',?1,NULL,'function_call','tool',NULL)",
+                [ordinal],
+            )
+            .unwrap();
+        }
+        for ordinal in RESPONSE_CANDIDATE_LIMIT as i64..(RESPONSE_CANDIDATE_LIMIT as i64 + 10) {
+            let id = format!("tail-{ordinal}");
+            db.execute("INSERT INTO node VALUES (?1,'assistant_response')", [&id])
+                .unwrap();
+            db.execute(
+                "INSERT INTO output_item VALUES ('prefix',?1,NULL,'message','final',?2)",
+                params![ordinal, id],
+            )
+            .unwrap();
+        }
+        let (nodes, truncated) = response_nodes(&db, "prefix").unwrap();
+        assert!(nodes.is_empty());
+        assert!(
+            truncated,
+            "unexamined candidate tail makes an empty result incomplete"
+        );
+
+        // Boundary: exactly the candidate cap is complete; cap+1 is unknown.
+        for ordinal in 0..RESPONSE_CANDIDATE_LIMIT as i64 {
+            db.execute(
+                "INSERT INTO output_item VALUES ('boundary',?1,NULL,'function_call','tool',NULL)",
+                [ordinal],
+            )
+            .unwrap();
+        }
+        let (nodes, truncated) = response_nodes(&db, "boundary").unwrap();
+        assert!(nodes.is_empty());
+        assert!(!truncated);
+        db.execute(
+            "INSERT INTO output_item VALUES ('boundary',?1,NULL,'function_call','tool',NULL)",
+            [RESPONSE_CANDIDATE_LIMIT as i64],
+        )
+        .unwrap();
+        let (nodes, truncated) = response_nodes(&db, "boundary").unwrap();
+        assert!(nodes.is_empty());
+        assert!(truncated);
+        let plan: Vec<String> = {
+            let mut statement = db.prepare("EXPLAIN QUERY PLAN SELECT ordinal,item_id,item_type,phase,node_id FROM output_item WHERE attempt_id=?1 ORDER BY ordinal LIMIT ?2").unwrap();
+            let rows = statement
+                .query_map(
+                    params!["boundary", (RESPONSE_CANDIDATE_LIMIT + 1) as i64],
+                    |row| row.get(3),
+                )
+                .unwrap();
+            rows.collect::<rusqlite::Result<_>>().unwrap()
+        };
+        let plan = plan.join(" | ");
+        assert!(
+            plan.contains("output_item_1") && plan.contains("attempt_id=?"),
+            "expected PK range scan: {plan}"
+        );
+
+        // Count VM instructions for the complete production lookup (candidate
+        // read plus node joins/filter). Growing rows past the LIMIT must not add work.
+        let steps = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let measured = steps.clone();
+        db.progress_handler(
+            1,
+            Some(move || {
+                measured.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                false
+            }),
+        )
+        .unwrap();
+        let (_, truncated) = response_nodes(&db, "prefix").unwrap();
+        assert!(truncated);
+        let bounded_steps = steps.swap(0, std::sync::atomic::Ordering::Relaxed);
+        for ordinal in 266..100_266 {
+            db.execute(
+                "INSERT INTO output_item VALUES ('prefix',?1,NULL,'function_call','tool',NULL)",
+                [ordinal],
+            )
+            .unwrap();
+        }
+        steps.store(0, std::sync::atomic::Ordering::Relaxed);
+        let (_, truncated) = response_nodes(&db, "prefix").unwrap();
+        assert!(truncated);
+        let large_steps = steps.load(std::sync::atomic::Ordering::Relaxed);
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        assert_eq!(
+            large_steps, bounded_steps,
+            "actual lookup VM steps must remain fixed after the 256-candidate prefix despite 100k later rows"
+        );
+    }
 }

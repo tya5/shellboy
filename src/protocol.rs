@@ -41,7 +41,7 @@ fn operation_result_schemas(
         };
     }
     result!("owner.shutdown", Accepted);
-    opaque!("status");
+    result!("status", crate::status::StatusSnapshot);
     result!("model.list", ModelListResult);
     result!("thread.list", Page<ThreadSummary>);
     result!("thread.get", ThreadDetails);
@@ -198,6 +198,9 @@ pub fn schema_json() -> String {
     add_root!("IndexProbeObservation", IndexProbeObservation);
     add_root!("IndexShrinkStatus", IndexShrinkStatus);
     add_root!("StorageStatus", StorageStatus);
+    add_root!("StatusSnapshot", crate::status::StatusSnapshot);
+    add_root!("WorkItem", crate::status::WorkItem);
+    add_root!("ResponseNodeRef", crate::status::ResponseNodeRef);
     let operation_results = operation_result_schemas(&mut generator);
     for (name, schema) in generator.take_definitions(false) {
         definitions.entry(name).or_insert(schema);
@@ -1694,7 +1697,8 @@ mod message_acknowledgement_tests {
             );
         }
         assert_eq!(results.len(), 63);
-        for name in ["status", "thread.create", "shell.list", "config.get"] {
+        assert_ne!(results["status"], serde_json::Value::Bool(true));
+        for name in ["thread.create", "shell.list", "config.get"] {
             assert_eq!(
                 results[name],
                 serde_json::Value::Bool(true),

@@ -5292,6 +5292,41 @@
       "title": "Response",
       "type": "object"
     },
+    "ResponseNodeRef": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "item_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "node_id": {
+          "type": "string"
+        },
+        "ordinal": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ordinal",
+        "kind",
+        "node_id"
+      ],
+      "title": "ResponseNodeRef",
+      "type": "object"
+    },
     "RevisitSummary": {
       "properties": {
         "consumed_count": {
@@ -5849,6 +5884,54 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "StatusSnapshot": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "consistency": {
+          "type": "string"
+        },
+        "filters": {
+          "$ref": "#/definitions/StatusArgs"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/WorkItem"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "receipt_budget": true,
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "observed_at",
+        "scope",
+        "consistency",
+        "fingerprint",
+        "filters",
+        "items",
+        "receipt_budget"
+      ],
+      "title": "StatusSnapshot",
       "type": "object"
     },
     "StorageArgs": {
@@ -6976,6 +7059,196 @@
       ],
       "title": "Welcome",
       "type": "object"
+    },
+    "WorkItem": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "activity_at": {
+          "type": "string"
+        },
+        "attempt_connection": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "current_connection": {
+          "type": "string"
+        },
+        "current_model": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "description": "Read-time duration for live shells; saved duration for terminal shells.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "end_message_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expect_reply": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "last_output_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reply": true,
+        "reply_to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "response_nodes": {
+          "items": {
+            "$ref": "#/definitions/ResponseNodeRef"
+          },
+          "type": "array"
+        },
+        "response_nodes_truncated": {
+          "type": "boolean"
+        },
+        "revisit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RevisitSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/definitions/Command"
+          },
+          "type": "array"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "thread_title": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "state",
+        "thread_id",
+        "thread_title",
+        "current_connection",
+        "current_model",
+        "response_nodes",
+        "response_nodes_truncated",
+        "activity_at",
+        "targets"
+      ],
+      "title": "WorkItem",
+      "type": "object"
     }
   },
   "opaque_result_note": "A true operation schema means the result is opaque JSON, not yet represented by a stable Rust result record.",
@@ -7981,7 +8254,54 @@
       "title": "ShellWriteResult",
       "type": "object"
     },
-    "status": true,
+    "status": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "consistency": {
+          "type": "string"
+        },
+        "filters": {
+          "$ref": "#/definitions/StatusArgs"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/definitions/WorkItem"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "receipt_budget": true,
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "observed_at",
+        "scope",
+        "consistency",
+        "fingerprint",
+        "filters",
+        "items",
+        "receipt_budget"
+      ],
+      "title": "StatusSnapshot",
+      "type": "object"
+    },
     "storage.collect": true,
     "storage.status": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
