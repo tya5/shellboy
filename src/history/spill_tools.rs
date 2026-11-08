@@ -104,10 +104,14 @@ pub(crate) fn load(db: &Connection, id: &str) -> Result<SpillToolSources, ApiErr
 /// Store in the same node-creation transaction; the covering index never contains payload bytes.
 pub(crate) fn save(db: &Connection, id: &str, payload: &Value) -> Result<(), rusqlite::Error> {
     if let Some(saved) = payload.get("spill_tools")
-        && let Ok(saved) = serde_json::from_value::<SpillToolSources>(saved.clone()) {
+        && let Ok(saved) = serde_json::from_value::<SpillToolSources>(saved.clone())
+    {
         let body = serde_json::to_string(&saved).expect("serializable spill metadata");
         if body.len() <= 16384 && saved.items.len() <= MAX_SOURCES {
-            db.execute("UPDATE node SET spill_tools_json=?2 WHERE id=?1",rusqlite::params![id, body])?;
+            db.execute(
+                "UPDATE node SET spill_tools_json=?2 WHERE id=?1",
+                rusqlite::params![id, body],
+            )?;
         }
     }
     Ok(())

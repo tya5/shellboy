@@ -10829,3 +10829,7 @@ covering SEARCH with neither DeferredSeek nor JSON function opcodes. Full zero-e
 steady-state VM counts for 16-byte and 16 MiB payloads (statement caches warmed equally). Migration unit tests passed
 21 cases with one ignored. Python 206 tests passed after completing fresh/migrated schema-36 version records. A
 clippy-only nested-if finding is corrected; final strict clippy and exact-tip CI remain pending.
+
+The final strict all-target clippy pass and rerun metadata unit tests (3) plus history-window tests (9) succeeded.
+The only intervening edits are formatting and the equivalent let-chain save guard. No wire/schema-export shape
+changed; protocol source metadata remains the same additive field. Exact-tip full CI follows on the review branch.
