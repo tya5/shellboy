@@ -4276,3 +4276,8 @@ producer's expected duration. Hold the producer on stdin, await the committed by
 then explicitly close stdin. This intentionally tests responsiveness and natural completion as separate ordered
 facts. Existing timeout bounds remain safety limits, not synchronization. Do not classify unrelated migration/schema
 CI failures as load flakes or claim a general product fix without reproducing the historical failed-shell reason.
+
+The GC budget fixture also waits for its foreground writer's first committed update before entering the measurement
+loop. Spawning a task is not evidence that it has run. A one-shot readiness event makes the concurrent-write premise
+explicit without changing the VM budget, completion deadline or required deferrals. This is a fixture-ordering guard,
+not evidence that every reported GC failure had that cause.

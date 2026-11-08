@@ -10876,3 +10876,7 @@ shells were not reproduced by these eight cases, and no product defect or drain-
 those passes. TUI/nested-owner targeted checks and repeated output-fixture runs are pending. The GC budget
 measurement is also a default test and still needs separate focused verification; it was not part of these eight
 initial cases.
+
+The GC budget fixture now establishes foreground participation with a one-shot sent after its first committed
+write, before measuring concurrent GC. The unchanged completion/deferral assertions and deadline still need the
+focused GC run; task-spawn order is no longer used as proof of participation.
