@@ -723,3 +723,5 @@ CREATE INDEX IF NOT EXISTS index_reclaim_state ON index_space(state,id);
 CREATE INDEX IF NOT EXISTS index_reclaim_group_value ON app_meta(value,key) WHERE key>='index.group.' AND key<'index.group/';
 INSERT INTO schema_migration(version,name) VALUES(35,'0035_index_reclaim_lookup');
 PRAGMA user_version=35;
+INSERT INTO schema_migration(version,name) VALUES(36,'0036_spill_tool_metadata');
+PRAGMA user_version=36;
