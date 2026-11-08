@@ -2619,7 +2619,7 @@ fn thread_list_awaiting_human(
                    AND json_extract(r.result_json,'$.to_human')=1 AND r.rowid<=?2) AS oldest_reply_at \
          FROM page WHERE page.target_thread_id IS NOT NULL ORDER BY page.target_thread_id"
     );
-    let mut statement = connection.prepare(sql).map_err(sql_error)?;
+    let mut statement = connection.prepare(&sql).map_err(sql_error)?;
     let mut rows = statement
         .query(params![after, watermark, i64::from(args.limit) + 1])
         .map_err(sql_error)?;
@@ -3325,7 +3325,9 @@ mod thread_list_plan_tests {
 
     #[test]
     fn awaiting_human_page_has_fixed_vm_steps_with_thousands_of_pending_threads() {
-        fn page_steps(thread_count: usize) -> (i64, Vec<(String, i64, String)>) {
+        fn page_steps(
+            thread_count: usize,
+        ) -> (i32, Vec<(String, i64, String)>, Vec<String>, bool) {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             db.execute(
