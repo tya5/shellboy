@@ -394,8 +394,9 @@ validation and are documented in prose.
 
 `Welcome` gains `capabilities: Vec<String>` (names like `events.wait`,
 `message.send.human`). Welcome arrives before the request, so a client can
-decide before sending anything. Because current clients decode `Welcome`
-strictly, adding the field is itself breaking: do it once, together with the
+decide before sending anything. Clients ignore capability names they do not
+recognize and only gate use of capabilities they do recognize. Because current
+clients decode `Welcome` strictly, adding the field is itself breaking: do it once, together with the
 tolerant-record split, as **protocol 3**. Everything present at protocol 3 is
 the baseline. The list holds only additions after that and starts empty or
 nearly empty. The list is a `const` slice checked by a test against an
