@@ -822,3 +822,8 @@ after preparing common instructions. It omits bodies and is historical, not live
 also returns `instruction_sources` with extra metadata, `agents_path` and `local_present`, alongside the usual
 per-request item hashes/character counts. Request body output intentionally includes saved text. Saved source order
 matches the instruction-prefix order. No schema migration or new daemon task is required.
+
+#270 review correction: raw user AGENTS JSON is always literal text. Bundle representation uses a writer-owned
+persisted digest-kind namespace; no JSON field in a user file activates source decoding. `instruction_sources` omits
+raw snapshots even when they contain an `extra` JSON field. Repair/remove broken common-file registrations through
+the model-independent config CLI, then explicitly retry; fail-closed semantics are unchanged.

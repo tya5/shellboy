@@ -758,3 +758,8 @@ Turn. Same-Turn retries/tool calls keep saved text. A bad registered file visibl
 remove its entry rather than assuming the guidance loaded. `thread get.instruction_sources` describes the latest
 prepared Turn; `config get` shows registrations and `thread request` shows saved instruction accounting. Never put
 credentials in these files or claim consent was checked by the configuration API itself.
+
+If a registered common file breaks preparation across Threads, do not wait for a model to repair it: the control CLI
+still runs. Repair the named file or use `config get` and hash-checked `config.set` to remove that entry (preserving
+others); `[]` clears the list. Then explicitly retry/resume the affected Run. Already saved Turn instructions remain
+unchanged. Raw AGENTS JSON is literal text, never a declaration of internal instruction sources.

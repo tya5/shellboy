@@ -10772,3 +10772,12 @@ Shared-slot `sh scripts/check.sh` passed on macOS arm64: default unit tests 2423
 1335 passed/19 ignored, plus doc/feature variants and the DB-observation feature regression. Strict clippy, format,
 Python and layout checks in the standard script also passed. This establishes synthetic behavior only; no real
 provider request or cache-hit-rate measurement was performed. Exact branch-tip CI remains the handoff gate.
+
+### #270 W8 P1 correction (validation pending)
+
+The first branch's successful CI did not catch raw AGENTS JSON colliding with the internal bundle marker. Regression
+coverage now uses literal marker JSON with/without `local`, forged `extra` and the internal runtime framing prefix,
+then replays each saved raw snapshot after file edits and checks that thread metadata does not expose forged sources.
+Generated bundles use a writer-owned persisted digest-kind namespace; plain saved SHA-256 bodies are always literal.
+Standalone request inspection follows the same saved-kind boundary. Fail-closed policy is retained with an explicit
+model-independent repair/remove/retry procedure. New focused/CI evidence is required before handoff.

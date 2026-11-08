@@ -84,3 +84,8 @@ restart-only. This per-Turn rule deliberately differs from per-Run connection-ge
 Turn, not a prediction of the next one. `thread request` reports saved source metadata and separate instruction
 items (characters/hashes); `--body` can show the saved content. Existing instruction-change context events include
 the composite hash. No new worker, database table, queue or filesystem watcher is added.
+
+Snapshot representation is determined by the persisted digest-kind namespace, never by parsing a user's AGENTS
+text for a JSON marker. Raw/legacy SHA-256 snapshots are escaped as literal local text on replay. Generated common
+bundles have a tagged digest; their body framing is internal and is not a user-file directive. See the configuration
+guide's broken-file recovery procedure; model-independent `config get/set` remains available when preparation fails.

@@ -523,9 +523,9 @@ async fn turn_instructions(
     snapshot: &Snapshot,
 ) -> Result<Option<Arc<str>>, ApiError> {
     let turn = snapshot.turn.clone();
-    let saved=control.store.database.call(move|db|Ok(db.query_row("SELECT s.body,s.observed_size FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[turn],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<i64>>(1)?))).optional()?)).await.map_err(storage_error)?;
-    if let Some((body, size)) = saved {
-        return Ok(size.map(|_| Arc::from(body)));
+    let saved=control.store.database.call(move|db|Ok(db.query_row("SELECT s.body,s.observed_size,s.content_hash FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.id=?1",[turn],|row|Ok((row.get::<_,String>(0)?,row.get::<_,Option<i64>>(1)?,row.get::<_,String>(2)?))).optional()?)).await.map_err(storage_error)?;
+    if let Some((body, size, hash)) = saved {
+        return Ok(size.map(|_| Arc::from(crate::instructions::saved_body(body, &hash))));
     }
     let prepared = control
         .instructions
@@ -535,7 +535,12 @@ async fn turn_instructions(
             control.store.config.current().extra_instructions,
         )
         .await?;
-    let body = prepared.as_ref().map(|value| value.body.clone());
+    let body = prepared.as_ref().map(|value| {
+        Arc::from(crate::instructions::saved_body(
+            value.body.to_string(),
+            &value.hash,
+        ))
+    });
     let turn = snapshot.turn.clone();
     let source_path = snapshot.agents.clone();
     control.store.database.call(move|db| {

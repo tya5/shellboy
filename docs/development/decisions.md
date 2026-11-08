@@ -4221,3 +4221,16 @@ No watcher, worker, queue or table is justified. User consent belongs to the reg
 API cannot infer it. Revisit the eight/8192-byte limits only with observed guide-size requirements, not to embed
 large manuals. Filesystem multi-file atomicity, adversarial local path replacement and real-provider cache hit rates
 are not promised by this change.
+
+### D-270 review: snapshot kind is persisted independently of user text
+
+The first implementation incorrectly recognized a JSON marker in AGENTS text as an internal bundle. Store a tagged
+digest namespace `instruction-bundle-v1:sha256:<digest>` for generated bundles; legacy/raw snapshots retain their
+bare SHA-256. Only this writer-owned saved kind determines decoding. Runtime raw bodies are unconditionally escaped
+into a local-file envelope before request assembly, even if they contain valid JSON or the internal body prefix.
+The standalone inspector and thread metadata reader use the saved discriminator too. No schema change is needed:
+the existing digest field carries its algorithm/representation namespace, not a new inferred content type.
+
+The review accepted static bounds and fail-closed semantics but required an operational recovery path. Retain the
+policy: repair the file or remove just its entry with hash-checked live config.set, then explicitly retry preparation.
+The control/config CLI remains available without model execution. Already saved Turns deliberately do not change.

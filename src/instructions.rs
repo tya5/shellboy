@@ -128,8 +128,8 @@ impl InstructionLoader {
                 let body=String::from_utf8(bytes).map_err(|_|failed(&format!("Extra instruction file is not UTF-8: {}",path.display())))?;
                 files.push(serde_json::json!({"path":path,"hash":crate::digest::sha256_hex(&body),"bytes":body.len(),"body":body}));
             }
-            let body=serde_json::json!({"shellboy_instruction_bundle_v1":true,"extra":files,"local":local.as_ref().map(|s|s.body.as_ref())}).to_string();
-            Ok(Some(InstructionSnapshot { source_path, hash:crate::digest::sha256_hex(&body),size:body.len() as u64,body:Arc::from(body),modified:None }))
+            let body=format!("{}{}", BUNDLE_BODY_PREFIX, serde_json::json!({"extra":files,"local":local.as_ref().map(|s|s.body.as_ref())}));
+            Ok(Some(InstructionSnapshot { source_path, hash:format!("{BUNDLE_HASH_PREFIX}{}",crate::digest::sha256_hex(&body)),size:body.len() as u64,body:Arc::from(body),modified:None }))
         }).await
     }
 }
@@ -236,10 +236,24 @@ mod snapshot_tests {
 }
 
 /// Saved structured body, not live filesystem data; same-Turn replay never re-reads files.
+const BUNDLE_HASH_PREFIX: &str = "instruction-bundle-v1:sha256:";
+const BUNDLE_BODY_PREFIX: &str = "shellboy-saved-instruction-bundle-v1\n";
+
+/// The hash namespace is persisted by the writer; raw snapshots always have a bare SHA-256.
+/// Never inspect user text to determine the saved snapshot's kind.
+pub(crate) fn saved_body(body: String, hash: &str) -> String {
+    if hash.starts_with(BUNDLE_HASH_PREFIX) {
+        body
+    } else {
+        format!(
+            "{}{}",
+            BUNDLE_BODY_PREFIX,
+            serde_json::json!({"extra":[],"local":body})
+        )
+    }
+}
 pub(crate) fn bundle(body: &str) -> Option<serde_json::Value> {
-    let value: serde_json::Value = serde_json::from_str(body).ok()?;
-    (value.get("shellboy_instruction_bundle_v1") == Some(&serde_json::Value::Bool(true)))
-        .then_some(value)
+    serde_json::from_str(body.strip_prefix(BUNDLE_BODY_PREFIX)?).ok()
 }
 
 #[cfg(test)]

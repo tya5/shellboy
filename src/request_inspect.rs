@@ -158,7 +158,14 @@ enum History {
 }
 
 /// run, instruction source, body, observed size, Thread AGENTS path.
-type TurnRow = (String, Option<String>, Option<String>, Option<i64>, String);
+type TurnRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    String,
+    Option<String>,
+);
 /// turn, connection, model, effort, reasoning epoch, manifest, usage.
 type AttemptRow = (
     String,
@@ -177,15 +184,18 @@ fn turn_row(
 ) -> Result<(String, PathBuf, Option<Option<String>>)> {
     let row: Option<TurnRow> = tx
         .query_row(
-            "SELECT u.run_id,s.source_path,s.body,s.observed_size,t.agents_path FROM turn u JOIN thread t ON t.id=u.thread_id LEFT JOIN instruction_snapshot s ON s.id=u.instruction_snapshot_id WHERE u.id=?1 AND u.thread_id=?2",
+            "SELECT u.run_id,s.source_path,s.body,s.observed_size,t.agents_path,s.content_hash FROM turn u JOIN thread t ON t.id=u.thread_id LEFT JOIN instruction_snapshot s ON s.id=u.instruction_snapshot_id WHERE u.id=?1 AND u.thread_id=?2",
             params![turn, thread],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
         )
         .optional()?;
-    let Some((run, source, body, size, agents)) = row else {
+    let Some((run, source, body, size, agents, hash)) = row else {
         return Err(fail("not_found", "Turn is not in this Thread"));
     };
-    let instructions = source.is_some().then(|| size.and(body));
+    let instructions = source.is_some().then(|| {
+        size.and(body)
+            .map(|body| crate::instructions::saved_body(body, hash.as_deref().unwrap_or("")))
+    });
     Ok((run, PathBuf::from(source.unwrap_or(agents)), instructions))
 }
 

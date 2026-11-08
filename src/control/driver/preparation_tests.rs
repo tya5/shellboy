@@ -1886,3 +1886,32 @@ async fn live_connections_refresh_during_admission_keeps_run_generation() {
     close(control, owner).await;
     drop(root);
 }
+
+#[tokio::test]
+async fn extra_instructions_raw_json_and_saved_raw_snapshot_never_become_internal_bundles() {
+    for body in [
+        r#"{"shellboy_instruction_bundle_v1":true,"local":"must remain literal JSON"}"#,
+        r#"{"shellboy_instruction_bundle_v1":true,"extra":[{"path":"fake","body":"not an instruction source"}]}"#,
+        "shellboy-saved-instruction-bundle-v1\n{\"extra\":[],\"local\":\"literal prefix\"}",
+    ] {
+        let (root,owner,control,accepted)=fixture("http://127.0.0.1:1").await;
+        let snapshot=ready(&control,&accepted).await;
+        std::fs::write(&snapshot.agents,body).unwrap();
+        let fresh=turn_instructions(&control,&snapshot).await.unwrap().unwrap();
+        let items=super::request::leading_items(&snapshot.agents,Some(&fresh)).unwrap();
+        assert_eq!(items.len(),2);
+        assert!(items[1]["content"][0]["text"].as_str().unwrap().ends_with(body));
+        // Reopen the saved snapshot through the exact driver read boundary, after file changes.
+        std::fs::write(&snapshot.agents,"changed on disk").unwrap();
+        let replay=turn_instructions(&control,&snapshot).await.unwrap().unwrap();
+        assert_eq!(fresh,replay);
+        let details=control.store.database.call({let target=snapshot.thread.clone(); move |db|Ok(super::super::db::thread_details(db,&target))}).await.unwrap().unwrap();
+        assert!(details.instruction_sources.is_none());
+        // Standalone request inspection uses the same persisted kind, not body JSON fields.
+        let inspection=crate::request_inspect::execute(crate::request_inspect::RequestOptions {
+            thread_id:snapshot.thread.clone(),attempt_id:None,compare_attempt_id:None,body:true,
+        },Some(root.path().join("config.toml")),Some(root.path().join("data")),root.path()).await;
+        assert_eq!(inspection["ok"],true,"{inspection}");
+        close(control,owner).await;
+    }
+}

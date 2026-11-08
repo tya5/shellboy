@@ -979,3 +979,19 @@ as separate developer items; placing a file in a directory or linking it in pros
 
 Inspect registered paths with `config get`, captured sources with `thread get`, and request item/content accounting
 with `thread request` (add `--body` only when you intend to display instruction content).
+
+### Recovering from a broken common instruction file
+
+A bad registered file blocks new unprepared Turns across Threads; already prepared Turns retain their captured
+instructions. The configuration/control CLI remains usable without a model request. Repair that file (valid UTF-8,
+regular readable file, at most 8192 bytes), then explicitly resume/retry the affected Run. If the file is no longer
+wanted, run `shellboy config get`, take its current `file.content_hash`, and use hash-checked `config set` to replace
+`extra_instructions` with the remaining absolute paths in their original order. An empty array disables all common
+registrations. Follow `shellboy config set --help` for the JSON changes syntax; preserve unrelated entries and never
+blindly overwrite another component's registration. A successful live change does not require owner restart.
+
+After repair/removal, explicitly resume the failed Run (including `--resume-recovery` for nonhuman message delivery
+where required) or submit a new human Turn, then inspect `thread get`/`thread request`. Preparation that failed before
+saving a snapshot will observe the repaired list; a Turn that already saved its snapshot intentionally keeps it.
+This fail-closed policy is retained after review: silently omitting an explicit instruction file would hide a change
+to the user's chosen guidance. Registration, repair and inspection do not require the blocked model to run.
