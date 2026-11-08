@@ -1093,6 +1093,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "実行中の変換をやめる",
             "Stop the running conversion"
         ),
+        FieldId::Awaiting => local!(language, "人への返信待ち", "Awaiting a human reply"),
         FieldId::SettlementStates => local!(
             language,
             "会話の観測状態",
@@ -1276,6 +1277,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "途中の結果を捨て、古い索引をそのまま使い続けます。",
             "Discard the partial result and keep using the old index."
+        ),
+        FieldId::Awaiting => local!(
+            language,
+            "humanを選ぶと、人への返信待ちがあるThreadだけを一覧します。",
+            "Select human to list only Threads awaiting a human reply."
         ),
         FieldId::SettlementStates => local!(
             language,

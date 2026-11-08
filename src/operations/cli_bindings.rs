@@ -83,6 +83,7 @@ const MEANINGS: &[Meaning] = &[
             ("limit", FieldId::Limit),
             ("cursor", FieldId::Cursor),
             ("query", FieldId::Query),
+            ("awaiting", FieldId::Awaiting),
             ("archived", FieldId::Archived),
             ("tags", FieldId::Tags),
             ("cwd", FieldId::Cwd),

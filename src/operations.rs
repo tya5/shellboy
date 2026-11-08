@@ -227,6 +227,7 @@ pub(crate) enum FieldId {
     Title,
     Descendants,
     Archived,
+    Awaiting,
     Tags,
     AddTags,
     RemoveTags,
@@ -726,6 +727,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         default_origin: DefaultOrigin::None,
         label: "アーカイブの扱い",
         help: "空は既定（アーカイブ済みを隠す）。includeは両方、onlyはアーカイブ済みだけを一覧します。",
+        kind: FieldType::Choice,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::Awaiting,
+        default_origin: DefaultOrigin::Literal,
+        label: "人への返信待ち",
+        help: "humanを選ぶと、人への返信待ちがあるThreadだけを一覧します。",
         kind: FieldType::Choice,
         discovery: Discovery::None,
     },
@@ -1286,6 +1295,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::Limit,
             FieldId::Cursor,
             FieldId::Query,
+            FieldId::Awaiting,
             FieldId::Archived,
             FieldId::Tags,
             FieldId::Cwd,
@@ -2277,6 +2287,8 @@ impl OperationSpec {
             ]
         } else if id == FieldId::AttachmentKind {
             vec!["file", "image"]
+        } else if id == FieldId::Awaiting {
+            vec!["human"]
         } else {
             args.iter()
                 .filter(|arg| arg.field == id)
