@@ -591,7 +591,6 @@ impl BrowserMessage<'_> {
                 one_line(activity_label(thread, language)),
                 format_reply_waits(
                     thread.awaiting_human_count,
-                    thread.awaiting_human_count_saturated,
                     thread.awaiting_thread_count,
                     language
                 ),
@@ -631,7 +630,6 @@ impl BrowserMessage<'_> {
                 one_line(activity_label(thread, language)),
                 format_reply_waits(
                     thread.awaiting_human_count,
-                    thread.awaiting_human_count_saturated,
                     thread.awaiting_thread_count,
                     language
                 ),
@@ -2622,7 +2620,6 @@ impl ThreadBrowser {
         };
         let waits = format_reply_waits(
             thread.awaiting_human_count,
-            thread.awaiting_human_count_saturated,
             thread.awaiting_thread_count,
             self.language,
         );
@@ -2998,12 +2995,8 @@ fn activity_column_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
         super::watch::phase_label(thread.activity, language, false)
     }
 }
-fn format_reply_waits(human: u64, saturated: bool, threads: u64, language: UiLanguage) -> String {
-    let human = if saturated {
-        format!("{human}+")
-    } else {
-        human.to_string()
-    };
+fn format_reply_waits(human: u64, threads: u64, language: UiLanguage) -> String {
+    let human = human.to_string();
     let has_human = human != "0";
     match language {
         UiLanguage::En if has_human && threads > 0 => {
@@ -3467,7 +3460,6 @@ mod tests {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_human_count: 0,
-            awaiting_human_count_saturated: false,
             awaiting_thread_count: 0,
             awaiting_human_oldest_at: None,
             awaiting_replies: 0,
@@ -4311,7 +4303,6 @@ mod tests {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_human_count: 0,
-            awaiting_human_count_saturated: false,
             awaiting_thread_count: 0,
             awaiting_human_oldest_at: None,
             awaiting_replies: 0,
@@ -4563,7 +4554,6 @@ mod patch_tests {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_human_count: 0,
-            awaiting_human_count_saturated: false,
             awaiting_thread_count: 0,
             awaiting_human_oldest_at: None,
             awaiting_replies: 0,
@@ -5300,7 +5290,6 @@ mod archive_tests {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_human_count: 0,
-            awaiting_human_count_saturated: false,
             awaiting_thread_count: 0,
             awaiting_human_oldest_at: None,
             awaiting_replies: 0,
@@ -5613,7 +5602,6 @@ mod watch_integration_tests {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_human_count: 0,
-            awaiting_human_count_saturated: false,
             awaiting_thread_count: 0,
             awaiting_human_oldest_at: None,
             awaiting_replies: 0,
@@ -6342,7 +6330,6 @@ mod language_tests {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
             awaiting_human_count: 0,
-            awaiting_human_count_saturated: false,
             awaiting_thread_count: 0,
             awaiting_human_oldest_at: None,
             awaiting_replies: 0,
@@ -6684,16 +6671,13 @@ mod language_tests {
         row.awaiting_thread_count = 1;
         let labels = format_reply_waits(
             row.awaiting_reply,
-            row.awaiting_human_count_saturated,
             row.awaiting_thread_replies,
             UiLanguage::Ja,
         );
         assert!(labels.contains("人の判断待ち1件"), "{labels}");
-        row.awaiting_human_count_saturated = true;
-        let labels = format_reply_waits(128, true, 1, UiLanguage::Ja);
-        assert!(labels.contains("人の判断待ち128+件"), "{labels}");
+        let labels = format_reply_waits(16, 1, UiLanguage::Ja);
+        assert!(labels.contains("人の判断待ち16件"), "{labels}");
         assert!(labels.contains("スレッド返信待ち1件"), "{labels}");
-        row.awaiting_human_count_saturated = false;
         let before = format!("{row:?}");
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let info = BrowserMessage::Info {

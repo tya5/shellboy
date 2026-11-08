@@ -22,6 +22,7 @@ LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn
 }
 fn columns_from() -> String {
     let activity_joins = activity_joins();
+    let sample_limit = crate::protocol::MAX_PENDING_REPLY_DUTIES + 1;
     let (revisit_pending, revisit_delivered) =
         crate::control::revisit::summary_sql("t.id", "latest.id");
     format!(
@@ -29,11 +30,10 @@ fn columns_from() -> String {
     COALESCE(u.state,latest.state), latest.stop_reason,latest.id,{ACTIVITY_COLUMNS},
     {revisit_pending},{revisit_delivered},
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
-    (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending'),
-    (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1),
-    (SELECT count(*) FROM (SELECT q.rowid FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 ORDER BY q.created_at LIMIT 129)),
-    (SELECT min(q.created_at) FROM (SELECT q.created_at FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 ORDER BY q.created_at LIMIT 129) q),
-    (SELECT count(*)>128 FROM (SELECT q.rowid FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 ORDER BY q.created_at LIMIT 129))
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' LIMIT {sample_limit})),
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1 LIMIT {sample_limit})),
+    (SELECT count(*) FROM (SELECT 1 FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 LIMIT {sample_limit})),
+    (SELECT min(q.created_at) FROM (SELECT r.created_at FROM receipt r INDEXED BY receipt_human_reply_pending WHERE r.target_thread_id=t.id AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 ORDER BY r.arrival_seq LIMIT {sample_limit}) q)
 FROM thread t {activity_joins}
 "
     )
@@ -105,7 +105,6 @@ pub(crate) struct RawSummary {
     pub(crate) awaiting_reply: u64,
     pub(crate) awaiting_thread_replies: u64,
     pub(crate) awaiting_human_oldest_at: Option<String>,
-    pub(crate) awaiting_human_count_saturated: bool,
     pub(crate) awaiting_replies: u64,
 }
 
@@ -219,7 +218,6 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         awaiting_reply: row.get::<_, i64>(24)?.max(0) as u64,
         awaiting_thread_replies: row.get::<_, i64>(23)?.max(0) as u64,
         awaiting_human_oldest_at: row.get(25)?,
-        awaiting_human_count_saturated: row.get(26)?,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
@@ -228,7 +226,6 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
         awaiting_human_count: raw.awaiting_reply,
-        awaiting_human_count_saturated: raw.awaiting_human_count_saturated,
         awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
         awaiting_thread_count: raw.awaiting_thread_replies,
         last_end_message: None,

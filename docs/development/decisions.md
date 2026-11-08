@@ -4292,3 +4292,16 @@ W8 P2 correction: the all-bytes barrier moved the control probe too late. Keep a
 instead: first stdout batch committed, Thread-create response while stderr is held, assert incomplete total, then
 release stderr and close stdin. Remove the running-state assertion rather than forcing it. This preserves evidence
 of control progress before saving finishes without depending on natural process duration.
+### D-262-5: Reject new reply duties at 16 per recipient Thread
+
+The user's 2026-11-08 decision replaces the previous read-time saturation
+contract. Define the admission limit once in the protocol layer; both `message
+ask` and `expect-reply` sends count all pending duties for the recipient Thread
+with an indexed `LIMIT 17` inside the same serialized write transaction. Reject
+the 17th with `reply_limit`, reporting the limit and current count and explaining
+that replying or cancelling frees capacity. Keep existing over-limit receipts;
+read-side count, oldest sample and awaiting-replies projections must use indexed
+bounded reads. No cleanup migration. Migration 38 adds a receipt arrival sequence
+and partial index to make candidate Thread seeks bounded across a stable page
+watermark. W8's same-Thread high-cardinality and off-page exclusion concerns are
+covered by query-plan/VM-step fixtures.

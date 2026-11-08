@@ -163,15 +163,7 @@ states never change again.
 
 ### Fail-safe cap
 
-A send with `--expect-reply` is rejected with the existing `input_limit` error
-when the target Thread already has **128** messages with `reply.state =
-pending`. 128 is reused, not chosen: it is the existing bound of the pending
-queue projection, `message cancel` and resume-time message recovery. Reusing it
-also keeps every pending-reply list (`thread get`, the Run-end reminder) inside
-one bounded response with no cursor. Verification will include a test at
-exactly 128/129 and record the size of a 128-entry reminder notice; no timing
-or size is assumed here. The cap is per recipient Thread because the recipient
-is the one that must work through the list (decision Q15).
+A send with `--expect-reply` is rejected with typed `reply_limit` when the target Thread already has 16 pending duties. The count is read with an indexed `LIMIT 17` inside the same write transaction as receipt insertion. The error includes `details.limit` and `details.current_count` and directs the caller to reply to or cancel an outstanding request before retry. This per-recipient cap covers both human asks and Thread replies. Legacy over-limit rows are preserved; reads remain bounded.
 
 ### Migration 26
 
@@ -715,7 +707,7 @@ the operation fingerprint), `message reply` (`Command::MessageReply`,
 message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
-`context_changed` notice, `thread get` `awaiting_reply` for human decisions and `awaiting_thread_replies` for Thread recipients, with additive `awaiting_replies`; admission notices (`reply_expected`, `reply`) and the 128 cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
+`context_changed` notice, `thread get` `awaiting_reply` for human decisions and `awaiting_thread_replies` for Thread recipients, with additive `awaiting_replies`; admission notices (`reply_expected`, `reply`) and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
 - Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
@@ -868,7 +860,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q12 | Remove `history get --final-answer-only` | **Judgement:** not removed. The recommendation assumed exec would stop using it, but the user's Q14 answer (`--result turn-end\|run-end`) needs the end-message projection. It is renamed `--end-message-only` with the rest of the "answer" vocabulary |
 | Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
-| Q15 | Cap | 128 pending reply-expected messages per receiving Thread; the 129th send is refused with `input_limit` |
+| Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th new send/ask is refused with `reply_limit` and details containing limit/current_count |
 | Q16 | Asking yourself | A model cannot send a reply-expected message to its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
 | D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
@@ -890,7 +882,7 @@ Other judgements made while finalizing (not covered by a user answer):
 
 ### Recovery queue units after integration with main (2026-11-03)
 
-The 128 pending reply-duty cap is not a general held-message admission bound.
+The pending reply-duty admission cap is not a general held-message admission bound.
 Ordinary sends can accumulate more than 128 held receipts; UI/readback windows
 also do not enforce admission. Per the user's decision, recovery must not refuse
 an oversized queue. Explicit send/retry releases the oldest 128 per pass and
@@ -921,7 +913,7 @@ cross-Thread human inbox paging; see [storage](storage.md). The pending receipt
 records `to_human=true`; reply state remains `pending` until a human reply,
 sender cancellation or recipient Thread deletion. Questions do not
 create a Run, deliver to a model, trigger Run-end reminders, or become ignored.
-They count toward the same 128 pending-reply cap.
+They count toward the same 16 pending-reply cap.
 
 `thread get` exposes unified pending duties for that Thread; `thread list` exposes
 only their count. The TUI renders the same per-Thread list in its `Pending replies`

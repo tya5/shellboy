@@ -314,6 +314,7 @@ Even when logical capacity stops new indexing, semantic searches of existing ind
 | `cursor_expired` / `cursor_encoding_mismatch` | Restart list/body retrieval without cursor; do not reuse for another target/encoding |
 | `output_expired` | Raw reclaimed; separately inspect saved quotes/answers, never invent source |
 | `input_limit` | Reported body/attachment/frame limit and target; no silent truncation |
+| `reply_limit` | Target Thread already has 16 pending reply duties (`details.limit`, `details.current_count`); reply to completed requests or cancel obsolete ones, then retry |
 | `storage_limit` | Inspect usage, reclaim according to retention or revise configuration, explicitly retry |
 | `save_failed` / `io_failed` | Free space, permissions, destination/reference state; distinguish unsaved input from saved acceptance |
 | Search unavailable / few results | Embedding settings, selected space, index status; explicitly choose historical backfill |

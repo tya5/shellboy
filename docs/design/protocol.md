@@ -271,7 +271,7 @@ not assert such work. Exit markers and Revisit are independent of activity.
 `thread.list` accepts optional `awaiting: "human"` (exclusive with `query`,
 `tags`, and `cwd`; it composes with `archived`, `limit`, and `cursor`). The CLI
 spelling is `shellboy thread list --awaiting human`. This returns a keyset
-page of only Threads with pending human-directed reply receipts. Items carry `awaiting_human_count` (an exact count up to 128, saturated at 128), `awaiting_human_count_saturated` (true iff the count exceeds 128), and nullable `awaiting_human_oldest_at` (the oldest `created_at` among the first 129 matching receipts). Both the count and oldest-time values are derived from at most 129 matching receipts; the count is exact through 128, then fixed at 128 with the saturation flag, never an estimate. Thread-directed
+page of only Threads with pending human-directed reply receipts. Items carry `awaiting_human_count` (bounded to the 16-duty admission maximum for newly accepted data) and nullable `awaiting_human_oldest_at` from the same bounded sample. Legacy data above the cap remains readable without an unbounded scan. Thread-directed
 reply duties do not qualify. Cursor scope binds the filter, archived mode, and
 receipt watermark. The reader uses the schema-36 partial index
 `receipt_human_reply_pending(target_thread_id, created_at)` and hydrates summary

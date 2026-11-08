@@ -10922,3 +10922,21 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 - [x] Paged activity snapshots contain no attempt state whose latest sequence exceeds that page cursor; tests page across attempt start and end.
 - [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
 - [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.
+### #262 per-recipient reply-duty admission cap (validation in progress)
+
+- The single limit constant is 16. Message ask and expect-reply share one
+  write-transaction guard; the query reads no more than 17 pending indexed rows.
+- The 17th addition must return typed `reply_limit` with `limit` and
+  `current_count`; a committed reply or cancellation must allow a subsequent
+  addition. Nothing deletes old over-limit data.
+- Legacy reading must cap per-Thread aggregate samples and use the human partial
+  index for candidate seeks with a receipt-sequence watermark. The EXPLAIN and
+  5,000-Thread/off-page exclusion test must show bounded VM steps; a separate
+  1,000-receipt same-Thread fixture verifies legacy over-limit readability and
+  the per-Thread `LIMIT 17` plan.
+- `count_saturated` is removed from implementation, schema and guidance. Protocol
+  schema, error catalog, Agent Guide and CLI guidance describe the same 16 limit
+  and recovery action.
+- Synthetic fixtures only; no real database, provider or paid API is used. Studio
+  behavior and non-host OS local execution are not dynamically tested; exact-tip
+  normal and all-OS CI remain the cross-platform gate.
