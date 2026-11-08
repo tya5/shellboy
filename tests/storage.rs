@@ -1242,6 +1242,9 @@ async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata()
     for _ in 0..2 {
         let db = DbWorker::open(&path).await.unwrap();
         db.call(|db| {
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=38",[],|r|r.get::<_,String>(0))?,"0038_human_reply_pending");
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=39",[],|r|r.get::<_,String>(0))?,"0039_independent_runs");
+            assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='index' AND name IN ('receipt_human_reply_pending','receipt_reply_run_pending')",[],|r|r.get::<_,i64>(0))?,2);
             assert_eq!(db.query_row("SELECT kind FROM event WHERE id='legacy-recovery'",[],|r|r.get::<_,String>(0))?,"recovery_wait");
             assert!(db.query_row("SELECT json_extract(payload_ref_json,'$.saved') FROM event WHERE id='legacy-recovery'",[],|r|r.get::<_,bool>(0))?);
             assert_eq!(
