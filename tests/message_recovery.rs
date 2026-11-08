@@ -528,9 +528,9 @@ async fn organizational_parent_does_not_authorize_old_unadmitted_input() {
             .unwrap();
         let current = snapshot(&owner, &old.message_id).await;
         assert_provenance(&before, &current);
-        assert_eq!(
-            current.on_path, false,
-            "unrelated machine send cannot recover older instructions"
+        assert!(
+            !current.on_path,
+            "machine parentage cannot recover older instructions"
         );
         assert_eq!(current.admission, "unadmitted");
         let replay = control
