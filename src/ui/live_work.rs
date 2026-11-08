@@ -1911,8 +1911,8 @@ mod tests {
             }
         }
         assert_eq!(cases, 864);
-        // Captured from the original renderer before shared-region extraction.
-        assert_eq!(digest, 0xcce04517ab437b25);
+        // Re-captured after removing the child-Run glyph and heading count (#276).
+        assert_eq!(digest, 0x59bbb08be0a8ce81);
     }
 
     fn screen(ui: &mut UiState) -> (String, u16) {
@@ -2162,7 +2162,7 @@ mod tests {
                     assert!(buffer[(0, 2)].modifier.contains(
                         ratatui::style::Modifier::REVERSED | ratatui::style::Modifier::BOLD
                     ));
-                    assert!(rows[3].contains("↳") && rows[4].contains("⋯"), "{rows:?}");
+                    assert!(rows[3].contains("⋯") && rows[4].contains("⋯"), "{rows:?}");
                     let arrow = if observed == Some(1) {
                         "→ [1]"
                     } else {
