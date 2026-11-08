@@ -317,7 +317,7 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
     bounded(control.start()).await.unwrap();
     owner.db.call(|db| {
         let tx=db.transaction()?;
-        for (thread,run,turn,parent,state) in [("parent","r-parent","u-parent",None,"running"),("child","r-child","u-child",Some("r-parent"),"running"),("recovering","r-recovery","u-recovery",None,"recovery_wait")] {
+        for (thread,run,turn,state) in [("parent","r-parent","u-parent","running"),("child","r-child","u-child","running"),("recovering","r-recovery","u-recovery","recovery_wait")] {
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','','','now')",[thread])?;
             tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,recovery_reason_json,created_at)VALUES(?1,?2,?3,?4,?5,'now')",rusqlite::params![turn,thread,run,state,if state=="recovery_wait" {Some(r#"{"code":"config_invalid","message":"fixture recovery reason"}"#)}else{None}])?;
