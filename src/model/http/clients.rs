@@ -34,7 +34,7 @@ impl HttpClients {
                 connections: config.connections.clone(),
                 default_connection: config.default_connection.clone(),
                 default_model: config.default_model.clone(),
-            extra_instructions: config.extra_instructions.clone(),
+                extra_instructions: config.extra_instructions.clone(),
                 entries: config
                     .connections
                     .iter()
