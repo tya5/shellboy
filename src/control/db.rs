@@ -2670,7 +2670,14 @@ fn awaiting_human_candidates(
                         serde_json::from_str(&timestamps_json).unwrap_or_default();
                     let count = timestamps.len() as u64;
                     let oldest = timestamps.first().cloned();
-                    (id, AwaitingHumanCount { count: count.min(128), oldest, saturated: count > 128 })
+                    (
+                        id,
+                        AwaitingHumanCount {
+                            count: count.min(128),
+                            oldest,
+                            saturated: count > 128,
+                        },
+                    )
                 })
                 .collect()
         })
