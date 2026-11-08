@@ -413,7 +413,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
     let (directory, owner) = owner_fixture(&url).await;
     owner.db.call(|db|{
         let tx=db.transaction()?;
-        for (thread,run,turn,parent) in [("parent","old-parent","parent-turn",None),("child","old-child","child-turn",Some("old-parent")),("grandchild","old-grandchild","grandchild-turn",Some("old-child"))] {
+        for (thread,run,turn) in [("parent","old-parent","parent-turn"),("child","old-child","child-turn"),("grandchild","old-grandchild","grandchild-turn")] {
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','test','fixture','now')",[thread])?;
             tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'running','now')",rusqlite::params![turn,thread,run])?;
@@ -711,7 +711,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     let grandchild_query = grandchild.clone();
     owner.db.call(move|db|{
         let tx=db.transaction()?;
-        for (thread,run,turn,owner) in [(&child_query,"recovery-child","recovery-child-turn",parent_run.as_str()),(&grandchild_query,"recovery-grandchild","recovery-grandchild-turn","recovery-child")] {
+        for (thread,run,turn) in [(&child_query,"recovery-child","recovery-child-turn"),(&grandchild_query,"recovery-grandchild","recovery-grandchild-turn")] {
             tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,?2,?3,'recovery_wait','now','{\"reason\":\"fixture_proxy_failure\"}')",rusqlite::params![turn,thread,run])?;
         }
