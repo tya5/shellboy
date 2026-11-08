@@ -539,12 +539,12 @@ async fn stopping_one_run_does_not_freeze_organizational_children() {
                 sender_label: None,
                 deliver: Deliver::Next,
                 thread_id: Some(new_child.thread_id),
-                text: "forbidden late child".into(),
+                text: "independent child admission".into(),
             })),
             Some(origin),
         )
         .await;
-    assert_eq!(result.unwrap_err().code, ErrorCode::InvalidState);
+    assert_eq!(result.unwrap().result["assignment"],"new_run");
     store
         .database
         .call(|connection| {
