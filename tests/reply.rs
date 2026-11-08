@@ -553,8 +553,9 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
             }
             if deleted=="recipient" {
                 let event:(String,Option<String>)=db.query_row("SELECT kind,target_run_id FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_outcome'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
-                assert_eq!(event,("context_changed".into(),None));
-                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id='sender'",[],|r|r.get::<_,i64>(0))?,0,"an idle sender must not start");
+                assert_eq!(event.0,"reply_outcome");
+                assert!(event.1.is_some());
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id='sender' AND state='live'",[],|r|r.get::<_,i64>(0))?,1,"ordinary outcome delivery activates an idle sender");
             }
             assert_eq!(db.query_row("SELECT count(*) FROM gc_job WHERE state='pending'",[],|r|r.get::<_,i64>(0))?,1);
             Ok(())

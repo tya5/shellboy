@@ -787,7 +787,7 @@ were spilled or the active Turn was summarized. Under known coverage it retries 
 grow/change, while new active sources remain eligible for active summarization. `compact list` can show
 `blocked_by_earlier_rejection`; explicit compact remains available. Unknown-coverage #248 blocking is unchanged.
 
-Protocol 4 removes Run ownership and the duplicate reply-duty lists. Use `awaiting_replies` and inspect its recipient
-tag. External peers must match the advertised version exactly; update Studio/clients with the owner, without a v3
+Protocol 5 removes Run ownership and the duplicate reply-duty lists. Use `awaiting_replies` and inspect its recipient
+tag. External peers must match the advertised version exactly; update Studio/clients with the owner, without a v4
 fallback. A Run owns shells only. Explicit own Run/Turn/invoking-shell waits fail with `self_wait`; other observations
 have no dependency graph. Child requests use expected replies and normal delivery after the sender Turn ends.

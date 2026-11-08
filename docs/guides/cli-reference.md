@@ -51,11 +51,11 @@ Normal CLI success/failure writes one JSON line to stdout; help/version use ordi
 If a reply is lost, `details.read_only=true` identifies a nonmutating operation. Get/list/search/preview/status create no receipt and recompute current values even with the same operation ID. After disconnect, reissue the same command/filters, but semantic query embedding may charge again. `wait` is not read-only because it may save the caller's waiting state.
 
 ```json
-{"protocol_version":4,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
+{"protocol_version":5,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
 ```
 
 ```json
-{"protocol_version":4,"operation_id":"INSTANCE:NONCE","ok":false,"error":{"code":"invalid_state","message":"...","hint":"...","details":{}}}
+{"protocol_version":5,"operation_id":"INSTANCE:NONCE","ok":false,"error":{"code":"invalid_state","message":"...","hint":"...","details":{}}}
 ```
 
 `hint` / `details` are optional; success has no error and failure has no result. Errors before communication can have an empty operation_id. The whole protocol frame is limited to 8MiB. Owner and CLI must use the current protocol version (4); `Welcome` advertises capabilities after the version check; there is no older-owner fallback.
@@ -66,7 +66,7 @@ If a reply is lost, `details.read_only=true` identifies a nonmutating operation.
 
 ### External RPC clients and versioning (#244)
 
-The local owner handshake exposes `protocol_version`; clients in another repository must compare it before use. Protocol 4 has a capability list; clients check the exact version first and use only the advertised capabilities. Open result records and `Welcome`/`Endpoint` ignore additive fields, but closed result records, request args, and unknown operation names remain strict. A version mismatch is terminal; there is no protocol-3 downgrade. A wire change that either peer cannot safely ignore requires a protocol version bump and coordinated owner/client release. Rely only on the documented operations, arguments, result fields, errors, cursor rules, and bounds—not internal tables, logs, or undocumented error details. Treat cursors as opaque. For ambiguous mutations, query the saved receipt with the same operation ID; never retry under a fresh ID merely because a transport ended.
+The local owner handshake exposes `protocol_version`; clients in another repository must compare it before use. Protocol 5 retains a capability list; clients check the exact version first and use only the advertised capabilities. Open result records and `Welcome`/`Endpoint` ignore additive fields, but closed result records, request args, and unknown operation names remain strict. A version mismatch is terminal; there is no protocol-4 downgrade. A wire change that either peer cannot safely ignore requires a protocol version bump and coordinated owner/client release. Rely only on the documented operations, arguments, result fields, errors, cursor rules, and bounds—not internal tables, logs, or undocumented error details. Treat cursors as opaque. For ambiguous mutations, query the saved receipt with the same operation ID; never retry under a fresh ID merely because a transport ended.
 
 Without an explicit ID, the CLI generates an instance-specific operation ID. For mutations/wait, resending `--operation-id` with the same ID, content, and caller retrieves retained results; changed content yields `operation_conflict`. Reads reobserve under the same ID and create no receipt for themselves. Message acceptance and receipt share one transaction. An accepted side-effect intent with unknown outcome may return pending: **this does not justify reissuing it under another ID**. Inspect `operation get --operation ID` `state` / `outcome` and target state. Old-instance IDs query saved receipts, never execute as new operations. Mutation replay of an unsaved old ID or expired outcome yields `operation_expired`; querying a missing receipt yields `operation_not_found`. Current-instance terminal outcomes may be collected after 24 hours during maintenance or under pressure, retaining expiry metadata to prevent reexecution. Pending and unapplied references remain protected. Check `result_expired` / `replay_policy`; do not blindly repeat a mutation under a new ID after its result disappears.
 
