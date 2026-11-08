@@ -122,7 +122,7 @@ async fn receipt_commit_is_durable_unique_and_assignment_immutable() {
 }
 
 #[tokio::test]
-async fn dag_and_run_ownership_cycles_and_duplicate_active_runs_are_rejected() {
+async fn dag_cycles_and_duplicate_active_runs_are_rejected_without_run_ownership() {
     let (_directory, database) = database().await;
     database.call(|connection| {
         for id in ["a","b","c"] {
@@ -135,9 +135,8 @@ async fn dag_and_run_ownership_cycles_and_duplicate_active_runs_are_rejected() {
         assert!(connection.execute("INSERT INTO edge VALUES('a','a')", []).is_err());
         // Updating an existing edge cannot bypass the insertion trigger.
         assert!(connection.execute("UPDATE edge SET src='c' WHERE src='a'", []).is_err());
-        connection.execute("UPDATE run SET owner_run_id='a' WHERE id='b'", [])?;
-        connection.execute("UPDATE run SET owner_run_id='b' WHERE id='c'", [])?;
-        assert!(connection.execute("UPDATE run SET owner_run_id='c' WHERE id='a'", []).is_err());
+        assert_eq!(connection.query_row("SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",[],|r|r.get::<_,i64>(0))?,0);
+        assert_eq!(connection.query_row("SELECT count(*) FROM sqlite_schema WHERE name IN ('runs_by_owner','reject_owner_cycle_insert','reject_owner_cycle_update')",[],|r|r.get::<_,i64>(0))?,0);
         assert!(connection.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('duplicate','a','stopping','now')", []).is_err());
         connection.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('a',0,'a'),('a',1,'b'),('a',2,'c')", [])?;
         assert!(connection.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('a',3,'b')", []).is_err());
