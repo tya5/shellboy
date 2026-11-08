@@ -1453,6 +1453,7 @@ impl Store {
                         .map_err(storage_error)?;
                 let mut result = MutationResult::value(cancelled)?;
                 result.changed_threads = changed;
+                result.quiet_wake_threads=super::reply::cancellation_wakes_tx(tx,&args.message_ids).map_err(sql_error)?;
                 Ok(result)
             }
             Command::OperationGet(args) => MutationResult::value(operation_details(
@@ -2149,7 +2150,7 @@ fn assign_message(
             }
         }
     } else {
-        let (run_id,turn_id)=start_run_tx(tx,id,actor(caller),now).map_err(sql_error)?;
+        let (run_id, turn_id) = start_run_tx(tx, id, actor(caller), now).map_err(sql_error)?;
         // A human's new instruction resumes unassigned saved input.
         // An independent model send does not silently admit recovery input.
         // Previously assigned receipts keep their original Run/Turn forever.
@@ -2185,13 +2186,28 @@ fn assign_message(
 }
 
 /// Shared ordinary Run activation for messages and explicit reply outcome delivery.
-pub(super) fn start_run_tx(tx:&Connection,thread:&str,source:Value,at:&str)->rusqlite::Result<(String,String)> {
-    let run=uuid::Uuid::new_v4().to_string();
-    tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,at])?;
-    super::context::record(tx,thread,"run_started",source.clone(),json!({"run_id":run}),at)?;
-    archive::clear_for_new_run(tx,thread,source,at)?;
-    let turn=super::state::create_turn_tx(tx,thread,&run,at,at)?;
-    Ok((run,turn))
+pub(super) fn start_run_tx(
+    tx: &Connection,
+    thread: &str,
+    source: Value,
+    at: &str,
+) -> rusqlite::Result<(String, String)> {
+    let run = uuid::Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
+        params![run, thread, at],
+    )?;
+    super::context::record(
+        tx,
+        thread,
+        "run_started",
+        source.clone(),
+        json!({"run_id":run}),
+        at,
+    )?;
+    archive::clear_for_new_run(tx, thread, source, at)?;
+    let turn = super::state::create_turn_tx(tx, thread, &run, at, at)?;
+    Ok((run, turn))
 }
 
 fn actor(caller: Option<&Origin>) -> Value {

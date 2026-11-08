@@ -163,6 +163,10 @@ pub(crate) fn cancel_reply_tx(
     admitted: bool,
 ) -> rusqlite::Result<bool> {
     let changed = db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply',json(?2)),updated_at=?3 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,json!({"state":"cancelled","at":at,"cancelled_by":actor,"cancel_reason":"sender"}).to_string(),at])?;
+    if changed==1 {
+        let sender:String=db.query_row("SELECT sender_json FROM receipt WHERE message_node_id=?1",[message],|r|r.get(0))?;
+        outcome_tx(db,message,&sender,"cancelled",at)?;
+    }
     if changed == 1 && admitted {
         // Leave the current selected path and inflight manifest intact. The
         // ordinary event admission path presents this notice without waking a Run.
@@ -369,6 +373,26 @@ pub(crate) fn complete_tx(
         params![event, run],
     )?;
     Ok(Some(event))
+}
+
+/// Terminal recipient Runs cannot fulfill their applied requests; settle each once.
+pub(crate) fn terminal_tx(db:&Connection,run:&str,at:&str)->rusqlite::Result<Vec<String>> {
+    let mut wakes=Vec::new();
+    let rows=db.prepare("SELECT message_node_id,sender_json FROM receipt WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0 AND EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed')) ORDER BY rowid LIMIT 128")?.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    for (message,sender) in rows {
+        if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
+            && let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);}
+    }
+    Ok(wakes)
+}
+
+pub(crate) fn cancellation_wakes_tx(db:&Connection,messages:&[String])->rusqlite::Result<Vec<String>> {
+    let mut wakes=Vec::new();
+    for message in messages {
+        let thread:Option<String>=db.query_row("SELECT e.target_thread_id FROM event e JOIN delivery d ON d.event_id=e.id JOIN run r ON r.id=d.recipient_id WHERE e.id=?1 AND d.state='pending' AND r.state='live'",[format!("reply-outcome-{message}-cancelled")],|r|r.get(0)).optional()?;
+        if let Some(thread)=thread && !wakes.contains(&thread) {wakes.push(thread);}
+    }
+    Ok(wakes)
 }
 
 fn outcome_tx(
