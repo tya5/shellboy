@@ -800,7 +800,7 @@ mod tests {
             )
             .await
             .unwrap();
-            assert_eq!(result["status"],"timeout");
+            assert_eq!(result["status"], "timeout");
         }
         let other = observe(
             control.clone(),
@@ -850,7 +850,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result["status"],"timeout");
+        assert_eq!(result["status"], "timeout");
         cancel.cancel();
         assert_eq!(first.await.unwrap().unwrap()["status"], "interrupted");
         assert!(control.waits.entries.lock().unwrap().is_empty());

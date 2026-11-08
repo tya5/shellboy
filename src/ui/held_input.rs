@@ -626,7 +626,7 @@ mod tests {
                 run_id: "run".into(),
                 rows,
                 shells: 2,
-                children: 0,
+
                 waits: Some(0),
                 overflow: 0,
                 counts_capped: false,

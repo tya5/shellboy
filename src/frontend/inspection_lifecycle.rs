@@ -417,7 +417,11 @@ mod tests {
             let thread = format!("child-{i}");
             let run = format!("child-run-{i}");
             db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'Child','/','','p','m','now')",[&thread]).unwrap();
-            db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,format!("stamp-{i:05}")]).unwrap();
+            db.execute(
+                "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
+                params![run, thread, format!("stamp-{i:05}")],
+            )
+            .unwrap();
             db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,'r','u',?1,'running','/','{}','UTF-8','UTF-8','open',?2)",params![format!("shell-{i}"),format!("stamp-{i:05}")]).unwrap();
         }
     }

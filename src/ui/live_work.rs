@@ -42,7 +42,7 @@ enum WorkMessage<'a> {
     },
     Counts {
         shells: u64,
-        children: u64,
+
         waits: Option<u64>,
     },
     More(u64),
@@ -90,7 +90,7 @@ impl<'a> WorkMessage<'a> {
                 En,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: Some(waits),
                 },
             ) => format!("Shells: {shells} | Waits: {waits}"),
@@ -98,7 +98,7 @@ impl<'a> WorkMessage<'a> {
                 En,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: None,
                 },
             ) => format!("Shells: {shells} | Waits: unknown"),
@@ -106,7 +106,7 @@ impl<'a> WorkMessage<'a> {
                 Ja,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: Some(waits),
                 },
             ) => format!("shell {shells} | 待機 {waits}"),
@@ -114,7 +114,7 @@ impl<'a> WorkMessage<'a> {
                 Ja,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: None,
                 },
             ) => format!("shell {shells} | 待機 未取得"),
@@ -225,7 +225,7 @@ pub struct LiveWorkSnapshot {
     pub run_id: String,
     pub rows: Vec<LiveWorkRow>,
     pub shells: u64,
-    pub children: u64,
+
     pub waits: Option<u64>,
     pub overflow: u64,
     pub counts_capped: bool,
@@ -236,7 +236,6 @@ impl PartialEq for LiveWorkSnapshot {
         self.run_id == other.run_id
             && self.rows == other.rows
             && self.shells == other.shells
-            && self.children == other.children
             && self.waits == other.waits
             && self.overflow == other.overflow
             && self.counts_capped == other.counts_capped
@@ -248,13 +247,12 @@ fn counts_text(snapshot: &LiveWorkSnapshot, language: UiLanguage) -> String {
     if !snapshot.counts_capped {
         return WorkMessage::Counts {
             shells: snapshot.shells,
-            children: snapshot.children,
+
             waits: snapshot.waits,
         }
         .render(language);
     }
     let shells = super::activity::count_label(snapshot.shells, true, language);
-    let children = super::activity::count_label(snapshot.children, true, language);
     let waits = snapshot.waits.map(|n| n.to_string()).unwrap_or_else(|| {
         match language {
             UiLanguage::En => "unknown",
@@ -1086,7 +1084,7 @@ mod tests {
         LiveWorkSnapshot {
             run_id: "owner".into(),
             shells: 2,
-            children: 1,
+
             waits: Some(1),
             overflow: 1,
             counts_capped: false,
@@ -1385,7 +1383,7 @@ mod tests {
             })
             .collect();
         work.shells = 10;
-        work.children = 0;
+
         work.waits = Some(0);
         work.overflow = 0;
         ui.apply(UiUpdate::Activity {
@@ -2010,7 +2008,7 @@ mod tests {
             ui.select_thread("thread".into());
             let mut work = snapshot(at);
             work.shells = 1;
-            work.children = 0;
+
             work.waits = Some(0);
             work.overflow = 0;
             work.rows.truncate(1);
@@ -2266,7 +2264,7 @@ mod language_tests {
                 run_id: "owner".into(),
                 observed_at: Instant::now(),
                 shells: 1,
-                children: 1,
+
                 waits: Some(1),
                 overflow: 0,
                 counts_capped: false,
@@ -2403,7 +2401,7 @@ mod language_tests {
                     row
                 })
                 .collect();
-            data.children = COUNT as u64;
+
             data.shells = 0;
             data.waits = Some(0);
             view.accept(Some(data), Instant::now());
@@ -2477,7 +2475,7 @@ mod language_tests {
         assert!(
             WorkMessage::Counts {
                 shells: 0,
-                children: 0,
+
                 waits: None
             }
             .render(UiLanguage::En)

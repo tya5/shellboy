@@ -296,7 +296,7 @@ pub(super) fn prepare_with_language(
                     overflow: (extra.shells).saturating_sub(rows.len() as u64),
                     rows,
                     shells: extra.shells,
-                    children: 0,
+
                     waits: None,
                     counts_capped: false,
                     observed_at,

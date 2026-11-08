@@ -52,14 +52,13 @@ WITH wait_keys AS MATERIALIZED (
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),id,kind LIMIT ?3
 ), counts AS MATERIALIZED (
  SELECT (SELECT count(*) FROM shell_candidates) AS shells,
-        0 AS children,
         (SELECT count(*) FROM waits) AS waits,
         (SELECT count(*) FROM wait_observations WHERE COALESCE(proof_valid,0)=0) AS invalid_waits,
         (SELECT count(DISTINCT s.id) FROM waits w JOIN shell_execution s ON s.id=w.execution_id
          WHERE s.owner_run_id=?1 AND s.state IN ('starting','running','stopping')) AS duplicate_shells
 )
 SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked.state,picked.started_at,picked.output_at,
-       counts.shells,counts.children,counts.waits,counts.invalid_waits,
+       counts.shells,counts.waits,counts.invalid_waits,
        picked.description,counts.duplicate_shells,
        CASE WHEN json_type(w.value,'$.conditions')='array' THEN json_array_length(w.value,'$.conditions') END,
        CASE WHEN json_type(w.value,'$.conditions[0].type')='text' THEN substr(json_extract(w.value,'$.conditions[0].type'),1,64) END,
@@ -77,7 +76,7 @@ pub(super) struct RawLiveWork {
     run_id: String,
     rows: Vec<RawRow>,
     shells: u64,
-    children: u64,
+
     waits: Option<u64>,
     known_waits: u64,
     duplicate_shells: u64,
@@ -139,7 +138,7 @@ pub(super) fn read_tx_limited(
         run_id: run_id.into(),
         rows: Vec::new(),
         shells: 0,
-        children: 0,
+
         waits: known.then_some(0),
         known_waits: 0,
         duplicate_shells: 0,
@@ -150,10 +149,9 @@ pub(super) fn read_tx_limited(
     let mut rows = statement.query(rusqlite::params![run_id, encoded, limit as i64])?;
     while let Some(row) = rows.next()? {
         result.shells = row.get::<_, i64>(8)? as u64;
-        result.children = row.get::<_, i64>(9)? as u64;
-        result.known_waits = row.get::<_, i64>(10)? as u64;
-        result.duplicate_shells = row.get::<_, i64>(13)? as u64;
-        result.waits = (known && row.get::<_, i64>(11)? == 0).then_some(result.known_waits);
+        result.known_waits = row.get::<_, i64>(9)? as u64;
+        result.duplicate_shells = row.get::<_, i64>(12)? as u64;
+        result.waits = (known && row.get::<_, i64>(10)? == 0).then_some(result.known_waits);
         if let Some(kind) = row.get::<_, Option<String>>(0)? {
             result.rows.push(RawRow {
                 kind,
@@ -161,16 +159,16 @@ pub(super) fn read_tx_limited(
                 related: row.get(2)?,
                 execution: row.get(3)?,
                 label: row.get(4)?,
-                description: row.get(12)?,
+                description: row.get(11)?,
                 state: row.get(5)?,
                 started_at: row.get(6)?,
                 output_at: row.get(7)?,
                 title: None,
-                wait_condition_count: row.get(14)?,
-                wait_kind: row.get(15)?,
-                wait_timeout_ms: row.get(16)?,
-                wait_target_id: row.get(17)?,
-                wait_thread_count: row.get(18)?,
+                wait_condition_count: row.get(13)?,
+                wait_kind: row.get(14)?,
+                wait_timeout_ms: row.get(15)?,
+                wait_target_id: row.get(16)?,
+                wait_thread_count: row.get(17)?,
                 wait_target: None,
             });
         }
@@ -251,7 +249,6 @@ pub(super) fn prepare_in(
     let now = raw.wall_at;
     let overflow = raw
         .shells
-        .saturating_add(raw.children)
         .saturating_add(raw.known_waits)
         .saturating_sub(raw.duplicate_shells)
         .saturating_sub(raw.rows.len() as u64);
@@ -380,10 +377,10 @@ pub(super) fn prepare_in(
         run_id: raw.run_id,
         rows,
         shells: raw.shells,
-        children: raw.children,
+
         waits: raw.waits,
         overflow,
-        counts_capped: raw.shells == 128 || raw.children == 128,
+        counts_capped: raw.shells == 128,
         observed_at,
     }
 }
@@ -425,7 +422,7 @@ mod tests {
             let snapshot = prepare(read_tx_limited(&db, "r", Some(&[]), limit).unwrap());
             assert_eq!(snapshot.rows.len(), rows);
             assert_eq!(snapshot.overflow, overflow);
-            assert_eq!((snapshot.shells, snapshot.children), (4, 1));
+            assert_eq!(snapshot.shells, 4);
         }
         for invalid in [0, 11] {
             assert!(read_tx_limited(&db, "r", Some(&[]), invalid).is_err());
@@ -492,11 +489,10 @@ mod tests {
         assert_eq!(
             (
                 snapshot.shells,
-                snapshot.children,
                 snapshot.waits,
                 snapshot.overflow
             ),
-            (4, 1, Some(1), 0)
+            (4, Some(1), 0)
         );
         assert!(!snapshot.rows.iter().any(|r| matches!(&r.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-old")));
         let wait = snapshot
@@ -673,11 +669,10 @@ mod tests {
         assert_eq!(
             (
                 snapshot.shells,
-                snapshot.children,
                 snapshot.waits,
                 snapshot.overflow
             ),
-            (4, 1, Some(1), 2)
+            (4, Some(1), 2)
         );
         assert_eq!(snapshot.rows.len(), 3);
         assert!(snapshot.rows.iter().all(|row| !row.label.contains("child")));

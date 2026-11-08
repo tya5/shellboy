@@ -1262,7 +1262,7 @@ mod watch_tests {
             work: Some(LiveWorkSnapshot {
                 run_id: format!("run-{thread}"),
                 shells: 1,
-                children: 0,
+
                 waits: Some(0),
                 overflow: 0,
                 counts_capped: false,

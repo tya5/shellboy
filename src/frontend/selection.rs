@@ -395,7 +395,7 @@ mod live_child_tests {
                     output_age_base: None,
                 }],
                 shells: 0,
-                children: 1,
+
                 waits: Some(0),
                 overflow: 0,
                 counts_capped: false,
