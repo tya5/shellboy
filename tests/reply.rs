@@ -443,6 +443,7 @@ async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_
         db.execute("UPDATE turn SET state='running' WHERE id=?1",[recovering])?;
         Ok(())
     }).await.unwrap();
+    store.execute(request(Command::RunRetry(RunTarget{run_id:accepted["run_id"].as_str().unwrap().into()})),None).await.unwrap();
     // No live parent Run is required for a reply: delivery starts ordinary new work.
     store
         .database

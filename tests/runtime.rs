@@ -2876,47 +2876,134 @@ async fn stalled_stream_enters_durable_recovery_and_preserves_received_text_with
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_run_ended() {
-    for outcome in ["completed","stopped","cancelled"] {
-        let (url,mut requests,server)=proxy().await;
-        let (_directory,owner,control)=runtime(&url).await;
-        let (send,receive)=mpsc::channel(32);
-        let local=shellboy::ipc::LocalServer::bind(&owner,send).await.unwrap();
-        let serving=tokio::spawn(control.clone().serve(receive));
-        let parent=start(&control).await;
-        let first=incoming(&mut requests).await;
-        let child=command(&control,Command::ThreadCreate(ThreadCreateArgs{agents:None,connection:None,cwd:None,model:None,effort:None,parent_id:Some(parent.thread_id.clone())})).await;
-        let child=child["thread_id"].as_str().unwrap().to_owned();
-        let executable=env!("CARGO_BIN_EXE_shellboy").replace('\'',"'\\''");
+    for outcome in ["completed", "stopped", "cancelled"] {
+        let (url, mut requests, server) = proxy().await;
+        let (_directory, owner, control) = runtime(&url).await;
+        let (send, receive) = mpsc::channel(32);
+        let local = shellboy::ipc::LocalServer::bind(&owner, send)
+            .await
+            .unwrap();
+        let serving = tokio::spawn(control.clone().serve(receive));
+        let parent = start(&control).await;
+        let first = incoming(&mut requests).await;
+        let child = command(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: Some(parent.thread_id.clone()),
+            }),
+        )
+        .await;
+        let child = child["thread_id"].as_str().unwrap().to_owned();
+        let executable = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
         first.reply.send(tool(&format!("'{executable}' message send --thread '{child}' --expect-reply --text 'outcome fixture'"),false)).ok().unwrap();
-        let mut recipient=None;
+        let mut recipient = None;
         for _ in 0..2 {
-            let request=incoming(&mut requests).await;
-            if request.body["input"].as_array().unwrap().iter().any(|item|item["role"]=="developer" && item.to_string().contains(&format!("thread={child}"))) {recipient=Some(request);}
-            else {request.reply.send(final_answer("wait for explicit outcome")).ok().unwrap();}
+            let request = incoming(&mut requests).await;
+            if request.body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| {
+                    item["role"] == "developer"
+                        && item.to_string().contains(&format!("thread={child}"))
+                })
+            {
+                recipient = Some(request);
+            } else {
+                request
+                    .reply
+                    .send(final_answer("wait for explicit outcome"))
+                    .ok()
+                    .unwrap();
+            }
         }
-        state(&control,"run",parent.run_id.as_deref().unwrap(),"completed").await;
-        let child_query=child.clone();
+        state(
+            &control,
+            "run",
+            parent.run_id.as_deref().unwrap(),
+            "completed",
+        )
+        .await;
+        let child_query = child.clone();
         let (message,run):(String,String)=control.store.database.call(move|db|Ok(db.query_row("SELECT message_node_id,run_id FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.expect_reply')=1",[child_query],|r|Ok((r.get(0)?,r.get(1)?)))?)).await.unwrap();
         match outcome {
-            "completed"=>{
-                recipient.take().unwrap().reply.send(final_answer("no explicit reply")).ok().unwrap();
+            "completed" => {
+                recipient
+                    .take()
+                    .unwrap()
+                    .reply
+                    .send(final_answer("no explicit reply"))
+                    .ok()
+                    .unwrap();
                 // The existing once-only unanswered-duty reminder remains mandatory.
-                incoming(&mut requests).await.reply.send(final_answer("still no reply")).ok().unwrap();
+                incoming(&mut requests)
+                    .await
+                    .reply
+                    .send(final_answer("still no reply"))
+                    .ok()
+                    .unwrap();
             }
-            "stopped"=>{command(&control,Command::RunStop(RunTarget{run_id:run.clone()})).await;}
-            _=>{command(&control,Command::MessageCancel(MessageCancelArgs{message_ids:vec![message.clone()]})).await;}
+            "stopped" => {
+                command(
+                    &control,
+                    Command::RunStop(RunTarget {
+                        run_id: run.clone(),
+                    }),
+                )
+                .await;
+            }
+            _ => {
+                command(
+                    &control,
+                    Command::MessageCancel(MessageCancelArgs {
+                        message_ids: vec![message.clone()],
+                    }),
+                )
+                .await;
+            }
         }
-        let resumed=incoming(&mut requests).await;
-        let input=resumed.body["input"].to_string();
-        assert!(input.contains("reply_outcome") && input.contains(&message),"{outcome}: {input}");
-        assert!(input.contains(if outcome=="cancelled" {"cancelled"}else{"ignored"}));
-        let sender=parent.thread_id.clone();
-        let old=parent.run_id.clone().unwrap();
-        let resumed_run:String=control.store.database.call(move|db|Ok(db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live' AND id<>?2",[sender,old],|r|r.get(0))?)).await.unwrap();
-        resumed.reply.send(final_answer("outcome observed")).ok().unwrap();
-        state(&control,"run",&resumed_run,"completed").await;
-        if outcome=="cancelled" {command(&control,Command::RunStop(RunTarget{run_id:run})).await;}
+        let resumed = incoming(&mut requests).await;
+        let input = resumed.body["input"].to_string();
+        assert!(
+            input.contains("reply_outcome") && input.contains(&message),
+            "{outcome}: {input}"
+        );
+        assert!(input.contains(if outcome == "cancelled" {
+            "cancelled"
+        } else {
+            "ignored"
+        }));
+        let sender = parent.thread_id.clone();
+        let old = parent.run_id.clone().unwrap();
+        let resumed_run: String = control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT id FROM run WHERE thread_id=?1 AND state='live' AND id<>?2",
+                    [sender, old],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        resumed
+            .reply
+            .send(final_answer("outcome observed"))
+            .ok()
+            .unwrap();
+        state(&control, "run", &resumed_run, "completed").await;
+        if outcome == "cancelled" {
+            command(&control, Command::RunStop(RunTarget { run_id: run })).await;
+        }
         drop(recipient);
-        local.shutdown().await.unwrap();serving.abort();close(control,owner,server).await;
+        local.shutdown().await.unwrap();
+        serving.abort();
+        close(control, owner, server).await;
     }
 }

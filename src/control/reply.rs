@@ -549,6 +549,12 @@ mod tests {
                 INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('recipient-turn','t','recipient','running','0');
                 INSERT INTO node(id,kind,created_at,payload_json) VALUES('request','user','0','{}');
                 INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,path_admission,created_at,result_json) VALUES('request','request','{\"kind\":\"model\",\"thread_id\":\"s\"}','t','request','recipient','recipient-turn','applied','admitted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');").unwrap();
+            let sender = json!({"kind":"model","instance_id":"fixture","thread_id":"s","run_id":"sender","turn_id":"sender-turn","execution_id":"sender-shell"});
+            db.execute(
+                "UPDATE receipt SET sender_json=?1 WHERE id='request'",
+                [sender.to_string()],
+            )
+            .unwrap();
             let tx = db.transaction().unwrap();
             if state == "recovery_wait" {
                 tx.execute(
@@ -586,7 +592,8 @@ mod tests {
                     vec![]
                 } else {
                     vec![String::from("s")]
-                }
+                },
+                "{state}"
             );
             if state != "recovery_wait" {
                 assert_eq!(tx.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id JOIN run r ON r.id=d.recipient_id JOIN turn u ON u.run_id=r.id WHERE e.target_thread_id='s' AND d.state='pending' AND r.state='live' AND u.state='running'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
