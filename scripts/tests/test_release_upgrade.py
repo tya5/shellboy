@@ -41,6 +41,10 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.assertEqual(base.count(tags), 1)
         base = base.replace(", branch_kind TEXT CHECK(branch_kind IS NULL OR branch_kind IN ('fork','rewind'))", '').replace(', spill_tools_json TEXT CHECK(spill_tools_json IS NULL OR octet_length(spill_tools_json)<=16384)', '').replace('CREATE INDEX node_spill_tools ON node(id,spill_tools_json);\n', '')
         db.executescript(base.replace(suffix, '').replace(column, '').replace(archive_indexes, '').replace(int8_scale, '').replace(chunks_job, '').replace(tags, ''))
+        db.execute('DROP INDEX IF EXISTS receipt_reply_run_pending')
+        db.execute('ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id)')
+        db.execute('CREATE INDEX runs_by_owner ON run(owner_run_id,state)')
+        db.execute('DROP INDEX IF EXISTS wait_recovery_thread')
         for ident, parent in [('parent', None), ('child', 'parent')]:
             db.execute('INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) '
                        'VALUES(?,?,?,?,?,?,?)', (ident, parent, '/synthetic', '', 'fixture', 'mock', '2026-11-01T00:00:00Z'))
@@ -54,7 +58,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
     def upgrade(self, db, start=16, target=17):
         before, records = checks.ledger(db), checks.snapshot(db)
         for version in range(start + 1, target + 1):
-            db.executescript(checks.DERIVED[version].read_text(encoding='utf-8'))
+            checks.apply_migration(db, version)
         checks.check_migration(db, before, start, target)
         checks.preserved(db, records)
         return before, records
@@ -377,22 +381,43 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(33, 39)])
         checks.preserved(db, records)
 
+    def test_schema32_to39_preserves_rows_and_foreign_keys(self):
+        db = self.fixture(32)
+        before, records = self.upgrade(db, 32, 39)
+        self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(33, 40)])
+        checks.preserved(db, records)
+        self.assertEqual(db.execute('PRAGMA foreign_keys').fetchone(), (1,))
+
+    def test_schema39_foreign_key_violation_rolls_back_and_restores_guard(self):
+        db = self.fixture(38)
+        db.commit()
+        db.execute('PRAGMA foreign_keys=OFF')
+        db.execute("UPDATE thread SET parent_thread_id='missing' WHERE id='child'")
+        db.commit()
+        db.execute('PRAGMA foreign_keys=ON')
+        with self.assertRaisesRegex(AssertionError, 'foreign key violation'):
+            checks.apply_migration(db, 39)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone(), (38,))
+        self.assertEqual(db.execute('PRAGMA foreign_keys').fetchone(), (1,))
+        self.assertIn('owner_run_id', {row[1] for row in db.execute('PRAGMA table_info(run)')})
+        self.assertIsNone(db.execute('SELECT version FROM schema_migration WHERE version=39').fetchone())
+
     def test_schema37_to38_checks_only_the_human_pending_index(self):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
         db.executescript((ROOT / 'src/storage/current.sql').read_text())
-        db.executescript("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version=38; PRAGMA user_version=37;")
+        db.executescript("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version IN (38,39); PRAGMA user_version=37;")
         before, _ = self.upgrade(db, 37, 38)
         self.assertEqual(checks.ledger(db), before + [(38, '0038_human_reply_pending')])
         db.execute('DROP INDEX receipt_human_reply_pending')
         with self.assertRaisesRegex(AssertionError, 'human reply targets'):
             checks.check_migration(db, before, 37, 38)
 
-    def test_arguments_default_to_public_v0100_schema32_and_target38(self):
+    def test_arguments_default_to_public_v0100_schema32_and_target39(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.10.0', 32, checks.CARGO_VERSION, 38))
+                         ('0.10.0', 32, checks.CARGO_VERSION, 39))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
@@ -403,9 +428,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 38))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 39))
         release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 38))
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 39))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])
