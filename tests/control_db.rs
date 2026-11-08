@@ -478,7 +478,7 @@ async fn machine_message_does_not_resume_recovery_but_new_human_instruction_does
 }
 
 #[tokio::test]
-async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
+async fn stopping_one_run_does_not_freeze_organizational_children() {
     let (_directory, store) = store().await;
     let parent = create(&store, None).await;
     let (parent_message, _) = send(&store, &parent.thread_id, "parent").await;
@@ -512,14 +512,22 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
         }),
     )
     .await;
-    assert_eq!(
-        stop.stop_runs,
-        vec![
-            child_message.run_id.unwrap(),
-            parent_message.run_id.clone().unwrap()
-        ],
-        "children stop before parents"
-    );
+    assert_eq!(stop.stop_runs, vec![parent_message.run_id.clone().unwrap()]);
+    let child_run = child_message.run_id.unwrap();
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row("SELECT state FROM run WHERE id=?1", [child_run], |r| r
+                    .get::<_, String>(
+                    0
+                ))?,
+                "live"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     let new_child = create(&store, Some(parent.thread_id)).await;
     let result = store
         .execute(
@@ -546,7 +554,7 @@ async fn hierarchical_stop_freezes_owned_descendants_before_new_child_start() {
                     [],
                     |row| row.get::<_, i64>(0)
                 )?,
-                2
+                1
             );
             Ok(())
         })
@@ -956,7 +964,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
 }
 
 #[tokio::test]
-async fn any_caller_may_stop_any_run_and_ownership_only_drives_cascade_and_notices() {
+async fn any_caller_may_stop_any_independent_run_without_cascade() {
     let (_directory, store) = store().await;
     let parent = create(&store, None).await;
     let (parent_message, _) = send(&store, &parent.thread_id, "parent").await;
@@ -1029,10 +1037,22 @@ async fn any_caller_may_stop_any_run_and_ownership_only_drives_cascade_and_notic
         )
         .await
         .unwrap();
-    assert_eq!(
-        stopped.stop_runs,
-        vec![child.run_id.unwrap(), parent_message.run_id.unwrap()]
-    );
+    assert_eq!(stopped.stop_runs, vec![parent_message.run_id.unwrap()]);
+    let child_run = child.run_id.unwrap();
+    store
+        .database
+        .call(move |db| {
+            assert_eq!(
+                db.query_row("SELECT state FROM run WHERE id=?1", [child_run], |r| r
+                    .get::<_, String>(
+                    0
+                ))?,
+                "live"
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     let human = execute(
         &store,
         Command::RunStop(RunTarget {

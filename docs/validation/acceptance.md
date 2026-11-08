@@ -10981,3 +10981,7 @@ reminder), explicit stop, and cancellation after the requesting Run completes; e
 Run's model input through normal delivery. Terminal `failed` is covered by the shared terminal helper's synthetic
 DB test, not a real provider failure: retry exhaustion remains recoverable and must not be mislabeled terminal.
 The actual final-SHA CI evidence will be reported separately; these focused passes do not claim a full-suite pass.
+
+Correction to the preceding incremental count: the focused protocol suite contains **33** tests, not 34. All 33
+passed against the regenerated version-5 artifact. The latest migration fixture repair also brings storage to
+25/25, including legacy recovery event/index conversion and pending reply preservation over two reopens.
