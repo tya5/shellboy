@@ -71,6 +71,7 @@ fn operation_result_schemas(
     opaque!("run.stop");
     result!("turn.get", TurnDetails);
     result!("wait", WaitResult);
+    result!("events.wait", EventsWaitResult);
     result!("history.list", Page<HistorySnippet>);
     result!("history.window", HistoryWindow);
     result!("history.get", HistoryBody);
@@ -1100,7 +1101,7 @@ record!(EventReasoningActivity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     received_bytes: Option<u64>
 });
-record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Vec::is_empty")] reasoning_activity: Vec<EventReasoningActivity> });
+record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.

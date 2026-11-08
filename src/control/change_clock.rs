@@ -877,7 +877,8 @@ mod tests {
         let ended = ended_response.result.unwrap();
         assert_eq!(ended["status"], "changed");
         assert_eq!(ended["changes"][0]["thread_id"], "t");
-        assert!(ended["reasoning_activity"].as_array().unwrap().is_empty());
+        // The short-poll result has no activity field for this isolated result path.
+        assert_eq!(ended.get("reasoning_activity"), None);
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
