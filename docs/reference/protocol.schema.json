@@ -1,7 +1,9 @@
 {
-  "$id": "https://shellboy.dev/schema/protocol-v3.json",
+  "$id": "https://shellboy.dev/schema/protocol-v4.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "capabilities": [],
+  "capabilities": [
+    "events.reasoning_activity"
+  ],
   "definitions": {
     "Accepted": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1627,6 +1629,23 @@
       ],
       "type": "string"
     },
+    "EventChange": {
+      "properties": {
+        "seq": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "seq"
+      ],
+      "type": "object"
+    },
     "EventCursor": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "description": "Opaque cursor: the owner instance that issued it and a position of that instance's change clock.",
@@ -1651,6 +1670,82 @@
         "seq"
       ],
       "title": "EventCursor",
+      "type": "object"
+    },
+    "EventLiveText": {
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "deltas": {
+          "items": {
+            "$ref": "#/definitions/EventTextDelta"
+          },
+          "type": "array"
+        },
+        "gap": {
+          "type": "boolean"
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "attempt_id",
+        "gap",
+        "deltas"
+      ],
+      "type": "object"
+    },
+    "EventReasoningActivity": {
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "received_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "attempt_id",
+        "elapsed_ms"
+      ],
+      "type": "object"
+    },
+    "EventTextDelta": {
+      "properties": {
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reasoning": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "offset",
+        "reasoning",
+        "text"
+      ],
       "type": "object"
     },
     "EventsWaitArgs": {
@@ -1679,6 +1774,60 @@
         }
       },
       "type": "object"
+    },
+    "EventsWaitResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/definitions/EventChange"
+          },
+          "type": "array"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "live_text": {
+          "items": {
+            "$ref": "#/definitions/EventLiveText"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "reasoning_activity": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/EventReasoningActivity"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/EventsWaitStatus"
+        }
+      },
+      "required": [
+        "status",
+        "cursor",
+        "changes",
+        "more"
+      ],
+      "title": "EventsWaitResult",
+      "type": "object"
+    },
+    "EventsWaitStatus": {
+      "enum": [
+        "baseline",
+        "changed",
+        "text",
+        "timeout",
+        "resync_required"
+      ],
+      "type": "string"
     },
     "ExecutionContext": {
       "additionalProperties": false,
@@ -6984,6 +7133,50 @@
       "title": "Accepted",
       "type": "object"
     },
+    "events.wait": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "properties": {
+        "changes": {
+          "items": {
+            "$ref": "#/definitions/EventChange"
+          },
+          "type": "array"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "live_text": {
+          "items": {
+            "$ref": "#/definitions/EventLiveText"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "reasoning_activity": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/EventReasoningActivity"
+          },
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/definitions/EventsWaitStatus"
+        }
+      },
+      "required": [
+        "status",
+        "cursor",
+        "changes",
+        "more"
+      ],
+      "title": "EventsWaitResult",
+      "type": "object"
+    },
     "history.get": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -8424,6 +8617,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 3,
-  "title": "Shellboy local RPC protocol v3"
+  "protocol_version": 4,
+  "title": "Shellboy local RPC protocol v4"
 }
