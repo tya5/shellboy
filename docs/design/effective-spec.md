@@ -522,6 +522,6 @@ dependency is added; no migration. Stage C (applying `connections` changes witho
 Runs own shells, not Runs. Thread hierarchy is organizational, admission is independent, stop does not cascade
 across Runs, and child lifecycle notifications/owned-child rows are removed. Delegation uses an expected reply and
 normal message delivery after the sender Turn ends. Explicit wait conditions remain observations without a
-resource/cycle graph or self-wait rejection. Thread-get has one recipient-tagged pending reply list. Shell ownership,
+resource/cycle graph. Direct own Run/Turn/shell waits alone return `self_wait`. Thread-get has one recipient-tagged pending reply list. Shell ownership,
 Thread parentage and Run-end unanswered reply reminders remain. Adopted revisions in the control/wait/reply/UI
 specifications supersede earlier Run ownership rules; no legacy compatibility branch is retained.

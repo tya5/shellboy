@@ -358,6 +358,7 @@ async fn frames_roundtrip_and_reject_truncation_oversize_and_invalid_json() {
 fn fixed_error_codes_and_persisted_state_values_are_closed() {
     let codes = [
         "invalid_argument",
+        "self_wait",
         "config_invalid",
         "app_not_running",
         "protocol_mismatch",
