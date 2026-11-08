@@ -117,10 +117,9 @@ pub enum Scope {
 fn not_found() -> ApiError {
     ApiError::new(ErrorCode::ThreadNotFound, "Thread not found")
 }
-fn live_thread(
-    db: &Connection,
-    id: &str,
-) -> Result<Option<(String, Option<String>, Option<String>)>, ApiError> {
+type LiveThread = (String, Option<String>, Option<String>);
+
+fn live_thread(db: &Connection, id: &str) -> Result<Option<LiveThread>, ApiError> {
     db.prepare_cached(
         "SELECT title,parent_thread_id,branch_kind FROM thread WHERE id=?1 AND deleted_at IS NULL",
     )
