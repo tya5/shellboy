@@ -6318,6 +6318,12 @@
         "archived": {
           "$ref": "#/definitions/ArchivedFilter"
         },
+        "awaiting": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "cursor": {
           "default": null,
           "type": [
@@ -6494,6 +6500,12 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "awaiting_human_oldest_at": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "awaiting_replies": {
           "default": 0,
