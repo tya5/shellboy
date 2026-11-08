@@ -1771,7 +1771,7 @@ async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
             let attacker = attacker.run_id.clone().unwrap();
             move |db| {
                 let independent: i64 = db.query_row(
-                    "SELECT count(*) FROM run WHERE id IN (?1,?2) AND owner_run_id IS NULL",
+                    "SELECT count(*) FROM run WHERE id IN (?1,?2)",
                     [victim, attacker],
                     |row| row.get(0),
                 )?;
@@ -1839,7 +1839,7 @@ async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_end_separately() {
+async fn real_shell_cli_starts_independent_child_without_parent_retention_or_lifecycle_notices() {
     let (url, mut requests, server) = proxy().await;
     let (_directory, owner, control) = runtime(&url).await;
     let (send, receive) = mpsc::channel(32);
@@ -1899,22 +1899,23 @@ async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_en
         "completed",
     )
     .await;
-    let child_thread = child_id.clone();
-    let parent_run = parent.run_id.clone().unwrap();
-    control
+    state(
+        &control,
+        "run",
+        parent.run_id.as_deref().unwrap(),
+        "completed",
+    )
+    .await;
+    let child_query = child_id.clone();
+    let child_run: String = control
         .store
         .database
         .call(move |db| {
-            let owner: String = db.query_row(
-                "SELECT owner_run_id FROM run WHERE thread_id=?1",
-                [child_thread],
-                |row| row.get(0),
-            )?;
-            assert_eq!(
-                owner, parent_run,
-                "shell CLI origin creates execution ownership, not just Thread lineage"
-            );
-            Ok(())
+            Ok(db.query_row(
+                "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
+                [child_query],
+                |r| r.get(0),
+            )?)
         })
         .await
         .unwrap();
@@ -1924,36 +1925,12 @@ async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_en
         .send(final_answer("child final answer"))
         .ok()
         .unwrap();
+    state(&control, "run", &child_run, "completed").await;
     let run = parent.run_id.clone().unwrap();
-    for _ in 0..4 {
-        let done = control
-            .store
-            .database
-            .call({
-                let run = run.clone();
-                move |db| {
-                    Ok(db.query_row(
-                        "SELECT state='completed' FROM run WHERE id=?1",
-                        [run],
-                        |row| row.get::<_, bool>(0),
-                    )?)
-                }
-            })
-            .await
-            .unwrap();
-        if done {
-            break;
-        }
-        tokio::select! {
-            request=requests.recv()=>{
-                let request=request.unwrap();assert!(!is_child(&request.body));
-                assert!(request.body.to_string().contains("child_turn_completed")||request.body.to_string().contains("child_run_ended"));
-                request.reply.send(final_answer("child status observed")).ok().unwrap();
-            },
-            _=state(&control,"run",&run,"completed")=>break,
-        }
-    }
-    state(&control, "run", &run, "completed").await;
+    assert!(
+        requests.try_recv().is_err(),
+        "child completion must not synthesize a parent request"
+    );
     control
         .store
         .database
@@ -1968,7 +1945,7 @@ async fn real_shell_cli_starts_owned_child_and_parent_receives_answer_and_run_en
                 [run],
                 |row| row.get(0),
             )?;
-            assert_eq!((turn_events, run_events), (1, 1));
+            assert_eq!((turn_events, run_events), (0, 0));
             Ok(())
         })
         .await
@@ -2895,4 +2872,214 @@ async fn stalled_stream_enters_durable_recovery_and_preserves_received_text_with
         .await
         .unwrap();
     close(control, owner, server).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn expected_reply_terminal_and_cancel_outcomes_deliver_http_after_sender_run_ended() {
+    for outcome in ["completed", "stopped", "cancelled"] {
+        let (url, mut requests, server) = proxy().await;
+        let (_directory, owner, control) = runtime(&url).await;
+        let (send, receive) = mpsc::channel(32);
+        let local = shellboy::ipc::LocalServer::bind(&owner, send)
+            .await
+            .unwrap();
+        let serving = tokio::spawn(control.clone().serve(receive));
+        let parent = start(&control).await;
+        let first = incoming(&mut requests).await;
+        let child = command(
+            &control,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: Some(parent.thread_id.clone()),
+            }),
+        )
+        .await;
+        let child = child["thread_id"].as_str().unwrap().to_owned();
+        let executable = env!("CARGO_BIN_EXE_shellboy").replace('\'', "'\\''");
+        first.reply.send(tool(&format!("'{executable}' message send --thread '{child}' --expect-reply --text 'outcome fixture'"),false)).ok().unwrap();
+        let mut recipient = None;
+        for _ in 0..2 {
+            let request = incoming(&mut requests).await;
+            if request.body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| {
+                    item["role"] == "developer"
+                        && item.to_string().contains(&format!("thread={child}"))
+                })
+            {
+                recipient = Some(request);
+            } else {
+                request
+                    .reply
+                    .send(final_answer("wait for explicit outcome"))
+                    .ok()
+                    .unwrap();
+            }
+        }
+        state(
+            &control,
+            "run",
+            parent.run_id.as_deref().unwrap(),
+            "completed",
+        )
+        .await;
+        let child_query = child.clone();
+        let (message,run):(String,String)=control.store.database.call(move|db|Ok(db.query_row("SELECT message_node_id,run_id FROM receipt WHERE target_thread_id=?1 AND json_extract(result_json,'$.expect_reply')=1",[child_query],|r|Ok((r.get(0)?,r.get(1)?)))?)).await.unwrap();
+        match outcome {
+            "completed" => {
+                recipient
+                    .take()
+                    .unwrap()
+                    .reply
+                    .send(final_answer("no explicit reply"))
+                    .ok()
+                    .unwrap();
+                // The existing once-only unanswered-duty reminder remains mandatory.
+                incoming(&mut requests)
+                    .await
+                    .reply
+                    .send(final_answer("still no reply"))
+                    .ok()
+                    .unwrap();
+            }
+            "stopped" => {
+                command(
+                    &control,
+                    Command::RunStop(RunTarget {
+                        run_id: run.clone(),
+                    }),
+                )
+                .await;
+            }
+            _ => {
+                command(
+                    &control,
+                    Command::MessageCancel(MessageCancelArgs {
+                        message_ids: vec![message.clone()],
+                    }),
+                )
+                .await;
+            }
+        }
+        let resumed = incoming(&mut requests).await;
+        let input = resumed.body["input"].to_string();
+        assert!(
+            input.contains("reply_outcome") && input.contains(&message),
+            "{outcome}: {input}"
+        );
+        assert!(input.contains(if outcome == "cancelled" {
+            "cancelled"
+        } else {
+            "ignored"
+        }));
+        let sender = parent.thread_id.clone();
+        let old = parent.run_id.clone().unwrap();
+        let resumed_run: String = control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT id FROM run WHERE thread_id=?1 AND state='live' AND id<>?2",
+                    [sender, old],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        resumed
+            .reply
+            .send(final_answer("outcome observed"))
+            .ok()
+            .unwrap();
+        state(&control, "run", &resumed_run, "completed").await;
+        if outcome == "cancelled" {
+            command(&control, Command::RunStop(RunTarget { run_id: run })).await;
+        }
+        drop(recipient);
+        local.shutdown().await.unwrap();
+        serving.abort();
+        close(control, owner, server).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
+    for terminal in ["completed", "stopped", "failed"] {
+        let (url, mut incoming_requests, server) = proxy().await;
+        let (_directory, owner, control) = runtime(&url).await;
+        let mut threads = Vec::new();
+        for _ in 0..3 {
+            let created = control
+                .store
+                .execute(
+                    Request::new(
+                        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
+                        Command::ThreadCreate(ThreadCreateArgs {
+                            agents: None,
+                            connection: None,
+                            cwd: None,
+                            model: None,
+                            effort: None,
+                            parent_id: None,
+                        }),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap();
+            threads.push(created.result["thread_id"].as_str().unwrap().to_owned());
+        }
+        let sender1 = threads[0].clone();
+        let sender2 = threads[1].clone();
+        let target = threads[2].clone();
+        control.store.database.call(move|db| {
+            let tx=db.transaction()?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('terminal-backlog',?1,?2,'0','1')",rusqlite::params![target,terminal])?;
+            for n in 0..261 {
+                let id=format!("backlog-{n}");
+                let sender=json!({"kind":"model","instance_id":"synthetic","thread_id":if n%2==0 {&sender1}else{&sender2},"run_id":"prior-run","turn_id":"prior-turn","execution_id":"prior-shell"});
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user','0','{}')",[&id])?;
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,path_admission,created_at,result_json) VALUES(?1,?1,?2,?3,?1,'terminal-backlog','applied','admitted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",rusqlite::params![id,sender.to_string(),target])?;
+            }
+            tx.commit()?;Ok(())
+        }).await.unwrap();
+        // No stop command or run-ended signal: a fresh maintenance start finds durable work.
+        control.start().await.unwrap();
+        let mut seen_http = false;
+        watchdog("bounded terminal startup sweep",async {
+            loop {
+                let settled=control.store.database.call(|db|Ok(db.query_row("SELECT count(*) FROM receipt WHERE run_id='terminal-backlog' AND json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0))?)).await.unwrap();
+                if settled==261 && seen_http {break;}
+                tokio::select! {
+                    request=incoming_requests.recv()=>{
+                        let request=request.unwrap();
+                        assert!(request.body["input"].to_string().contains("reply_outcome"));
+                        seen_http=true;
+                        request.reply.send(final_answer("terminal backlog observed")).ok().unwrap();
+                    }
+                    _=tokio::task::yield_now()=>{}
+                }
+            }
+        }).await.unwrap();
+        assert_eq!(
+            control
+                .store
+                .database
+                .call(|db| Ok(db.query_row(
+                    "SELECT count(*) FROM event WHERE kind='reply_outcome'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?))
+                .await
+                .unwrap(),
+            261
+        );
+        close(control, owner, server).await;
+    }
 }

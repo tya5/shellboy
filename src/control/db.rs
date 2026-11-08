@@ -1453,6 +1453,9 @@ impl Store {
                         .map_err(storage_error)?;
                 let mut result = MutationResult::value(cancelled)?;
                 result.changed_threads = changed;
+                result.quiet_wake_threads =
+                    super::reply::cancellation_wakes_tx(tx, &args.message_ids)
+                        .map_err(sql_error)?;
                 Ok(result)
             }
             Command::OperationGet(args) => MutationResult::value(operation_details(
@@ -1958,7 +1961,6 @@ impl Store {
             status,
             reason,
             wake,
-            owner_changed,
         } = if args.to_human {
             MessageAssignment {
                 run: None,
@@ -1967,7 +1969,6 @@ impl Store {
                 status: DeliveryStatus::Accepted,
                 reason: None,
                 wake: false,
-                owner_changed: None,
             }
         } else {
             assign_message(
@@ -2033,9 +2034,6 @@ impl Store {
         bump_roots(tx)?;
         let accepted_thread = accepted.thread_id.clone();
         let mut result = MutationResult::value(accepted)?;
-        if let Some(owner) = owner_changed {
-            result.changed_threads.push(owner);
-        }
         if wake {
             if args.deliver == Deliver::Now {
                 result.wake_threads.push(id);
@@ -2061,7 +2059,6 @@ struct MessageAssignment {
     status: DeliveryStatus,
     reason: Option<&'static str>,
     wake: bool,
-    owner_changed: Option<String>,
 }
 
 fn assign_message(
@@ -2073,7 +2070,7 @@ fn assign_message(
     resume_recovery: bool,
     now: &str,
 ) -> Result<MessageAssignment> {
-    let parent: Option<String> = tx
+    let _parent: Option<String> = tx
         .query_row(
             "SELECT parent_thread_id FROM thread WHERE id=?1 AND deleted_at IS NULL",
             [id],
@@ -2096,7 +2093,6 @@ fn assign_message(
     let mut status = DeliveryStatus::Accepted;
     let mut reason = None;
     let mut wake = false;
-    let mut owner_changed = None;
     if let Some((run_id, state)) = run {
         // A Run already in recovery wait gets ordinary input, as at entry.
         let recovering: bool = tx
@@ -2166,41 +2162,11 @@ fn assign_message(
             }
         }
     } else {
-        let owner = if let Some(caller) =
-            caller.filter(|caller| parent.as_deref() == Some(caller.thread_id.as_str()))
-        {
-            let live:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND thread_id=?2 AND state='live')",params![caller.run_id,caller.thread_id],|row| row.get(0)).map_err(sql_error)?;
-            if !live {
-                return Err(error(
-                    ErrorCode::InvalidState,
-                    "owner Run is stopping or ended",
-                ));
-            }
-            Some(caller.run_id.clone())
-        } else {
-            None
-        };
-        owner_changed = caller
-            .filter(|_| owner.is_some())
-            .map(|origin| origin.thread_id.clone());
-        let run_id = uuid::Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at) VALUES(?1,?2,?3,'live',?4)",params![run_id,id,owner,now]).map_err(sql_error)?;
-        super::context::record(
-            tx,
-            id,
-            "run_started",
-            actor(caller),
-            json!({"run_id":run_id}),
-            now,
-        )
-        .map_err(sql_error)?;
-        // New work on an archived Thread makes it visible again (#222).
-        archive::clear_for_new_run(tx, id, actor(caller), now).map_err(sql_error)?;
-        let turn_id = super::state::create_turn_tx(tx, id, &run_id, now, now).map_err(sql_error)?;
-        // A human's new instruction, or an owning parent's explicit terminal
-        // child restart, is the resume boundary for unassigned saved input.
+        let (run_id, turn_id) = start_run_tx(tx, id, actor(caller), now).map_err(sql_error)?;
+        // A human's new instruction resumes unassigned saved input.
+        // An independent model send does not silently admit recovery input.
         // Previously assigned receipts keep their original Run/Turn forever.
-        if caller.is_none() || owner.is_some() {
+        if caller.is_none() {
             super::message_delivery::recover_on_resume_tx(
                 tx,
                 id,
@@ -2228,8 +2194,32 @@ fn assign_message(
         status,
         reason,
         wake,
-        owner_changed,
     })
+}
+
+/// Shared ordinary Run activation for messages and explicit reply outcome delivery.
+pub(super) fn start_run_tx(
+    tx: &Connection,
+    thread: &str,
+    source: Value,
+    at: &str,
+) -> rusqlite::Result<(String, String)> {
+    let run = uuid::Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
+        params![run, thread, at],
+    )?;
+    super::context::record(
+        tx,
+        thread,
+        "run_started",
+        source.clone(),
+        json!({"run_id":run}),
+        at,
+    )?;
+    archive::clear_for_new_run(tx, thread, source, at)?;
+    let turn = super::state::create_turn_tx(tx, thread, &run, at, at)?;
+    Ok((run, turn))
 }
 
 fn actor(caller: Option<&Origin>) -> Value {
@@ -2289,7 +2279,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_reply: Vec::new(), awaiting_thread_replies: Vec::new(), awaiting_human: Vec::new(), awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,children_count:0,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.instruction_sources = connection.query_row(
         "SELECT CASE WHEN s.content_hash GLOB 'instruction-bundle-v1:sha256:*' AND json_valid(substr(s.body,38)) THEN json_extract(substr(s.body,38),'$.extra') ELSE NULL END FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",[id],|r|r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?.flatten().and_then(|body|serde_json::from_str::<Vec<Value>>(&body).ok()).map(|mut files| {for file in &mut files {if let Some(file)=file.as_object_mut() { file.remove("body"); }} json!({"extra":files,"snapshot":"latest_prepared_turn"})});
     details.tags = tags::for_thread(connection, id)?;
@@ -2298,11 +2288,6 @@ pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails
     details.last_input = crate::thread_observation::last_input(connection, id)?;
     details.awaiting_replies =
         super::reply::awaiting_replies_tx(connection, id, None).map_err(sql_error)?;
-    details.awaiting_reply =
-        super::reply::awaiting_replies_tx(connection, id, Some(true)).map_err(sql_error)?;
-    details.awaiting_thread_replies =
-        super::reply::awaiting_replies_tx(connection, id, Some(false)).map_err(sql_error)?;
-    details.awaiting_human = details.awaiting_reply.clone();
     details.title = thread_display_title(connection, id, &details.title)?;
     details.run_id = connection
         .query_row(
@@ -2318,11 +2303,7 @@ pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails
             details.recovery_reason = recovery_status(connection, &details.thread_id, &id, reason)?;
             details.turn_id = Some(id);
         }
-        details.children_count = count(
-            connection,
-            "SELECT count(*) FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping')",
-            run,
-        )?;
+
         details.shells_count = count(
             connection,
             "SELECT count(*) FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')",
@@ -2804,17 +2785,9 @@ pub(crate) fn saved_usage_for_detail(
 
 pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
     let row = connection
-        .query_row(
-            "SELECT thread_id,state,owner_run_id FROM run WHERE id=?1",
-            [id],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                ))
-            },
-        )
+        .query_row("SELECT thread_id,state FROM run WHERE id=?1", [id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| error(ErrorCode::TargetUnavailable, "Run not found"))?;
@@ -2837,15 +2810,9 @@ pub fn run_details(connection: &Connection, id: &str) -> Result<RunDetails> {
         run_id: id.into(),
         thread_id: row.0,
         state,
-        owner_run_id: row.2,
         turn_id,
         end_message_node_id,
         recovery_hint,
-        owned_run_ids: ids(
-            connection,
-            "SELECT id FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping') ORDER BY created_at,id",
-            id,
-        )?,
         owned_execution_ids: ids(
             connection,
             "SELECT id FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping') ORDER BY started_at,id",
@@ -2893,12 +2860,7 @@ fn stop_run(tx: &Transaction<'_>, id: &str, now: &str) -> Result<MutationResult>
     let details = run_details(tx, id)?;
     let mut result = MutationResult::default();
     if matches!(details.state, RunState::Live | RunState::Stopping) {
-        let mut statement=tx.prepare("WITH RECURSIVE owned(id,depth) AS(SELECT ?1,0 UNION ALL SELECT r.id,o.depth+1 FROM run r JOIN owned o ON r.owner_run_id=o.id WHERE r.state IN ('live','stopping')) SELECT id FROM owned ORDER BY depth DESC,id").map_err(sql_error)?;
-        result.stop_runs = statement
-            .query_map([id], |row| row.get::<_, String>(0))
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
+        result.stop_runs = vec![id.to_owned()];
         for run in &result.stop_runs {
             tx.execute("UPDATE run SET state='stopping',stop_reason='explicit_stop' WHERE id=?1 AND state='live'",[run]).map_err(sql_error)?;
             tx.execute("UPDATE turn SET generation=generation+1 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[run]).map_err(sql_error)?;
@@ -3658,10 +3620,6 @@ mod thread_list_plan_tests {
             plans.iter().any(|p| p.contains("shell_active_owner")),
             "{plans:?}"
         );
-        assert!(
-            plans.iter().any(|p| p.contains("runs_by_owner")),
-            "{plans:?}"
-        );
         // The outer Thread pagination may sort; the scalar Run lookup must use
         // its covering index instead of reading every Run in each Thread.
     }
@@ -4120,11 +4078,11 @@ mod activity_list_tests {
         db.execute("UPDATE shell_execution SET state='exited'", [])
             .unwrap();
         verify(ActivityPhase::Continuing, "completed");
-        db.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at) VALUES('kid','child','r','live','2026-10-29T00:00:00Z')", []).unwrap();
-        verify(ActivityPhase::Background, "completed");
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('kid','child','live','2026-10-29T00:00:00Z')", []).unwrap();
+        verify(ActivityPhase::Continuing, "completed");
         db.execute("UPDATE run SET state='stopping' WHERE id='kid'", [])
             .unwrap();
-        verify(ActivityPhase::Background, "completed");
+        verify(ActivityPhase::Continuing, "completed");
         db.execute("UPDATE run SET state='completed' WHERE id='kid'", [])
             .unwrap();
         verify(ActivityPhase::Continuing, "completed");
@@ -5342,7 +5300,7 @@ mod agents_reference_tests {
 mod interrupted_message_assignment_tests {
     use super::*;
     #[test]
-    fn only_human_or_live_direct_parent_new_run_recovers_original_assigned_input() {
+    fn only_human_new_run_recovers_original_assigned_input() {
         for caller_kind in ["human", "parent", "foreign"] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
@@ -5376,7 +5334,7 @@ mod interrupted_message_assignment_tests {
                 .unwrap();
             assert_eq!(
                 count,
-                if caller_kind == "foreign" { 0 } else { 1 },
+                if caller_kind == "human" { 1 } else { 0 },
                 "{caller_kind}"
             );
             let original: (String, String) = tx
@@ -5581,10 +5539,8 @@ mod message_acknowledgement_state_tests {
 #[cfg(test)]
 mod thread_deletion_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::{Control, EngineEvent},
-    };
+    use crate::control::EngineEvent;
+    use crate::{app::DataOwner, control::Control};
     use std::collections::BTreeSet;
 
     async fn fixture() -> (tempfile::TempDir, DataOwner) {
@@ -5960,12 +5916,9 @@ mod thread_deletion_notification_tests {
 }
 
 #[cfg(test)]
-mod owned_child_notification_tests {
+mod independent_run_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::{Control, EngineEvent},
-    };
+    use crate::{app::DataOwner, control::Control};
     use futures_util::FutureExt;
 
     fn parent_origin() -> Origin {
@@ -5980,7 +5933,7 @@ mod owned_child_notification_tests {
     }
 
     #[tokio::test]
-    async fn owned_new_run_acceptance_notifies_parent_without_waking_it_or_replaying_effects() {
+    async fn new_run_acceptance_is_independent_and_does_not_notify_parent() {
         for mode in ["owned", "human", "foreign", "stopping-owner", "rollback"] {
             let root = tempfile::tempdir().unwrap();
             let db = DbWorker::open(root.path().join("fixture.db"))
@@ -6026,15 +5979,8 @@ mod owned_child_notification_tests {
                 }),
             );
             let result = store.execute(request.clone(), caller.clone()).await;
-            if matches!(mode, "stopping-owner" | "rollback") {
-                assert_eq!(
-                    result.unwrap_err().code,
-                    if mode == "rollback" {
-                        ErrorCode::SaveFailed
-                    } else {
-                        ErrorCode::InvalidState
-                    }
-                );
+            if mode == "rollback" {
+                assert_eq!(result.unwrap_err().code, ErrorCode::SaveFailed);
                 db.call(|db| {
                     assert_eq!(
                         db.query_row(
@@ -6050,27 +5996,10 @@ mod owned_child_notification_tests {
                 .unwrap();
             } else {
                 let first = result.unwrap();
-                assert_eq!(
-                    first.changed_threads,
-                    if mode == "owned" {
-                        vec!["parent".to_owned()]
-                    } else {
-                        vec![]
-                    }
-                );
+                assert!(first.changed_threads.is_empty());
                 assert_eq!(first.quiet_wake_threads, vec!["child".to_owned()]);
                 assert!(first.wake_threads.is_empty() && first.stop_runs.is_empty());
-                let owner = db
-                    .call(|db| {
-                        Ok(db.query_row(
-                            "SELECT owner_run_id FROM run WHERE thread_id='child'",
-                            [],
-                            |row| row.get::<_, Option<String>>(0),
-                        )?)
-                    })
-                    .await
-                    .unwrap();
-                assert_eq!(owner.as_deref(), (mode == "owned").then_some("parent-run"));
+                db.call(|db| {assert_eq!(db.query_row("SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",[],|r|r.get::<_,i64>(0))?,0);Ok(())}).await.unwrap();
                 let replay = store.execute(request, caller.clone()).await.unwrap();
                 assert_eq!(replay.result, first.result);
                 assert!(
@@ -6109,7 +6038,7 @@ mod owned_child_notification_tests {
     }
 
     #[tokio::test]
-    async fn recovery_and_completion_owner_nudges_notify_live_or_stopping_parents_only() {
+    async fn saved_child_transitions_do_not_synthesize_parent_notifications() {
         for parent_state in ["live", "stopping", "completed"] {
             let root = tempfile::tempdir().unwrap();
             let config = root.path().join("config.toml");
@@ -6124,7 +6053,7 @@ mod owned_child_notification_tests {
             let control = Control::new(&owner, root.path().into());
             let state = parent_state.to_owned();
             owner.db.call(move |db| {
-                db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','parent','/','','p','m','now'),('child','child','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','parent-run','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','recovery_wait','now');")?;
+                db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','parent','/','','p','m','now'),('child','child','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','recovery_wait','now');")?;
                 db.execute("UPDATE run SET state=?1 WHERE id='parent-run'",[state])?;Ok(())
             }).await.unwrap();
             // An existing synthetic driver captures the pre-existing quiet
@@ -6146,26 +6075,12 @@ mod owned_child_notification_tests {
                 if completed {
                     owner.db.call(|db| {db.execute_batch("UPDATE turn SET state='completed' WHERE id='child-turn'; UPDATE run SET state='completed' WHERE id='child-run';")?;Ok(())}).await.unwrap();
                 }
-                control.nudge_owner("child-run").await;
-                if parent_state == "completed" {
-                    assert!(matches!(
-                        events.try_recv(),
-                        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                    ));
-                } else {
-                    assert!(
-                        matches!(events.try_recv(),Ok(EngineEvent::Changed {thread_id,recovery:false}) if thread_id=="parent")
-                    );
-                    assert!(matches!(
-                        events.try_recv(),
-                        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                    ));
-                }
-                assert_eq!(
-                    nudge.notified().now_or_never().is_some(),
-                    parent_state == "live",
-                    "only the existing live-parent quiet nudge may run"
-                );
+
+                assert!(matches!(
+                    events.try_recv(),
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                ));
+                assert!(nudge.notified().now_or_never().is_none());
             }
             control.live.test_drivers().lock().await.clear();
             owner.shutdown().await.unwrap();
@@ -6176,14 +6091,12 @@ mod owned_child_notification_tests {
 #[cfg(test)]
 mod driverless_child_stop_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::{Control, EngineEvent},
-    };
+    use crate::control::EngineEvent;
+    use crate::{app::DataOwner, control::Control};
     use futures_util::FutureExt;
 
     #[tokio::test]
-    async fn stopping_an_offscreen_recovery_child_refreshes_parent_only_after_successful_drain() {
+    async fn stopping_an_offscreen_run_never_refreshes_or_stops_unrelated_runs() {
         for (parent_state, fail_drain) in [
             ("live", false),
             ("stopping", false),
@@ -6211,12 +6124,10 @@ mod driverless_child_stop_notification_tests {
                 for index in 0..4 {
                     let thread=format!("child-{index}");let run=format!("run-{index}");let turn=format!("turn-{index}");
                     tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?1,'/','','p','m','now')",[&thread])?;
-                    tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,'parent-run','live',?3)",params![run,thread,format!("2026-10-25T00:00:0{}Z",index+1)])?;
+                    tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,format!("2026-10-25T00:00:0{}Z",index+1)])?;
                     tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'recovery_wait','2026-10-25T00:00:00Z')",params![turn,thread,run])?;
                 }
-                let oldest=tx.prepare("SELECT id FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping') ORDER BY created_at,id LIMIT 3")?.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                assert_eq!(oldest,["run-0","run-1","run-2"],"target run-3 is outside the bounded display dependencies");
-                assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,4);
+                assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2','run-3') AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,4);
                 if fail_drain {
                     tx.execute_batch("CREATE TRIGGER reject_child_drain BEFORE UPDATE OF state ON run WHEN OLD.id='run-3' AND NEW.state='stopped' BEGIN SELECT RAISE(ABORT,'synthetic stopped-child rollback'); END;")?;
                 }
@@ -6279,10 +6190,7 @@ mod driverless_child_stop_notification_tests {
                     other => panic!("unexpected stop notification: {other:?}"),
                 }
             }
-            assert_eq!(
-                parent_notifications,
-                usize::from(!fail_drain && parent_state != "completed")
-            );
+            assert_eq!(parent_notifications, 0);
             // One hint when the stopping state commits (#243) and one after the drain.
             assert_eq!(child_notifications, 2);
             assert_eq!(errors, usize::from(fail_drain));
@@ -6293,7 +6201,7 @@ mod driverless_child_stop_notification_tests {
             owner.db.call(move |db| {
                 let target=db.query_row("SELECT r.state,u.state FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id='run-3'",[],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?;
                 assert_eq!(target,if fail_drain {("stopping".into(),"recovery_wait".into())}else{("stopped".into(),"stopped".into())});
-                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,if fail_drain {4}else{3});
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2','run-3') AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,if fail_drain {4}else{3});
                 assert_eq!(db.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2') AND state='live'",[],|row|row.get::<_,i64>(0))?,3);
                 if fail_drain {db.execute_batch("DROP TRIGGER reject_child_drain;")?;}
                 Ok(())
@@ -6313,10 +6221,8 @@ mod driverless_child_stop_notification_tests {
 #[cfg(test)]
 mod browser_creation_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::{Control, EngineEvent},
-    };
+    use crate::control::EngineEvent;
+    use crate::{app::DataOwner, control::Control};
     async fn fixture() -> (tempfile::TempDir, DataOwner, Arc<Control>) {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config.toml");

@@ -401,7 +401,7 @@ validation and are documented in prose.
 - The owner keeps accepting exactly one version (current-only, Issue #33);
   supporting a range is open (Q2).
 
-### 4.3 Capability advertisement (historical proposal; protocol 4 is current)
+### 4.3 Capability advertisement (historical proposal; protocol 5 is current)
 
 `Welcome` gained `capabilities: Vec<String>` with protocol 3 (names like `events.wait`,
 `message.send.human`); protocol 4 adds `events.reasoning_activity`. Welcome arrives before the request, so a client can
@@ -516,6 +516,19 @@ are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protoc
 8. Is a durable typed change log (E4, new column/table) ever wanted, or are
    hints + saved-fact reads the permanent model?
 
+## #276 protocol 5 decision
+
+Under section 4.2, this is a versioned breaking change, not an additive capability: the current protocol becomes 5.
+Remove `RunDetails.owner_run_id`, `RunDetails.owned_run_ids`, `ParentChange.live_run_owner_run_id`,
+`ThreadDetails.children_count`, and the three Thread-get lists `awaiting_reply`, `awaiting_human`,
+`awaiting_thread_replies`. Use `awaiting_replies` with `recipient_kind` and `recipient_thread_id`. Shell ownership
+fields and `owned_execution_ids` remain. The old `wait_cycle` error is removed; direct self-resource observation
+returns typed `self_wait` without a dependency graph. Welcome/Endpoint/envelopes advertise exact version 5, and
+version 4 peers fail closed rather than negotiate a downgrade. No aliases, payload rewrites or compatibility shim.
+Studio follows separately in #280; the final wire inventory and version are recorded there before handoff.
+
+Main already uses protocol 4 for #275 reasoning activity; #276 therefore advances to 5 and retains the
+`events.reasoning_activity` capability. The initial branch-only version-4 proposal is superseded.
 
 Protocol 5 adds `awaiting_human_count_exact` to `ThreadSummary`. It defaults to
 true when absent and is omitted when true; false means the accompanying count

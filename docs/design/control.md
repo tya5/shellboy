@@ -588,3 +588,13 @@ receipts after the outcome event/delivery is durable. See gc.md and storage.md.
 ## Shell argument policy
 
 The model response envelope is validated before any call runs: duplicate or missing call IDs, disabled tools, malformed envelopes and the argument byte limit reject the group. Duplicate shell parameter names, including unknown names, reject the affected call rather than choosing a value. Shell argument, encoding and initial-stdin errors instead produce a result for that call; other valid calls continue in order. Preflight reports detected encoding and initial-stdin failures. Unknown keys are always ignored with a result warning; the removed `[shell] unknown_arguments` setting is not accepted. The warning and existing bounded diagnostic record name keys and accepted parameters, never values. NUL and size checks remain in effect.
+
+## Adopted revision: independent Runs (#276, post-v0.11.0)
+
+This revision supersedes Run-to-Run ownership, parent admission/child limits, foreign-owner rejection, descendant
+stop propagation and child-based Run retention described earlier. A new Run is independent regardless of the
+request sender or Thread parentage. `parent_thread_id` remains organizational. Stopping a Run stops that Run's
+shells only; application shutdown independently visits every live Run. A completed Turn keeps a Run alive only
+for its own shell work or ordinary current-Run completion conditions, never for another Run or pending child reply.
+Recovery/replay does not adopt, stop or replay child Runs. Exact shell ownership, operation receipts, generation
+fences and explicit recovery decisions remain. There is no compatibility ownership graph or replacement queue.

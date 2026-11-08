@@ -82,7 +82,7 @@ enum WatchMessage<'a> {
     WorkUnknown,
     Counts {
         shells: u64,
-        children: u64,
+
         waits: Option<u64>,
         first: &'a str,
     },
@@ -142,26 +142,26 @@ impl WatchMessage<'_> {
                 En,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits,
                     first,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "Shells: {shells} · Child runs: {children} · Waits: {} · {first}",
-                "Shells: {shells} | Child runs: {children} | Waits: {} | {first}",
+                "Shells: {shells} · Waits: {} · {first}",
+                "Shells: {shells} | Waits: {} | {first}",
                 waits.map_or_else(|| "unknown".into(), |n| n.to_string())
             ),
             (
                 Ja,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits,
                     first,
                 },
             ) => crate::ui::text_width::glyphs::formatted!(
-                "shell {shells} · 子 {children} · 待機 {} · {first}",
-                "shell {shells} | 子 {children} | 待機 {} | {first}",
+                "shell {shells} · 待機 {} · {first}",
+                "shell {shells} | 待機 {} | {first}",
                 waits.map_or_else(|| "未取得".into(), |n| n.to_string())
             ),
             (En, Self::Pending { summary, count: 1 }) => crate::ui::text_width::glyphs::formatted!(
@@ -481,7 +481,7 @@ impl WatchDetail {
                 .map(|work| {
                     WatchMessage::Counts {
                         shells: work.shells,
-                        children: work.children,
+
                         waits: work.waits,
                         first: work.rows.first().map_or("", |row| row.label.as_str()),
                     }
@@ -1432,7 +1432,7 @@ mod tests {
                 output_age_base: Some(Duration::from_secs(age)),
             }],
             shells: 1,
-            children: 0,
+
             waits: Some(0),
             overflow: 0,
             counts_capped: false,

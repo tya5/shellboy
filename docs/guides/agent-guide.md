@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Delegation](delegation.md) · [Shell](shell.md) · [CLI reference](cli-reference.md)
 
-This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. “Child agent,” “subagent,” and “sub-agent” mean an owned Run started in a child Thread; they do not introduce another model-facing tool.
+This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent is an independent Run on another Thread. A Run owns its shells, never another Run; Thread parentage only organizes conversations.
 
 ## Read this guide in the running environment
 
@@ -47,7 +47,7 @@ A shell starts in the cwd saved on its Thread. Different Threads separate histor
 
 When you want the user to open a file or folder, write its absolute `file://` URL (for example, `file:///Users/me/report.md`); ordinary mentions of paths do not need this prefix.
 
-Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Ownership and human operations](delegation.md#ownership-and-human-operations).
+Origin is authenticated context inherited from the model shell by the CLI. Do not dump the whole environment, display tokens, or copy them. Permissions and ownership checks differ from an ordinary human's external CLI. See [Identity and operations](delegation.md#identity-and-operations).
 
 Add attachments through the shell as well, using `shellboy attachment add --path PATH --kind image`. Inspect the returned array's `source_node_id` and `delivery_status`; acceptance is not proof that the model has read the attachment. It is applied to a dedicated node after all results in your tool group are ready. Older attachments are resent at their original provenance positions, so do not treat one as a new image if the current message has no attachment. Shellboy metadata distinguishes the currently read revision and update notifications. See [Attachments](attachments.md).
 
@@ -111,18 +111,24 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 
 1. Read instructions, current state, and necessary original text.
 2. Perform bounded work through shell. Use background execution for long tasks and track the returned execution.
-3. If dividing work, create a child Thread and send its request. Check assignment after acceptance before waiting.
-4. Check wait status and reply state, then read the original reply node.
+3. If dividing work, create/select a child Thread and send its request with `--expect-reply`; retain the accepted message ID.
+4. End your Turn when only a child result remains. Its explicit reply is normally delivered back to your Thread; read the original reply node.
 5. Report results, verification, failures, and remaining work to the user.
 
-Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. A completed parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check `message get` for the reply state and retrieve `reply.node_id` when replied.
+Give children their purpose, scope, permitted files, completion criteria and expected return information in the
+request. They do not inherit the entire parent conversation. Use `message send --thread CHILD_THREAD_ID
+--expect-reply --text ...`, retain `message_id`, and end the Turn instead of synchronously supervising a child Run.
+The child uses `message reply --message MESSAGE_ID --text ...` once the request is applied. A normal delivered reply
+continues the sender's conversation. Inspect `message get` and its `reply.node_id` when evidence is needed; do not
+mistake the child's final Turn text for the requested reply. Progress is an ordinary message. Parent Run completion
+or stop neither adopts nor stops another Thread's Run. Only its own live shells can retain a background Run.
+Unanswered-request reminders at Run completion remain. See [Delegation](delegation.md).
 
 
 ### Waiting for a shell, and leaving shells behind
 
 A background shell has no time limit. A shell that never ends keeps your Run
-live after your Turn ends, and a parent waiting on `thread_settled` for your
-Thread keeps waiting. Shellboy does not stop it automatically, because that
+live after your Turn ends. An explicit `thread_settled` observer keeps waiting. Shellboy does not stop it automatically, because that
 would also stop correct long commands.
 
 - Wait for a shell with `shellboy wait` and `shell_ended` for its
@@ -131,12 +137,12 @@ would also stop correct long commands.
   timeout, and a timeout leaves the shell running.
 - Do not wait for other work (another process, a build, a child) by polling
   `pgrep`, `ps`, or similar. Wait on the Shellboy target: the shell's
-  `execution_id`, a child's `thread_settled`, or a reply.
+  `execution_id`. For child requests, end your Turn and await normal reply delivery.
 - Before you end a Turn, stop owned shells you no longer need with
   `shellboy shell stop --execution EXECUTION_ID`, and confirm with `shell get`
   that the state is terminal. Leave one running only on purpose, and say so in
   your answer with its `execution_id`.
-- If you wait for a child with `thread_settled` and the wait times out, read
+- If an explicit inspection wait with `thread_settled` times out, read
   `result.snapshot.conditions[].owned_shells` (execution ID, Run, elapsed
   milliseconds) and run `shellboy shell list --thread CHILD_THREAD_ID --state running`.
   A child's finished Turn with a live shell is not a settled Thread. Inspect it
@@ -177,7 +183,7 @@ shellboy events wait --after 'CURSOR' --thread CHILD_A --thread CHILD_B --timeou
 
 Models: pass `--thread` with other Threads' IDs and never your own. Your own adoption of input,
 tool start and finish all change your Thread and would wake you every round at a token cost. To
-supervise children prefer `wait` with `thread_settled` (next section); use `events wait` mainly
+delegate to children, use `--expect-reply` and end the Turn; use `events wait` mainly
 for tools and clients outside a model Turn.
 
 `status:"changed"` lists the Threads that changed (`changes[].thread_id`); then read
@@ -189,9 +195,10 @@ must not miss a transition, use `wait` with `thread_settled` (see below). Detail
 
 `events wait --reasoning-activity` is for UI clients that want progress metadata without receiving model text. It reports active local request attempts in `reasoning_activity`, including before content arrives. `elapsed_ms` measures time since the local stream attempt started; `received_bytes` is absent until reasoning deltas arrive and then counts their UTF-8 bytes, not tokens. No reasoning content is exposed. `events wait --text` is a separate opt-in that returns unsaved answer deltas; reasoning content is excluded from `live_text` even when this flag is set. Do not use either option to follow another Thread: the text remains unsaved/lossy and retries replace it. Wait for the Thread to settle and read saved history.
 
-### Wait for any child Thread
+### Explicit inspection of Thread completion
 
-Use one wait for several child Threads, not a repeated ThreadList comparison:
+For external inspection, use one bounded wait instead of repeated ThreadList comparisons. This is not the child
+request lifecycle: models send `--expect-reply` and finish their Turn to receive the reply normally.
 
 ```sh
 shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["CHILD_A","CHILD_B"],"states":["completed","recovery_wait","failed","stopped"]}]'
@@ -420,7 +427,7 @@ Use `connection test --base-url ... --api-key-env VAR` and `credentials set`/`cl
 
 Query a lost operation result with `shellboy operation get --operation OPERATION_ID`. Distinguish its receipt state/outcome from downstream completion, and follow targets to their get commands. Check downstream for message and compact. Repeating compact with the same ID returns its original queued acceptance even after downstream completion. pending/result_uncertain do not prove that side effects never occurred or that retrying with a new ID is safe. The query itself creates no receipt; its operation ID does not guarantee replay of the observation. Repeating attachment.add with the same ID returns the original result before mutable preflight, while preserving authentication and request-equality checks.
 
-Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` means execution ownership. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
+Run/Turn/message/history get always includes `context`; Thread context can be absent for a fork. `history list` requires `provenance`, `context`, and `selection` on each item; `history get` requires `provenance` and `context`. Context contains saved times, states, reasons, and ownership. `parent_thread_id` means Thread lineage; `owner_run_id` exists for shell ownership only; Runs do not have parent owners. Unknown `started_at` and an unfinished `lifetime_ms` are omitted. `lifetime_ms` spans creation to termination, including preparation and waiting. Read `recovery_reason` as a JSON value; recovery wait or uncertainty after restart do not necessarily mean failure. Distinguish history origin from selection destinations.
 
 To move a conversation back to an earlier point, `shellboy thread rewind --thread THREAD --node NODE` cuts that Thread's selected path to end at NODE and keeps the removed part as a child Thread (`branch_thread_id` in the result; opening it undoes the rewind). It rewinds the conversation only: shell side effects are not undone, and the result lists the shell executions and child Threads started after NODE. It is refused while the target has a live or stopping Run or messages with unknown path admission; definitely unadmitted queued messages are allowed. Because you always run inside a live Run, omitting `--thread` (your own Thread) is refused; rewind only another idle Thread, or continue from an earlier point with `shellboy thread fork --thread THREAD --node NODE`, or ask the user to run `/rewind`. `--exclude-node` ends the path just before NODE. The result also lists unanswered replies to messages the Thread sent (`pending_replies_to_sent_messages`); background shells from the removed part may still report `shell_ended`. Going back into a summarized range works only while the originals exist (not after `thread prune`).
 
@@ -578,8 +585,7 @@ one during that Turn.
 
 If no Run is live when it is sent (for example your parent sends one to a child
 that already finished), it is delivered immediately like an ordinary message and
-starts a new Run. A parent may send one to its owned child under the ordinary
-message rules.
+starts an independent new Run under the ordinary message rules.
 
 A waiting complete-delivery message never outlives its Run. If the Run ends
 some other way, it is released at that moment as ordinary input: after `/stop`,
@@ -595,9 +601,8 @@ complete-delivery message. Core cannot identify questions. If one arrives while
 waiting for the user, end briefly without starting extra work. A false trigger
 can cost an additional model request.
 
-`child_turn_completed` is progress, not completion of a child Run. A child with
-complete-delivery messages can send several such notifications; wait for
-`child_run_ended` before treating the child as finished.
+There are no automatic child Turn/Run lifecycle notices. Request a specific reply with `--expect-reply`, end the
+sender Turn, and inspect the saved reply/message when it is delivered. Progress is an ordinary message.
 
 ## Inspect a delegation sender
 
@@ -787,3 +792,14 @@ Automatic compaction does not repeat a rejected closed-range summary in the same
 were spilled or the active Turn was summarized. Under known coverage it retries when eligible closed-summary sources
 grow/change, while new active sources remain eligible for active summarization. `compact list` can show
 `blocked_by_earlier_rejection`; explicit compact remains available. Unknown-coverage #248 blocking is unchanged.
+
+Protocol 5 removes Run ownership and the duplicate reply-duty lists. Use `awaiting_replies` and inspect its recipient
+tag. External peers must match the advertised version exactly; update Studio/clients with the owner, without a v4
+fallback. A Run owns shells only. Explicit own Run/Turn/invoking-shell waits fail with `self_wait`; other observations
+have no dependency graph. Child requests use expected replies and normal delivery after the sender Turn ends.
+
+## Wait for any child Thread
+
+Use expected replies rather than supervising child Runs: retain each accepted request ID and finish your Turn.
+External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
+`last_end_message` and `last_input` without treating recovery_wait as terminal or automatically replaying an interrupted wait.

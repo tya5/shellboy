@@ -36,16 +36,8 @@ fn phase_label(state: &str, language: UiLanguage) -> Option<&'static str> {
 #[derive(Clone, Copy)]
 enum WorkMessage<'a> {
     State(&'a str),
-    ChildState(&'a str),
-    Heading {
-        empty: bool,
-        folded: bool,
-    },
-    Counts {
-        shells: u64,
-        children: u64,
-        waits: Option<u64>,
-    },
+    Heading { empty: bool, folded: bool },
+    Counts { shells: u64, waits: Option<u64> },
     More(u64),
     OutputAge(u64),
     Elapsed(u64),
@@ -57,18 +49,12 @@ enum WorkMessage<'a> {
 }
 impl<'a> WorkMessage<'a> {
     fn state(row: &'a LiveWorkRow) -> Self {
-        if matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
-            Self::ChildState(&row.state)
-        } else {
-            Self::State(&row.state)
-        }
+        Self::State(&row.state)
     }
+
     fn render(self, language: UiLanguage) -> String {
         use UiLanguage::{En, Ja};
         let rendered: String = match (language, self) {
-            (_, Self::ChildState(state)) => phase_label(state, language)
-                .map(str::to_owned)
-                .unwrap_or_else(|| Self::State(state).render(language)),
             (En, Self::State(state)) => phase_label(state, language)
                 .unwrap_or(match state {
                     "starting" => "Starting",
@@ -97,34 +83,34 @@ impl<'a> WorkMessage<'a> {
                 En,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: Some(waits),
                 },
-            ) => format!("Shells: {shells} | Child runs: {children} | Waits: {waits}"),
+            ) => format!("Shells: {shells} | Waits: {waits}"),
             (
                 En,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: None,
                 },
-            ) => format!("Shells: {shells} | Child runs: {children} | Waits: unknown"),
+            ) => format!("Shells: {shells} | Waits: unknown"),
             (
                 Ja,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: Some(waits),
                 },
-            ) => format!("shell {shells} | 子 {children} | 待機 {waits}"),
+            ) => format!("shell {shells} | 待機 {waits}"),
             (
                 Ja,
                 Self::Counts {
                     shells,
-                    children,
+
                     waits: None,
                 },
-            ) => format!("shell {shells} | 子 {children} | 待機 未取得"),
+            ) => format!("shell {shells} | 待機 未取得"),
             (En, Self::More(1)) => "1 more item".into(),
             (En, Self::More(count)) => format!("{count} more items"),
             (Ja, Self::More(count)) => format!("他{count}件"),
@@ -157,7 +143,7 @@ impl<'a> WorkMessage<'a> {
             (Ja, Self::PreviewLoading) => "  |   | 出力を取得中.".into(),
         };
         match self {
-            Self::State(_) | Self::ChildState(_) => rendered,
+            Self::State(_) => rendered,
             Self::PreviewNotice | Self::PreviewLoading => {
                 let prefix = format!("  {}   {} ", glyphs::vertical(), glyphs::vertical());
                 let body = rendered.strip_prefix("  |   | ").unwrap_or(&rendered);
@@ -186,10 +172,6 @@ pub enum LiveWorkTarget {
     Shell {
         execution_id: String,
         turn_id: Option<String>,
-    },
-    ChildRun {
-        run_id: String,
-        thread_id: String,
     },
     Wait {
         operation_id: String,
@@ -236,7 +218,7 @@ pub struct LiveWorkSnapshot {
     pub run_id: String,
     pub rows: Vec<LiveWorkRow>,
     pub shells: u64,
-    pub children: u64,
+
     pub waits: Option<u64>,
     pub overflow: u64,
     pub counts_capped: bool,
@@ -247,7 +229,6 @@ impl PartialEq for LiveWorkSnapshot {
         self.run_id == other.run_id
             && self.rows == other.rows
             && self.shells == other.shells
-            && self.children == other.children
             && self.waits == other.waits
             && self.overflow == other.overflow
             && self.counts_capped == other.counts_capped
@@ -259,13 +240,12 @@ fn counts_text(snapshot: &LiveWorkSnapshot, language: UiLanguage) -> String {
     if !snapshot.counts_capped {
         return WorkMessage::Counts {
             shells: snapshot.shells,
-            children: snapshot.children,
+
             waits: snapshot.waits,
         }
         .render(language);
     }
     let shells = super::activity::count_label(snapshot.shells, true, language);
-    let children = super::activity::count_label(snapshot.children, true, language);
     let waits = snapshot.waits.map(|n| n.to_string()).unwrap_or_else(|| {
         match language {
             UiLanguage::En => "unknown",
@@ -274,8 +254,8 @@ fn counts_text(snapshot: &LiveWorkSnapshot, language: UiLanguage) -> String {
         .into()
     });
     match language {
-        UiLanguage::En => format!("Shells: {shells} | Child runs: {children} | Waits: {waits}"),
-        UiLanguage::Ja => format!("shell {shells} | 子 {children} | 待機 {waits}"),
+        UiLanguage::En => format!("Shells: {shells} | Waits: {waits}"),
+        UiLanguage::Ja => format!("shell {shells} | 待機 {waits}"),
     }
 }
 
@@ -389,7 +369,6 @@ impl LiveWorkView {
                     LiveWorkTarget::Wait { execution_id, .. } => self.rows().iter().find(|row| matches!(
                         &row.target, LiveWorkTarget::Shell { execution_id: id, .. } if id == execution_id
                     )).map(|row| row.target.clone()),
-                    _ => None,
                 };
                 if let Some(replacement) = replacement {
                     self.region.selected = Some(replacement);
@@ -758,7 +737,6 @@ pub(super) fn draw(
         // One-cell, East-Asian-narrow kind glyphs; not colour dependent.
         let kind = match row.target {
             LiveWorkTarget::Shell { .. } => glyphs::SHELL,
-            LiveWorkTarget::ChildRun { .. } => glyphs::CHILD,
             LiveWorkTarget::Wait { .. } => glyphs::WAIT,
         };
         let last_item = index + 1 == view.region.visible_rows;
@@ -813,12 +791,6 @@ pub(super) fn draw(
                     .position(|other| match (target, &other.target) {
                         (WaitTarget::Shell(a), LiveWorkTarget::Shell { execution_id, .. }) => {
                             a == execution_id
-                        }
-                        (WaitTarget::Run(a), LiveWorkTarget::ChildRun { run_id, .. }) => {
-                            a == run_id
-                        }
-                        (WaitTarget::Thread(a), LiveWorkTarget::ChildRun { thread_id, .. }) => {
-                            a == thread_id
                         }
                         _ => false,
                     })
@@ -993,15 +965,6 @@ impl UiState {
             KeyCode::Char(' ') => {
                 self.active_view_mut().live_work.toggle();
             }
-            KeyCode::Char('o') => {
-                if let Some(LiveWorkRow {
-                    target: LiveWorkTarget::ChildRun { thread_id, .. },
-                    ..
-                }) = self.view().live_work.selected()
-                {
-                    return Some(self.select_thread(thread_id.clone()));
-                }
-            }
             KeyCode::F(6) => {
                 let Some(target) = self
                     .view()
@@ -1016,10 +979,6 @@ impl UiState {
                     LiveWorkTarget::Shell { execution_id, .. } => {
                         context.set_reference(operations::TargetKind::Execution, execution_id);
                         operations::OpKind::ShellGet
-                    }
-                    LiveWorkTarget::ChildRun { run_id, .. } => {
-                        context.set_reference(operations::TargetKind::Run, run_id);
-                        operations::OpKind::RunGet
                     }
                     LiveWorkTarget::Wait { operation_id, .. } => {
                         context.set_reference(operations::TargetKind::Operation, operation_id);
@@ -1117,7 +1076,7 @@ mod tests {
         LiveWorkSnapshot {
             run_id: "owner".into(),
             shells: 2,
-            children: 1,
+
             waits: Some(1),
             overflow: 1,
             counts_capped: false,
@@ -1139,9 +1098,9 @@ mod tests {
                 },
                 LiveWorkRow {
                     description: None,
-                    target: LiveWorkTarget::ChildRun {
-                        run_id: "child-run".into(),
-                        thread_id: "child-thread".into(),
+                    target: LiveWorkTarget::Wait {
+                        operation_id: "child-run".into(),
+                        execution_id: "child-thread".into(),
                     },
                     label: "child task".into(),
                     state: "live".into(),
@@ -1333,7 +1292,7 @@ mod tests {
             // A child row alone has no ticking seconds: only the blink can move.
             let mut work = snapshot(at);
             work.rows
-                .retain(|row| matches!(row.target, LiveWorkTarget::ChildRun { .. }));
+                .retain(|row| matches!(row.target, LiveWorkTarget::Wait { .. }));
             ui.apply(UiUpdate::Activity {
                 thread_id: "thread".into(),
                 generation: ui.view().generation,
@@ -1416,7 +1375,7 @@ mod tests {
             })
             .collect();
         work.shells = 10;
-        work.children = 0;
+
         work.waits = Some(0);
         work.overflow = 0;
         ui.apply(UiUpdate::Activity {
@@ -1603,8 +1562,11 @@ mod tests {
         let actions = ui
             .live_work_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
             .unwrap();
-        assert!(actions.iter().any(|action|matches!(action,UiAction::SelectThread {thread_id,..} if thread_id=="child-thread")));
-        assert!(!ui.view().live_work.region.active);
+        assert!(
+            actions.is_empty(),
+            "owned-child navigation is no longer an action"
+        );
+        assert!(ui.view().live_work.region.active);
     }
     #[test]
     fn wait_target_number_and_approximate_deadline_are_visible() {
@@ -1949,8 +1911,8 @@ mod tests {
             }
         }
         assert_eq!(cases, 864);
-        // Captured from the original renderer before shared-region extraction.
-        assert_eq!(digest, 0xcce04517ab437b25);
+        // Re-captured after removing the child-Run glyph and heading count (#276).
+        assert_eq!(digest, 0x59bbb08be0a8ce81);
     }
 
     fn screen(ui: &mut UiState) -> (String, u16) {
@@ -2041,7 +2003,7 @@ mod tests {
             ui.select_thread("thread".into());
             let mut work = snapshot(at);
             work.shells = 1;
-            work.children = 0;
+
             work.waits = Some(0);
             work.overflow = 0;
             work.rows.truncate(1);
@@ -2200,7 +2162,7 @@ mod tests {
                     assert!(buffer[(0, 2)].modifier.contains(
                         ratatui::style::Modifier::REVERSED | ratatui::style::Modifier::BOLD
                     ));
-                    assert!(rows[3].contains("↳") && rows[4].contains("⋯"), "{rows:?}");
+                    assert!(rows[3].contains("⋯") && rows[4].contains("⋯"), "{rows:?}");
                     let arrow = if observed == Some(1) {
                         "→ [1]"
                     } else {
@@ -2236,7 +2198,7 @@ mod tests {
         let lines = body_lines(&mut ui);
         assert_eq!(lines.len(), 3, "{lines:?}");
         assert!(lines[0].starts_with("├─[1]") && lines[0].contains("$ "));
-        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("↳ child task"));
+        assert!(lines[1].starts_with("├─[2]") && lines[1].contains("⋯ child task"));
         assert!(lines[2].starts_with("└─[3]") && lines[2].contains("⋯ saved wait"));
         // Padding rows carry no connector: same count with fewer items.
         let mut two = snapshot(at);
@@ -2268,9 +2230,9 @@ mod language_tests {
                 execution_id: "shell-id".into(),
                 turn_id: None,
             },
-            LiveWorkTarget::ChildRun {
-                run_id: "child-run".into(),
-                thread_id: "child-thread".into(),
+            LiveWorkTarget::Wait {
+                operation_id: "child-run".into(),
+                execution_id: "child-thread".into(),
             },
             LiveWorkTarget::Wait {
                 operation_id: "wait-id".into(),
@@ -2297,7 +2259,7 @@ mod language_tests {
                 run_id: "owner".into(),
                 observed_at: Instant::now(),
                 shells: 1,
-                children: 1,
+
                 waits: Some(1),
                 overflow: 0,
                 counts_capped: false,
@@ -2310,14 +2272,8 @@ mod language_tests {
     fn owned_work_is_registered_in_both_languages_and_widths() {
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &[
-                    "Owned work",
-                    "Shells: 1",
-                    "Child runs: 1",
-                    "Running",
-                    "Waiting",
-                ],
-                UiLanguage::Ja => &["抱えている作業", "shell 1", "子 1", "実行中", "待機中"],
+                UiLanguage::En => &["Owned work", "Shells: 1", "Running", "Waiting"],
+                UiLanguage::Ja => &["抱えている作業", "shell 1", "実行中", "待機中"],
             }
         }
         super::super::i18n::verify_screen(populate, expected);
@@ -2345,7 +2301,7 @@ mod language_tests {
         super::super::i18n::verify_screen(empty, empty_expected);
     }
     #[test]
-    fn child_phase_projection_is_english_without_rewriting_source_states() {
+    fn observed_wait_phase_projection_preserves_source_states() {
         use crate::activity::ActivityPhase::*;
         let expected = [
             (Idle, "Idle"),
@@ -2406,23 +2362,16 @@ mod language_tests {
             row.state = crate::activity::ActivityPhase::Recovery
                 .column_label()
                 .into();
-            if !matches!(row.target, LiveWorkTarget::ChildRun { .. }) {
-                assert_eq!(
-                    WorkMessage::state(&row).render(UiLanguage::En),
-                    "Recovery needed"
-                );
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
-            } else {
-                row.state = "live".into();
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::En), "Running");
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), "実行中");
-                assert_eq!(row.state, "live");
-            }
+            assert_eq!(
+                WorkMessage::state(&row).render(UiLanguage::En),
+                "Recovery needed"
+            );
+            assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
         }
         crate::ui::text_width::clear_terminal_width();
     }
     #[test]
-    fn canonical_child_states_render_at_both_widths_for_one_two_and_many() {
+    fn canonical_wait_states_render_at_both_widths_for_one_two_and_many() {
         fn children<const COUNT: usize>(ui: &mut UiState) {
             populate(ui);
             let view = &mut ui.active_view_mut().live_work;
@@ -2431,9 +2380,9 @@ mod language_tests {
             data.rows = (0..COUNT)
                 .map(|index| {
                     let mut row = child.clone();
-                    row.target = LiveWorkTarget::ChildRun {
-                        run_id: format!("child-run-{index}"),
-                        thread_id: format!("child-thread-{index}"),
+                    row.target = LiveWorkTarget::Wait {
+                        operation_id: format!("child-run-{index}"),
+                        execution_id: format!("child-thread-{index}"),
                     };
                     row.state = crate::activity::ActivityPhase::Recovery
                         .column_label()
@@ -2441,7 +2390,7 @@ mod language_tests {
                     row
                 })
                 .collect();
-            data.children = COUNT as u64;
+
             data.shells = 0;
             data.waits = Some(0);
             view.accept(Some(data), Instant::now());
@@ -2515,7 +2464,7 @@ mod language_tests {
         assert!(
             WorkMessage::Counts {
                 shells: 0,
-                children: 0,
+
                 waits: None
             }
             .render(UiLanguage::En)

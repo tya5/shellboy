@@ -10,8 +10,8 @@ const LIMIT: usize = 64;
 const CURSOR_BYTES: usize = 65_536;
 const RUN_NEXT: &str = "SELECT rowid,id,ended_at FROM run INDEXED BY wait_run_state WHERE thread_id=?1 AND state=?2 AND rowid>?3 ORDER BY rowid LIMIT 1";
 const RUN_HEAD: &str = "SELECT rowid,id,ended_at FROM run INDEXED BY wait_run_state WHERE thread_id=?1 AND state=?2 ORDER BY rowid DESC LIMIT 1";
-const RECOVERY_NEXT: &str = "SELECT rowid,id,json_extract(payload_ref_json,'$.run_id'),json_extract(payload_ref_json,'$.turn_id'),created_at FROM event INDEXED BY wait_recovery_thread WHERE kind='child_recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')=?1 AND rowid>?2 ORDER BY rowid LIMIT 1";
-const RECOVERY_HEAD: &str = "SELECT rowid,id,json_extract(payload_ref_json,'$.run_id'),json_extract(payload_ref_json,'$.turn_id'),created_at FROM event INDEXED BY wait_recovery_thread WHERE kind='child_recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')=?1 ORDER BY rowid DESC LIMIT 1";
+const RECOVERY_NEXT: &str = "SELECT rowid,id,json_extract(payload_ref_json,'$.run_id'),json_extract(payload_ref_json,'$.turn_id'),created_at FROM event INDEXED BY wait_recovery_thread WHERE kind='recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')=?1 AND rowid>?2 ORDER BY rowid LIMIT 1";
+const RECOVERY_HEAD: &str = "SELECT rowid,id,json_extract(payload_ref_json,'$.run_id'),json_extract(payload_ref_json,'$.turn_id'),created_at FROM event INDEXED BY wait_recovery_thread WHERE kind='recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')=?1 ORDER BY rowid DESC LIMIT 1";
 const CURRENT_RUN: &str = "SELECT id,state FROM run INDEXED BY one_live_run WHERE thread_id=?1 AND state IN ('live','stopping') LIMIT 1";
 const LAST_RUN: &str = "SELECT id,state,ended_at FROM run INDEXED BY run_thread_created WHERE thread_id=?1 ORDER BY created_at DESC,id DESC LIMIT 1";
 const CURRENT_RECOVERY: &str = "SELECT id FROM turn INDEXED BY one_open_turn WHERE thread_id=?1 AND run_id=?2 AND state IN ('preparing','running','waiting','recovery_wait') AND state='recovery_wait' LIMIT 1";
@@ -86,7 +86,6 @@ pub(crate) struct Report {
     pub changes: Vec<Value>,
     pub cursor: String,
     pub more: bool,
-    pub targets: Vec<String>,
     pub unavailable: bool,
 }
 
@@ -152,7 +151,7 @@ fn anchor(db: &Connection, thread: &str, state: &str, position: &Position) -> Re
         return Err(expired());
     }
     let query = if state == "recovery_wait" {
-        "SELECT id FROM event WHERE rowid=?1 AND kind='child_recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')=?2 AND ?3='recovery_wait'"
+        "SELECT id FROM event WHERE rowid=?1 AND kind='recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')=?2 AND ?3='recovery_wait'"
     } else {
         "SELECT id FROM run WHERE rowid=?1 AND thread_id=?2 AND state=?3"
     };
@@ -343,10 +342,6 @@ pub(crate) fn observe(
         changes,
         cursor,
         more,
-        targets: threads
-            .into_iter()
-            .map(|id| format!("thread:{id}"))
-            .collect(),
         unavailable: !unavailable.is_empty(),
     }))
 }
@@ -462,7 +457,7 @@ mod tests {
         )
         .unwrap();
         db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,generation)VALUES('u','a','active','preparing','3000',1)",[]).unwrap();
-        db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('recovery','child_recovery_wait','{}','a',?1,'1999')",[json!({"thread_id":"a","run_id":"active","turn_id":"u","generation":0,"state":"recovery_wait"}).to_string()]).unwrap();
+        db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('recovery','recovery_wait','{}','a',?1,'1999')",[json!({"thread_id":"a","run_id":"active","turn_id":"u","generation":0,"state":"recovery_wait"}).to_string()]).unwrap();
         let mut cursor = baseline.cursor;
         let mut changes = Vec::new();
         loop {

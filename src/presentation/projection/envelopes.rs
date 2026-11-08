@@ -79,13 +79,8 @@ fn event(
             "index_state" if event.pointer("/change/after/paused") == Some(&Value::Bool(true)) => {
                 EventClass::Attention
             }
-            "child_recovery_wait" | "recovery_wait" => EventClass::Attention,
-            "recovery_resumed"
-            | "thread_unarchived"
-            | "child_turn_completed"
-            | "child_run_ended"
-            | "shell_ended"
-            | "child_report" => EventClass::Change,
+            "recovery_wait" => EventClass::Attention,
+            "recovery_resumed" | "thread_unarchived" | "shell_ended" => EventClass::Change,
             "index_state"
             | "thread_settings"
             | "thread_parent"
@@ -132,7 +127,6 @@ fn prioritize_interruption_identity(p: &mut NodePresentation, value: &Value, kin
         "turns",
         "shells",
         "tool_calls",
-        "owned_children",
         "unreflected_messages",
         "cancelled_waits",
         "pending_operations_with_unknown_targets",

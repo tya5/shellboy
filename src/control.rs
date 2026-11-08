@@ -191,6 +191,11 @@ async fn maintenance_loop(
 ) {
     use crate::maintenance::Work;
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
+    let mut reply_cursor = None;
+    let mut reply_active = false;
+    let mut reply_rescan = false;
+    let mut reply_requester = None;
+
     loop {
         let now = tokio::time::Instant::now();
         let due: Vec<u32> = deadlines
@@ -204,11 +209,55 @@ async fn maintenance_loop(
                 signals.mark(*work);
             }
         }
+        if stop.is_cancelled() {
+            return;
+        }
         let set = signals.take();
-        if !set.is_empty() {
+        if set.contains(Work::ReplyOutcomes) {
+            if reply_active {
+                reply_rescan = true;
+            } else {
+                reply_active = true;
+            }
+        }
+        if !set.is_empty() || reply_active {
             let Some(strong) = control.upgrade() else {
                 return;
             };
+            if reply_active {
+                let requester = reply_requester.get_or_insert_with(|| {
+                    crate::storage::BackgroundRequester::new(strong.store.database.clone())
+                });
+                let after = reply_cursor.clone();
+                match requester
+                    .unit(std::num::NonZeroU32::new(128).unwrap(), move |db, _| {
+                        let tx = db.transaction()?;
+                        let batch =
+                            reply::terminal_batch_tx(&tx, after, &chrono::Utc::now().to_rfc3339())?;
+                        tx.commit()?;
+                        Ok(batch)
+                    })
+                    .await
+                {
+                    Ok(crate::storage::Background::Done(batch)) => {
+                        debug_assert!(batch.examined <= 128);
+                        reply_cursor = batch.cursor;
+                        if reply_cursor.is_none() {
+                            reply_active = reply_rescan;
+                            reply_rescan = false;
+                        }
+                        for thread in batch.wakes {
+                            strong.changed(&thread);
+                            strong.kick_quiet(thread).await;
+                        }
+                    }
+                    Ok(crate::storage::Background::Deferred) => {}
+                    Err(_) => {
+                        strong.fail_storage().await;
+                        return;
+                    }
+                }
+            }
             if set.contains(Work::Receipts) {
                 match strong.store.collect_receipts().await {
                     Ok(pass) => {
@@ -231,7 +280,7 @@ async fn maintenance_loop(
             drop(strong);
             if Work::ALL
                 .iter()
-                .any(|w| *w != Work::Receipts && set.contains(*w))
+                .any(|w| !matches!(w, Work::Receipts | Work::ReplyOutcomes) && set.contains(*w))
             {
                 tokio::select! {biased;_=stop.cancelled()=>return,result=gc.collect_kinds(set,chrono::Utc::now())=>{
                     match result {
@@ -1070,20 +1119,20 @@ impl Control {
         }
     }
 
-    async fn stop_run(&self, run_id: &str) {
+    async fn stop_run(self: &Arc<Self>, run_id: &str) {
         let run = run_id.to_owned();
         let thread = self
             .store
             .database
             .call(move |db| {
                 Ok(
-                    db.query_row("SELECT child.thread_id,parent.thread_id FROM run child LEFT JOIN run parent ON parent.id=child.owner_run_id AND parent.state IN ('live','stopping') WHERE child.id=?1", [run], |r| {
-                        Ok((r.get::<_, String>(0)?,r.get::<_,Option<String>>(1)?))
+                    db.query_row("SELECT thread_id FROM run WHERE id=?1", [run], |r| {
+                        r.get::<_, String>(0)
                     })?,
                 )
             })
             .await;
-        if let Ok((thread, parent)) = thread {
+        if let Ok(thread) = thread {
             if let Some(token) = self.compact_tasks.lock().await.get(&thread) {
                 token.cancel();
             }
@@ -1092,9 +1141,6 @@ impl Control {
                 match driver::stop_without_driver(self, run_id).await {
                     Ok(()) => {
                         self.store.database.signals().run_ended(run_id);
-                        if let Some(parent) = parent.filter(|parent| parent != &thread) {
-                            self.changed(&parent);
-                        }
                     }
                     Err(error) => {
                         self.fail_storage().await;
@@ -1125,23 +1171,6 @@ impl Control {
             live.stop_shells().await;
         });
         let _ = stop.await;
-    }
-    async fn nudge_owner(self: &Arc<Self>, child_run: &str) {
-        let run = child_run.to_owned();
-        let owner=self.store.database.call(move|db| {
-            use rusqlite::OptionalExtension;
-            Ok(db.query_row("SELECT parent.thread_id,parent.state FROM run child JOIN run parent ON parent.id=child.owner_run_id WHERE child.id=?1 AND parent.state IN ('live','stopping')",[run],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?))).optional()?)
-        }).await;
-        match owner {
-            Ok(Some((thread, state))) => {
-                self.changed(&thread);
-                if state == "live" {
-                    self.kick_quiet(thread).await;
-                }
-            }
-            Err(_) => self.fail_storage().await,
-            _ => {}
-        }
     }
     pub async fn background(&self, thread_id: &str) -> Result<(), ApiError> {
         self.live.background(thread_id).await
@@ -1240,7 +1269,6 @@ impl Control {
             crate::maintenance::Work::Raw,
         ]);
         signals.run_ended(&slot.run_id);
-        self.nudge_owner(&slot.run_id).await;
         // An accepted send/retry can race the previous driver's final
         // observation and map removal. Recheck after releasing its slot.
         if !self.stop.is_cancelled() {

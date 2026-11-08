@@ -4,8 +4,7 @@ use rusqlite::{Connection, Row};
 
 /// Aliases t/latest/u/a are shared by summary and bounded lineage readers.
 pub(crate) const ACTIVITY_COLUMNS: &str = "latest.state,u.state,
-    EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=latest.id AND state IN ('starting','running','stopping'))
-      OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=latest.id AND state IN ('live','stopping')),
+    EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=latest.id AND state IN ('starting','running','stopping')),
     a.state,CASE WHEN a.state='failed' AND a.generation=u.generation AND json_valid(a.error_json)
       THEN CASE WHEN octet_length(json_extract(a.error_json,'$.automatic_retry'))<=256 THEN json_extract(a.error_json,'$.automatic_retry') END END,
     CASE WHEN latest.state='live' AND u.state='running' AND COALESCE(a.state,'')<>'inflight'

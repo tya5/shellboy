@@ -272,8 +272,7 @@ fn alive(pid: i32) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_rejects_late_answers()
- {
+async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_independent() {
     let _fixture = FIXTURE.lock().await;
     let (url, mut requests, server) = proxy().await;
     let (directory, owner, control) = runtime(&url).await;
@@ -329,38 +328,25 @@ async fn stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_
     }
     let child_query = child.clone();
     let grand_query = grandchild.clone();
-    let (child_run, grand_run, grand_owner, child_owner): (String, String, String, String) =
-        control
-            .store
-            .database
-            .call(move |db| {
-                Ok((
-                    db.query_row(
-                        "SELECT id FROM run WHERE thread_id=?1",
-                        [&child_query],
-                        |r| r.get(0),
-                    )?,
-                    db.query_row(
-                        "SELECT id FROM run WHERE thread_id=?1",
-                        [&grand_query],
-                        |r| r.get(0),
-                    )?,
-                    db.query_row(
-                        "SELECT owner_run_id FROM run WHERE thread_id=?1",
-                        [grand_query],
-                        |r| r.get(0),
-                    )?,
-                    db.query_row(
-                        "SELECT owner_run_id FROM run WHERE thread_id=?1",
-                        [child_query],
-                        |r| r.get(0),
-                    )?,
-                ))
-            })
-            .await
-            .unwrap();
-    assert_eq!(child_owner, parent.run_id.as_deref().unwrap());
-    assert_eq!(grand_owner, child_run);
+    let (child_run, grand_run): (String, String) = control
+        .store
+        .database
+        .call(move |db| {
+            Ok((
+                db.query_row(
+                    "SELECT id FROM run WHERE thread_id=?1",
+                    [child_query],
+                    |r| r.get(0),
+                )?,
+                db.query_row(
+                    "SELECT id FROM run WHERE thread_id=?1",
+                    [grand_query],
+                    |r| r.get(0),
+                )?,
+            ))
+        })
+        .await
+        .unwrap();
     command(
         &control,
         Command::RunStop(RunTarget {
@@ -368,20 +354,28 @@ async fn stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_
         }),
     )
     .await;
-    for run in [parent.run_id.as_ref().unwrap(), &child_run, &grand_run] {
+    state(&control, "run", parent.run_id.as_ref().unwrap(), "stopped").await;
+    assert!(!alive(pids[0]), "parent shell must be reaped");
+    for run in [&child_run, &grand_run, independent.run_id.as_ref().unwrap()] {
+        state(&control, "run", run, "live").await;
+    }
+    for pid in &pids[1..] {
+        assert!(alive(*pid), "independent shell {pid} must remain alive");
+    }
+    // Stop each independent Run explicitly; its own late response stays fenced.
+    for run in [&child_run, &grand_run] {
+        command(
+            &control,
+            Command::RunStop(RunTarget {
+                run_id: run.clone(),
+            }),
+        )
+        .await;
         state(&control, "run", run, "stopped").await;
     }
     for pid in &pids[..3] {
-        assert!(!alive(*pid), "Run terminal before process {pid} ended");
+        assert!(!alive(*pid));
     }
-    assert!(alive(pids[3]));
-    state(
-        &control,
-        "run",
-        independent.run_id.as_ref().unwrap(),
-        "live",
-    )
-    .await;
     for thread in [&parent.thread_id, &child, &grandchild] {
         let _ = held
             .remove(thread)
@@ -399,7 +393,7 @@ async fn stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_
         }),
     )
     .await;
-    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: stopping_parent_reaps_real_grandchildren_but_keeps_independent_run_and_rejects_late_answers", async {
+    crate::test_watchdog::watchdog("tests/runtime_hierarchy.rs: stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_independent", async {
         while alive(pids[3]) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
@@ -419,9 +413,9 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
     let (directory, owner) = owner_fixture(&url).await;
     owner.db.call(|db|{
         let tx=db.transaction()?;
-        for (thread,run,turn,parent) in [("parent","old-parent","parent-turn",None),("child","old-child","child-turn",Some("old-parent")),("grandchild","old-grandchild","grandchild-turn",Some("old-child"))] {
+        for (thread,run,turn) in [("parent","old-parent","parent-turn"),("child","old-child","child-turn"),("grandchild","old-grandchild","grandchild-turn")] {
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','test','fixture','now')",[thread])?;
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,parent])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'running','now')",rusqlite::params![turn,thread,run])?;
         }
         tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('old-shell','old-parent','parent-turn','old-shell-op','running','/','{}','UTF-8','UTF-8','open','now')",[])?;
@@ -432,7 +426,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         for number in 0..66 {
             let shell=format!("old-shell-{number:03}");
             tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,'old-parent','parent-turn',?1,'running','/','{}','UTF-8','UTF-8','open','now')",[shell])?;
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at,ended_at)VALUES(?1,'child','old-parent','completed','now','now')",[format!("old-completed-child-{number:03}")])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES(?1,'child','completed','now','now')",[format!("old-completed-child-{number:03}")])?;
             let operation=format!("old-wait-{number:03}");
             let body=json!({"operation_id":operation,"caller":{"thread_id":"parent","run_id":"old-parent","turn_id":"parent-turn","execution_id":"old-shell","token":"secret-must-not-survive"},"conditions":conditions,"timeout_ms":30000,"accepted_at":"now"}).to_string();
             tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![format!("wait.pending.{operation}"),body])?;
@@ -464,10 +458,9 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         .iter()
         .find(|event| event["change"]["runs"]["items"][0]["run_id"] == "old-parent")
         .unwrap();
-    for (section, last_id) in [
-        ("shells", "old-shell-065"),
-        ("owned_children", "old-completed-child-065"),
-    ] {
+    assert!(parent["change"].get("owned_children").is_none());
+    {
+        let (section, last_id) = ("shells", "old-shell-065");
         assert_eq!(parent["change"][section]["count"], 67);
         assert_eq!(
             parent["change"][section]["items"].as_array().unwrap().len(),
@@ -712,13 +705,12 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     let first = incoming(&mut requests).await;
     let child = child_thread(&control, &parent.thread_id).await;
     let grandchild = child_thread(&control, &child).await;
-    let parent_run = parent.run_id.clone().unwrap();
     let child_query = child.clone();
     let grandchild_query = grandchild.clone();
     owner.db.call(move|db|{
         let tx=db.transaction()?;
-        for (thread,run,turn,owner) in [(&child_query,"recovery-child","recovery-child-turn",parent_run.as_str()),(&grandchild_query,"recovery-grandchild","recovery-grandchild-turn","recovery-child")] {
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,owner])?;
+        for (thread,run,turn) in [(&child_query,"recovery-child","recovery-child-turn"),(&grandchild_query,"recovery-grandchild","recovery-grandchild-turn")] {
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,?2,?3,'recovery_wait','now','{\"reason\":\"fixture_proxy_failure\"}')",rusqlite::params![turn,thread,run])?;
         }
         tx.commit()?;Ok(())
@@ -746,7 +738,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
         .collect::<Vec<_>>();
     assert_eq!(responses.len(), 3, "{body}");
     assert_eq!(responses[0]["result"]["delivery_status"], "held");
-    // An ancestor that is not the direct owner may retry too (#256).
+    // Thread organization does not restrict explicit retry of an independent Run.
     assert_eq!(responses[1]["ok"], true);
     assert_eq!(responses[2]["ok"], true);
     assert!(
@@ -791,6 +783,14 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
         &control,
         Command::RunStop(RunTarget {
             run_id: parent.run_id.unwrap(),
+        }),
+    )
+    .await;
+    state(&control, "run", "recovery-grandchild", "live").await;
+    command(
+        &control,
+        Command::RunStop(RunTarget {
+            run_id: "recovery-grandchild".into(),
         }),
     )
     .await;

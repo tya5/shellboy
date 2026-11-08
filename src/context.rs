@@ -103,7 +103,25 @@ pub fn for_thread(db: &Connection, id: &str) -> Result<ExecutionContext> {
 }
 
 pub fn for_run(db: &Connection, id: &str) -> Result<ExecutionContext> {
-    let mut context=db.query_row("SELECT thread_id,owner_run_id,state,created_at,ended_at,stop_reason FROM run WHERE id=?1",[id],|row| Ok(ExecutionContext{thread_id:row.get(0)?,owner_run_id:row.get(1)?,state:row.get(2)?,created_at:row.get(3)?,ended_at:row.get(4)?,stop_reason:row.get(5)?,run_id:Some(id.into()),..Default::default()})).optional().map_err(sql_error)?.ok_or_else(missing)?;
+    let mut context = db
+        .query_row(
+            "SELECT thread_id,state,created_at,ended_at,stop_reason FROM run WHERE id=?1",
+            [id],
+            |row| {
+                Ok(ExecutionContext {
+                    thread_id: row.get(0)?,
+                    state: row.get(1)?,
+                    created_at: row.get(2)?,
+                    ended_at: row.get(3)?,
+                    stop_reason: row.get(4)?,
+                    run_id: Some(id.into()),
+                    ..Default::default()
+                })
+            },
+        )
+        .optional()
+        .map_err(sql_error)?
+        .ok_or_else(missing)?;
     context.lifetime_ms = lifetime(
         context.created_at.as_deref().unwrap_or_default(),
         context.ended_at.as_deref(),
@@ -117,7 +135,7 @@ pub fn for_run(db: &Connection, id: &str) -> Result<ExecutionContext> {
 }
 
 pub fn for_turn(db: &Connection, id: &str) -> Result<ExecutionContext> {
-    let (mut context,raw)=db.query_row("SELECT t.thread_id,t.run_id,t.state,t.created_at,t.ended_at,t.recovery_reason_json,r.owner_run_id FROM turn t JOIN run r ON r.id=t.run_id WHERE t.id=?1",[id],|row|Ok((ExecutionContext{thread_id:row.get(0)?,run_id:row.get(1)?,state:row.get(2)?,created_at:row.get(3)?,ended_at:row.get(4)?,owner_run_id:row.get(6)?,turn_id:Some(id.into()),..Default::default()},row.get::<_,Option<String>>(5)?))).optional().map_err(sql_error)?.ok_or_else(missing)?;
+    let (mut context,raw)=db.query_row("SELECT t.thread_id,t.run_id,t.state,t.created_at,t.ended_at,t.recovery_reason_json FROM turn t JOIN run r ON r.id=t.run_id WHERE t.id=?1",[id],|row|Ok((ExecutionContext{thread_id:row.get(0)?,run_id:row.get(1)?,state:row.get(2)?,created_at:row.get(3)?,ended_at:row.get(4)?,turn_id:Some(id.into()),..Default::default()},row.get::<_,Option<String>>(5)?))).optional().map_err(sql_error)?.ok_or_else(missing)?;
     context.lifetime_ms = lifetime(
         context.created_at.as_deref().unwrap_or_default(),
         context.ended_at.as_deref(),
@@ -134,8 +152,8 @@ pub fn for_message(db: &Connection, id: &str) -> Result<ExecutionContext> {
 }
 
 pub fn for_node(db: &Connection, id: &str) -> Result<ExecutionContext> {
-    db.query_row("SELECT n.created_at,n.deleted_reason,n.turn_id,t.run_id,t.thread_id,r.owner_run_id FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[id],|row|{
+    db.query_row("SELECT n.created_at,n.deleted_reason,n.turn_id,t.run_id,t.thread_id FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[id],|row|{
         let tombstone_reason:Option<String>=row.get(1)?;
-        Ok(ExecutionContext{state:if tombstone_reason.is_some(){"tombstone"}else{"present"}.into(),created_at:row.get(0)?,turn_id:row.get(2)?,run_id:row.get(3)?,thread_id:row.get(4)?,owner_run_id:row.get(5)?,tombstone_reason,node_id:Some(id.into()),..Default::default()})
+        Ok(ExecutionContext{state:if tombstone_reason.is_some(){"tombstone"}else{"present"}.into(),created_at:row.get(0)?,turn_id:row.get(2)?,run_id:row.get(3)?,thread_id:row.get(4)?,tombstone_reason,node_id:Some(id.into()),..Default::default()})
     }).optional().map_err(sql_error)?.ok_or_else(missing)
 }

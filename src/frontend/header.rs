@@ -100,7 +100,6 @@ const HEADER_SQL: &str = "SELECT
  CASE WHEN octet_length(r.id)<=?5 THEN r.id END,
  CASE WHEN octet_length(u.id)<=?5 THEN u.id END,
  CASE WHEN octet_length(u.recovery_reason_json)<=?7 THEN u.recovery_reason_json END,
- (SELECT count(*) FROM run child WHERE child.owner_run_id=r.id AND child.state IN ('live','stopping')),
  (SELECT count(*) FROM shell_execution s WHERE s.owner_run_id=r.id AND s.state IN ('starting','running','stopping')),
  COALESCE(octet_length(u.recovery_reason_json)>?7,0),
  CASE WHEN octet_length(t.title)>?2 THEN 'title'
@@ -146,22 +145,19 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
     let row = rows
         .next()?
         .ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound, "Thread not found"))?;
-    if let Some(field) = row.get::<_, Option<String>>(14)? {
+    if let Some(field) = row.get::<_, Option<String>>(13)? {
         return Err(header_scalar_limit(&field));
     }
     let details = ThreadDetails {
         instruction_sources: None,
         archived_at: None,
         tags: Vec::new(),
-        auto_compact_at: row.get::<_, Option<i64>>(15)?.map(|v| v as u64),
+        auto_compact_at: row.get::<_, Option<i64>>(14)?.map(|v| v as u64),
         effective_auto_compact_at: None,
         segment_chars: None,
         effective_segment_chars: None,
         reduce_rounds: None,
         effective_reduce_rounds: None,
-        awaiting_reply: Vec::new(),
-        awaiting_thread_replies: Vec::new(),
-        awaiting_human: Vec::new(),
         awaiting_replies: Vec::new(),
         last_end_message: None,
         last_input: None,
@@ -178,14 +174,13 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         turn_id: row.get(9)?,
         recovery_reason: row.get(10)?,
         parent_change: None,
-        children_count: row.get::<_, i64>(11)? as u64,
-        shells_count: row.get::<_, i64>(12)? as u64,
+        shells_count: row.get::<_, i64>(11)? as u64,
         usage_totals: None,
         context_usage: None,
         context: None,
     };
     let updated_at = row.get::<_, String>(7)?;
-    let recovery_limited = row.get::<_, bool>(13)?;
+    let recovery_limited = row.get::<_, bool>(12)?;
     drop(rows);
     drop(statement);
     let title = read_title_tx(db, thread, &details.title)?;
@@ -453,7 +448,7 @@ mod tests {
             let tx=db.transaction()?;
             tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('p','/','','p','m','now'),('child','/','','p','m','now'),('unowned','/','','p','m','now');
                 UPDATE thread SET parent_thread_id='p',effort='high' WHERE id='t';
-                INSERT INTO run(id,thread_id,state,created_at,owner_run_id)VALUES('r','t','live','now',NULL),('owned','child','live','now','r'),('other','unowned','live','now',NULL);
+                INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','live','now'),('owned','child','live','now'),('other','unowned','live','now');
                 INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('u','t','r','recovery_wait','now','{\"reason\":\"saved\"}');
                 INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('e','r','u','e','running','/','{}','UTF-8','UTF-8','open','now');")?;
             input(&tx,"path","\u{1b}[31mfirst\u{1b}[0m\r\n selected request",true,"later","applied")?;
@@ -479,7 +474,7 @@ mod tests {
             serde_json::to_value(expected).unwrap()
         );
         assert_eq!(actual.title, "first selected request");
-        assert_eq!((actual.children_count, actual.shells_count), (1, 1));
+        assert_eq!(actual.shells_count, 1);
         assert_eq!(
             actual.context.unwrap().updated_at.as_deref(),
             Some("saved-update")
@@ -970,7 +965,7 @@ mod header_scalar_bound_tests {
         .unwrap();
         db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,'t',?2,'recovery_wait','now',?3)",params![turn,run,recovery]).unwrap();
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','/','','p','m','now')").unwrap();
-        db.execute("INSERT INTO run(id,thread_id,state,owner_run_id,created_at)VALUES('child-run','child','live',?1,'now')",[&run]).unwrap();
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now')",[]).unwrap();
         db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('e',?1,?2,'operation','running','/','{}','UTF-8','UTF-8','open','now')",params![run,turn]).unwrap();
         let expected = crate::control::db::thread_details(&db, "t").unwrap();
         let trace = Statements::new(&db);
@@ -983,7 +978,6 @@ mod header_scalar_bound_tests {
         drop(trace);
         let (actual, limited) = raw.prepare_inspection();
         assert!(limited.is_empty());
-        assert_eq!(actual.children_count, 1);
         assert_eq!(actual.shells_count, 1);
         assert_eq!(
             serde_json::to_value(actual).unwrap(),
@@ -1084,7 +1078,7 @@ mod header_scalar_bound_tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        for alias in ["t", "r", "u", "child", "s"] {
+        for alias in ["t", "r", "u", "s"] {
             assert!(
                 plans
                     .iter()
@@ -1098,10 +1092,6 @@ mod header_scalar_bound_tests {
                 "{alias}: {plans:?}"
             );
         }
-        assert!(
-            plans.iter().any(|plan| plan.contains("runs_by_owner")),
-            "{plans:?}"
-        );
         assert!(
             plans.iter().any(|plan| plan.contains("shell_active_owner")),
             "{plans:?}"

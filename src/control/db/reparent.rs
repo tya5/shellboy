@@ -1,11 +1,8 @@
 //! Move a Thread under another live Thread, or detach it (#222 stage 2).
 //!
-//! Only `thread.parent_thread_id` changes. Live authority follows `run.owner_run_id`
-//! (stop, retry, recovery and completion notices, wait cycles), which is stored when
-//! a Run starts and never re-derived, so a move leaves every Run, shell, wait and
-//! pending reply untouched. The new parent is read at exactly one point: the next
-//! model send that starts a Run on the moved Thread. `updated_at` is not changed so
-//! list order does not move; `revision` is bumped like every Thread write.
+//! Only Thread organization changes. Runs are independent; shells, pending replies,
+//! observations and recovery decisions remain with their existing Thread/Run IDs.
+//! `updated_at` stays unchanged and `revision` advances like every Thread write.
 use super::{MutationResult, actor, error, sql_error};
 use crate::protocol::{ErrorCode, Origin};
 use rusqlite::{OptionalExtension, Transaction, params};
@@ -139,18 +136,17 @@ pub(super) fn annotate(
     thread: &str,
     moved: &Moved,
 ) -> super::Result<()> {
-    let live: Option<(String, Option<String>)> = tx
+    let live: Option<String> = tx
         .query_row(
-            "SELECT id,owner_run_id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
+            "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
             [thread],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .optional()
         .map_err(sql_error)?;
     result.result["parent_change"] = json!({
         "previous_parent_id": moved.previous,
-        "live_run_id": live.as_ref().map(|(run, _)| run),
-        "live_run_owner_run_id": live.and_then(|(_, owner)| owner),
+        "live_run_id": live,
     });
     Ok(())
 }

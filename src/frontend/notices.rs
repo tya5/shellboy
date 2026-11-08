@@ -20,9 +20,6 @@ enum NoticeText {
     BackgroundRequested,
     BackgroundNotRequested,
     BackgroundUnknown,
-    DeletedThread,
-    ThreadUnavailable,
-    Untitled,
 }
 impl NoticeText {
     fn text(self) -> &'static str {
@@ -33,9 +30,6 @@ impl NoticeText {
             Self::BackgroundRequested => "背景指定あり",
             Self::BackgroundNotRequested => "背景指定なし",
             Self::BackgroundUnknown => "背景指定未記録",
-            Self::DeletedThread => "参照先の会話は削除済み",
-            Self::ThreadUnavailable => "参照先の会話を取得できません",
-            Self::Untitled => "無題",
         }
     }
 }
@@ -48,40 +42,31 @@ events AS MATERIALIZED (
  SELECT n.id AS node_id,e.kind,e.payload_ref_json AS payload
  FROM requested CROSS JOIN node n ON n.id=requested.node_id
  JOIN event e ON e.id=CASE WHEN json_valid(n.payload_json) THEN json_extract(n.payload_json,'$.event_id') END
- WHERE n.kind='event' AND e.kind IN ('shell_ended','child_turn_completed','child_run_ended','child_report')
+ WHERE n.kind='event' AND e.kind='shell_ended'
 ), refs AS MATERIALIZED (
- SELECT events.*,CASE WHEN json_valid(payload) THEN json_extract(payload,'$.execution_id') END AS execution_id,
- CASE WHEN json_valid(payload) THEN json_extract(payload,'$.thread_id') END AS saved_thread,
- CASE WHEN json_valid(payload) THEN json_extract(payload,'$.run_id') END AS run_id FROM events
+ SELECT events.*,CASE WHEN json_valid(payload) THEN json_extract(payload,'$.execution_id') END AS execution_id FROM events
 )
 SELECT refs.node_id,refs.kind,refs.execution_id,
  substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.command')='text' THEN json_extract(c.arguments_json,'$.command') END END,1,120),
  CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.background') IN ('true','false') THEN json_extract(c.arguments_json,'$.background') END END,
  c.group_id,c.call_id,r.node_id,
- COALESCE(refs.saved_thread,child.thread_id),substr(t.title,1,80),t.deleted_at,t.id,s.id,original.deleted_reason,
+ s.id,original.deleted_reason,
  substr(CASE WHEN json_valid(c.arguments_json) THEN CASE WHEN json_type(c.arguments_json,'$.description')='text' THEN json_extract(c.arguments_json,'$.description') END END,1,512)
 FROM refs
 LEFT JOIN shell_execution s ON s.id=refs.execution_id
 LEFT JOIN tool_call c ON c.operation_id=s.id AND EXISTS(SELECT 1 FROM tool_group g WHERE g.id=c.group_id AND g.turn_id=s.turn_id)
 LEFT JOIN tool_result r ON r.group_id=c.group_id AND r.call_id=c.call_id
 LEFT JOIN node original ON original.id=r.node_id
-LEFT JOIN run child ON child.id=refs.run_id
-LEFT JOIN thread t ON t.id=COALESCE(refs.saved_thread,child.thread_id)
 ";
 
 pub(super) struct Fact {
     pub node_id: String,
-    kind: String,
     execution: Option<String>,
     command: Option<String>,
     background: Option<bool>,
     group: Option<String>,
     call: Option<String>,
     source: Option<String>,
-    thread: Option<String>,
-    title: Option<String>,
-    deleted: Option<String>,
-    available_thread: Option<String>,
     available_execution: Option<String>,
     source_deleted: Option<String>,
     description: Option<String>,
@@ -103,20 +88,15 @@ pub(super) fn read_tx(db: &Connection, ids: &[String]) -> Result<Vec<Fact>, Stor
         .query_map([encoded], |r| {
             Ok(Fact {
                 node_id: r.get(0)?,
-                kind: r.get(1)?,
                 execution: r.get(2)?,
                 command: r.get(3)?,
                 background: r.get(4)?,
                 group: r.get(5)?,
                 call: r.get(6)?,
                 source: r.get(7)?,
-                thread: r.get(8)?,
-                title: r.get(9)?,
-                deleted: r.get(10)?,
-                available_thread: r.get(11)?,
-                available_execution: r.get(12)?,
-                source_deleted: r.get(13)?,
-                description: r.get(14)?,
+                available_execution: r.get(8)?,
+                source_deleted: r.get(9)?,
+                description: r.get(10)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -153,7 +133,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
             continue;
         };
         let mut fields = Vec::new();
-        let caption = if fact.kind == "shell_ended" {
+        let caption = {
             if let Some(description) = crate::tool_description::label(fact.description.as_deref()) {
                 fields.push(field("description", description));
             }
@@ -192,30 +172,7 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
                     "{command} | {background}"
                 )
             }
-        } else {
-            if let Some(thread) = &fact.thread {
-                fields.push(field("thread_id", thread.clone()));
-            }
-            if fact.deleted.is_some() {
-                NoticeText::DeletedThread.text().into()
-            } else if fact.available_thread.is_none() {
-                NoticeText::ThreadUnavailable.text().into()
-            } else {
-                format!(
-                    "現在の名前: {}",
-                    clean(
-                        fact.title
-                            .as_deref()
-                            .filter(|s| !s.is_empty())
-                            .unwrap_or(NoticeText::Untitled.text())
-                    )
-                )
-            }
         };
-        if fact.kind != "shell_ended" && (fact.deleted.is_some() || fact.available_thread.is_none())
-        {
-            fields.push(field("unavailable", caption.clone()));
-        }
         fields.push(field(
             "title",
             crate::ui::text_width::glyphs::formatted!(
@@ -230,25 +187,14 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
             node.presentation.metadata_limited = true;
         }
         node.presentation.fields.extend(fields);
-        let source_error = (fact.kind == "shell_ended"
-            && (fact.source.is_none() || fact.source_deleted.is_some()))
-        .then_some(Text::NoticeSourceUnavailable);
-        let notice = if fact.kind == "shell_ended" {
-            if fact.available_execution.is_none() || fact.group.is_none() {
-                Message::Text(Text::NoticeCallUnavailable)
-            } else {
-                Message::CommandNotice {
-                    command: fact.command.as_deref().map(clean).filter(|s| !s.is_empty()),
-                    background: fact.background,
-                }
-            }
-        } else if fact.deleted.is_some() {
-            Message::Text(Text::NoticeDeletedThread)
-        } else if fact.available_thread.is_none() {
-            Message::Text(Text::NoticeThreadUnavailable)
+        let source_error = (fact.source.is_none() || fact.source_deleted.is_some())
+            .then_some(Text::NoticeSourceUnavailable);
+        let notice = if fact.available_execution.is_none() || fact.group.is_none() {
+            Message::Text(Text::NoticeCallUnavailable)
         } else {
-            Message::ThreadNotice {
-                title: fact.title.as_deref().map(clean).filter(|s| !s.is_empty()),
+            Message::CommandNotice {
+                command: fact.command.as_deref().map(clean).filter(|s| !s.is_empty()),
+                background: fact.background,
             }
         };
         node.presentation
@@ -329,16 +275,8 @@ mod tests {
                 background: Some(true),
             })
         );
-        assert_eq!(
-            nodes[1].presentation.ui_messages.notice,
-            Some(Message::ThreadNotice {
-                title: Some("same".into()),
-            })
-        );
-        assert_eq!(
-            nodes[2].presentation.ui_messages.notice,
-            Some(Message::Text(Text::NoticeThreadUnavailable))
-        );
+        assert_eq!(nodes[1].presentation.ui_messages.notice, None);
+        assert_eq!(nodes[2].presentation.ui_messages.notice, None);
         let serialized = serde_json::to_value(&nodes[0].presentation).unwrap();
         let mut without_typed = nodes[0].presentation.clone();
         without_typed.ui_messages.notice = None;
@@ -351,11 +289,6 @@ mod tests {
             .unwrap();
         shell.source = None;
         shell.group = None;
-        let child = facts
-            .iter_mut()
-            .find(|fact| fact.node_id == "node-child-notice")
-            .unwrap();
-        child.deleted = Some("now".into());
         apply(&mut nodes, &facts);
         assert_eq!(
             nodes[0].presentation.ui_messages.notice,
@@ -366,10 +299,7 @@ mod tests {
             Some(Text::NoticeSourceUnavailable)
         );
         assert!(value(&nodes[0], "source_error").is_some());
-        assert_eq!(
-            nodes[1].presentation.ui_messages.notice,
-            Some(Message::Text(Text::NoticeDeletedThread))
-        );
+        assert_eq!(nodes[1].presentation.ui_messages.notice, None);
         apply(&mut nodes, &[]);
         for node in &nodes {
             assert_eq!(node.presentation.ui_messages.notice, None);
@@ -415,7 +345,7 @@ mod tests {
         let trace = super::super::sql_trace::Statements::new(&db);
         let facts = read_tx(&db, &ids).unwrap();
         assert_eq!(trace.count(), 1);
-        assert_eq!(facts.len(), 3);
+        assert_eq!(facts.len(), 1);
         let mut nodes = vec![node("shell"), node("child-notice"), node("missing")];
         apply(&mut nodes, &facts);
         assert_eq!(value(&nodes[0], "source_node"), Some("source"));
@@ -423,13 +353,8 @@ mod tests {
         assert!(value(&nodes[0], "title").unwrap().contains("CORRECT"));
         assert!(!value(&nodes[0], "title").unwrap().contains("WRONG"));
         assert!(value(&nodes[0], "title").unwrap().contains("背景指定あり"));
-        assert_eq!(value(&nodes[1], "thread_id"), Some("child"));
-        assert!(
-            value(&nodes[1], "title")
-                .unwrap()
-                .contains("現在の名前: same")
-        );
-        assert!(value(&nodes[2], "unavailable").is_some());
+        assert!(value(&nodes[1], "thread_id").is_none());
+        assert!(value(&nodes[2], "unavailable").is_none());
         for node in &nodes {
             assert_eq!(node.text, "CANONICAL_SENTINEL");
             assert!(node.presentation.metadata_bytes() <= crate::presentation::MAX_METADATA_BYTES);
@@ -457,29 +382,13 @@ mod tests {
         );
     }
     #[test]
-    fn rename_delete_and_missing_refs_replace_current_metadata_without_touching_history() {
+    fn child_lifecycle_facts_are_not_decorated_or_refreshed() {
         let db = fixture();
         let ids = vec!["node-child-notice".into()];
         let mut nodes = vec![node("child-notice")];
-        apply(&mut nodes, &read_tx(&db, &ids).unwrap());
-        db.execute("UPDATE thread SET title='renamed' WHERE id='child'", [])
-            .unwrap();
-        apply(&mut nodes, &read_tx(&db, &ids).unwrap());
-        assert!(
-            value(&nodes[0], "title")
-                .unwrap()
-                .contains("現在の名前: renamed")
-        );
-        assert!(!value(&nodes[0], "title").unwrap().contains("same"));
-        db.execute("UPDATE thread SET deleted_at='now' WHERE id='child'", [])
-            .unwrap();
-        apply(&mut nodes, &read_tx(&db, &ids).unwrap());
-        assert!(
-            value(&nodes[0], "unavailable")
-                .unwrap()
-                .contains("削除済み")
-        );
-        assert_eq!(value(&nodes[0], "thread_id"), Some("child"));
+        assert!(read_tx(&db, &ids).unwrap().is_empty());
+        apply(&mut nodes, &[]);
+        assert!(value(&nodes[0], "title").is_none());
         assert_eq!(nodes[0].text, "CANONICAL_SENTINEL");
         let trace = super::super::sql_trace::Statements::new(&db);
         assert!(read_tx(&db, &vec!["x".into(); 129]).is_err());

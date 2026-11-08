@@ -14,7 +14,7 @@ Before 1.0.0, release-specific backward-compatibility paths are not part of the 
 
 成功/失敗は `Response<T>`。`success/failure` を利用し、受信時 `validate` を行う。片側だけを出力し、hint/details/run_id/turn_id/next_cursor等の未確定値は省略する。`MessageAccepted::validate` はpending時のID不在と割当済み時の両ID存在を検査する。各操作のcore結果をThread/Run/Turn/Shell/History/Attachment/Index/Storageのrecordで表し、provider payloadやwait snapshotのみJSON拡張値を許す。状態enumは原文のRun/Turn/attempt/shell/message/managed/index状態に対応し、Turnのfailedは論理DDLのCHECKに合わせて含める（引継ぎの遷移表は網羅列挙ではない）。API/proxy attempt errorはこの操作errorと区別する。
 
-wait条件は `type` tagの `turn_completed/run_ended/shell_ended/shell_output` のみ。timeout既定30,000ms、0を許容、非負u64。any判定、同snapshot成立集合、循環拒否、登録と状態確認の直列化、停止とは独立したRPC取消しはControl実装の責務であり、型fixtureだけで検証完了とは扱わない。
+wait条件は `type` tagの `turn_completed/run_ended/shell_ended/shell_output` のみ。timeout既定30,000ms、0を許容、非負u64。any判定、同snapshot成立集合、呼出元Run/Turn/shell自身のID待ち拒否（循環graphなし）、登録と状態確認の直列化、停止とは独立したRPC取消しはControl実装の責務であり、型fixtureだけで検証完了とは扱わない。
 
 通信frameは4 byte unsigned big-endian長＋UTF-8 JSON、版はenvelopeに置く。1 frameの上限は8MiB。最大1MiBのdraft/stdinがJSONで制御文字ごと6 byteへ展開されてもmetadataと共に収まるための境界であり、入力本文上限を引き上げるものではない。prefix前EOFは正常切断、途中prefix/payload EOFはio_failed、0/超過長はinput_limit、JSON不正はinvalid_argument。長さ検査を割当より先に行う。
 
@@ -91,7 +91,7 @@ does not alter the command or execution. Reading it adds no table scan.
 
 Thread archive (#222 stage 1) adds `thread.archive` and `thread.unarchive` (both `ThreadArchiveArgs {thread_ids: 0..=200 IDs, descendants}`; empty means the calling Thread, over 200 is `input_limit`) and the `archived` field of `ThreadListArgs` (`exclude` default, `include`, `only`; omitted on the wire when `exclude`, so existing operation fingerprints are unchanged). `ThreadSummary` and `ThreadDetails` carry an optional `archived_at`. Results: `{archived|unarchived, already, not_found, descendants}`. Details: [thread organization](thread-organization.md).
 
-Re-parenting (#222 stage 2) adds the optional `parent_id` to `ThreadSetArgs` (a Thread ID moves the Thread under that live Thread, the empty string detaches it; omitted on the wire when absent, so existing operation fingerprints are unchanged). A successful move adds `parent_change {previous_parent_id, live_run_id, live_run_owner_run_id}` to the `ThreadDetails` result and reports the moved Thread, the old parent and the new parent in the changed set (`Control::changed`, so `events.wait` clients refresh all three). Setting the current parent again is a no-op that publishes nothing. Errors: a self-parent or a new parent inside the Thread's own subtree is `invalid_state`; an unknown, deleted or missing parent or Thread is `thread_not_found`; a new parent with more than 1,024 ancestors is `input_limit`.
+Re-parenting (#222 stage 2) adds the optional `parent_id` to `ThreadSetArgs` (a Thread ID moves the Thread under that live Thread, the empty string detaches it; omitted on the wire when absent, so existing operation fingerprints are unchanged). A successful move adds `parent_change {previous_parent_id, live_run_id}` to the `ThreadDetails` result and reports the moved Thread, the old parent and the new parent in the changed set (`Control::changed`, so `events.wait` clients refresh all three). Setting the current parent again is a no-op that publishes nothing. Errors: a self-parent or a new parent inside the Thread's own subtree is `invalid_state`; an unknown, deleted or missing parent or Thread is `thread_not_found`; a new parent with more than 1,024 ancestors is `input_limit`.
 
 Thread tags (#222 stage 3) add `thread.tag` (`ThreadTagArgs {thread_ids: 0..=200 IDs (empty means the calling Thread), add: 0..=64 tags, remove: 0..=64 tags}`; at least one tag, a tag in both lists is `invalid_argument`) and `thread.tags` (`ThreadTagsArgs {limit 1..=200, cursor}`, a page of distinct tag names in byte order, names only). `ThreadListArgs` gains `tags` (0..=64, AND; omitted on the wire when empty) and `cwd` (the saved cwd compared after the same lexical cleanup as saved cwds; a relative path is `invalid_argument`; omitted when absent), so existing operation fingerprints are unchanged. `ThreadSummary` and `ThreadDetails` gain `tags` (sorted, omitted when empty). A tag is trimmed, one line, 1..=128 Unicode scalar values, no control characters; case matters. A Thread carries at most 64 tags and a call that would exceed that is `input_limit` and changes nothing. `thread.tag` result: `{changed, unchanged, not_found, add, remove}` (`add`/`remove` are the normalized request); `changed_threads` is the changed Threads only, a replay with the same operation ID publishes nothing, `updated_at` is untouched. `thread.cwds` (`ThreadCwdsArgs {limit 1..=200, cursor}`) returns distinct saved cwds of non-deleted Threads (archived included) as strings in byte order, no counts. A list cursor is bound to a digest of the sorted tag set and the cwd (and to the archived mode), so it cannot move between filters (`cursor_expired`). Details: [thread organization](thread-organization.md).
 
@@ -228,6 +228,7 @@ OSごとの所有対象を型の構成で明確にする。Windowsの実機受�
 
 Historical protocol-2 behavior (superseded by Issue #244 A2): protocol-2 request/response envelopes rejected all other versions; current required fields were not made optional for older owners. That version-mismatch diagnostic and receipt guidance remain. Protocol 3 added capabilities, protocol 4 added the strict `events.wait` result, and protocol 5 changes human-reply count and oldest-time semantics and replaces the snapshot cursor with an incompatible live cursor; the additive exactness flag alone is tolerated by open result records. For external clients, `docs/reference/protocol.schema.json` is generated from the wire types and the exact drift test keeps it synchronized. Other results still represented by `serde_json::Value` remain opaque. Unknown request arguments remain typed `invalid_argument` errors before dispatch. Any incompatible strict result shape requires a new `PROTOCOL_VERSION`, exact handshake match, regenerated schema, and explicit migration note; no silent downgrade is supported. Capabilities do not make older strict typed result decoders tolerate new fields.
 
+
 ## R3-3 / R3-4: Command分類・語彙・既定値の正本
 
 Commandのwire名とdispatch routeはprotocolの網羅matchを正本とする。route、runtime actionをshutdownでdropできるか、取消後も許可するcleanup、C5 capture前に完了すべきcontext mutationは別の意味であり、独立した網羅matchに既存集合を移す。共通metadata registryやschema DSLへ統合しない。人間向け日本語title、入力前のTUIフォーム名、IPC通常24/停止2/Status2枠、shell所有者の認可targetはそれぞれ層の責務を保持する。元レビュー時点のfrontend英語36名は既に日本語表示となっているため、protocol名への置換で表示を退行させない。
@@ -324,13 +325,13 @@ request and never deletes a space. `index.remove` takes `space_id` and optional 
 one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
 source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
 and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
-the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 4 is current after #275. See
+the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 5 is current after #276. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 
 thread.create/set/fork accept optional `agents`; thread.get returns required
-`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 4 is current after #275.
+`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 5 is current after #276.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
 
@@ -523,7 +524,7 @@ state is created. Existing ungrouped response shape is unchanged.
 ## Optional Deletion Target Marker (#122)
 
 `thread.delete` accepts the optional `args.preview_marker` additively under the
-current protocol 4 contract; older protocol-2/3 notes about the original change
+current protocol 5 contract; older protocol-2/3 notes about the original change
 are historical, not the current wire version. The marker contains
 `thread_count` (1..257) and `ids_hash` (64 lowercase SHA-256 hex characters).
 Old requests omitting it, or using null, retain unguarded current behavior;
@@ -887,6 +888,13 @@ lookup was insufficient: parsing payload JSON before applying substring limits s
 
 `thread.branch_kind` records `fork` or `rewind` when a branch is created. Pre-migration rows and non-branch roots retain NULL and serialize as `unknown`; no kind is inferred from path shape. Migration 37 adds only this nullable checked field.
 
+## #276 protocol 5: independent Runs
+
+Main protocol 4 already includes #275 reasoning activity. Version 5 retains that capability and removes Run ownership
+and the duplicate Thread-get reply-duty lists; see the exact inventory in events-and-external-protocol.md and #280.
+Only direct invoking Run/Turn/shell ID waits are rejected with `self_wait`; no cycle graph remains. Reply duties stay
+pending through `recovery_wait`, and explicit replies/outcomes use ordinary requesting-Thread delivery after its Run
+ends. Shell ownership and organizational Thread parentage are unchanged. No protocol-4 alias or downgrade is provided.
 ### Saved assistant response references on status attempts (#279)
 
 Durable `status` attempt WorkItems expose `response_nodes`, an output-item-ordered list of saved `assistant_response` references from the existing `output_item` rows for that exact `attempt_id`. Each entry preserves `ordinal`, nullable provider `item_id`, provider `kind`, nullable `phase`, and the saved `node_id`; repeated items that point at the same node remain repeated entries so item identity/order is not lost. Studio may pass `node_id` to `history.window`; it must not use `end_message_node_id` for intermediate attempts. That field remains exclusively the Turn's final answer pointer. For each attempt, the list contains only eligible assistant-response items found within the inspected candidate prefix. It can be empty because no row was saved yet/at all, because saved rows have no assistant-response node, or because all inspected candidates were ineligible. An empty list with `response_nodes_truncated=false` means the full candidate range was inspected and contained no eligible response; an empty list with `response_nodes_truncated=true` means later candidates were not inspected and eligible refs may exist. Failed/retried attempts retain their own refs; retries use different attempt IDs. Live-only observations use an empty list and `response_nodes_truncated=false` because they have no durable output-item ownership.

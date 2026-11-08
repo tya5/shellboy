@@ -107,7 +107,6 @@ fn generic_recovery_preserves_specific_hints_and_never_promises_safe_reexecution
         ErrorCode::OperationExpired,
         ErrorCode::IoFailed,
         ErrorCode::InvalidState,
-        ErrorCode::WaitCycle,
         ErrorCode::SaveFailed,
         ErrorCode::OutputExpired,
     ] {
@@ -318,9 +317,9 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
     bounded(control.start()).await.unwrap();
     owner.db.call(|db| {
         let tx=db.transaction()?;
-        for (thread,run,turn,parent,state) in [("parent","r-parent","u-parent",None,"running"),("child","r-child","u-child",Some("r-parent"),"running"),("recovering","r-recovery","u-recovery",None,"recovery_wait")] {
+        for (thread,run,turn,state) in [("parent","r-parent","u-parent","running"),("child","r-child","u-child","running"),("recovering","r-recovery","u-recovery","recovery_wait")] {
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','','','now')",[thread])?;
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,parent])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,recovery_reason_json,created_at)VALUES(?1,?2,?3,?4,?5,'now')",rusqlite::params![turn,thread,run,state,if state=="recovery_wait" {Some(r#"{"code":"config_invalid","message":"fixture recovery reason"}"#)}else{None}])?;
         }
         // Durable shell metadata is fixture data; no fake PID/OS process is inspected.
@@ -377,10 +376,7 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
         parent["change"]["cancelled_waits"]["items"][0]["operation_id"],
         operation
     );
-    assert_eq!(
-        parent["change"]["owned_children"]["items"][0]["run_id"],
-        "r-child"
-    );
+    assert!(parent["change"].get("owned_children").is_none());
     assert_eq!(
         parent["change"]["shells"]["items"][0]["execution_id"],
         "s-parent"

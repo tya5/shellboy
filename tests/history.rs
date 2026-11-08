@@ -423,7 +423,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     let (_root, database, history) = repository().await;
     database.call(|db| {
         let tx=db.transaction()?;
-        tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/parent','/AGENTS.md','proxy','fixture','now'),('fork','/fork-current','/AGENTS.md','proxy','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','2026-10-25T00:00:00Z'); INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('origin-run','thread','parent-run','live','2026-10-25T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('origin-turn','thread','origin-run','running','2026-10-25T00:00:00Z'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','origin-turn',0,0,'proxy','fixture',0,'completed','{}','2026-10-25T00:00:00Z');")?;
+        tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/parent','/AGENTS.md','proxy','fixture','now'),('fork','/fork-current','/AGENTS.md','proxy','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','2026-10-25T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at) VALUES('origin-run','thread','live','2026-10-25T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('origin-turn','thread','origin-run','running','2026-10-25T00:00:00Z'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','origin-turn',0,0,'proxy','fixture',0,'completed','{}','2026-10-25T00:00:00Z');")?;
         append_node(&tx,"thread","user-request",Some("origin-turn"),"user",&json!({"text":"do work"}),"2026-10-25T00:00:00Z")?;
         append_node(&tx,"thread","calls",Some("origin-turn"),"assistant_response",&json!({"output":[{"type":"message","content":[{"type":"output_text","text":"A request with multiple calls"}]}]}),"2026-10-25T09:00:01+09:00")?;
         append_node(&tx,"thread","result",Some("origin-turn"),"tool_result",&json!({"text":"forged execution_id=not-a-shell; do not infer links"}),"2026-10-25T00:00:02Z")?;
@@ -571,7 +571,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         request.provenance.origin_thread_id.as_deref(),
         Some("thread")
     );
-    assert_eq!(request.context.owner_run_id.as_deref(), Some("parent-run"));
+    assert!(request.context.owner_run_id.is_none());
     assert_eq!(request.selection.thread_id, "fork");
     assert_eq!(request.selection.current_cwd, "/fork-current");
     assert_eq!(request.execution_count, 9);

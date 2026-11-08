@@ -194,6 +194,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0038_human_reply_pending.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 39,
+        sql: include_str!("../../migrations/0039_independent_runs.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -207,9 +212,14 @@ pub(super) fn run(
         .filter(|migration| migration.version > version)
     {
         report(migration.version - version, super::SCHEMA_VERSION - version);
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let additive_column_already_present = match migration.version {
+        // Rebuild the Run table without changing referent IDs or dependent rows.
+        if migration.version == 39 {
+            connection.pragma_update(None, "foreign_keys", false)?;
+        }
+        let migrated = (|| -> Result<(), StorageError> {
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let additive_column_already_present = match migration.version {
             36 => transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_table_info('node') WHERE name='spill_tools_json')",
                 [],
@@ -222,22 +232,28 @@ pub(super) fn run(
             )?,
             _ => false,
         };
-        if additive_column_already_present {
-            // Downgrade fixtures can retain additive columns; keep existing data intact.
-            transaction.execute_batch(
-                migration
-                    .sql
-                    .split_once(';')
-                    .expect("column then metadata")
-                    .1,
-            )?;
-        } else {
-            transaction.execute_batch(migration.sql)?;
+            if additive_column_already_present {
+                // Downgrade fixtures can retain additive columns; keep existing data intact.
+                transaction.execute_batch(
+                    migration
+                        .sql
+                        .split_once(';')
+                        .expect("column then metadata")
+                        .1,
+                )?;
+            } else {
+                transaction.execute_batch(migration.sql)?;
+            }
+            if migration.version == 4 {
+                migrate_attachment_sources(&transaction)?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })();
+        if migration.version == 39 {
+            connection.pragma_update(None, "foreign_keys", true)?;
         }
-        if migration.version == 4 {
-            migrate_attachment_sources(&transaction)?;
-        }
-        transaction.commit()?;
+        migrated?;
     }
     validation();
     validate_schema(connection)?;
@@ -319,6 +335,63 @@ fn migrate_attachment_sources(tx: &rusqlite::Transaction<'_>) -> Result<(), Stor
 #[cfg(test)]
 mod activity_migration_tests {
     use super::*;
+
+    #[test]
+    fn foreign_key_check_detects_violations_with_enforcement_disabled() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE parent(id TEXT PRIMARY KEY); CREATE TABLE child(parent_id TEXT REFERENCES parent(id));").unwrap();
+        db.pragma_update(None, "foreign_keys", false).unwrap();
+        let tx = db.transaction().unwrap();
+        tx.execute("INSERT INTO child VALUES('missing')", [])
+            .unwrap();
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            1
+        );
+        tx.rollback().unwrap();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn failed_run_rebuild_rolls_back_and_restores_foreign_keys() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        // Inject a collision after FK checks are disabled, before any Run copy.
+        db.execute_batch("CREATE TABLE independent_run(collision INTEGER); DELETE FROM schema_migration WHERE version=39; PRAGMA user_version=38;").unwrap();
+        assert!(run(&mut db, 38, &|_, _| {}, &|| {}).is_err());
+        assert_eq!(
+            db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            38
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='run'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+    }
 
     #[test]
     fn recovery_index_upgrades_from_each_recent_schema() {
@@ -449,8 +522,8 @@ mod activity_migration_tests {
             );
             assert_eq!(
                 crate::storage::SCHEMA_VERSION,
-                38,
-                "schema 38 is the reviewed #262 baseline extension"
+                39,
+                "schema 39 extends the reviewed #262 schema-38 baseline"
             );
             assert_eq!(
                 db.query_row(
@@ -495,12 +568,12 @@ mod activity_migration_tests {
             .unwrap();
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','legacy',?2,'applied','old','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("legacy-receipt-{index}"), node]).unwrap();
         }
-        db.execute_batch("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version=38; PRAGMA user_version=37;").unwrap();
+        db.execute_batch("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version>=38; PRAGMA user_version=37;").unwrap();
         run(&mut db, 37, &|_, _| {}, &|| {}).unwrap();
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            38
+            39
         );
         assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 20);
         assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_human_reply_pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);

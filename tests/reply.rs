@@ -215,11 +215,8 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
-        assert_eq!(
-            details["awaiting_thread_replies"].as_array().unwrap().len(),
-            1
-        );
+        assert!(details.get("awaiting_reply").is_none());
+        assert_eq!(details["awaiting_replies"].as_array().unwrap().len(), 1);
         if admitted {
             let node = id.clone();
             store.database.call(move |db| { db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1",[node])?;Ok(()) }).await.unwrap();
@@ -278,13 +275,8 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
-        assert!(
-            details["awaiting_thread_replies"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
+        assert!(details.get("awaiting_reply").is_none());
+        assert!(details["awaiting_replies"].as_array().unwrap().is_empty());
         let error = store
             .execute(
                 request(Command::MessageReply(MessageReplyArgs {
@@ -348,21 +340,27 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .await
         .unwrap()
         .result;
-    assert_eq!(details["awaiting_reply"].as_array().unwrap().len(), 1);
+    assert_eq!(details["awaiting_replies"].as_array().unwrap().len(), 2);
+    for old in [
+        "awaiting_reply",
+        "awaiting_human",
+        "awaiting_thread_replies",
+    ] {
+        assert!(details.get(old).is_none());
+    }
+    let duties = details["awaiting_replies"].as_array().unwrap();
     assert_eq!(
-        details["awaiting_reply"][0]["message_id"],
+        duties
+            .iter()
+            .find(|d| d["recipient_kind"] == "human")
+            .unwrap()["message_id"],
         human_ask["message_id"]
     );
     assert_eq!(
-        details["awaiting_human"][0]["message_id"],
-        human_ask["message_id"]
-    );
-    assert_eq!(
-        details["awaiting_thread_replies"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        details["awaiting_thread_replies"][0]["message_id"],
+        duties
+            .iter()
+            .find(|d| d["recipient_kind"] == "thread")
+            .unwrap()["message_id"],
         message_id
     );
     let not_applied = store
@@ -416,7 +414,7 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
 }
 
 #[tokio::test]
-async fn reply_to_model_is_delivered_once_and_preserves_correlation() {
+async fn recovery_wait_keeps_pending_and_recovered_reply_wakes_completed_sender_once() {
     let (_root, store) = fixture().await;
     let sender = Origin {
         instance_id: "fixture".into(),
@@ -437,6 +435,38 @@ async fn reply_to_model_is_delivered_once_and_preserves_correlation() {
         db.execute("UPDATE receipt SET state='applied',path_admission='admitted' WHERE message_node_id=?1", [applied])?;
         Ok(())
     }).await.unwrap();
+    let recovering = accepted["turn_id"].as_str().unwrap().to_owned();
+    let recovery_id = id.clone();
+    store.database.call(move|db| {
+        db.execute("UPDATE turn SET state='recovery_wait' WHERE id=?1",[&recovering])?;
+        assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE message_node_id=?1",[recovery_id],|r|r.get::<_,String>(0))?,"pending");
+        Ok(())
+    }).await.unwrap();
+    store
+        .execute(
+            request(Command::RunRetry(RunTarget {
+                run_id: accepted["run_id"].as_str().unwrap().into(),
+            })),
+            None,
+        )
+        .await
+        .unwrap();
+    // No live parent Run is required for a reply: delivery starts ordinary new work.
+    store
+        .database
+        .call(|db| {
+            db.execute(
+                "UPDATE turn SET state='completed',ended_at='now' WHERE run_id='sender-run'",
+                [],
+            )?;
+            db.execute(
+                "UPDATE run SET state='completed',ended_at='now' WHERE id='sender-run'",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
     let recipient = Origin {
         thread_id: "recipient".into(),
         ..sender
@@ -452,6 +482,8 @@ async fn reply_to_model_is_delivered_once_and_preserves_correlation() {
         .unwrap()
         .result;
     assert_eq!(result["delivery"]["thread_id"], "sender");
+    assert_eq!(result["delivery"]["assignment"], "new_run");
+    assert_ne!(result["delivery"]["run_id"], "sender-run");
     assert_eq!(
         store
             .execute(operation, Some(recipient))
@@ -521,8 +553,9 @@ async fn deletion_terminalizes_replies_before_gc_and_recipient_wins() {
             }
             if deleted=="recipient" {
                 let event:(String,Option<String>)=db.query_row("SELECT kind,target_run_id FROM event WHERE json_extract(payload_ref_json,'$.kind')='reply_outcome'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
-                assert_eq!(event,("context_changed".into(),None));
-                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id='sender'",[],|r|r.get::<_,i64>(0))?,0,"an idle sender must not start");
+                assert_eq!(event.0,"reply_outcome");
+                assert!(event.1.is_some());
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE thread_id='sender' AND state='live'",[],|r|r.get::<_,i64>(0))?,1,"ordinary outcome delivery activates an idle sender");
             }
             assert_eq!(db.query_row("SELECT count(*) FROM gc_job WHERE state='pending'",[],|r|r.get::<_,i64>(0))?,1);
             Ok(())

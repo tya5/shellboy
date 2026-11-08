@@ -17,7 +17,7 @@ impl Fixture {
             .await
             .unwrap();
         db.call(|db|{db.execute_batch("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('a',NULL,'Alpha','/fixture','/fixture/AGENTS.md','current-profile','current-model','2026-10-25T08:00:00Z'),('b','a','Thread child','/fixture','/fixture/AGENTS.md','current-profile','current-model','2026-10-25T08:00:00Z'),('c',NULL,'Owned work','/fixture','/fixture/AGENTS.md','current-profile','current-model','2026-10-25T08:00:00Z');
-        INSERT INTO run(id,thread_id,owner_run_id,state,created_at,ended_at)VALUES('root','a',NULL,'live','2026-10-25T07:00:00Z',NULL),('owned','c','root','live','2026-10-25T07:01:00Z',NULL),('unrelated','b',NULL,'completed','2026-10-25T06:00:00Z','2026-10-25T07:30:00Z');
+        INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('root','a','live','2026-10-25T07:00:00Z',NULL),('owned','c','live','2026-10-25T07:01:00Z',NULL),('unrelated','b','completed','2026-10-25T06:00:00Z','2026-10-25T07:30:00Z');
         INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('turn-root','a','root','running','2026-10-25T07:02:00Z',NULL),('turn-owned','c','owned','waiting','2026-10-25T07:03:00Z',NULL),('turn-other','b','unrelated','completed','2026-10-25T06:05:00Z','2026-10-25T07:30:00Z');
         INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('held-node',NULL,'user','2026-10-25T07:04:00Z','\"PRIVATE_BODY\"',14),('answer','turn-other','assistant','2026-10-25T07:30:00Z','\"PRIVATE_ANSWER\"',16),('applied-node','turn-other','user','2026-10-25T06:05:00Z','\"PRIVATE_BODY\"',14);
         UPDATE turn SET answer_node_id='answer' WHERE id='turn-other';
@@ -82,7 +82,7 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
         .iter()
         .find(|i| i.kind == "run" && i.id == "owned")
         .unwrap();
-    assert_eq!(owned.owner_run_id.as_deref(), Some("root"));
+    assert!(owned.owner_run_id.is_none());
     assert_eq!(owned.parent_thread_id, None);
     let attempt = status.items.iter().find(|i| i.kind == "attempt").unwrap();
     assert_eq!(attempt.current_model, "current-model");
@@ -110,6 +110,7 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     assert_eq!(held.run_id, None);
     assert_eq!(held.message_id.as_deref(), Some("held-node"));
     let shell = status.items.iter().find(|i| i.kind == "shell").unwrap();
+    assert_eq!(shell.owner_run_id.as_deref(), Some("root"));
     assert!(matches!(&shell.targets[0],Command::ShellGet(a)if a.execution_id=="exec"));
     assert!(matches!(&shell.targets[1],Command::ShellRead(a)if a.execution_id=="exec"));
     assert!(shell.operation_id.is_none());

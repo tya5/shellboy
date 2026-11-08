@@ -109,7 +109,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             "r.state,r.thread_id,r.id,t.id,r.created_at,NULL,r.ended_at,NULL,substr(r.stop_reason,1,512)",
             "LEFT JOIN turn t ON t.id=(SELECT id FROM (SELECT id,created_at FROM turn INDEXED BY turns_by_run WHERE run_id=r.id AND created_at=(SELECT max(created_at) FROM turn INDEXED BY turns_by_run WHERE run_id=r.id) LIMIT 201) ORDER BY id DESC LIMIT 1)",
             "r.thread_id",
-            "r.owner_run_id",
+            "NULL",
             "t.answer_node_id",
             "NULL",
             "NULL",
@@ -121,7 +121,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             "r.state,r.thread_id,r.run_id,r.id,r.created_at,NULL,r.ended_at,NULL,CASE WHEN json_valid(r.recovery_reason_json) THEN substr(COALESCE(json_extract(r.recovery_reason_json,'$.kind'),json_extract(r.recovery_reason_json,'$.code')),1,512) END",
             "JOIN run t ON t.id=r.run_id",
             "r.thread_id",
-            "t.owner_run_id",
+            "NULL",
             "r.answer_node_id",
             "NULL",
             "NULL",
@@ -133,7 +133,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             "r.state,t.thread_id,r.owner_run_id,r.turn_id,NULL,r.started_at,r.ended_at,NULL,substr(r.end_reason,1,512)",
             "JOIN run t ON t.id=r.owner_run_id",
             "t.thread_id",
-            "t.owner_run_id",
+            "r.owner_run_id",
             "NULL",
             "NULL",
             "NULL",
@@ -145,7 +145,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             "r.state,r.target_thread_id,r.run_id,r.turn_id,r.created_at,NULL,NULL,NULLIF(r.updated_at,''),substr(r.hold_reason,1,512)",
             "LEFT JOIN run t ON t.id=r.run_id LEFT JOIN turn u ON u.id=r.turn_id",
             "r.target_thread_id",
-            "t.owner_run_id",
+            "NULL",
             "NULL",
             "CASE WHEN EXISTS(SELECT 1 FROM operation_receipt o WHERE o.operation_id=r.client_operation_id) THEN r.client_operation_id END",
             "NULL",
@@ -157,7 +157,7 @@ pub(crate) fn point_sql(kind: Kind) -> String {
             "r.state,t.thread_id,t.run_id,r.turn_id,NULL,r.started_at,r.ended_at,NULL,CASE WHEN json_valid(r.error_json) THEN substr(COALESCE(json_extract(r.error_json,'$.kind'),json_extract(r.error_json,'$.code')),1,512) END",
             "JOIN turn t ON t.id=r.turn_id JOIN run u ON u.id=t.run_id",
             "t.thread_id",
-            "u.owner_run_id",
+            "NULL",
             "t.answer_node_id",
             "NULL",
             "substr(r.profile_id,1,128)",
@@ -675,9 +675,7 @@ mod tests {
             ('parent','Parent','/','','p','m','2026-11-01T00:00:00Z'),
             ('scope','Current title','/','','current-profile','current-model','2026-11-01T00:00:00Z');
           UPDATE thread SET parent_thread_id='parent' WHERE id='scope';
-          INSERT INTO run(id,thread_id,state,created_at,ended_at,owner_run_id,stop_reason) VALUES
-            ('owner','parent','completed','2026-11-01T00:00:00Z','2026-11-01T00:00:01Z',NULL,NULL),
-            ('r','scope','failed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','owner','saved-stop');
+          INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('owner','parent','completed','2026-11-01T00:00:00Z','2026-11-01T00:00:01Z',NULL),('r','scope','failed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','saved-stop');
           INSERT INTO node(id,kind,created_at,payload_json) VALUES('answer','assistant','2026-11-01T00:00:01Z','{}'),('message','user','2026-11-01T00:00:00Z','{}');
           INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at,answer_node_id,recovery_reason_json) VALUES
             ('t','scope','r','failed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','answer','{"kind":"saved-recovery"}');

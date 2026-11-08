@@ -10927,6 +10927,104 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 - [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
 - [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.
 
+### #276 independent Runs: incremental evidence (work in progress)
+
+Stage-1 inventory and the seven simplification decisions are posted on issue #276. The branch is not ready for
+handoff until corrected-tip normal and all-OS CI pass, and it must not land before v0.11.0.
+
+- Storage: 25 focused tests pass, including fresh/upgrade schema identity, removal of the Run-owner column/index/
+  cycle triggers, retained active-Run uniqueness and Thread DAG checks, and a synthetic v37→v38 upgrade with two
+  reopens preserving Run/Turn IDs, shell ownership, actual pending expected-reply receipt metadata and FK validity.
+- Shell/wait read model: all 15 focused tests pass after removing child rows/index probes/counts; shell ownership,
+  output timing, wait scope and bounded SQL assertions remain. No performance gain is inferred from fewer queries.
+- Wait observations: 19/20 initially pass; one transient-recovery cursor regression exposed the old child-event
+  index/query name. The current correction uses local recovery events and migrates the event-kind index; rerun
+  is pending. Self/ancestor/composed observations no longer reject cycles and retain normal timeout/cancellation.
+- Python: 206 tests pass before the final schema artifact refresh. Language classifications are individually
+  re-reviewed for changed shell/Watch source arms; six removed child literals lose their obsolete decisions.
+
+Explicit RunEnded/TurnCompleted observation and bounded interrupted-wait records remain general inspection tools;
+they are not the child delegation lifecycle. Reply duties use one recipient-tagged list. A Run owns shells only,
+and Thread parentage remains organizational. New native shell/HTTP independence tests and completed-sender reply
+admission are implemented but still await focused validation. The nested OS-owner cleanup cases are shell ownership
+and intentionally unchanged. No real provider or user database is used.
+
+### #276 Claude review: synthetic migration comparison
+
+Command: `python3 scripts/dev/measure-run-owner-migration.py --base dc98c52cb3 --output /tmp/276-migration-comparison.json`.
+Measured on macOS 26.3.1 arm64, Python 3.12.7 / SQLite 3.51.0, using identical copies of a synthetic schema-37 DB.
+The DB contains exactly 1,000,000 completed Runs, one Thread, a star-shaped owner relation, and 512 separate 1 MiB
+unrelated padding rows. Seed size: 797,499,392 bytes. Actual user Run counts and data distribution are unknown;
+this fixture is not a claim to approximate a user's database. Setup/copy time is excluded from migration timing.
+
+Both methods first remove the owner cycle triggers and owner index. `ALTER TABLE run DROP COLUMN owner_run_id`
+fails after 1.2466110000386834 seconds: `error in table run after drop column: no such column: owner_run_id`.
+The remaining table-level owner self-check prevents this method; failure time is not a successful migration time.
+The table rebuild succeeds in 12.380933917011134 seconds, preserves all 1,000,000 Runs, and reports zero FK
+violations. Result DB size: 869,429,248 bytes. The two non-owner Run indexes are recreated; owner indexes/triggers
+are not. The rebuild is the valid minimal method among these two tested alternatives without writable-schema hacks,
+payload rewriting or one-off compatibility machinery. Timings are observations on this synthetic Python/SQLite
+environment, not predictions for real user databases or evidence for Rust's bundled SQLite performance.
+
+The existing Rust synthetic upgrade regression verifies shell/Turn IDs and pending reply receipts over two reopens;
+new schema/index and direct-self-wait changes still require the final focused checks and CI. Backup belongs to binary
+replacement operations, not a new migration shim. A stopped preliminary fixture setup did not produce a measurement;
+only the completed star-shaped fixture run supplies the numbers above.
+
+### #276 reviewed implementation validation update
+
+After rebasing onto main `0ac5087af2`, #275 already occupies protocol 4. The breaking #276 wire therefore uses
+protocol **5**, retaining `events.reasoning_activity`; #280 comment 6722194384 supersedes the earlier v4 proposal.
+The regenerated schema and 34 protocol tests pass. Strict all-target Clippy (`-D warnings`) passes. The injected
+migration-38 failure regression passes, showing rollback and restored FK checking. The large-DB measurement above
+covers the Run-DDL method only, not seed/copy work or all event-index work in migration 38.
+
+Focused evidence: 20 wait tests, 9 reply integration tests (pending through recovery then explicit Run retry and
+same-request reply), 4 independent-runtime tests with real child/grandchild shell PIDs, 4 shell-notice tests, and
+34 work-panel tests pass. A native HTTP test covers replyless normal completion (including the retained one-time
+reminder), explicit stop, and cancellation after the requesting Run completes; each outcome reaches a new requesting
+Run's model input through normal delivery. Terminal `failed` is covered by the shared terminal helper's synthetic
+DB test, not a real provider failure: retry exhaustion remains recoverable and must not be mislabeled terminal.
+The actual final-SHA CI evidence will be reported separately; these focused passes do not claim a full-suite pass.
+
+Correction to the preceding incremental count: the focused protocol suite contains **33** tests, not 34. All 33
+passed against the regenerated version-5 artifact. The latest migration fixture repair also brings storage to
+25/25, including legacy recovery event/index conversion and pending reply preservation over two reopens.
+
+### #276 post-review limited count observation and FK rationale
+
+Claude review comment 6723108515 authorizes only a read-only count observation. A previously explicitly approved DB
+location was verified from the private task memo; it was opened once with `mode=ro`, timeout zero, a two-second
+progress-handler ceiling and one short read transaction. Only three COUNTs were executed, without PRAGMA changes,
+owner operations, copying or reading payload/settings/conversation content. Observed counts: **3,303 Runs**, **22,537
+events**, **49 child_recovery_wait events**. No private path or identifiers are published. These supersede the earlier
+unknown-count statement, not its honest historical measurement scope. The matched synthetic fixture reproduces these
+three counts only, not real content/distributions or whole-user-DB byte size.
+
+The event-kind UPDATE now runs before dropping `wait_recovery_thread`. Synthetic EXPLAIN reports `SCAN event USING
+INDEX wait_recovery_thread` over the 49-row partial index, not the complete event table; the post-migration predicate
+lookup reports `SEARCH event USING INDEX wait_recovery_thread (<expr>=?)`. The migration preserves IDs/payloads.
+
+SQLite's documented generalized ALTER TABLE procedure (https://sqlite.org/lang_altertable.html, section 7) disables
+FK enforcement before starting the transaction, rebuilds the table, runs foreign_key_check, commits, then reenables
+FK enforcement. https://sqlite.org/foreignkeys.html states toggling enforcement inside a transaction is a no-op.
+https://sqlite.org/pragma.html#pragma_foreign_key_check defines an explicit integrity inspection: it reports rows
+violating foreign keys independently of whether mutation-time enforcement is enabled. OFF is therefore not a claim
+of integrity and not a substitute for that check. `src/storage/migrate.rs::run` disables before BEGIN, executes the
+DDL/copy and foreign_key_check inside the transaction, rejects any returned violation, commits only on success, then
+restores FK enforcement on both success and error. Transaction drop rolls back on error before restoration.
+`failed_run_rebuild_rolls_back_and_restores_foreign_keys` injects a DDL failure; the schema-38 upgrade fixture preserves
+actual shell/Turn references and pending receipt IDs over two reopens. These fixtures support, rather than replace,
+the official transaction/enforcement rationale. No one-off backup shim or writable-schema modification is used.
+
+Matched-count synthetic measurement (same macOS/Python/SQLite environment as the earlier comparison): 3,303 Runs,
+22,537 events with 49 legacy recovery events; seed 3,596,288 bytes, after rebuild 3,833,856 bytes. Run-DDL-only rebuild:
+**0.01050916698295623 seconds**, 3,303 copied rows. Full migration-38 SQL transaction including event conversion,
+indexes and version metadata: **0.011683542048558593 seconds**, legacy recovery 49→0 and local recovery 0→49,
+22,488 unrelated events unchanged, FK violations zero. DROP COLUMN failed after 0.004264333052560687 seconds for the
+same owner CHECK constraint. This successful timing excludes seed/copy setup and the separately reported FK query;
+it is not a measurement of application startup/integrity scans or real DB performance. These small synthetic rows
+match the authorized counts only; no claim is made about real payload sizes or distributions.
 ## #279 saved attempt response references — pending verification
 
 - Separate #279 branch/worktree based on current `origin/main`; #278 remains untouched.
@@ -10934,6 +11032,17 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 - `end_message_node_id` remains final-Turn-only. No schema table, migration, worker, or adapter added. Protocol remains v4 because `status` was an opaque result and request/event contracts are unchanged.
 - Synthetic tests cover commentary and final nodes, duplicate output items sharing a node, null and no-row results, eligible tails after 256 noneligible candidates, all-noneligible exact/overflow boundaries, VM-step counts before/after 100k extra rows, selected-path readback eligibility, the composite-key query plan, status projection, and durable change-clock cursor advancement.
 - No live owner or billing APIs are used. Re-run review, light checks, push, and both CI matrices on the repaired SHA; the earlier e39c658 CI is not evidence for this P1 repair.
+
+Post-W8 boundedness evidence: `bounded_terminal_sweeps_resume_all_senders_without_cross_run_scans_or_duplicates`
+passes for completed/stopped/failed with 261 applied requests, two senders and 4,096 unrelated pending receipts on
+other Runs of the same target. Each sweep examines at most 128 candidates, survives rollback and cursor loss on DB
+reopen, settles all 261 exactly once, retains all unrelated held duties, and verifies indexed seek/no-sort plans and
+less than 2,500 SQLite VM steps for each candidate-selection query. The fixed test pass budget is not a runtime cap.
+`startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch` starts a disposable Control with 261 saved
+terminal requests and no run-ended signal; existing startup maintenance settles all requests and issues real local
+mock HTTP input containing the outcome for each tested terminal state. The real user owner is not used or restarted.
+Explicit FK-OFF detection, rollback/restoration and the legacy partial-index migration regression also pass. These
+focused results precede the new final-SHA CI; the older 6cad05f0 CI is not evidence for the correction.
 ### #262 per-recipient reply-duty admission cap (validation in progress)
 
 - The single limit constant is 16. Message ask and expect-reply share one
@@ -11011,3 +11120,21 @@ Synthetic schema 32-to-37 SQL migration: 3.683 ms in one in-memory run on macOS 
 ### v0.11.0 synthetic schema 32-to-38
 
 A two-Thread, one-node in-memory fixture applied migrations 33-38 in 5.101 ms on macOS arm64, SQLite 3.51.0 (one run); migration ledger, retained columns and new indexes were checked. This excludes binary startup and is not a production-sized upgrade.
+### #276 schema-39 follow-up after #262
+
+Main `65dc4574` lands #262 as schema 38 (`0038_human_reply_pending`). #276 now follows it as schema **39**
+(`0039_independent_runs`), retaining protocol **5** as directed. The SQL body is unchanged except version/name
+metadata: Run rebuild, event UPDATE before old partial-index DROP, and `receipt_reply_run_pending` remain intact.
+FK-disable/restore selection and the synthetic upgrade/rollback fixtures now target 38->39. Main's human pending
+index, reply-limit behavior, count exactness and oldest timestamp are retained; these are upstream integration,
+not invented changes to terminal continuation. The unified reply list and removed Run ownership fields remain.
+
+The schema-38 evidence earlier in this record is historical, not validation of schema 39. A fresh synthetic run
+uses base `65dc4574`, the previously authorized counts 3303/22537/49, and no new user DB reads. Environment remains
+macOS 26.3.1 arm64 / Python 3.12.7 / SQLite 3.51.0. Seed: 3,600,384 bytes. Run-DDL-only rebuild:
+0.018501916085369885 seconds, 3303 copied rows; full migration-39 SQL transaction: 0.03841533395461738 seconds,
+3353 changed rows; result: 3,837,952 bytes, FK violations zero. Legacy recovery 49->0, local recovery 0->49,
+unrelated events 22488 unchanged. DROP COLUMN fails on the existing owner CHECK after 0.0073168749222531915 seconds.
+Old partial-index UPDATE plan and new recovery lookup plan remain indexed. Timing excludes fixture setup/copy and
+separate FK checks, is not application startup or real-user DB timing, and matches counts only, not distributions.
+Fresh final-SHA focused validation, normal/all-OS CI and W8 delta review are required separately.

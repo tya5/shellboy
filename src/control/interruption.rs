@@ -53,7 +53,6 @@ AND (EXISTS (
 ORDER BY id";
 
 const RUN_SNAPSHOT: &str = r"SELECT json_object('run_id', id,
-    'owner_run_id', owner_run_id,
     'request_count', (
         SELECT count(*)
         FROM receipt
@@ -129,38 +128,6 @@ WHERE u.thread_id=?1 AND (g.state<>'completed' OR EXISTS (
     AND (pending.state IN ('pending','running') OR NOT EXISTS (
         SELECT 1 FROM tool_result saved WHERE saved.group_id=pending.group_id AND saved.call_id=pending.call_id))))
 ORDER BY g.created_at,g.id,c.ordinal";
-
-const OWNED_CHILDREN_SNAPSHOT: &str = r"SELECT json_object('run_id', c.id,
-    'thread_id', c.thread_id,
-    'owner_run_id', c.owner_run_id,
-    'first_message_id', (
-        SELECT id
-        FROM receipt
-        WHERE run_id = c.id
-        ORDER BY rowid LIMIT 1),
-    'first_request_node_id', (
-        SELECT message_node_id
-        FROM receipt
-        WHERE run_id = c.id
-        ORDER BY rowid LIMIT 1),
-    'previous_state', c.state,
-    'startup_state', CASE WHEN c.state IN ('live', 'stopping') THEN 'stopped' ELSE c.state END,
-    'last_turn_id', (
-        SELECT u.id
-        FROM turn u
-        WHERE u.run_id = c.id
-        ORDER BY u.created_at DESC, u.rowid DESC LIMIT 1),
-    'end_message_node_id', (
-        SELECT u.answer_node_id
-        FROM turn u
-        WHERE u.run_id = c.id
-        ORDER BY u.created_at DESC, u.rowid DESC LIMIT 1))
-FROM run c
-JOIN run p ON p.id = c.owner_run_id
-WHERE p.thread_id = ?1
-AND (p.state IN ('live', 'stopping')
-    OR c.state IN ('live', 'stopping'))
-ORDER BY c.created_at, c.id";
 
 const MESSAGE_SNAPSHOT: &str = r"SELECT json_object('receipt_id', id,
     'message_node_id', message_node_id,
@@ -440,14 +407,6 @@ fn capture_context(
             )?;
             let tool_calls =
                 snapshot_section(tx, TOOL_CALL_SNAPSHOT, &thread, at, "tool_calls", reason)?;
-            let children = snapshot_section(
-                tx,
-                OWNED_CHILDREN_SNAPSHOT,
-                &thread,
-                at,
-                "owned_children",
-                reason,
-            )?;
             let messages = snapshot_section(
                 tx,
                 MESSAGE_SNAPSHOT,
@@ -509,7 +468,7 @@ fn capture_context(
             )?;
             let actor = json!({"kind":"shellboy","source":source});
             let snapshot_node = uuid::Uuid::new_v4().to_string();
-            let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"owned_children":children,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
+            let payload = json!({"snapshot_node_id":snapshot_node,"kind":reason,"actor":actor,"change":{"reason":reason,"result_uncertain":true,"automatic_replay":false,"os_processes_inspected":false,"runs":runs,"turns":turns,"shells":shells,"tool_calls":tool_calls,"unreflected_messages":messages,"cancelled_waits":waits,"pending_operations_with_unknown_targets":unknown},"observed_at":at,"timezone":chrono::Local::now().offset().to_string()});
             crate::history::append_node(
                 tx,
                 &thread,
@@ -555,7 +514,7 @@ mod tool_snapshot_tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch(r#"
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','before');
-            INSERT INTO run VALUES('r','t',NULL,'stopped','before','before',NULL);
+            INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('r','t','stopped','before','before',NULL);
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','before');
             INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','before');
             INSERT INTO tool_group VALUES('g','a','u','running','before');

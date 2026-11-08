@@ -88,16 +88,16 @@ async fn registered_thread_wait_retains_its_baseline_when_completion_is_followed
 }
 
 #[tokio::test]
-async fn thread_targets_keep_self_ancestor_and_composed_wait_cycle_protection() {
+async fn thread_targets_accept_self_and_ancestor_observation_without_cycle_policy() {
     crate::test_watchdog::watchdog("Thread wait ownership cycles",async {
         let root=tempfile::tempdir().unwrap();let owner=open(root.path()).await;let control=Control::new(&owner,root.path().into());
         owner.db.call(|db| {
-            db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('p','p','/','/a','p','m','now'),('c','c','/','/a','p','m','now');INSERT INTO run(id,thread_id,state,created_at)VALUES('pr','p','live','0');INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('cr','c','pr','live','0');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('cu','c','cr','running','0');INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('cs','cr','cu','op','running','/','{}','UTF-8','UTF-8','open','0');")?;Ok(())
+            db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('p','p','/','/a','p','m','now'),('c','c','/','/a','p','m','now');INSERT INTO run(id,thread_id,state,created_at)VALUES('pr','p','live','0');INSERT INTO run(id,thread_id,state,created_at) VALUES('cr','c','live','0');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('cu','c','cr','running','0');INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('cs','cr','cu','op','running','/','{}','UTF-8','UTF-8','open','0');")?;Ok(())
         }).await.unwrap();
         let origin=Origin {instance_id:owner.instance_id.clone(),thread_id:"c".into(),run_id:"cr".into(),turn_id:"cu".into(),execution_id:"cs".into(),token:"fixture".into()};
         for target in ["c","p"] {
-            let error=observe(control.clone(),format!("cycle-{target}"),args(target,None),Some(origin.clone()),CancellationToken::new()).await.unwrap_err();
-            assert_eq!(error.code,ErrorCode::WaitCycle);
+            let result=observe(control.clone(),format!("cycle-{target}"),args(target,None),Some(origin.clone()),CancellationToken::new()).await.unwrap();
+            assert_eq!(result["status"],"timeout");
         }
         assert!(control.waits.entries.lock().unwrap().is_empty());
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();

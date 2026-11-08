@@ -209,7 +209,7 @@ async fn startup_repairs_pending_partial_old_terminal_and_child_groups_idempoten
         for (thread,count,terminal,child) in [("pending",1,false,false),("partial",2,false,false),("terminal",1,true,false),("child",1,false,true)] {
             let run=format!("run-{thread}");let turn=format!("turn-{thread}");let attempt=format!("attempt-{thread}");let group=format!("group-{thread}");let source=format!("source-{thread}");
             tx.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?2,?3,'','fixture','fixture','now')",params![thread,child.then_some("parent"),cwd])?;
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,?4,'now')",params![run,thread,child.then_some("parent-run"),if terminal{"stopped"}else{"live"}])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,?3,'now')",params![run,thread,if terminal{"stopped"}else{"live"}])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,?4,'now')",params![turn,thread,run,if terminal{"stopped"}else{"running"}])?;
             tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,?2,0,0,'fixture','fixture',0,'completed','{}','now')",params![attempt,turn])?;
             tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,?3,'running','now')",params![group,attempt,turn])?;

@@ -35,10 +35,12 @@ pub enum Work {
     /// The full event-retention sweep for rows that predate this owner:
     /// startup, explicit `storage collect`, or an ended-Run queue overflow.
     EventBacklog = 1 << 9,
+    /// Durable pending replies are rechecked after terminal commits and startup.
+    ReplyOutcomes = 1 << 10,
 }
 
 impl Work {
-    pub const ALL: [Work; 10] = [
+    pub const ALL: [Work; 11] = [
         Work::Receipts,
         Work::Raw,
         Work::History,
@@ -49,6 +51,7 @@ impl Work {
         Work::Managed,
         Work::EndedRuns,
         Work::EventBacklog,
+        Work::ReplyOutcomes,
     ];
     /// Source deletion makes derived data eligible as well.
     pub const DELETION: [Work; 3] = [Work::History, Work::SummaryCache, Work::IndexSources];
@@ -121,6 +124,7 @@ impl Signals {
     /// Call after a Run's terminal state committed: its own deliveries and
     /// shell events become eligible for targeted retention.
     pub fn run_ended(&self, run: &str) {
+        self.mark(Work::ReplyOutcomes);
         let overflow = {
             let mut runs = self.ended_runs.lock().expect("ended runs");
             if runs.iter().any(|known| known == run) {
@@ -237,6 +241,7 @@ mod tests {
         assert_eq!(signals.take(), {
             let mut set = WorkSet::default();
             set.insert(Work::EndedRuns);
+            set.insert(Work::ReplyOutcomes);
             set
         });
         signals.run_ended("overflow");

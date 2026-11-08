@@ -796,7 +796,6 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
 #[tokio::test]
 async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
-    let thread = accepted.thread_id.clone();
     let run = accepted.run_id.clone().unwrap();
     let turn = accepted.turn_id.clone().unwrap();
     let answer = accepted.message_id.clone();
@@ -816,8 +815,8 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
                         "UPDATE turn SET state=?1,ended_at='original-turn',answer_node_id=?2",
                         params![turn_state, answer],
                     )?;
-                    super::super::state::complete_idle_run(&tx, &thread, &run)?;
-                    super::super::state::complete_answer_turn(&tx, &thread, &run, &turn, &answer)?;
+                    super::super::state::complete_idle_run(&tx, &run)?;
+                    super::super::state::complete_answer_turn(&tx, &turn, &answer)?;
                     assert_eq!(
                         tx.query_row("SELECT state,ended_at FROM run", [], |r| Ok((
                             r.get::<_, String>(0)?,
@@ -837,16 +836,10 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
             tx.execute("UPDATE run SET state='completed'", [])?;
             tx.execute("UPDATE turn SET state='completed'", [])?;
             assert_eq!(
-                super::super::state::complete_answer_turn(
-                    &tx,
-                    &thread,
-                    &run,
-                    &turn,
-                    "different-answer"
-                )
-                .unwrap_err()
-                .into_api_error()
-                .code,
+                super::super::state::complete_answer_turn(&tx, &turn, "different-answer")
+                    .unwrap_err()
+                    .into_api_error()
+                    .code,
                 ErrorCode::OperationConflict
             );
             assert_eq!(
@@ -855,14 +848,14 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
                 answer
             );
             assert_eq!(
-                super::super::state::complete_idle_run(&tx, &thread, "missing")
+                super::super::state::complete_idle_run(&tx, "missing")
                     .unwrap_err()
                     .into_api_error()
                     .code,
                 ErrorCode::TargetUnavailable
             );
             assert_eq!(
-                super::super::state::complete_answer_turn(&tx, &thread, &run, "missing", &answer)
+                super::super::state::complete_answer_turn(&tx, "missing", &answer)
                     .unwrap_err()
                     .into_api_error()
                     .code,

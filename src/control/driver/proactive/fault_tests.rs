@@ -782,7 +782,6 @@ fn assert_interruption_audits(
         "turns",
         "shells",
         "tool_calls",
-        "owned_children",
         "unreflected_messages",
         "pending_operations_with_unknown_targets",
     ];

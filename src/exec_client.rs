@@ -110,7 +110,7 @@ impl Failure {
             | ErrorCode::ThreadNotFound
             | ErrorCode::InputLimit
             | ErrorCode::ConfigInvalid
-            | ErrorCode::WaitCycle => 2,
+            | ErrorCode::SelfWait => 2,
             ErrorCode::InvalidState | ErrorCode::TargetUnavailable => 4,
             _ => 6,
         };

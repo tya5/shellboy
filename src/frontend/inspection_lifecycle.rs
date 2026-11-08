@@ -12,12 +12,10 @@ const OWNED_IDS: usize = 128;
 // Bound each indexed state prefix BEFORE timestamp sorting. The final sort
 // sees at most258/387 rows, including overflow sentinels, not an owner's entire
 // lifetime. Complete small sets retain the canonical timestamp/ID order.
-const OWNED_RUNS: &str = "WITH live AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(created_at)<=512 THEN created_at ELSE '' END AS created_at,COALESCE(octet_length(id)>512 OR octet_length(created_at)>512,0) AS overflow FROM run INDEXED BY runs_by_owner WHERE owner_run_id=?1 AND state='live' ORDER BY rowid LIMIT 129), stopping AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(created_at)<=512 THEN created_at ELSE '' END AS created_at,COALESCE(octet_length(id)>512 OR octet_length(created_at)>512,0) AS overflow FROM run INDEXED BY runs_by_owner WHERE owner_run_id=?1 AND state='stopping' ORDER BY rowid LIMIT 129), candidates AS (SELECT * FROM live UNION ALL SELECT * FROM stopping) SELECT id,overflow FROM candidates ORDER BY created_at,id LIMIT 129";
 const OWNED_EXECUTIONS: &str = "WITH starting AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(started_at)>512 THEN '' ELSE started_at END AS started_at,COALESCE(octet_length(id)>512 OR octet_length(started_at)>512,0) AS overflow FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?1 AND state='starting' AND state IN ('starting','running','stopping') ORDER BY rowid LIMIT 129), running AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(started_at)>512 THEN '' ELSE started_at END AS started_at,COALESCE(octet_length(id)>512 OR octet_length(started_at)>512,0) AS overflow FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?1 AND state='running' AND state IN ('starting','running','stopping') ORDER BY rowid LIMIT 129), stopping AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(started_at)>512 THEN '' ELSE started_at END AS started_at,COALESCE(octet_length(id)>512 OR octet_length(started_at)>512,0) AS overflow FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?1 AND state='stopping' AND state IN ('starting','running','stopping') ORDER BY rowid LIMIT 129), candidates AS (SELECT * FROM starting UNION ALL SELECT * FROM running UNION ALL SELECT * FROM stopping) SELECT id,overflow FROM candidates ORDER BY started_at,id LIMIT 129";
 
 const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' ELSE r.thread_id END,
     CASE WHEN octet_length(r.state)>512 THEN '' ELSE r.state END,
-    CASE WHEN octet_length(r.owner_run_id)>512 THEN '' ELSE r.owner_run_id END,
     CASE WHEN octet_length(r.created_at)>512 THEN '' ELSE r.created_at END,
     CASE WHEN octet_length(r.ended_at)>512 THEN '' ELSE r.ended_at END,
     CASE WHEN octet_length(r.stop_reason)>512 THEN '' ELSE r.stop_reason END,
@@ -29,7 +27,6 @@ const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' EL
                 COALESCE(octet_length(u.recovery_reason_json)>?2,0)
                 , (COALESCE(octet_length(r.thread_id)>512,0)
     OR COALESCE(octet_length(r.state)>512,0)
-    OR COALESCE(octet_length(r.owner_run_id)>512,0)
     OR COALESCE(octet_length(r.created_at)>512,0)
     OR COALESCE(octet_length(r.ended_at)>512,0)
     OR COALESCE(octet_length(r.stop_reason)>512,0)
@@ -42,7 +39,6 @@ const TURN_SQL: &str =
     "SELECT CASE WHEN octet_length(u.thread_id)>512 THEN '' ELSE u.thread_id END,
     CASE WHEN octet_length(u.run_id)>512 THEN '' ELSE u.run_id END,
     CASE WHEN octet_length(u.state)>512 THEN '' ELSE u.state END,
-    CASE WHEN octet_length(r.owner_run_id)>512 THEN '' ELSE r.owner_run_id END,
     CASE WHEN octet_length(u.created_at)>512 THEN '' ELSE u.created_at END,
     CASE WHEN octet_length(u.ended_at)>512 THEN '' ELSE u.ended_at END,
     CASE WHEN octet_length(u.answer_node_id)>512 THEN '' ELSE u.answer_node_id END,
@@ -52,7 +48,6 @@ const TURN_SQL: &str =
             , (COALESCE(octet_length(u.thread_id)>512,0)
     OR COALESCE(octet_length(u.run_id)>512,0)
     OR COALESCE(octet_length(u.state)>512,0)
-    OR COALESCE(octet_length(r.owner_run_id)>512,0)
     OR COALESCE(octet_length(u.created_at)>512,0)
     OR COALESCE(octet_length(u.ended_at)>512,0)
     OR COALESCE(octet_length(u.answer_node_id)>512,0))
@@ -63,7 +58,6 @@ struct RawRun {
     scalar_overflow: bool,
     thread: String,
     state: String,
-    owner: Option<String>,
     created: String,
     ended: Option<String>,
     stop_reason: Option<String>,
@@ -72,8 +66,6 @@ struct RawRun {
     reason: Option<String>,
     reason_limited: bool,
     revisit: Option<crate::protocol::RevisitSummary>,
-    owned_runs: Vec<String>,
-    runs_limited: bool,
     executions: Vec<String>,
     executions_limited: bool,
 }
@@ -82,7 +74,6 @@ struct RawTurn {
     thread: String,
     run: String,
     state: String,
-    owner: Option<String>,
     created: String,
     ended: Option<String>,
     answer: Option<String>,
@@ -131,20 +122,18 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                 .query_row(RUN_SQL, rusqlite::params![id, JSON_BYTES as i64], |row| {
                     Ok(RawRun {
                         waiting_reason: None,
-                        scalar_overflow: row.get(10)?,
+                        scalar_overflow: row.get(9)?,
                         thread: row.get(0)?,
                         state: row.get(1)?,
-                        owner: row.get(2)?,
-                        created: row.get(3)?,
-                        ended: row.get(4)?,
-                        stop_reason: row.get(5)?,
-                        turn: row.get(6)?,
-                        answer: row.get(7)?,
-                        reason: row.get(8)?,
-                        reason_limited: row.get(9)?,
+
+                        created: row.get(2)?,
+                        ended: row.get(3)?,
+                        stop_reason: row.get(4)?,
+                        turn: row.get(5)?,
+                        answer: row.get(6)?,
+                        reason: row.get(7)?,
+                        reason_limited: row.get(8)?,
                         revisit: None,
-                        owned_runs: Vec::new(),
-                        runs_limited: false,
                         executions: Vec::new(),
                         executions_limited: false,
                     })
@@ -155,7 +144,6 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                 raw.waiting_reason = crate::readback::run_wait_reason(db, &raw.thread, id)?;
             }
             raw.revisit = crate::control::revisit::summary_for_run(db, id)?;
-            (raw.owned_runs, raw.runs_limited) = owned(db, OWNED_RUNS, id)?;
             (raw.executions, raw.executions_limited) = owned(db, OWNED_EXECUTIONS, id)?;
             RawBody::Run(raw)
         }
@@ -164,16 +152,16 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
             RawBody::Turn(
                 db.query_row(TURN_SQL, rusqlite::params![id, JSON_BYTES as i64], |row| {
                     Ok(RawTurn {
-                        scalar_overflow: row.get(9)?,
+                        scalar_overflow: row.get(8)?,
                         thread: row.get(0)?,
                         run: row.get(1)?,
                         state: row.get(2)?,
-                        owner: row.get(3)?,
-                        created: row.get(4)?,
-                        ended: row.get(5)?,
-                        answer: row.get(6)?,
-                        reason: row.get(7)?,
-                        reason_limited: row.get(8)?,
+
+                        created: row.get(3)?,
+                        ended: row.get(4)?,
+                        answer: row.get(5)?,
+                        reason: row.get(6)?,
+                        reason_limited: row.get(7)?,
                     })
                 })
                 .optional()?
@@ -273,16 +261,12 @@ pub(super) fn prepare_in(
             if raw.reason_limited {
                 limited_fields.extend(["recovery_hint".into(), "context.recovery_reason".into()]);
             }
-            if raw.runs_limited {
-                limited_fields.push("owned_run_ids".into());
-            }
             if raw.executions_limited {
                 limited_fields.push("owned_execution_ids".into());
             }
             let recovery_reason = decoded_reason(raw.reason.as_deref(), raw.reason_limited)?;
             let context = ExecutionContext {
                 thread_id: Some(raw.thread.clone()),
-                owner_run_id: raw.owner.clone(),
                 state: raw.state.clone(),
                 created_at: Some(raw.created.clone()),
                 ended_at: raw.ended.clone(),
@@ -305,10 +289,8 @@ pub(super) fn prepare_in(
                     run_id: id.clone(),
                     thread_id: raw.thread,
                     state,
-                    owner_run_id: raw.owner,
                     turn_id: raw.turn,
                     end_message_node_id: raw.answer,
-                    owned_run_ids: raw.owned_runs,
                     owned_execution_ids: raw.executions,
                     recovery_hint: reason_hint(raw.reason, raw.reason_limited, language),
                     revisit: raw.revisit,
@@ -326,7 +308,6 @@ pub(super) fn prepare_in(
             let context = ExecutionContext {
                 thread_id: Some(raw.thread.clone()),
                 run_id: Some(raw.run.clone()),
-                owner_run_id: raw.owner,
                 state: raw.state.clone(),
                 created_at: Some(raw.created.clone()),
                 ended_at: raw.ended.clone(),
@@ -436,7 +417,11 @@ mod tests {
             let thread = format!("child-{i}");
             let run = format!("child-run-{i}");
             db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'Child','/','','p','m','now')",[&thread]).unwrap();
-            db.execute("INSERT INTO run(id,thread_id,state,owner_run_id,created_at)VALUES(?1,?2,'live','r',?3)",params![run,thread,format!("stamp-{i:05}")]).unwrap();
+            db.execute(
+                "INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",
+                params![run, thread, format!("stamp-{i:05}")],
+            )
+            .unwrap();
             db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,'r','u',?1,'running','/','{}','UTF-8','UTF-8','open',?2)",params![format!("shell-{i}"),format!("stamp-{i:05}")]).unwrap();
         }
     }
@@ -483,7 +468,7 @@ mod tests {
         let expected = canonical(&db, &run());
         let trace = Statements::new(&db);
         let raw = read_tx(&db, &run()).unwrap();
-        assert_eq!(trace.count(), 6);
+        assert_eq!(trace.count(), 5);
         drop(trace);
         let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value, expected);
@@ -513,7 +498,7 @@ mod tests {
                 assert_eq!(
                     trace.count(),
                     if matches!(command, Command::RunGet(_)) {
-                        5
+                        4
                     } else {
                         1
                     }
@@ -547,18 +532,17 @@ mod tests {
             canonical(&db, &run())
         );
         seed_owned(&db, 8, 150);
-        let before = (steps(&db, OWNED_RUNS), steps(&db, OWNED_EXECUTIONS));
+        let before = steps(&db, OWNED_EXECUTIONS);
         let value = prepare(read_tx(&db, &run()).unwrap()).unwrap();
-        for key in ["owned_run_ids", "owned_execution_ids"] {
+        {
+            let key = "owned_execution_ids";
             assert_eq!(value.value[key].as_array().unwrap().len(), 128);
             assert!(value.limited_fields.contains(&key.into()));
         }
         seed_owned(&db, 150, 1150);
-        assert_eq!(
-            (steps(&db, OWNED_RUNS), steps(&db, OWNED_EXECUTIONS)),
-            before
-        );
-        for sql in [OWNED_RUNS, OWNED_EXECUTIONS] {
+        assert_eq!(steps(&db, OWNED_EXECUTIONS), before);
+        {
+            let sql = OWNED_EXECUTIONS;
             let plans = db
                 .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
                 .unwrap()
@@ -593,7 +577,7 @@ mod tests {
             let mut statement = db.prepare(RUN_SQL).unwrap();
             let turns = statement
                 .query_map(params!["r", JSON_BYTES as i64], |row| {
-                    row.get::<_, Option<String>>(6)
+                    row.get::<_, Option<String>>(5)
                 })
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()

@@ -609,7 +609,7 @@ async fn next_with_clients(
         let mut events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND e.kind<>'context_changed' ORDER BY e.created_at,e.id")?.query_map([&run],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
         if turn.is_none()&&(!events.is_empty()||attachment_count>0){turn=Some(super::state::create_turn_tx(&tx,&thread,&run,&now(),&now())?);}
         if turn.is_none() {
-            let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')) OR EXISTS(SELECT 1 FROM run WHERE owner_run_id=?1 AND state IN ('live','stopping'))",[&run],|r|r.get(0))?;
+            let owned:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM shell_execution WHERE owner_run_id=?1 AND state IN ('starting','running','stopping'))",[&run],|r|r.get(0))?;
             if owned{return Ok(Next::Idle);}
             // During shutdown, waiting Revisit messages are handed off at the next start.
             if shutting_down.load(std::sync::atomic::Ordering::SeqCst) && super::revisit::has_pending(&tx,&thread)? { return Ok(Next::Done); }
@@ -620,7 +620,7 @@ async fn next_with_clients(
                 events.push(tx.query_row("SELECT id,json_object('event_id',id,'kind',kind,'payload',json(payload_ref_json)) FROM event WHERE id=?1",[event],|r|Ok((r.get(0)?,r.get(1)?)))?);
             }
             if turn.is_none() {
-                super::state::complete_idle_run(&tx, &thread, &run)?;
+                super::state::complete_idle_run(&tx, &run)?;
                 tx.commit()?;return Ok(Next::Done);
             }
         }
@@ -713,7 +713,6 @@ async fn recover_preparation(
                 execution_id: None,
             });
         control.changed_with_recovery(&target_thread, true);
-        control.nudge_owner(&target_run).await;
     }
     // Keep the original typed failure as the one driver error. The recovery
     // reason is persisted above; the caller must not silently report success.
@@ -767,7 +766,6 @@ async fn recover(
         );
     }
     let thread_id = snapshot.thread.clone();
-    let run_id = snapshot.run.clone();
     let snapshot = snapshot.clone();
     let recovered = control
         .store
@@ -793,10 +791,13 @@ async fn recover(
         .await
         .map_err(storage_error)?;
     control.changed_with_recovery(&thread_id, recovered);
-    control.nudge_owner(&run_id).await;
+
     Ok(())
 }
-pub(super) async fn stop_without_driver(control: &Control, run_id: &str) -> Result<(), ApiError> {
+pub(super) async fn stop_without_driver(
+    control: &Arc<Control>,
+    run_id: &str,
+) -> Result<(), ApiError> {
     let run = run_id.to_owned();
     let target: Option<(String, String)> = control
         .store
@@ -839,17 +840,17 @@ pub(super) async fn stop_without_driver(control: &Control, run_id: &str) -> Resu
     Ok(())
 }
 
-/// Freeze ownership first; cancel processes and child drivers; record terminal
-/// state only after every owned resource has actually released its live handle.
+/// Freeze this Run, drain its shells, then record terminal state only after
+/// every owned shell has released its live handle.
 async fn drain_and_stop(
-    control: &Control,
+    control: &Arc<Control>,
     run_id: &str,
     current_thread: Option<&str>,
 ) -> Result<(), ApiError> {
     let run_id = run_id.to_owned();
     let owned = control.store.database.call(move |db| {
         let tx = db.transaction()?;
-        let owned: Vec<(String,String)> = tx.prepare("WITH RECURSIVE owned(id,thread_id,depth) AS(SELECT id,thread_id,0 FROM run WHERE id=?1 UNION ALL SELECT r.id,r.thread_id,o.depth+1 FROM run r JOIN owned o ON r.owner_run_id=o.id WHERE r.state IN ('live','stopping')) SELECT id,thread_id FROM owned ORDER BY depth DESC,id")?.query_map([run_id],|row|Ok((row.get(0)?,row.get(1)?)))?.collect::<Result<_,_>>()?;
+        let owned: Vec<(String,String)> = tx.prepare("SELECT id,thread_id FROM run WHERE id=?1")?.query_map([run_id],|row|Ok((row.get(0)?,row.get(1)?)))?.collect::<Result<_,_>>()?;
         for (run,_) in &owned {
             super::attachment_delivery::hold_run_tx(&tx,run).map_err(crate::storage::StorageError::from)?;
             tx.execute("UPDATE run SET state='stopping' WHERE id=?1 AND state='live'",[run])?;
@@ -871,17 +872,26 @@ async fn drain_and_stop(
         notified.await;
     }
     let stopping_for_shutdown = control.stop.is_cancelled();
-    control
+    let wakes = control
         .store
         .database
         .call(move |db| {
             let tx = db.transaction()?;
             super::state::stop_drained_runs(&tx, &owned, stopping_for_shutdown)?;
+            let mut wakes = Vec::new();
+            for (run, _) in &owned {
+                wakes.extend(super::reply::terminal_tx(&tx, run, &now())?);
+            }
             tx.commit()?;
-            Ok(())
+            Ok(wakes)
         })
         .await
-        .map_err(storage_error)
+        .map_err(storage_error)?;
+    for thread in wakes {
+        control.changed(&thread);
+        control.kick_quiet(thread).await;
+    }
+    Ok(())
 }
 
 async fn save_tool_result(

@@ -160,7 +160,7 @@ mod interruption_tests {
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
         db.execute_batch(r#"
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/','p','m','before');
-            INSERT INTO run VALUES('r','t',NULL,'stopped','before','before',NULL);
+            INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('r','t','stopped','before','before',NULL);
             INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','stopped','before');
             INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES('a','u',0,0,'p','m',0,'completed','{}','before');
             INSERT INTO tool_group VALUES('g','a','u','running','before');

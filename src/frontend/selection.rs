@@ -15,8 +15,6 @@ pub(super) struct Selection {
     pub(super) tool_scope: Option<ToolObservation>,
     refresh_not_before: Option<tokio::time::Instant>,
     // Only the selected projection's bounded child rows are dependencies.
-    live_children: Vec<String>,
-    notice_children: Vec<String>,
 }
 impl Selection {
     pub(super) fn refresh_ready(&self, thread: &str, now: tokio::time::Instant) -> bool {
@@ -97,8 +95,6 @@ impl Selection {
     }
     fn replace_token(&mut self) {
         self.tool_scope = None;
-        self.live_children.clear();
-        self.notice_children.clear();
         self.refresh_not_before = None;
         self.cancel.cancel();
         self.cancel = CancellationToken::new();
@@ -123,56 +119,6 @@ impl Selection {
             self.refresh();
         }
         self.generations.entry(thread.to_owned()).or_insert(0);
-    }
-    pub(super) fn observe_notices(
-        &mut self,
-        thread: &str,
-        generation: u64,
-        epoch: u64,
-        threads: Vec<String>,
-    ) {
-        if self.accepts(thread, generation, epoch) {
-            self.notice_children = threads
-                .into_iter()
-                .filter(|id| id.len() <= 256)
-                .take(128)
-                .collect();
-        }
-    }
-    pub(super) fn dependent_parent(&self, changed: &str) -> Option<String> {
-        (self
-            .live_children
-            .iter()
-            .chain(&self.notice_children)
-            .any(|child| child == changed)
-            || self.tool_scope.as_ref().is_some_and(|scope| {
-                scope.nodes.iter().any(|node| {
-                    node.presentation
-                        .fields
-                        .iter()
-                        .any(|f| f.key == "/ui_notice/thread_id" && f.value == changed)
-                })
-            }))
-        .then(|| self.active_thread.clone())
-        .flatten()
-    }
-    fn observe_live_children(&mut self, snapshot: &crate::ui::activity::ActivitySnapshot) {
-        self.live_children = snapshot
-            .live_work
-            .as_ref()
-            .map(|work| {
-                work.rows
-                    .iter()
-                    .take(10)
-                    .filter_map(|row| match &row.target {
-                        crate::ui::live_work::LiveWorkTarget::ChildRun { thread_id, .. } => {
-                            Some(thread_id.clone())
-                        }
-                        _ => None,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
     }
     pub(super) fn changed(&mut self, thread: &str) {
         if self.active_thread.as_deref() == Some(thread) {
@@ -210,7 +156,6 @@ impl Selection {
         }
         match result {
             Ok(projection) => {
-                self.observe_live_children(&projection.snapshot);
                 self.progress_running = projection.poll_running;
                 update(updates, projection.progress_update(&thread)).await;
                 update(
@@ -220,7 +165,6 @@ impl Selection {
                 .await;
             }
             Err(error) => {
-                self.live_children.clear();
                 self.progress_running = false;
                 update(
                     updates,
@@ -391,172 +335,5 @@ mod refresh_scope_tests {
         selected.observe_tools("t", 1, scope(7, 4)).unwrap();
         selected.activate_draft("draft".into());
         assert!(selected.tool_scope.is_none());
-    }
-}
-
-#[cfg(test)]
-mod live_child_tests {
-    use super::*;
-    use crate::ui::{
-        activity::ActivitySnapshot,
-        live_work::{LiveWorkRow, LiveWorkSnapshot, LiveWorkTarget},
-    };
-    fn snapshot() -> ActivitySnapshot {
-        ActivitySnapshot {
-            live_work: Some(LiveWorkSnapshot {
-                run_id: "parent-run".into(),
-                rows: vec![LiveWorkRow {
-                    description: None,
-                    target: LiveWorkTarget::ChildRun {
-                        run_id: "child-run".into(),
-                        thread_id: "child".into(),
-                    },
-                    label: "child".into(),
-                    state: "実行中".into(),
-                    started_at: None,
-                    elapsed_base: None,
-                    last_output_at: None,
-                    wait_info: None,
-                    output_age_base: None,
-                }],
-                shells: 0,
-                children: 1,
-                waits: Some(0),
-                overflow: 0,
-                counts_capped: false,
-                observed_at: std::time::Instant::now(),
-            }),
-            ..Default::default()
-        }
-    }
-    #[tokio::test]
-    async fn pause_change_invalidates_inflight_initial_activity() {
-        use crate::index::PauseReason;
-        let (updates, receiver) = std::sync::mpsc::sync_channel(16);
-        let mut selection = Selection::default();
-        selection.select_thread("t".into(), 1);
-        let epoch = selection.progress_epoch;
-        let old_pause_epoch = selection.pause_notification_epoch;
-        for _ in 0..128 {
-            selection.note_pause_notification();
-        }
-        assert_eq!(selection.progress_epoch, epoch);
-        assert!(!selection.accepts_initial_activity("t", 1, epoch, old_pause_epoch));
-        assert!(selection.accepts("t", 1, epoch));
-        assert!(selection.accepts_initial_activity(
-            "t",
-            1,
-            epoch,
-            selection.pause_notification_epoch
-        ));
-        let project = |index_pause| activity::Projection {
-            snapshot: crate::ui::activity::ActivitySnapshot {
-                index_pause,
-                ..Default::default()
-            },
-            observed_at: std::time::Instant::now(),
-            tool_calls: 0,
-            cancelled_calls: 0,
-            counts_capped: false,
-            poll_running: false,
-        };
-        selection
-            .publish_activity(
-                &updates,
-                "t".into(),
-                1,
-                epoch,
-                Ok(project(Some(PauseReason::Transport))),
-            )
-            .await;
-        let pauses: Vec<_> = receiver
-            .try_iter()
-            .filter_map(|update| match update {
-                UiUpdate::Activity { snapshot, .. } => Some(snapshot.index_pause),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(pauses, [Some(PauseReason::Transport)]);
-    }
-
-    #[tokio::test]
-    async fn stale_activity_cannot_restore_child_dependencies_after_parent_or_selection_change() {
-        let (updates, _receiver) = std::sync::mpsc::sync_channel(16);
-        let mut selection = Selection::default();
-        selection.select_thread("parent".into(), 2);
-        let old_epoch = selection.progress_epoch;
-        let project = || activity::Projection {
-            snapshot: snapshot(),
-            observed_at: std::time::Instant::now(),
-            tool_calls: 0,
-            cancelled_calls: 0,
-            counts_capped: false,
-            poll_running: false,
-        };
-        selection
-            .publish_activity(&updates, "parent".into(), 2, old_epoch, Ok(project()))
-            .await;
-        assert!(selection.dependent_parent("child").is_some());
-        selection.changed("parent");
-        let new_epoch = selection.progress_epoch;
-        let mut newer = project();
-        newer.snapshot.live_work = None;
-        selection
-            .publish_activity(&updates, "parent".into(), 2, new_epoch, Ok(newer))
-            .await;
-        selection
-            .publish_activity(&updates, "parent".into(), 2, old_epoch, Ok(project()))
-            .await;
-        assert!(selection.dependent_parent("child").is_none());
-        selection.select_thread("other".into(), 3);
-        selection
-            .publish_activity(&updates, "parent".into(), 2, new_epoch, Ok(project()))
-            .await;
-        assert!(selection.dependent_parent("child").is_none());
-    }
-    #[test]
-    fn only_visible_child_dependencies_route_to_parent_and_switch_clears_them() {
-        let mut selection = Selection::default();
-        selection.select_thread("parent".into(), 2);
-        selection.observe_live_children(&snapshot());
-        assert_eq!(
-            selection.dependent_parent("child").as_deref(),
-            Some("parent")
-        );
-        assert!(selection.dependent_parent("unrelated").is_none());
-        let start = tokio::time::Instant::now();
-        selection.refresh_started("parent", start);
-        let parent = selection.dependent_parent("child").unwrap();
-        for _ in 0..100 {
-            selection.changed(&parent);
-        }
-        assert!(!selection.refresh_ready(&parent, start + std::time::Duration::from_millis(499)));
-        selection.observe_live_children(&ActivitySnapshot::default());
-        assert!(selection.dependent_parent("child").is_none());
-        selection.observe_live_children(&snapshot());
-        selection.select_thread("other".into(), 3);
-        assert!(selection.dependent_parent("child").is_none());
-    }
-    #[test]
-    fn current_notice_dependencies_are_bounded_generation_fenced_and_cleared_on_switch() {
-        let mut selection = Selection::default();
-        selection.select_thread("parent".into(), 2);
-        let epoch = selection.progress_epoch;
-        selection.observe_notices("parent", 2, epoch, vec!["child".into()]);
-        assert_eq!(
-            selection.dependent_parent("child").as_deref(),
-            Some("parent")
-        );
-        assert!(selection.dependent_parent("unrelated").is_none());
-        selection.observe_notices("parent", 1, epoch, vec![]);
-        assert!(selection.dependent_parent("child").is_some());
-        selection.observe_notices("parent", 2, epoch.wrapping_sub(1), vec![]);
-        assert!(selection.dependent_parent("child").is_some());
-        selection.observe_notices("parent", 2, epoch, vec!["bounded".into(); 200]);
-        assert_eq!(selection.notice_children.len(), 128);
-        selection.select_thread("other".into(), 3);
-        assert!(selection.dependent_parent("bounded").is_none());
-        selection.observe_notices("parent", 2, epoch, vec!["child".into()]);
-        assert!(selection.dependent_parent("child").is_none());
     }
 }

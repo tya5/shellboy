@@ -358,6 +358,7 @@ async fn frames_roundtrip_and_reject_truncation_oversize_and_invalid_json() {
 fn fixed_error_codes_and_persisted_state_values_are_closed() {
     let codes = [
         "invalid_argument",
+        "self_wait",
         "config_invalid",
         "app_not_running",
         "protocol_mismatch",
@@ -367,7 +368,6 @@ fn fixed_error_codes_and_persisted_state_values_are_closed() {
         "operation_expired",
         "operation_not_found",
         "invalid_state",
-        "wait_cycle",
         "cursor_expired",
         "cursor_encoding_mismatch",
         "output_expired",
@@ -749,7 +749,7 @@ fn current_lifecycle_details_require_observed_context() {
         ),
         (
             "run",
-            json!({"run_id":"r","thread_id":"t","state":"live","owned_run_ids":[],"owned_execution_ids":[]}),
+            json!({"run_id":"r","thread_id":"t","state":"live","owned_execution_ids":[]}),
         ),
         (
             "turn",

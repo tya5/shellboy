@@ -22,19 +22,17 @@ fn orphan(db: &Connection) {
 }
 
 #[test]
-fn real_index_only_upgrade_skips_full_scan_and_clears_pending() {
+fn run_rebuild_upgrade_requires_full_scan_and_preserves_pending_on_corruption() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("db");
     let db = open_connection(&path, None, None, true).unwrap();
     downgrade_copy(&db, 26);
     orphan(&db);
     drop(db);
-    let db = open_connection(&path, None, None, true).unwrap();
-    assert_eq!(pending(&db).unwrap(), None);
-    assert!(
-        Check::Full.run(&db).is_err(),
-        "manual/full checks must still find unrelated corruption"
-    );
+    assert!(open_connection(&path, None, None, true).is_err());
+    let db = Connection::open(&path).unwrap();
+    assert_eq!(pending(&db).unwrap(), Some(Check::Full));
+    assert!(Check::Full.run(&db).is_err());
 }
 
 #[test]
@@ -82,7 +80,7 @@ fn interrupted_upgrade_and_later_integrity_error_both_keep_pending() {
     drop(db);
     assert!(open_connection(&path, None, None, true).is_err());
     let db = Connection::open(&path).unwrap();
-    assert_eq!(pending(&db).unwrap(), Some(Check::Skip));
+    assert_eq!(pending(&db).unwrap(), Some(Check::Full));
     assert_eq!(schema_version(&db).unwrap(), 26);
     db.execute_batch("DROP TABLE jobs_running_recovery;")
         .unwrap();

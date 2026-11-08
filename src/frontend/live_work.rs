@@ -43,39 +43,23 @@ WITH wait_keys AS MATERIALIZED (
         (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at,
         CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END AS description
  FROM shell_members member CROSS JOIN shell_execution s ON s.id=member.id
-), child_candidates AS MATERIALIZED (
- SELECT id,thread_id,state,created_at FROM run INDEXED BY runs_by_owner
- WHERE owner_run_id=?1 AND state IN ('live','stopping') LIMIT 128
-), children AS MATERIALIZED (
- SELECT 'child' AS kind,r.id AS id,r.thread_id AS related,NULL AS execution,
-        substr(t.title,1,512) AS label,r.state,r.created_at AS started_at,NULL AS output_at,NULL AS description
- FROM child_candidates r JOIN thread t ON t.id=r.thread_id
- ORDER BY julianday(r.created_at) IS NULL,julianday(r.created_at),r.id LIMIT ?3
 ), wait_rows AS MATERIALIZED (
  SELECT 'wait' AS kind,operation_id AS id,NULL AS related,execution_id AS execution,
         NULL AS label,'waiting' AS state,started_at,NULL AS output_at,NULL AS description FROM waits
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),operation_id LIMIT ?3
 ), picked AS MATERIALIZED (
- SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM children UNION ALL SELECT * FROM wait_rows)
+ SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM wait_rows)
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),id,kind LIMIT ?3
 ), counts AS MATERIALIZED (
  SELECT (SELECT count(*) FROM shell_candidates) AS shells,
-        (SELECT count(*) FROM child_candidates) AS children,
         (SELECT count(*) FROM waits) AS waits,
         (SELECT count(*) FROM wait_observations WHERE COALESCE(proof_valid,0)=0) AS invalid_waits,
         (SELECT count(DISTINCT s.id) FROM waits w JOIN shell_execution s ON s.id=w.execution_id
          WHERE s.owner_run_id=?1 AND s.state IN ('starting','running','stopping')) AS duplicate_shells
 )
 SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked.state,picked.started_at,picked.output_at,
-       counts.shells,counts.children,counts.waits,counts.invalid_waits,
-       child_turn.state,child_attempt.state,
-       CASE WHEN child_attempt.state='failed' AND child_attempt.generation=child_turn.generation AND json_valid(child_attempt.error_json)
-         THEN json_extract(child_attempt.error_json,'$.automatic_retry') END,
-       CASE WHEN picked.kind='child' THEN
-         EXISTS(SELECT 1 FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=picked.id AND state IN ('starting','running','stopping'))
-         OR EXISTS(SELECT 1 FROM run INDEXED BY runs_by_owner WHERE owner_run_id=picked.id AND state IN ('live','stopping')) ELSE 0 END,
-       CASE WHEN picked.kind='child' AND picked.state='live' AND child_turn.state='running' AND COALESCE(child_attempt.state,'')<>'inflight'
-         THEN EXISTS(SELECT 1 FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=child_turn.id AND state='running') ELSE 0 END,picked.description,counts.duplicate_shells,
+       counts.shells,counts.waits,counts.invalid_waits,
+       picked.description,counts.duplicate_shells,
        CASE WHEN json_type(w.value,'$.conditions')='array' THEN json_array_length(w.value,'$.conditions') END,
        CASE WHEN json_type(w.value,'$.conditions[0].type')='text' THEN substr(json_extract(w.value,'$.conditions[0].type'),1,64) END,
        CASE WHEN json_type(w.value,'$.timeout_ms')='integer' AND typeof(json_extract(w.value,'$.timeout_ms'))='integer' AND json_extract(w.value,'$.timeout_ms')>=0 THEN json_extract(w.value,'$.timeout_ms') END,
@@ -86,16 +70,13 @@ SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked
        CASE WHEN json_extract(w.value,'$.conditions[0].type')='thread_settled' AND json_type(w.value,'$.conditions[0].thread_ids')='array' THEN json_array_length(w.value,'$.conditions[0].thread_ids') END
 FROM counts LEFT JOIN picked ON 1
 LEFT JOIN waits w ON picked.kind='wait' AND w.operation_id=picked.id
-LEFT JOIN turn child_turn ON child_turn.id=(SELECT id FROM turn INDEXED BY activity_turn_run WHERE picked.kind='child' AND run_id=picked.id ORDER BY created_at DESC,id DESC LIMIT 1)
-LEFT JOIN model_attempt child_attempt ON child_attempt.rowid=(SELECT rowid FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=child_turn.id
-    AND picked.state='live' AND child_turn.state='running' ORDER BY rowid DESC LIMIT 1)
 ORDER BY julianday(picked.started_at) IS NULL,julianday(picked.started_at),picked.id,picked.kind";
 
 pub(super) struct RawLiveWork {
     run_id: String,
     rows: Vec<RawRow>,
     shells: u64,
-    children: u64,
+
     waits: Option<u64>,
     known_waits: u64,
     duplicate_shells: u64,
@@ -113,20 +94,12 @@ struct RawRow {
     started_at: Option<String>,
     output_at: Option<String>,
     title: Option<super::header::TitleWitness>,
-    child_phase: Option<ChildPhase>,
     wait_condition_count: Option<i64>,
     wait_kind: Option<String>,
     wait_timeout_ms: Option<i64>,
     wait_target_id: Option<String>,
     wait_thread_count: Option<i64>,
     wait_target: Option<WaitTarget>,
-}
-struct ChildPhase {
-    turn: Option<String>,
-    attempt: Option<String>,
-    retry: Option<String>,
-    owned: bool,
-    tools: bool,
 }
 
 #[cfg(test)]
@@ -165,7 +138,7 @@ pub(super) fn read_tx_limited(
         run_id: run_id.into(),
         rows: Vec::new(),
         shells: 0,
-        children: 0,
+
         waits: known.then_some(0),
         known_waits: 0,
         duplicate_shells: 0,
@@ -176,10 +149,9 @@ pub(super) fn read_tx_limited(
     let mut rows = statement.query(rusqlite::params![run_id, encoded, limit as i64])?;
     while let Some(row) = rows.next()? {
         result.shells = row.get::<_, i64>(8)? as u64;
-        result.children = row.get::<_, i64>(9)? as u64;
-        result.known_waits = row.get::<_, i64>(10)? as u64;
-        result.duplicate_shells = row.get::<_, i64>(18)? as u64;
-        result.waits = (known && row.get::<_, i64>(11)? == 0).then_some(result.known_waits);
+        result.known_waits = row.get::<_, i64>(9)? as u64;
+        result.duplicate_shells = row.get::<_, i64>(12)? as u64;
+        result.waits = (known && row.get::<_, i64>(10)? == 0).then_some(result.known_waits);
         if let Some(kind) = row.get::<_, Option<String>>(0)? {
             result.rows.push(RawRow {
                 kind,
@@ -187,44 +159,22 @@ pub(super) fn read_tx_limited(
                 related: row.get(2)?,
                 execution: row.get(3)?,
                 label: row.get(4)?,
-                description: row.get(17)?,
+                description: row.get(11)?,
                 state: row.get(5)?,
                 started_at: row.get(6)?,
                 output_at: row.get(7)?,
                 title: None,
-                wait_condition_count: row.get(19)?,
-                wait_kind: row.get(20)?,
-                wait_timeout_ms: row.get(21)?,
-                wait_target_id: row.get(22)?,
-                wait_thread_count: row.get(23)?,
+                wait_condition_count: row.get(13)?,
+                wait_kind: row.get(14)?,
+                wait_timeout_ms: row.get(15)?,
+                wait_target_id: row.get(16)?,
+                wait_thread_count: row.get(17)?,
                 wait_target: None,
-                child_phase: if row.get::<_, String>(0)? == "child" {
-                    Some(ChildPhase {
-                        turn: row.get(12)?,
-                        attempt: row.get(13)?,
-                        retry: row.get(14)?,
-                        owned: row.get(15)?,
-                        tools: row.get(16)?,
-                    })
-                } else {
-                    None
-                },
             });
         }
     }
     drop(rows);
     drop(statement);
-    // Final display membership is already capped by the validated limit. Reuse the header's
-    // finite evidence policy only for those children, inside this same read.
-    for row in &mut result.rows {
-        if row.kind == "child" {
-            row.title = super::header::read_title_tx(
-                db,
-                row.related.as_deref().expect("saved child Thread"),
-                row.label.as_deref().unwrap_or_default(),
-            )?;
-        }
-    }
     // Resolve only the selected wait targets by primary key in this snapshot.
     for row in &mut result.rows {
         let (Some(kind), Some(id)) = (row.wait_kind.as_deref(), row.wait_target_id.as_deref())
@@ -299,7 +249,6 @@ pub(super) fn prepare_in(
     let now = raw.wall_at;
     let overflow = raw
         .shells
-        .saturating_add(raw.children)
         .saturating_add(raw.known_waits)
         .saturating_sub(raw.duplicate_shells)
         .saturating_sub(raw.rows.len() as u64);
@@ -307,26 +256,6 @@ pub(super) fn prepare_in(
         .rows
         .into_iter()
         .map(|mut row| {
-            if let Some(phase) = row.child_phase.take() {
-                let retrying = phase
-                    .retry
-                    .as_deref()
-                    .and_then(|body| {
-                        serde_json::from_str::<crate::ui::activity::AutomaticRetrySnapshot>(body)
-                            .ok()
-                    })
-                    .is_some_and(|retry| retry.number > 0 && retry.number <= retry.limit);
-                row.state = crate::activity::classify(
-                    Some(&row.state),
-                    phase.turn.as_deref(),
-                    phase.owned,
-                    phase.attempt.as_deref() == Some("inflight"),
-                    retrying,
-                    phase.tools,
-                )
-                .column_label()
-                .into();
-            }
             if let Some(title) = row.title.take() {
                 row.label = Some(title.prepare());
             }
@@ -350,16 +279,6 @@ pub(super) fn prepare_in(
                             "コマンド（内容未記録）",
                             "Command (not recorded)"
                         ),
-                    ),
-                ),
-                "child" => (
-                    LiveWorkTarget::ChildRun {
-                        run_id: row.id,
-                        thread_id: row.related.expect("saved child Thread"),
-                    },
-                    label(
-                        row.label.as_deref(),
-                        crate::ui::i18n::local!(language, "名称未設定", "Untitled"),
                     ),
                 ),
                 _ => (
@@ -458,10 +377,10 @@ pub(super) fn prepare_in(
         run_id: raw.run_id,
         rows,
         shells: raw.shells,
-        children: raw.children,
+
         waits: raw.waits,
         overflow,
-        counts_capped: raw.shells == 128 || raw.children == 128,
+        counts_capped: raw.shells == 128,
         observed_at,
     }
 }
@@ -478,7 +397,7 @@ mod tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'),('child','/','','p','m','now'),('lineage','/','','p','m','now');
             UPDATE thread SET parent_thread_id='t' WHERE id='lineage';
             INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','2020-01-01T00:00:00Z'),('lineage-run','lineage','live','2010-01-01T00:00:00Z');
-            INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','r','live','2020-01-01T00:00:01Z');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','2020-01-01T00:00:01Z');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2020-01-01T00:00:00Z');").unwrap();
         for (id, owner, start) in [
             ("s-old", "r", "2020-01-01T00:00:00Z"),
@@ -499,11 +418,11 @@ mod tests {
     #[test]
     fn row_limit_bounds_the_candidate_merge_without_changing_counts() {
         let db = fixture();
-        for (limit, rows, overflow) in [(1, 1, 4), (3, 3, 2), (10, 5, 0)] {
+        for (limit, rows, overflow) in [(1, 1, 3), (3, 3, 1), (10, 4, 0)] {
             let snapshot = prepare(read_tx_limited(&db, "r", Some(&[]), limit).unwrap());
             assert_eq!(snapshot.rows.len(), rows);
             assert_eq!(snapshot.overflow, overflow);
-            assert_eq!((snapshot.shells, snapshot.children), (4, 1));
+            assert_eq!(snapshot.shells, 4);
         }
         for invalid in [0, 11] {
             assert!(read_tx_limited(&db, "r", Some(&[]), invalid).is_err());
@@ -520,13 +439,8 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        for index in [
-            "shell_active_owner",
-            "runs_by_owner",
-            "activity_turn_run",
-            "activity_attempt_turn",
-            "activity_group_turn_state",
-        ] {
+        {
+            let index = "shell_active_owner";
             assert!(
                 details.iter().any(|detail| detail.contains(index)),
                 "missing {index}: {details:?}"
@@ -568,13 +482,8 @@ mod tests {
         let snapshot =
             prepare(read_tx_limited(&db, "r", Some(&[("w".into(), "s-old".into())]), 10).unwrap());
         assert_eq!(
-            (
-                snapshot.shells,
-                snapshot.children,
-                snapshot.waits,
-                snapshot.overflow
-            ),
-            (4, 1, Some(1), 0)
+            (snapshot.shells, snapshot.waits, snapshot.overflow),
+            (4, Some(1), 0)
         );
         assert!(!snapshot.rows.iter().any(|r| matches!(&r.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-old")));
         let wait = snapshot
@@ -739,8 +648,8 @@ mod tests {
         let raw = read_tx(&db, "r", Some(&scope)).unwrap();
         assert_eq!(
             trace.count(),
-            3,
-            "one live batch plus two bounded untitled-child witnesses"
+            1,
+            "one shell/wait batch; no owned-child metadata lookups"
         );
         drop(trace);
         db.execute("UPDATE shell_execution SET state='exited'", [])
@@ -749,25 +658,17 @@ mod tests {
         drop(db);
         let snapshot = prepare(raw);
         assert_eq!(
-            (
-                snapshot.shells,
-                snapshot.children,
-                snapshot.waits,
-                snapshot.overflow
-            ),
-            (4, 1, Some(1), 2)
+            (snapshot.shells, snapshot.waits, snapshot.overflow),
+            (4, Some(1), 1)
         );
         assert_eq!(snapshot.rows.len(), 3);
+        assert!(snapshot.rows.iter().all(|row| !row.label.contains("child")));
         assert!(
-            matches!(&snapshot.rows[0].target, LiveWorkTarget::ChildRun { run_id, .. } if run_id == "child-run")
+            matches!(&snapshot.rows[0].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "wait-old")
         );
         assert!(
-            matches!(&snapshot.rows[1].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "wait-old")
+            matches!(&snapshot.rows[1].target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-new")
         );
-        assert!(
-            matches!(&snapshot.rows[2].target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-new")
-        );
-        assert_eq!(snapshot.rows[0].label, "未送信");
     }
 
     #[test]
@@ -829,16 +730,10 @@ mod tests {
             [],
         )
         .unwrap();
-        let child = prepare(raw)
-            .rows
-            .into_iter()
-            .find(|row| matches!(row.target, LiveWorkTarget::ChildRun { .. }))
-            .unwrap();
-        assert_eq!(child.label, "Known child question");
-        assert_eq!(
-            child.state,
-            crate::activity::ActivityPhase::Recovery.column_label()
-        );
+        assert!(prepare(raw).rows.iter().all(|row| matches!(
+            row.target,
+            LiveWorkTarget::Shell { .. } | LiveWorkTarget::Wait { .. }
+        )));
     }
 
     #[test]
@@ -888,9 +783,10 @@ mod tests {
         assert!(
             matches!(&snapshot.rows[1].target,LiveWorkTarget::Shell{execution_id,..}if execution_id=="s-new")
         );
-        assert!(
-            matches!(&snapshot.rows[2].target,LiveWorkTarget::ChildRun{run_id,..}if run_id=="child-run")
-        );
+        assert!(matches!(
+            &snapshot.rows[2].target,
+            LiveWorkTarget::Shell { .. }
+        ));
     }
 
     #[test]

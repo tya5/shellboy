@@ -63,3 +63,19 @@ become failed merely because the recipient Run stops or enters recovery.
 The model wait graph links its shell to the recipient Thread and refreshes
 ownership edges as assignment changes. A committed reply takes precedence over
 an interruption caused by that reply arriving at the caller.
+
+## Adopted revision: observation without ownership (#276)
+
+Remove the complete combined resource/dependency graph and all reachability/cycle rejection. A direct invoking
+Run/Turn/shell ID comparison alone rejects `self_wait`. Explicit other Run/Turn/shell/reply/Thread conditions remain observations. They finish on a matching fact, interruption,
+unavailability or the requested observation deadline; a cycle can simply time out. This is not task supervision.
+Retain bounded pending operation bindings and interrupted-wait facts for crash inspection, without graph edges or
+automatic replay. For child tasks use `message send --expect-reply` and end the sender Turn, not synchronous Run/Turn
+waiting. A delivered explicit reply resumes the sender's ordinary conversation. No live parent Run is required.
+
+### Claude review correction (#276)
+
+The graph remains removed, but a model cannot wait on its own Run, Turn or invoking shell. Compare only the supplied
+IDs with authenticated Origin and return typed `self_wait` immediately. No ancestor, sibling, Thread-organization or
+reachability check is restored. Other resources remain ordinary observations. This supersedes the earlier proposal
+to accept self-waits; external observers without an invoking model resource retain explicit observation access.

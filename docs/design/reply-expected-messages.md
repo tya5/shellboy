@@ -982,3 +982,32 @@ existing model mark. `thread list` exposes the count of all pending duties in it
 Overflow remains reachable through `/replies`. Human questions alone are
 suppressed from Run-end reminders and `ignored`; other-Thread duties keep the
 existing rules.
+
+## Adopted G21 replacement (#276)
+
+Reply-expected messages are the single delegation contract. Create/select a child Thread, send an accepted request
+with `expect_reply`, retain its message ID and finish the current Turn if only that result remains. The recipient
+replies to the exact applied message once; ordinary reply delivery resumes the sender Thread through the existing
+message path. Progress is an ordinary message. No Run owns another Run, no parent background state is retained by a
+child, and child answer/end/progress/recovery notifications are not automatically forwarded. Run-end unanswered
+request reminders remain. Human decision questions and sender provenance are unchanged.
+
+Thread-get exposes one `awaiting_replies` list. Each item's `recipient_kind` and `recipient_thread_id` distinguish
+human/thread duties; the duplicate `awaiting_human`, `awaiting_reply` and `awaiting_thread_replies` lists are removed.
+
+## W8 correction: bounded terminal settlement and restart
+
+A terminal Run's first indexed batch is not its completion guarantee. `receipt_reply_run_pending(run_id,state)`
+partially indexes non-human pending duties, so direct Run completion/stop seeks at most 128 applied candidates
+without scanning pending receipts belonging to other Runs on the same Thread. There is no new recipient cap.
+
+The existing maintenance task also sweeps the durable pending receipts on startup and committed Run-end signals.
+Each background unit selects at most 128 candidates *before* checking Run/state eligibility. Two indexed keyset
+seeks on `receipt_reply_pending(target_thread_id,rowid)` avoid OFFSET, post-filter LIMIT and sorting. An in-memory
+cursor advances after commit; rollback keeps the previous cursor and restart loses it safely, restarting the sweep.
+A new terminal signal during an active sweep requests another sweep to catch eligibility changes behind the cursor.
+The requester yields at existing background-unit boundaries and observes shutdown between units. Idle live/recovery
+requests do not cause repeated sweeps without a new signal. Receipt CAS and the deterministic outcome event ID make
+revisiting a committed batch idempotent. Delivery admission and the post-commit quiet wakes use the existing ordinary
+message mechanism. No new table, queue, worker or durable cursor is introduced. The schema-39 independent-Runs migration gains
+only the partial Run/pending index; wire remains protocol 5.

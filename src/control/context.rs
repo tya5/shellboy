@@ -1,9 +1,9 @@
 //! Append-only context observations. They never create a Turn or wake a wait.
-use rusqlite::{Transaction, params};
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 
 pub(crate) fn record(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     thread: &str,
     kind: &str,
     actor: Value,
@@ -14,7 +14,7 @@ pub(crate) fn record(
     Ok(())
 }
 pub(super) fn turn_started(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     thread: &str,
     run: &str,
     turn: &str,

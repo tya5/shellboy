@@ -1,4 +1,4 @@
-//! Bounded-duration observations and composed ownership/wait graph validation.
+//! Bounded-duration explicit observations without resource dependency policy.
 use super::{Control, foreground::ForegroundSlot};
 use crate::protocol::*;
 use rusqlite::{Connection, OptionalExtension};
@@ -47,7 +47,6 @@ pub(super) struct WaitRegistry {
 #[derive(Clone)]
 struct Registration {
     source: String,
-    targets: Vec<String>,
 }
 struct Guard {
     entries: Arc<StdMutex<HashMap<String, Registration>>>,
@@ -57,7 +56,7 @@ impl Drop for Guard {
     fn drop(&mut self) {
         self.entries
             .lock()
-            .expect("wait graph poisoned")
+            .expect("wait registry poisoned")
             .remove(&self.id);
     }
 }
@@ -66,7 +65,7 @@ impl Control {
     /// Bounded in-process ownership witnesses; the frontend joins these exact
     /// operations to their committed pending records in its normal read snapshot.
     pub(crate) fn pending_wait_sources(&self) -> Option<Vec<(String, String)>> {
-        let entries = self.waits.entries.lock().expect("wait graph poisoned");
+        let entries = self.waits.entries.lock().expect("wait registry poisoned");
         if entries.len() > 128 {
             return None;
         }
@@ -86,7 +85,6 @@ impl Control {
 struct Observation {
     matched: Vec<WaitCondition>,
     snapshot: Value,
-    targets: Vec<String>,
     recovery: bool,
     unavailable: bool,
     interrupted: bool,
@@ -155,31 +153,26 @@ async fn observe_inner(
         return Err(invalid("wait requires at least one condition"));
     }
     crate::thread_observation::validate(&args.conditions, args.after.as_deref())?;
+    if let Some(origin) = &caller {
+        let own = args.conditions.iter().any(|condition| match condition {
+            WaitCondition::RunEnded { run_id } => run_id == &origin.run_id,
+            WaitCondition::TurnCompleted { turn_id } => turn_id == &origin.turn_id,
+            WaitCondition::ShellEnded { execution_id }
+            | WaitCondition::ShellOutput { execution_id, .. } => {
+                execution_id == &origin.execution_id
+            }
+            _ => false,
+        });
+        if own {
+            return Err(ApiError::new(
+                ErrorCode::SelfWait,
+                "Cannot wait for the invoking Run, Turn or shell",
+            ));
+        }
+    }
     let mut thread_after = args.after.clone();
     let duration = Duration::from_millis(args.timeout_ms);
     let started = tokio::time::Instant::now();
-    if let Some(caller) = &caller {
-        for condition in &args.conditions {
-            let own = match condition {
-                WaitCondition::ReplyReceived { .. } => false,
-                WaitCondition::ThreadSettled { thread_ids, .. } => {
-                    thread_ids.contains(&caller.thread_id)
-                }
-                WaitCondition::TurnCompleted { turn_id } => turn_id == &caller.turn_id,
-                WaitCondition::RunEnded { run_id } => run_id == &caller.run_id,
-                WaitCondition::ShellEnded { execution_id }
-                | WaitCondition::ShellOutput { execution_id, .. } => {
-                    execution_id == &caller.execution_id
-                }
-            };
-            if own {
-                return Err(ApiError::new(
-                    ErrorCode::WaitCycle,
-                    "synchronous wait on the caller's own Run, Turn, or shell is forbidden",
-                ));
-            }
-        }
-    }
     let mut guard = None;
     let mut initial = true;
     let observes_output = args
@@ -204,21 +197,21 @@ async fn observe_inner(
             .waits
             .observations
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let (observation, edges) = control
+        let observation = control
             .store
             .database
             .call(move |db| {
                 let tx=db.transaction()?;
                 let observation=inspect(&tx,&query,origin.as_ref(),initial);
-                let edges=if origin.is_some() && (initial || query.conditions.iter().any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. }))) {ownership_edges(&tx)} else {Ok(Vec::new())};
-                if initial&&observation.as_ref().is_ok_and(|observation|outcome(&query,observation,None).is_ok_and(|value|value.is_none()))&&edges.is_ok(){
+
+                if initial&&observation.as_ref().is_ok_and(|observation|outcome(&query,observation,None).is_ok_and(|value|value.is_none())){
                     let caller=origin.as_ref().map(|origin|json!({"thread_id":origin.thread_id,"run_id":origin.run_id,"turn_id":origin.turn_id,"execution_id":origin.execution_id}));
                     let body=json!({"operation_id":durable_id,"caller":caller,"conditions":query.conditions,"timeout_ms":query.timeout_ms,"after_cursor":observation.as_ref().ok().and_then(|o|o.cursor.as_ref()),"accepted_at":chrono::Utc::now().to_rfc3339()}).to_string();
-                    if body.len().saturating_add(WAIT_BINDING_BYTES)>MAX_FRAME_BYTES{return Ok((Err(ApiError::new(ErrorCode::InputLimit,"Wait observation metadata exceeds the public frame bound")),edges));}
+                    if body.len().saturating_add(WAIT_BINDING_BYTES)>MAX_FRAME_BYTES{return Ok(Err(ApiError::new(ErrorCode::InputLimit,"Wait observation metadata exceeds the public frame bound")));}
                     tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![WaitKeys::new(&durable_id).pending(),body])?;
                 }
                 tx.commit()?;
-                Ok((observation,edges))
+                Ok(observation)
             })
             .await
             .map_err(crate::app::storage_error)?;
@@ -236,26 +229,14 @@ async fn observe_inner(
                 .any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. })))
             && let Some(caller) = &caller
         {
-            let mut entries = control.waits.entries.lock().expect("wait graph poisoned");
+            let mut entries = control
+                .waits
+                .entries
+                .lock()
+                .expect("wait registry poisoned");
             let registration = Registration {
                 source: format!("shell:{}", caller.execution_id),
-                targets: observation.targets.clone(),
             };
-            let mut edges = edges?;
-            for (_, previous) in entries.iter().filter(|(id, _)| *id != &operation_id) {
-                for target in &previous.targets {
-                    edges.push((previous.source.clone(), target.clone()));
-                }
-            }
-            for target in &registration.targets {
-                edges.push((registration.source.clone(), target.clone()));
-            }
-            if cycle(&edges) {
-                return Err(ApiError::new(
-                    ErrorCode::WaitCycle,
-                    "wait would create a cycle with ownership or another wait",
-                ));
-            }
             entries.insert(operation_id.clone(), registration);
             if guard.is_none() {
                 guard = Some(Guard {
@@ -371,36 +352,9 @@ fn inspect(
     caller: Option<&Origin>,
     initial: bool,
 ) -> Result<Observation> {
-    if initial && let Some(caller) = caller {
-        let mut statement=db.prepare("WITH RECURSIVE owners(id) AS(SELECT owner_run_id FROM run WHERE id=?1 AND owner_run_id IS NOT NULL UNION SELECT r.owner_run_id FROM run r JOIN owners o ON r.id=o.id WHERE r.owner_run_id IS NOT NULL) SELECT id FROM owners").map_err(sql_error)?;
-        let ancestors = statement
-            .query_map([&caller.run_id], |row| row.get::<_, String>(0))
-            .map_err(sql_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(sql_error)?;
-        for condition in &args.conditions {
-            let target = match condition {
-                WaitCondition::RunEnded { run_id } => Some(run_id.clone()),
-                WaitCondition::TurnCompleted { turn_id } => db
-                    .query_row("SELECT run_id FROM turn WHERE id=?1", [turn_id], |row| {
-                        row.get::<_, String>(0)
-                    })
-                    .optional()
-                    .map_err(sql_error)?,
-                _ => None,
-            };
-            if target.is_some_and(|run| ancestors.contains(&run)) {
-                return Err(ApiError::new(
-                    ErrorCode::WaitCycle,
-                    "synchronous wait on an owning ancestor's Run or Turn is forbidden",
-                ));
-            }
-        }
-    }
     let mut observation = Observation {
         matched: vec![],
         snapshot: Value::Null,
-        targets: vec![],
         recovery: false,
         unavailable: false,
         interrupted: false,
@@ -412,8 +366,15 @@ fn inspect(
     for condition in &args.conditions {
         match condition {
             WaitCondition::ReplyReceived { message_id } => {
-                let row = db.query_row("SELECT r.target_thread_id,r.result_json FROM receipt r WHERE r.message_node_id=?1", [message_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).optional().map_err(sql_error)?;
-                if let Some((thread, saved)) = row {
+                let row = db
+                    .query_row(
+                        "SELECT r.result_json FROM receipt r WHERE r.message_node_id=?1",
+                        [message_id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?;
+                if let Some(saved) = row {
                     let saved: Value = saved
                         .as_deref()
                         .and_then(|s| serde_json::from_str(s).ok())
@@ -426,8 +387,6 @@ fn inspect(
                     snapshots.push(json!({"type":"reply","message_id":message_id,"state":state,"reply_node_id":reply["node_id"],"at":reply["at"],"by":reply["by"]}));
                     if state != "pending" {
                         observation.matched.push(condition.clone());
-                    } else {
-                        observation.targets.push(format!("thread:{thread}"));
                     }
                 } else {
                     missing(&mut observation, initial, "Message", message_id)?;
@@ -465,7 +424,6 @@ fn inspect(
                     } else if state == "recovery_wait" {
                         observation.recovery = true;
                     }
-                    observation.targets.push(format!("turn:{turn_id}"));
                 } else {
                     missing(&mut observation, initial, "Turn", turn_id)?;
                 }
@@ -481,7 +439,6 @@ fn inspect(
                     } else if recovery {
                         observation.recovery = true;
                     }
-                    observation.targets.push(format!("run:{run_id}"));
                 } else {
                     missing(&mut observation, initial, "Run", run_id)?;
                 }
@@ -503,7 +460,6 @@ fn inspect(
                             observation.matched.push(condition.clone());
                         }
                     }
-                    observation.targets.push(format!("shell:{execution_id}"));
                 } else {
                     missing(&mut observation, initial, "shell", execution_id)?;
                 }
@@ -520,7 +476,6 @@ fn inspect(
         observation.unavailable |= report.unavailable;
         observation.snapshot["thread_unavailable"] = json!(report.unavailable);
         observation.cursor = Some(report.cursor);
-        observation.targets.extend(report.targets);
     }
     Ok(observation)
 }
@@ -569,67 +524,6 @@ fn missing(observation: &mut Observation, initial: bool, kind: &str, id: &str) -
 fn terminal(state: &str) -> bool {
     matches!(state, "completed" | "stopped" | "failed" | "exited")
 }
-fn ownership_edges(db: &Connection) -> Result<Vec<(String, String)>> {
-    let mut edges = Vec::new();
-    let mut statement = db
-        .prepare("SELECT id,owner_run_id,thread_id FROM run INDEXED BY one_live_run WHERE state IN ('live','stopping')")
-        .map_err(sql_error)?;
-    let mut rows = statement.query([]).map_err(sql_error)?;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let owner: Option<String> = row.get(1).map_err(sql_error)?;
-        let thread: String = row.get(2).map_err(sql_error)?;
-        edges.push((format!("thread:{thread}"), format!("run:{id}")));
-        if let Some(owner) = owner {
-            edges.push((format!("run:{owner}"), format!("run:{id}")));
-        }
-    }
-    let mut statement=db.prepare("SELECT id,run_id FROM turn INDEXED BY one_open_turn WHERE state IN ('preparing','running','waiting','recovery_wait')").map_err(sql_error)?;
-    let mut rows = statement.query([]).map_err(sql_error)?;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let run: String = row.get(1).map_err(sql_error)?;
-        edges.push((format!("run:{run}"), format!("turn:{id}")));
-    }
-    let mut statement=db.prepare("SELECT id,owner_run_id,turn_id FROM shell_execution INDEXED BY shell_active_owner WHERE state IN ('starting','running','stopping')").map_err(sql_error)?;
-    let mut rows = statement.query([]).map_err(sql_error)?;
-    while let Some(row) = rows.next().map_err(sql_error)? {
-        let id: String = row.get(0).map_err(sql_error)?;
-        let run: String = row.get(1).map_err(sql_error)?;
-        let turn: String = row.get(2).map_err(sql_error)?;
-        edges.push((format!("run:{run}"), format!("shell:{id}")));
-        edges.push((format!("turn:{turn}"), format!("shell:{id}")));
-    }
-    Ok(edges)
-}
-fn cycle(edges: &[(String, String)]) -> bool {
-    let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
-    let mut incoming: HashMap<&str, usize> = HashMap::new();
-    for (source, target) in edges {
-        adjacency.entry(source).or_default().push(target);
-        incoming.entry(source).or_default();
-        *incoming.entry(target).or_default() += 1;
-    }
-    let mut ready: std::collections::VecDeque<&str> = incoming
-        .iter()
-        .filter_map(|(node, count)| (*count == 0).then_some(*node))
-        .collect();
-    let mut visited = 0;
-    while let Some(node) = ready.pop_front() {
-        visited += 1;
-        if let Some(targets) = adjacency.get(node) {
-            for target in targets {
-                let count = incoming.get_mut(target).expect("known wait graph target");
-                *count -= 1;
-                if *count == 0 {
-                    ready.push_back(target);
-                }
-            }
-        }
-    }
-    visited != incoming.len()
-}
-
 fn invalid(message: &str) -> ApiError {
     ApiError::new(ErrorCode::InvalidArgument, message)
 }
@@ -656,9 +550,9 @@ mod tests {
         let control = Control::new(&owner, directory.path().to_path_buf());
         control.store.database.call(|db| {
             let tx=db.transaction()?;
-            for (thread,run,turn,shell,parent) in [("parent","rp","tp","sp",None),("a","ra","ta","sa",Some("rp")),("b","rb","tb","sb",Some("rp"))] {
+            for (thread,run,turn,shell) in [("parent","rp","tp","sp"),("a","ra","ta","sa"),("b","rb","tb","sb")] {
                 tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','','','now')",[thread])?;
-                tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,parent])?;
+                tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
                 tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'running','now')",rusqlite::params![turn,thread,run])?;
                 tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,?2,?3,?1,'running','/','{}','UTF-8','UTF-8','open','now')",rusqlite::params![shell,run,turn])?;
             }
@@ -703,14 +597,12 @@ mod tests {
                 "z:operation".into(),
                 Registration {
                     source: "shell:execution:日本".into(),
-                    targets: vec!["run:other".into()],
                 },
             );
             entries.insert(
                 "a:operation".into(),
                 Registration {
                     source: "shell:shell:nested".into(),
-                    targets: vec![],
                 },
             );
         }
@@ -734,7 +626,6 @@ mod tests {
                     format!("operation-{index}"),
                     Registration {
                         source: format!("shell:execution-{index}"),
-                        targets: vec![],
                     },
                 );
             }
@@ -744,7 +635,6 @@ mod tests {
             "overflow".into(),
             Registration {
                 source: "shell:last".into(),
-                targets: vec![],
             },
         );
         assert!(
@@ -910,7 +800,7 @@ mod tests {
         }
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn owner_and_sibling_wait_cycles_reject_but_same_run_other_shell_can_timeout() {
+    async fn self_ancestor_and_composed_waits_are_observations_without_cycle_policy() {
         let (_dir, owner, control) = fixture().await;
         let a = origin("a", "ra", "ta", "sa");
         for condition in [
@@ -919,9 +809,6 @@ mod tests {
             },
             WaitCondition::TurnCompleted {
                 turn_id: "tp".into(),
-            },
-            WaitCondition::ShellEnded {
-                execution_id: "sa".into(),
             },
         ] {
             let result = observe(
@@ -932,8 +819,34 @@ mod tests {
                 CancellationToken::new(),
             )
             .await
+            .unwrap();
+            assert_eq!(result["status"], "timeout");
+        }
+        for condition in [
+            WaitCondition::RunEnded {
+                run_id: "ra".into(),
+            },
+            WaitCondition::TurnCompleted {
+                turn_id: "ta".into(),
+            },
+            WaitCondition::ShellEnded {
+                execution_id: "sa".into(),
+            },
+            WaitCondition::ShellOutput {
+                execution_id: "sa".into(),
+                cursor: String::new(),
+            },
+        ] {
+            let error = observe(
+                control.clone(),
+                uuid::Uuid::new_v4().to_string(),
+                args(condition, 30_000),
+                Some(a.clone()),
+                CancellationToken::new(),
+            )
+            .await
             .unwrap_err();
-            assert_eq!(result.code, ErrorCode::WaitCycle);
+            assert_eq!(error.code, ErrorCode::SelfWait);
         }
         let other = observe(
             control.clone(),
@@ -976,14 +889,14 @@ mod tests {
                 WaitCondition::ShellEnded {
                     execution_id: "sa".into(),
                 },
-                5000,
+                0,
             ),
             Some(origin("b", "rb", "tb", "sb")),
             CancellationToken::new(),
         )
         .await
-        .unwrap_err();
-        assert_eq!(result.code, ErrorCode::WaitCycle);
+        .unwrap();
+        assert_eq!(result["status"], "timeout");
         cancel.cancel();
         assert_eq!(first.await.unwrap().unwrap()["status"], "interrupted");
         assert!(control.waits.entries.lock().unwrap().is_empty());

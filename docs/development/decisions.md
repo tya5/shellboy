@@ -4292,6 +4292,31 @@ W8 P2 correction: the all-bytes barrier moved the control probe too late. Keep a
 instead: first stdout batch committed, Thread-create response while stderr is held, assert incomplete total, then
 release stderr and close stdin. Remove the running-state assertion rather than forcing it. This preserves evidence
 of control progress before saving finishes without depending on natural process duration.
+
+### D-276: independent Runs and expected-reply delegation
+
+Issue #276 adopts removal of Run-to-Run ownership, without replacing it with another dependency graph. Keep shell
+ownership, Thread organization, explicit general observations and unanswered-reply reminders. Remove child-based
+retention/stop propagation and lifecycle forwarding. One tagged reply-duty list replaces the three aliases.
+
+Child requests use accepted expected-reply messages. End the sender Turn when only the result remains; the explicit
+reply is ordinarily delivered to that Thread, including by starting a new independent Run after the sender ends.
+Progress uses normal messages. Schema 38 removes the ownership field and related policy indexes/triggers, preserving
+referent IDs and shell ownership. The local recovery event replaces child-forwarding nomenclature; existing recovery
+facts migrate their event kind/index without rewriting payloads. Landing is deferred until after v0.11.0.
+
+### D-276 review correction: direct self-wait guard
+
+Claude's accepted review changes candidate 1 only: keep direct invoking Run/Turn/shell ID rejection with typed
+`self_wait`. Remove the dependency graph, not this constant-time input guard. Ancestor and sibling observations do
+not need classification. The prior self-wait acceptance statement is superseded, not implemented as a fallback.
+
+### D-276 recovery-wait reply duty (leader decision)
+
+A retry-exhausted Turn in `recovery_wait` is not terminal. Keep the same expected-reply receipt pending and allow its
+reply after explicit recovery. Only actual replyless normal completion, explicit stop and terminal failure settle
+as ignored. Do not substitute a recovery notification for an invented terminal outcome. Cancellation is its own
+outcome, delivered normally to the requesting Thread. No Run ownership or parent-forwarding policy is reinstated.
 ### D-262-5: Reject new reply duties at 16 per recipient Thread
 
 The user's 2026-11-08 decision replaces the previous read-time saturation
@@ -4322,3 +4347,11 @@ samples, advancing across examined candidates. Live changes may add or remove
 future keys; keys inserted before the cursor require a fresh listing. No new
 table or aggregate cache is permitted. W8 independent review may revise these
 provisional public semantics.
+
+### #276 after #262 schema 38
+
+Independent Runs move from the unlanded schema-38 proposal to schema 39 after #262 lands as 38. Keep #262 human
+reply pending index/count exactness and protocol 5. Preserve #276 SQL semantics and bounded terminal continuation;
+update migration identity, FK rebuild selector, fixtures and measurement labels. Merge upstream without rewriting
+published task history. Prior schema-38 CI is not schema-39 evidence; refresh focused checks and both CI at the same
+final SHA, followed by independent W8 delta review. Landing remains after v0.11.0, not authorized by this renumbering.

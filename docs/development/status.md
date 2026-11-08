@@ -21,6 +21,10 @@ CI is not evidence of real-provider behavior, physical-terminal behavior, produc
 
 The prior branch-by-branch ledger, including entries added to main after the original snapshot, is retained in [status history](status-history.md); its handoffs and pending-check notes are not current status.
 
+#276 is in progress: the inventory and seven scoped simplification decisions are posted, independent Run admission/
+stop/wait/UI paths and schema 38 are implemented incrementally, and focused validation is ongoing. General explicit
+Run/Turn observations remain; delegation is expected-reply delivery rather than a supervised live parent Run.
+Handoff requires both normal and all-OS CI on the final rebased tip; landing is after v0.11.0.
 ## #262 bounded human reply duties (verification in progress)
 
 Admission is 16 per recipient; legacy summaries report 17+ with exact=false.
