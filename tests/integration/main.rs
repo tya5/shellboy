@@ -227,6 +227,7 @@ mod exec_client;
 #[path = "../support/watchdog.rs"]
 pub(crate) mod test_watchdog;
 
+#[cfg(unix)]
 #[path = "../support/pty_session.rs"]
 pub(crate) mod pty_session;
 
