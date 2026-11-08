@@ -349,8 +349,8 @@ fn inspect(
     for condition in &args.conditions {
         match condition {
             WaitCondition::ReplyReceived { message_id } => {
-                let row = db.query_row("SELECT r.target_thread_id,r.result_json FROM receipt r WHERE r.message_node_id=?1", [message_id], |r| Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?))).optional().map_err(sql_error)?;
-                if let Some((thread, saved)) = row {
+                let row = db.query_row("SELECT r.result_json FROM receipt r WHERE r.message_node_id=?1", [message_id], |r| r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?;
+                if let Some(saved) = row {
                     let saved: Value = saved
                         .as_deref()
                         .and_then(|s| serde_json::from_str(s).ok())

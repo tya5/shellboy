@@ -969,8 +969,7 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
     use crate::ui::text_width::glyphs;
     match kind.unwrap_or("") {
         "shell_ended" => glyphs::SHELL,
-        "child_turn_completed" | "child_run_ended" | "child_report" => glyphs::CHILD,
-        "recovery_wait" | "child_recovery_wait" | "reply_reminder" | "reply_outcome" => {
+        "recovery_wait" | "reply_reminder" | "reply_outcome" => {
             glyphs::WAIT
         }
         "thread_settings"
@@ -1119,13 +1118,6 @@ fn notice_row(view: &ThreadView, node: &UiNode, width: u16, prefix: String) -> L
         (None, Some(code)) => Message::Exit { code }.render(language),
         _ => String::new(),
     };
-    if kind == "child_turn_completed" && matches!(status, None | Some("completed")) {
-        outcome = crate::ui::i18n::local!(language, "回答", "Answer").into();
-    } else if kind == "child_report" && matches!(status, None | Some("completed")) {
-        outcome = crate::ui::i18n::local!(language, "報告", "Report").into();
-    } else if kind == "child_run_ended" && status == Some("completed") {
-        outcome = crate::ui::i18n::local!(language, "完了", "Completed").into();
-    }
     let signal = node
         .presentation
         .fields

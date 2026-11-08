@@ -64,7 +64,7 @@ pub(super) async fn adopt_response(
                 tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,?3,'running',?4)",params![group,attempt_id,current.turn,now()])?;
                 for (ordinal,item)in output.iter().filter(|v|v.get("type").and_then(Value::as_str)==Some("function_call")).enumerate(){tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?2,?3,'shell',?4,'pending')",params![group,item["call_id"].as_str().unwrap_or(""),ordinal as i64,item["arguments"].as_str().unwrap_or("{}")])?;}
             }else{
-                crate::control::state::complete_answer_turn(&tx, &current.thread, &current.run, &current.turn, &node)?;
+                crate::control::state::complete_answer_turn(&tx, &current.turn, &node)?;
             }
             crate::attachments::mark_success_tx(&tx,&successful_attachments,&attempt_id).map_err(crate::storage::StorageError::from)?;
             tx.commit()?;Ok(true)

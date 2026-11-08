@@ -620,7 +620,7 @@ async fn next_with_clients(
                 events.push(tx.query_row("SELECT id,json_object('event_id',id,'kind',kind,'payload',json(payload_ref_json)) FROM event WHERE id=?1",[event],|r|Ok((r.get(0)?,r.get(1)?)))?);
             }
             if turn.is_none() {
-                super::state::complete_idle_run(&tx, &thread, &run)?;
+                super::state::complete_idle_run(&tx, &run)?;
                 tx.commit()?;return Ok(Next::Done);
             }
         }
@@ -766,7 +766,6 @@ async fn recover(
         );
     }
     let thread_id = snapshot.thread.clone();
-    let run_id = snapshot.run.clone();
     let snapshot = snapshot.clone();
     let recovered = control
         .store

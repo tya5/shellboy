@@ -2556,7 +2556,21 @@ async fn retry_has_no_authority_check_and_is_safe_when_raced() {
     let loser = direct.as_ref().err().or(ancestor.as_ref().err()).unwrap();
     assert_eq!(loser.code, ErrorCode::InvalidState);
     let winner = direct.or(ancestor).unwrap();
-    store.database.call(|db| {assert_eq!(db.query_row("SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",[],|r|r.get::<_,i64>(0))?,0);Ok(())}).await.unwrap();
+    store
+        .database
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
     assert_eq!(winner.quiet_wake_threads, vec![leaf.thread_id.clone()]);
     // Replaying the winning operation ID returns the saved result without resuming again.
     let again = retry();

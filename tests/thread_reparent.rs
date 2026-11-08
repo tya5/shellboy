@@ -372,7 +372,11 @@ async fn moving_a_live_thread_changes_organization_without_run_ownership() {
         moved.result["parent_change"]["live_run_id"],
         json!(child_run)
     );
-    assert!(moved.result["parent_change"].get("live_run_owner_run_id").is_none());
+    assert!(
+        moved.result["parent_change"]
+            .get("live_run_owner_run_id")
+            .is_none()
+    );
     // The new parent may send while the old live Run keeps its stored owner.
     let accepted = store
         .execute(request(send(&child, "from new")), Some(new_origin.clone()))

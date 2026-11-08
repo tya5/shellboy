@@ -349,7 +349,6 @@ pub(super) fn record_recovery_event(
 /// in this same transaction; preserve its normal completion notification.
 pub(super) fn complete_idle_run(
     tx: &rusqlite::Transaction<'_>,
-    thread: &str,
     run: &str,
 ) -> Result<(), StorageError> {
     let changed = tx.execute(
@@ -382,8 +381,6 @@ pub(super) fn complete_idle_run(
 /// New accepted input keeps this Turn open for the following request.
 pub(super) fn complete_answer_turn(
     tx: &rusqlite::Transaction<'_>,
-    thread: &str,
-    run: &str,
     turn: &str,
     node: &str,
 ) -> Result<(), StorageError> {

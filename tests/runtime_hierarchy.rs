@@ -788,9 +788,15 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
         }),
     )
     .await;
-    state(&control,"run","recovery-grandchild","live").await;
-    command(&control,Command::RunStop(RunTarget{run_id:"recovery-grandchild".into()})).await;
-    state(&control,"run","recovery-grandchild","stopped").await;
+    state(&control, "run", "recovery-grandchild", "live").await;
+    command(
+        &control,
+        Command::RunStop(RunTarget {
+            run_id: "recovery-grandchild".into(),
+        }),
+    )
+    .await;
+    state(&control, "run", "recovery-grandchild", "stopped").await;
     drop(grandchild_retry);
     drop(parent_continuation);
     local.shutdown().await.unwrap();

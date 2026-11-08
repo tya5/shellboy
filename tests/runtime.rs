@@ -1899,18 +1899,38 @@ async fn real_shell_cli_starts_independent_child_without_parent_retention_or_lif
         "completed",
     )
     .await;
-    state(&control,"run",parent.run_id.as_deref().unwrap(),"completed").await;
-    let child_query=child_id.clone();
-    let child_run:String=control.store.database.call(move|db|Ok(db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state='live'",[child_query],|r|r.get(0))?)).await.unwrap();
+    state(
+        &control,
+        "run",
+        parent.run_id.as_deref().unwrap(),
+        "completed",
+    )
+    .await;
+    let child_query = child_id.clone();
+    let child_run: String = control
+        .store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT id FROM run WHERE thread_id=?1 AND state='live'",
+                [child_query],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
     child_request
         .unwrap()
         .reply
         .send(final_answer("child final answer"))
         .ok()
         .unwrap();
-    state(&control,"run",&child_run,"completed").await;
-    let run=parent.run_id.clone().unwrap();
-    assert!(requests.try_recv().is_err(),"child completion must not synthesize a parent request");
+    state(&control, "run", &child_run, "completed").await;
+    let run = parent.run_id.clone().unwrap();
+    assert!(
+        requests.try_recv().is_err(),
+        "child completion must not synthesize a parent request"
+    );
     control
         .store
         .database

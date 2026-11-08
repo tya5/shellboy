@@ -816,8 +816,8 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
                         "UPDATE turn SET state=?1,ended_at='original-turn',answer_node_id=?2",
                         params![turn_state, answer],
                     )?;
-                    super::super::state::complete_idle_run(&tx, &thread, &run)?;
-                    super::super::state::complete_answer_turn(&tx, &thread, &run, &turn, &answer)?;
+                    super::super::state::complete_idle_run(&tx, &run)?;
+                    super::super::state::complete_answer_turn(&tx, &turn, &answer)?;
                     assert_eq!(
                         tx.query_row("SELECT state,ended_at FROM run", [], |r| Ok((
                             r.get::<_, String>(0)?,
@@ -839,8 +839,6 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
             assert_eq!(
                 super::super::state::complete_answer_turn(
                     &tx,
-                    &thread,
-                    &run,
                     &turn,
                     "different-answer"
                 )
@@ -855,14 +853,14 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
                 answer
             );
             assert_eq!(
-                super::super::state::complete_idle_run(&tx, &thread, "missing")
+                super::super::state::complete_idle_run(&tx, "missing")
                     .unwrap_err()
                     .into_api_error()
                     .code,
                 ErrorCode::TargetUnavailable
             );
             assert_eq!(
-                super::super::state::complete_answer_turn(&tx, &thread, &run, "missing", &answer)
+                super::super::state::complete_answer_turn(&tx, "missing", &answer)
                     .unwrap_err()
                     .into_api_error()
                     .code,

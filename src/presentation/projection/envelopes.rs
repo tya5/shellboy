@@ -79,13 +79,10 @@ fn event(
             "index_state" if event.pointer("/change/after/paused") == Some(&Value::Bool(true)) => {
                 EventClass::Attention
             }
-            "child_recovery_wait" | "recovery_wait" => EventClass::Attention,
+            "recovery_wait" => EventClass::Attention,
             "recovery_resumed"
             | "thread_unarchived"
-            | "child_turn_completed"
-            | "child_run_ended"
-            | "shell_ended"
-            | "child_report" => EventClass::Change,
+            | "shell_ended" => EventClass::Change,
             "index_state"
             | "thread_settings"
             | "thread_parent"
