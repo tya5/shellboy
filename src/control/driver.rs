@@ -529,7 +529,7 @@ async fn turn_instructions(
     }
     let prepared = control
         .instructions
-        .prepare(snapshot.cwd.clone(), snapshot.agents.clone())
+        .prepare_with_extra(snapshot.cwd.clone(), snapshot.agents.clone(), control.store.config.current().extra_instructions)
         .await?;
     let body = prepared.as_ref().map(|value| value.body.clone());
     let turn = snapshot.turn.clone();

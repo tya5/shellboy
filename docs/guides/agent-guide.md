@@ -747,3 +747,14 @@ reason to automatically compact unfinished work.
 `index remove` commits deletion without computing exact index-size counts: `counts_exact` is false and pending
 quantities/segments are null (unknown). Request `--dry-run` explicitly for exact projected counts; it may scan the
 index. `removed: true` still means the durable decision, and `reclaim_pending: true` means maintenance owns cleanup.
+
+### Registering common instruction files
+
+Ask for the user's confirmation before registering an external component's common instructions. `extra_instructions`
+is an explicit ordered array of absolute UTF-8 paths; preserve other registrations when using hash-checked
+`config.set`. No directory discovery occurs. At most eight regular UTF-8 files of 8192 bytes each are accepted.
+They apply to all Threads as developer instructions before the per-Thread role, beginning with the next prepared
+Turn. Same-Turn retries/tool calls keep saved text. A bad registered file visibly stops preparation; repair it or
+remove its entry rather than assuming the guidance loaded. `thread get.instruction_sources` describes the latest
+prepared Turn; `config get` shows registrations and `thread request` shows saved instruction accounting. Never put
+credentials in these files or claim consent was checked by the configuration API itself.

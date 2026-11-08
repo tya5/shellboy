@@ -55,3 +55,32 @@ header under the [Control contract](control.md#working-instruction-provenance-he
 Its path follows the captured Turn snapshot, including after thread.set changes
 the configured reference. The prefix is not part of the saved body/hash. It does
 not change explicit selection, missing/empty-file behavior or instruction roles.
+
+## Configured common instructions (#270)
+
+`extra_instructions = ["/absolute/path/to/common.md"]` is an ordered, opt-in owner-wide list. No directory is
+searched, linked file expanded, or conventional global filename implicitly loaded. Paths must be absolute UTF-8,
+at most 4096 bytes each; at most eight entries are accepted. Each file must be regular, UTF-8 and at most 8192 bytes
+of captured content, including an empty file. This bounds extra content to 64 KiB. Symlinks to regular files follow
+the ordinary file-read rules. These files are trusted user configuration, not a sandbox or a secret store.
+
+At new-Turn preparation, the existing bounded control-file lane reads the current adopted list and all file bodies.
+Missing, unreadable, nonregular, invalid-UTF-8 or oversized configured files fail preparation visibly; nothing is
+silently excluded and no partially assembled request is sent. Existing recovery/retry reporting surfaces the error
+and path. Unlike optional Thread AGENTS absence, explicitly registered common-file absence is an error.
+
+Built-in instructions remain first, then each common file in configured order as a separate developer item, then
+Thread AGENTS if present. Headers identify the source path; body text does not gain timestamps or changing metadata.
+This preserves the common prompt prefix across Thread-role changes. Instructions are not merged into a user's
+AGENTS file, and files should be short guides pointing to capabilities rather than copied tool manuals.
+
+The existing immutable instruction snapshot stores the composed bodies and source hashes/sizes. Same-Turn tool
+continuations, retries and recovered/resumed attempts reuse it, including after restart. New Turns read again;
+file edits and configuration changes never enter an already prepared Turn. An unprepared failed Turn can retry
+preparation after the cause is fixed. `config.set` adopts this list without restart; direct disk edits remain
+restart-only. This per-Turn rule deliberately differs from per-Run connection-generation pinning.
+
+`thread get.instruction_sources` reports extra paths, content hashes and captured byte sizes for the latest prepared
+Turn, not a prediction of the next one. `thread request` reports saved source metadata and separate instruction
+items (characters/hashes); `--body` can show the saved content. Existing instruction-change context events include
+the composite hash. No new worker, database table, queue or filesystem watcher is added.

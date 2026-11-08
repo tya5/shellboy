@@ -94,6 +94,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
         stored_keys: _,
         live_connections: _,
         data_dir,
+        extra_instructions,
         default_connection,
         default_model,
         connections,
@@ -111,6 +112,7 @@ fn fields(config: &Config) -> BTreeMap<String, Leaf> {
     } = config;
     let mut out = Fields::default();
     out.plain(&["data_dir"], data_dir);
+    out.plain(&["extra_instructions"], extra_instructions);
     out.plain(&["default_connection"], default_connection);
     out.plain(&["default_model"], default_model);
     if connections.is_empty() {
@@ -724,7 +726,7 @@ fn apply_runtime(
     })
 }
 fn live_field(name: &str, embedding: Option<&str>) -> bool {
-    if matches!(name, "default_connection" | "default_model") {
+    if matches!(name, "default_connection" | "default_model" | "extra_instructions") {
         return true;
     }
     if name == "connections" {

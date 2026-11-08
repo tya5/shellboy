@@ -10749,3 +10749,11 @@ test, local `$ref` resolution test, and protocol-3 handshake test passed. The
 language audit passed for 416 files. The generated Draft 2020-12 artifact contains
 62 operation mappings (excluding `events.wait`) and all 1,532 local references
 resolve. Cross-OS CI remains pending. No real API or user data used.
+
+### #270 planned/implemented acceptance
+
+Synthetic coverage targets explicit-only registration, ordered common/Thread instruction items, unchanged shared
+prefix bytes, file edits observed only by a newly prepared snapshot, missing optional AGENTS, file-size boundaries,
+missing/nonregular/invalid-UTF-8 errors, path/list limits, live `config.set` adoption, same-Turn tool continuation,
+next-Turn use and source metadata without bodies. No passing execution is claimed here yet. Real providers, cache
+hit-rate measurements, adversarial filesystem races and user-consent UI workflows are outside these fixtures.

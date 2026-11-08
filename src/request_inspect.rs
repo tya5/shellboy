@@ -545,6 +545,10 @@ impl Assembled {
             "items": items,
             "unknown": self.unknown,
         });
+        result["instruction_sources"] = plan.instructions.as_ref().and_then(|body|body.as_deref()).and_then(crate::instructions::bundle).map(|mut bundle| {
+            for file in bundle["extra"].as_array_mut().into_iter().flatten() { if let Some(file)=file.as_object_mut() { file.remove("body"); } }
+            json!({"extra":bundle["extra"],"agents_path":plan.agents,"local_present":bundle["local"].is_string()})
+        }).unwrap_or(Value::Null);
         if let Some(wire) = &self.wire {
             let bytes = serde_json::to_vec(wire).expect("JSON value serializes");
             result["total"] = json!({

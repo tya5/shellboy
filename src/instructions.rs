@@ -104,6 +104,26 @@ impl InstructionLoader {
         })
         .await
     }
+    /// Compose all explicitly configured files in the existing bounded file lane.
+    pub(crate) async fn prepare_with_extra(&self, cwd: PathBuf, source_path: PathBuf, extra: Vec<PathBuf>) -> Result<Option<InstructionSnapshot>, ApiError> {
+        let local = self.prepare(cwd, source_path.clone()).await?;
+        if extra.is_empty() { return Ok(local); }
+        self.file_work(move || {
+            let mut files = Vec::new();
+            for path in extra {
+                let meta = std::fs::metadata(&path).map_err(|_| failed(&format!("Extra instruction file cannot be inspected: {}",path.display())))?;
+                if !meta.is_file() { return Err(failed(&format!("Extra instruction path is not a regular file: {}",path.display()))); }
+                let mut bytes=Vec::new();
+                File::open(&path).and_then(|f|f.take(8193).read_to_end(&mut bytes)).map_err(|_|failed(&format!("Extra instruction file cannot be read: {}",path.display())))?;
+                if bytes.len()>8192 { return Err(ApiError::new(ErrorCode::InputLimit,format!("Extra instruction file exceeds 8192 bytes: {}",path.display()))); }
+                let body=String::from_utf8(bytes).map_err(|_|failed(&format!("Extra instruction file is not UTF-8: {}",path.display())))?;
+                files.push(serde_json::json!({"path":path,"hash":sha256_hex(&body),"bytes":body.len(),"body":body}));
+            }
+            let body=serde_json::json!({"shellboy_instruction_bundle_v1":true,"extra":files,"local":local.as_ref().map(|s|s.body.as_ref())}).to_string();
+            Ok(Some(InstructionSnapshot { source_path, hash:sha256_hex(&body),size:body.len() as u64,body:Arc::from(body),modified:None }))
+        }).await
+    }
+
 }
 // Keep the stat/read boundary explicit: file changes between them must not
 // let observed attributes substitute for the captured body/hash.
@@ -204,5 +224,66 @@ mod snapshot_tests {
             read_snapshot(path, observed).unwrap_err().code,
             ErrorCode::InputLimit
         );
+    }
+}
+
+/// Saved structured body, not live filesystem data; same-Turn replay never re-reads files.
+pub(crate) fn bundle(body: &str) -> Option<serde_json::Value> {
+    let value:serde_json::Value=serde_json::from_str(body).ok()?;
+    (value.get("shellboy_instruction_bundle_v1")==Some(&serde_json::Value::Bool(true))).then_some(value)
+}
+
+#[cfg(test)]
+mod extra_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn extra_instructions_are_explicit_ordered_stable_and_refreshed_only_on_prepare() {
+        let root=tempfile::tempdir().unwrap();
+        let local=root.path().join("AGENTS.md");
+        let one=root.path().join("studio.md");
+        let two=root.path().join("user.md");
+        std::fs::write(&local,"thread role").unwrap();
+        std::fs::write(&one,"studio guide").unwrap();
+        std::fs::write(&two,"user guide").unwrap();
+        let loader=InstructionLoader::new(&Config::default());
+        let no_extra=loader.prepare_with_extra(root.path().into(),local.clone(),vec![]).await.unwrap().unwrap();
+        assert_eq!(&*no_extra.body,"thread role");
+        let first=loader.prepare_with_extra(root.path().into(),local.clone(),vec![one.clone(),two.clone()]).await.unwrap().unwrap();
+        let same=loader.prepare_with_extra(root.path().into(),local.clone(),vec![one.clone(),two.clone()]).await.unwrap().unwrap();
+        assert_eq!(first.body,same.body); assert_eq!(first.hash,same.hash);
+        let captured=bundle(&first.body).unwrap();
+        assert_eq!(captured["extra"][0]["body"],"studio guide");
+        assert_eq!(captured["extra"][1]["body"],"user guide");
+        assert_eq!(captured["local"],"thread role");
+        std::fs::write(&one,"changed").unwrap();
+        let next=loader.prepare_with_extra(root.path().into(),local.clone(),vec![one.clone(),two]).await.unwrap().unwrap();
+        assert_ne!(next.hash,first.hash);
+        assert_eq!(bundle(&first.body).unwrap(),captured);
+        std::fs::remove_file(&local).unwrap();
+        let missing_local=loader.prepare_with_extra(root.path().into(),local,vec![one]).await.unwrap().unwrap();
+        assert!(bundle(&missing_local.body).unwrap()["local"].is_null());
+    }
+
+    #[tokio::test]
+    async fn extra_instructions_fail_closed_for_missing_directory_oversize_and_invalid_utf8() {
+        let root=tempfile::tempdir().unwrap(); let path=root.path().join("extra.md");
+        let loader=InstructionLoader::new(&Config::default());
+        for body in [None,Some(vec![b'a';8193]),Some(vec![255])] {
+            if let Some(body)=body {std::fs::write(&path,body).unwrap();}
+            let error=loader.prepare_with_extra(root.path().into(),root.path().join("absent"),vec![path.clone()]).await.err().unwrap();
+            assert!(error.message.contains("Extra instruction"));
+        }
+        std::fs::write(&path,vec![b'a';8192]).unwrap();
+        assert!(loader.prepare_with_extra(root.path().into(),root.path().join("absent"),vec![path.clone()]).await.is_ok());
+        assert!(loader.prepare_with_extra(root.path().into(),root.path().join("absent"),vec![root.path().into()]).await.is_err());
+    }
+
+    #[test]
+    fn extra_instructions_config_requires_bounded_absolute_paths() {
+        assert!(Config::parse("extra_instructions=['relative.md']").is_err());
+        let mut config=Config::default();
+        config.extra_instructions=vec![std::env::temp_dir().join("guide.md");9];
+        assert!(config.validate().is_err());
     }
 }

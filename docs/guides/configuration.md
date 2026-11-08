@@ -956,3 +956,26 @@ Shellboy automatically measures the terminal's ambiguous-character width.
 It remembers successful observations per terminal identity and never saves a
 guessed result. When no observation is available, it uses conservative
 fallback glyphs and reserves wider character widths.
+
+## Common instruction files
+
+Optionally register short, trusted common guidance for every Thread:
+
+```toml
+extra_instructions = ["/absolute/path/to/studio-guide.md", "/absolute/path/to/user-guide.md"]
+```
+
+Only listed files apply. The default is an empty list. Use absolute UTF-8 paths (maximum 4096 bytes each), at most
+eight files and 8192 UTF-8 bytes per file. Missing/unreadable/nonregular/oversized/invalid-UTF-8 files stop the next
+Turn's preparation with a visible error; they are not silently skipped. Fix the file or remove the registration and
+retry. This is user instruction text sent to the selected provider; do not register secrets.
+
+After obtaining the user's confirmation, an external component can use `config get` and then `config set` with its
+expected hash to update `extra_instructions` as a JSON array of paths. Preserve existing entries and ordering;
+registration is not automatic and the API does not itself assert that consent was obtained. The running owner
+adopts this field immediately, but already prepared Turns keep their saved bodies. The next new Turn observes the
+list and file edits. Direct configuration-file edits still require restart. Common files precede per-Thread AGENTS
+as separate developer items; placing a file in a directory or linking it in prose does not activate it.
+
+Inspect registered paths with `config get`, captured sources with `thread get`, and request item/content accounting
+with `thread request` (add `--body` only when you intend to display instruction content).

@@ -10,6 +10,7 @@ pub(crate) struct ClientSnapshot {
     pub(crate) connections: BTreeMap<String, Connection>,
     pub(crate) default_connection: Option<String>,
     pub(crate) default_model: Option<String>,
+    pub(crate) extra_instructions: Vec<std::path::PathBuf>,
     entries: BTreeMap<String, Result<HttpModelClient, ModelError>>,
 }
 impl ClientSnapshot {
@@ -33,6 +34,7 @@ impl HttpClients {
                 connections: config.connections.clone(),
                 default_connection: config.default_connection.clone(),
                 default_model: config.default_model.clone(),
+            extra_instructions: config.extra_instructions.clone(),
                 entries: config
                     .connections
                     .iter()
@@ -88,6 +90,7 @@ impl HttpClients {
             connections,
             default_connection: config.default_connection.clone(),
             default_model: config.default_model.clone(),
+            extra_instructions: config.extra_instructions.clone(),
             entries,
         });
     }

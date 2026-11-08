@@ -8759,6 +8759,7 @@ mod tool_refresh_tests {
     }
     fn details() -> ThreadDetails {
         ThreadDetails {
+            instruction_sources: None,
             archived_at: None,
             tags: Vec::new(),
             auto_compact_at: None,
