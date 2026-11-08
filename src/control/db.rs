@@ -3426,7 +3426,7 @@ mod thread_list_plan_tests {
             small_steps, large_steps,
             "VM steps must not grow with off-page pending Threads or archived exclusions"
         );
-        assert_eq!(large_steps, 328, "SQLite VM-step contract changed");
+        assert_eq!(large_steps, 220, "SQLite VM-step contract changed");
     }
 
     #[test]
