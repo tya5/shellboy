@@ -365,6 +365,10 @@ Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy sh
 
 Use the same current release for the owner and CLI. The local RPC handshake uses protocol 4 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
 
+## Resolve saved model response items
+
+For a durable `status` attempt, `response_nodes` links each saved assistant output item to `history.window` by `node_id`. The list preserves output order and item kind/phase; distinct items may share a node ID. It is capped at 64 entries; `response_nodes_truncated=true` means additional saved items are omitted with no continuation cursor. `end_message_node_id` remains only the Turn's final answer reference, not an intermediate attempt response.
+
 ## List models and change your Thread's model
 
 Run these through shell. An authenticated model shell can omit the Thread argument.

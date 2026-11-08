@@ -893,6 +893,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn saved_response_change_wakes_events_wait_with_durable_cursor() {
+        use crate::protocol::{Command, EventCursor, EventsWaitArgs, Request};
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let wait = |after| {
+            Request::new(
+                uuid::Uuid::new_v4().to_string(),
+                Command::EventsWait(EventsWaitArgs {
+                    after,
+                    thread_ids: vec!["thread".into()],
+                    timeout_ms: 3_600_000,
+                    include_text: false,
+                    include_reasoning_activity: false,
+                }),
+            )
+        };
+        let baseline = control.request(wait(None)).await.result.unwrap();
+        let cursor = baseline["cursor"].as_str().unwrap().to_owned();
+        let after = EventCursor::decode(&cursor).unwrap();
+        let waiting = {
+            let control = control.clone();
+            tokio::spawn(async move { control.request(wait(Some(cursor))).await })
+        };
+        tokio::task::yield_now().await;
+        // This is the same post-commit hook used by response adoption: it records
+        // before notify, so an events.wait waiter can read the new sequence.
+        control.changed("thread");
+        let response = waiting.await.unwrap();
+        assert!(response.ok, "{:?}", response.error);
+        let result = response.result.unwrap();
+        assert_eq!(result["status"], "changed");
+        assert_eq!(result["changes"][0]["thread_id"], "thread");
+        let next = EventCursor::decode(result["cursor"].as_str().unwrap()).unwrap();
+        assert!(next.seq > after.seq);
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn events_wait_reports_reasoning_activity_start_bytes_and_end() {
         use crate::protocol::{Command, EventsWaitArgs, Request};
         let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;

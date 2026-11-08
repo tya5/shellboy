@@ -10921,3 +10921,11 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 - [x] Paged activity snapshots contain no attempt state whose latest sequence exceeds that page cursor; tests page across attempt start and end.
 - [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
 - [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.
+
+## #279 saved attempt response references — pending verification
+
+- Separate #279 branch/worktree based on current `origin/main`; #278 remains untouched.
+- Added an ordered, item-level `response_nodes` projection for durable attempt WorkItems from existing `output_item`→`assistant_response` nodes. Repeated node references preserve distinct output items; explicit 64-item cap reports `response_nodes_truncated` and has no nested continuation.
+- `end_message_node_id` remains final-Turn-only. No schema table, migration, worker, or adapter added. Protocol remains v4 because `status` was an opaque result and request/event contracts are unchanged.
+- Synthetic tests cover commentary and final nodes, duplicate output items sharing a node, null and no-row results, explicit overflow, selected-path readback eligibility, the composite-key query plan, status projection, and durable change-clock cursor advancement.
+- No live owner or billing APIs are used. CI/review are a later delivery unit.

@@ -25,6 +25,9 @@ impl Fixture {
         INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,updated_at,hold_reason)VALUES('held-receipt','fixture:held','{\"token\":\"PRIVATE_TOKEN\"}','c','held-node','held','2026-10-25T07:04:00Z','2026-10-25T07:06:00Z','stopping');
         INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at,updated_at)VALUES('applied-receipt','fixture:applied','{\"token\":\"PRIVATE_TOKEN\"}','b','applied-node','unrelated','turn-other','applied','2026-10-25T06:05:00Z','2026-10-25T07:30:00Z');
         INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','turn-root',0,0,'actual-profile','actual-model',0,'inflight','{\"token\":\"PRIVATE_MANIFEST\"}','2026-10-25T07:07:00Z');
+        INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('attempt-commentary','turn-root','assistant_response','2026-10-25T07:08:00Z','{\"output\":[]}',13),('attempt-final','turn-root','assistant_response','2026-10-25T07:09:00Z','{\"output\":[]}',13);
+        INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('a',0,'attempt-commentary'),('a',1,'attempt-final');
+        INSERT INTO output_item(attempt_id,ordinal,item_id,item_type,phase,status,payload_json,node_id)VALUES('attempt',0,'commentary-item','message','commentary','completed','{}','attempt-commentary'),('attempt',1,'final-item','message','final','completed','{}','attempt-final');
         INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('fixture:held','fixture','{\"token\":\"PRIVATE_TOKEN\"}','hash','completed','{\"result\":{\"message_id\":\"held-node\"}}','2026-10-25T07:04:00Z');")?;Ok(())}).await.unwrap();
         let store = Store::new(
             db.clone(),
@@ -84,6 +87,25 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     let attempt = status.items.iter().find(|i| i.kind == "attempt").unwrap();
     assert_eq!(attempt.current_model, "current-model");
     assert_eq!(attempt.attempt_model.as_deref(), Some("actual-model"));
+    assert_eq!(
+        attempt.end_message_node_id, None,
+        "intermediate response refs are not the final Turn answer"
+    );
+    assert_eq!(attempt.response_nodes.len(), 2);
+    assert_eq!(
+        attempt.response_nodes[0].phase.as_deref(),
+        Some("commentary")
+    );
+    assert_eq!(attempt.response_nodes[0].node_id, "attempt-commentary");
+    assert_eq!(attempt.response_nodes[1].phase.as_deref(), Some("final"));
+    assert_eq!(attempt.response_nodes[1].node_id, "attempt-final");
+    assert!(!attempt.response_nodes_truncated);
+    assert!(
+        status
+            .items
+            .iter()
+            .all(|i| i.response_nodes.is_empty() || i.kind == "attempt")
+    );
     let held = status.items.iter().find(|i| i.kind == "message").unwrap();
     assert_eq!(held.run_id, None);
     assert_eq!(held.message_id.as_deref(), Some("held-node"));

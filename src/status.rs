@@ -4,12 +4,13 @@ use crate::protocol::*;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, FixedOffset};
 use rusqlite::{Connection, OptionalExtension, params};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::cmp::Ordering;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkItem {
     pub kind: String,
     pub id: String,
@@ -27,6 +28,8 @@ pub struct WorkItem {
     pub attempt_id: Option<String>,
     pub operation_id: Option<String>,
     pub end_message_node_id: Option<String>,
+    pub response_nodes: Vec<ResponseNodeRef>,
+    pub response_nodes_truncated: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expect_reply: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,7 +51,15 @@ pub struct WorkItem {
     pub revisit: Option<RevisitSummary>,
     pub targets: Vec<Command>,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ResponseNodeRef {
+    pub ordinal: u64,
+    pub item_id: Option<String>,
+    pub kind: String,
+    pub phase: Option<String>,
+    pub node_id: String,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusSnapshot {
     pub instance_id: String,
     pub observed_at: String,
@@ -302,6 +313,31 @@ struct PagePosition {
     after: SortKey,
     watermark: DateTime<FixedOffset>,
 }
+const RESPONSE_NODE_LIMIT: usize = 64;
+fn response_nodes(db: &Connection, attempt_id: &str) -> Result<(Vec<ResponseNodeRef>, bool)> {
+    // (attempt_id, ordinal) is the primary key, so each bounded page lookup
+    // examines only this attempt's items. Preserve duplicate-node items/order.
+    let mut statement = db.prepare(
+        "SELECT oi.ordinal,oi.item_id,oi.item_type,oi.phase,oi.node_id FROM output_item oi JOIN node n ON n.id=oi.node_id WHERE oi.attempt_id=?1 AND n.kind='assistant_response' ORDER BY oi.ordinal LIMIT ?2",
+    ).map_err(sql)?;
+    let mut rows = statement
+        .query(params![attempt_id, (RESPONSE_NODE_LIMIT + 1) as i64])
+        .map_err(sql)?;
+    let mut nodes = Vec::new();
+    while let Some(row) = rows.next().map_err(sql)? {
+        nodes.push(ResponseNodeRef {
+            ordinal: row.get::<_, i64>(0).map_err(sql)? as u64,
+            item_id: row.get(1).map_err(sql)?,
+            kind: row.get(2).map_err(sql)?,
+            phase: row.get(3).map_err(sql)?,
+            node_id: row.get(4).map_err(sql)?,
+        });
+    }
+    let truncated = nodes.len() > RESPONSE_NODE_LIMIT;
+    nodes.truncate(RESPONSE_NODE_LIMIT);
+    Ok((nodes, truncated))
+}
+
 fn decode_cursor(args: &StatusArgs, instance: &str, filter: &str) -> Result<Option<PagePosition>> {
     let cursor = if let Some(token) = &args.cursor {
         if token.len() > 8192 {
@@ -394,6 +430,8 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         execution_id: (kind == WorkKind::Shell).then_some(id.clone()),
         message_id: (kind == WorkKind::Message).then_some(id.clone()),
         attempt_id: (kind == WorkKind::Attempt).then_some(id.clone()),
+        response_nodes: Vec::new(),
+        response_nodes_truncated: false,
         elapsed_ms: None,
         last_output_at: None,
         revisit: None,
@@ -519,6 +557,12 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     // the durable fingerprint or cursor sort keys.
     let observed = chrono::Utc::now();
     for selected in &mut selected {
+        if selected.item.kind == "attempt" {
+            (
+                selected.item.response_nodes,
+                selected.item.response_nodes_truncated,
+            ) = response_nodes(db, &selected.item.id)?;
+        }
         if selected.item.kind == "shell" {
             let timing =
                 crate::shell::timing::read(db, &selected.item.id, observed).map_err(sql)?;
@@ -537,4 +581,77 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         items: selected.into_iter().map(|p| p.item).collect(),
         next_cursor,
     })
+}
+
+#[cfg(test)]
+mod response_node_tests {
+    use super::*;
+
+    #[test]
+    fn response_nodes_preserve_order_kind_and_cap_items() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE node(id TEXT PRIMARY KEY, kind TEXT NOT NULL);
+             CREATE TABLE thread_path(thread_id TEXT NOT NULL,ordinal INTEGER NOT NULL,node_id TEXT NOT NULL,PRIMARY KEY(thread_id,ordinal),UNIQUE(thread_id,node_id));
+             CREATE TABLE output_item(attempt_id TEXT NOT NULL, ordinal INTEGER NOT NULL, item_id TEXT, item_type TEXT NOT NULL, phase TEXT, node_id TEXT, PRIMARY KEY(attempt_id,ordinal));",
+        ).unwrap();
+        db.execute("INSERT INTO node VALUES ('commentary-node','assistant_response'),('final-node','assistant_response'),('user-node','user_message')", []).unwrap();
+        db.execute("INSERT INTO thread_path VALUES ('thread',0,'commentary-node'),('thread',1,'final-node')", []).unwrap();
+        db.execute("INSERT INTO output_item VALUES ('attempt',0,'item-c','message','commentary','commentary-node'),('attempt',1,'item-c-part','message','commentary','commentary-node'),('attempt',2,'item-f','message','final','final-node'),('attempt',3,'item-u','message','final','user-node'),('attempt',4,'item-null','message','final',NULL)", []).unwrap();
+
+        let (nodes, truncated) = response_nodes(&db, "attempt").unwrap();
+        assert!(!truncated);
+        assert_eq!(
+            nodes.len(),
+            3,
+            "preserve each output item, including duplicate node links"
+        );
+        assert_eq!(nodes[0].node_id, "commentary-node");
+        assert_eq!(nodes[0].kind, "message");
+        assert_eq!(nodes[0].phase.as_deref(), Some("commentary"));
+        assert_eq!(nodes[1].node_id, "commentary-node");
+        assert_eq!(nodes[1].item_id.as_deref(), Some("item-c-part"));
+        assert_eq!(nodes[2].node_id, "final-node");
+        assert_eq!(nodes[2].phase.as_deref(), Some("final"));
+        for item in &nodes {
+            let ordinal: i64 = db
+                .query_row(
+                    "SELECT ordinal FROM thread_path WHERE thread_id='thread' AND node_id=?1",
+                    [&item.node_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                ordinal >= 0,
+                "every published ID is a history.window anchor"
+            );
+        }
+
+        // No saved output rows (pre-save or failed attempt) is an explicit empty ref list.
+        let (none, truncated) = response_nodes(&db, "pre-save-or-failed").unwrap();
+        assert!(none.is_empty());
+        assert!(!truncated);
+
+        for ordinal in 5..=69 {
+            let id = format!("node-{ordinal}");
+            db.execute("INSERT INTO node VALUES (?1,'assistant_response')", [&id])
+                .unwrap();
+            db.execute(
+                "INSERT INTO output_item VALUES ('many',?1,NULL,'message','final',?2)",
+                params![ordinal, id],
+            )
+            .unwrap();
+        }
+        let (nodes, truncated) = response_nodes(&db, "many").unwrap();
+        assert_eq!(nodes.len(), RESPONSE_NODE_LIMIT);
+        assert!(
+            truncated,
+            "overflow must be disclosed, never silently treated as complete"
+        );
+        let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT oi.ordinal,oi.item_id,oi.item_type,oi.phase,oi.node_id FROM output_item oi JOIN node n ON n.id=oi.node_id WHERE oi.attempt_id='many' AND n.kind='assistant_response' ORDER BY oi.ordinal LIMIT 65", [], |row| row.get(3)).unwrap();
+        assert!(
+            plan.contains("output_item_1") && plan.contains("attempt_id=?"),
+            "expected attempt/ordinal range scan: {plan}"
+        );
+    }
 }
