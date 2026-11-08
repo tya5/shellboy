@@ -756,6 +756,7 @@ impl Command {
                         || a.turn_id.is_some()
                         || a.include_children
                         || a.since.is_some()
+                        || a.since_node_id.is_some()
                         || a.until.is_some()
                         || a.group_by.is_some()
                         || a.timezone.is_some()
@@ -769,6 +770,10 @@ impl Command {
                     return Ok(());
                 }
                 crate::usage_totals::breakdown::validate(a)?;
+                optional_nonempty(a.since_node_id.as_deref(), "since_node_id")?;
+                if a.since_node_id.is_some() && a.since.is_some() {
+                    return Err(invalid("usage.get since_node_id conflicts with since"));
+                }
                 crate::readback::Window::new(a.since.as_deref(), a.until.as_deref())?;
                 if [
                     a.thread_id.is_some(),

@@ -13,7 +13,7 @@ use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 
 use super::{
-    ThreadScope, fork_thread, select_path, selected_ids, selection_revision, sql_error,
+    ThreadScope, fork_thread_kind, select_path, selected_ids, selection_revision, sql_error,
     storage_error, validate_group_boundary,
 };
 use crate::protocol::{ApiError, ErrorCode, ThreadForkArgs};
@@ -166,7 +166,7 @@ fn rewind_inner(
 
     // 1. Keep the whole old path as a child Thread (existing fork machinery;
     //    refuses to split unfinished tool calls at the old end).
-    fork_thread(
+    fork_thread_kind(
         tx,
         &ThreadForkArgs {
             agents: None,
@@ -176,6 +176,7 @@ fn rewind_inner(
         },
         branch_id,
         now,
+        "rewind",
     )?;
     let children = child_facts(tx, thread, branch_id, &boundary_time)?;
     let replies = pending_replies_sent(tx, thread)?;

@@ -33,11 +33,44 @@ async fn events_wait_asks_for_text_only_with_the_flag() {
         assert_eq!(parsed.include_text, wanted);
     }
 }
+#[test]
+fn usage_since_node_conflicts_with_time_and_attempt() {
+    for args in [
+        &[
+            "shellboy",
+            "usage",
+            "get",
+            "--since-node",
+            "n",
+            "--since",
+            "2026-11-01T00:00:00Z",
+        ][..],
+        &[
+            "shellboy",
+            "usage",
+            "get",
+            "--attempt",
+            "a",
+            "--since-node",
+            "n",
+        ][..],
+    ] {
+        assert_eq!(
+            Cli::try_parse_from(args).unwrap_err().kind(),
+            ErrorKind::ArgumentConflict
+        );
+    }
+}
+
 #[tokio::test]
 async fn all_public_cli_operations_map_to_shared_typed_contracts() {
     let cases: &[(&[&str], &str)] = &[
         (&["status"], "status"),
         (&["usage", "get", "--thread", "t"], "usage.get"),
+        (
+            &["usage", "get", "--thread", "t", "--since-node", "n"],
+            "usage.get",
+        ),
         (&["model", "list"], "model.list"),
         (&["shell", "list"], "shell.list"),
         (&["compact", "list", "--thread", "t"], "compact.list"),

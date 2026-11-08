@@ -1026,6 +1026,56 @@ fn attempt_usage_wire_validation_rejects_aggregate_options_and_blank_ids() {
 }
 
 #[test]
+fn usage_since_node_conflicts_with_since_and_shell_exit_grouping() {
+    use shellboy::protocol::{Command, UsageGetArgs};
+    assert!(
+        Command::UsageGet(UsageGetArgs {
+            since_node_id: Some("node".into()),
+            since: Some("2026-11-01T00:00:00Z".into()),
+            ..Default::default()
+        })
+        .validate()
+        .is_err()
+    );
+    assert!(
+        Command::UsageGet(UsageGetArgs {
+            since_node_id: Some("node".into()),
+            until: Some("2026-11-02T00:00:00Z".into()),
+            ..Default::default()
+        })
+        .validate()
+        .is_ok()
+    );
+    assert!(
+        Command::UsageGet(UsageGetArgs {
+            since_node_id: Some("node".into()),
+            group_by: Some("shell-exit".into()),
+            ..Default::default()
+        })
+        .validate()
+        .is_ok()
+    );
+    assert!(
+        Command::UsageGet(UsageGetArgs {
+            since_node_id: Some(" ".into()),
+            ..Default::default()
+        })
+        .validate()
+        .is_err()
+    );
+    assert!(
+        Command::UsageGet(UsageGetArgs {
+            since_node_id: Some("node".into()),
+            group_by: Some("thread".into()),
+            cursor: Some("saved-page".into()),
+            ..Default::default()
+        })
+        .validate()
+        .is_ok()
+    );
+}
+
+#[test]
 fn exported_schema_matches_committed_protocol_schema() {
     let generated = shellboy::protocol::schema_json();
     let committed = include_str!("../docs/reference/protocol.schema.json");

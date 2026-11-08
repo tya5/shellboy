@@ -1270,6 +1270,7 @@ impl Form {
                     Ok(Command::UsageGet(UsageGetArgs {
                         attempt_id: form.optional("attempt")?.map(String::into_boxed_str),
                         since: form.optional("since")?,
+                        since_node_id: None,
                         until: form.optional("until")?,
                         thread_id: form.thread_target()?.thread_id,
                         run_id: form.optional("run")?,

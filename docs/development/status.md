@@ -5303,3 +5303,7 @@ normal and all-OS CI. Explicit common files use existing snapshot/file-worker/co
 #260 continuation investigates the historical load-sensitive integration cases from main `aee6ab96`. A remaining
 slow-DB fixture liveness race is replaced by a committed-byte/explicit-EOF handshake. Focused checks are pending;
 recent unrelated migration/schema failures are kept separate from load evidence.
+
+## #273 branch-relative usage and kind (in progress)
+
+Adds `usage get --since-node NODE`, resolving one selected-path node timestamp to the existing inclusive time lower bound; it is mutually exclusive with `--since`. Grouped reads resolve to that Thread instead of the all-Thread default. Aggregate candidate and statement plan are unchanged. `thread.branches` reports persisted `fork`/`rewind`; old unrecorded branches report `unknown`. Nullable branch_kind migration 37. Focused query-plan/step-count, provenance, migration and request-path regressions pass on the current worktree, as does `cargo check --locked --tests`. The exported protocol schema regression also passes. Exact-tip CI remains pending. Protocol, CLI reference, and Agent Guide updated.

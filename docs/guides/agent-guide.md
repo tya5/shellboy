@@ -244,7 +244,12 @@ See [Recovery](recovery-and-storage.md#automatic-retries-for-temporary-model-com
 
 To inspect your own saved usage, run `shellboy usage get`; add
 `--thread THREAD_ID --include-children` for a bounded conversation-family total.
-These are saved usage/duration facts, not a bill; unknown/unrecorded is not zero.
+Use `--since-node NODE_ID` to start inclusively at a saved point on the selected
+Thread path; it is an alternative to `--since TIME` and can pair with `--until`.
+Branch inventory also identifies
+`fork`, `rewind`, and `unknown` kinds; unknown means the creation path was not
+recorded and must not be inferred. These are saved usage/duration facts, not a
+bill; unknown/unrecorded is not zero.
 Use `usage get --since TIME --until TIME` for a half-open saved-start period.
 To see what fills your context, read `latest_request` in `usage get`:
 `input_bytes.categories` are measured UTF-8 bytes of the last request body by
@@ -423,7 +428,7 @@ To find or group Threads, use tags rather than parents. `shellboy thread tag --t
 
 `parent_id` is conversation hierarchy: delegation and reports, who owns the next Run, `--include-children` usage, `thread delete --descendants` and branch families. Do not use it only to file Threads; label them with tags instead. `shellboy thread set --thread ID --parent PARENT_ID` moves a Thread with its subtree and `--parent ''` detaches it; it changes no setting and no running work (a live Run keeps its owner, which still gets its recovery and end notices and whose stop cascades to it, and a new-parent send during the current Run joins its existing Turn without transferring ownership; a later send after it ends owns the next Run). Consequences to weigh before moving a Thread: it leaves its old parent's tree, a child's report to `parent_id` then goes to the new parent, and `--include-children` usage and `thread delete --descendants` follow the new tree. A move that would make a Thread its own ancestor is refused.
 
-To see how conversations branch, run `shellboy thread branches [--thread THREAD]`. A branch is a child Thread (made by `thread fork`, the user's `/edit`, or `thread rewind`) that shares the start of its parent's history. The result is a bounded, paged tree of the family (the topmost live ancestor and everything below it): each item gives `parent_thread_id`, `state` (`current`/`ancestor`/`branch`), `divergence.node_id` (the last node shared with the parent), the tip's last request excerpt and time, `size.path_nodes` (`bytes` is always null), `running`, and `pruned_originals`. Use it to find a rewound-away part (the child of the Thread you rewound), to choose a `thread fork --node` target, or to pick a branch to `thread get`/`history list`. Limits: 200 items per page, 256 Threads per family (`family_truncated`), 160-character excerpts; a cursor expires only when the tree changes (a family Thread is created or deleted).
+To see how conversations branch, run `shellboy thread branches [--thread THREAD]`. A branch is a child Thread (made by `thread fork`, the user's `/edit`, or `thread rewind`) that shares the start of its parent's history. The result is a bounded, paged tree of the family (the topmost live ancestor and everything below it): each item gives `parent_thread_id`, `branch_kind` (`fork`, `rewind`, or `unknown`), `state` (`current`/`ancestor`/`branch`), `divergence.node_id` (the last node shared with the parent), the tip's last request excerpt and time, `size.path_nodes` (`bytes` is always null), `running`, and `pruned_originals`. Use it to find a rewound-away part (the child of the Thread you rewound), to choose a `thread fork --node` target, or to pick a branch to `thread get`/`history list`. Limits: 200 items per page, 256 Threads per family (`family_truncated`), 160-character excerpts; a cursor expires only when the tree changes (a family Thread is created or deleted).
 
 To release disk used by originals you no longer need, prune them explicitly. Read anything you still need first (`shellboy history get --node NODE`), then run `shellboy thread prune --before NODE --dry-run` (omitting `--thread` targets your own Thread), review `replacements.summaries`, `replacements.spills`, `shared_replacements_kept` and `source_nodes_on_other_live_paths`, and only then run `shellboy thread prune --before NODE`. The prune releases the originals of summaries and spills adopted before NODE; the existing GC reclaims them (to check immediately, run `shellboy storage collect --category history` and read its counts). It cannot be undone: afterwards `history get` of those originals, a summary restore, and a spill's `retrieve:` hint report "pruned / not retained". Originals other live Threads still hold are kept. GC frees pages inside the database but does not shrink the file (no automatic VACUUM). The full flow is `thread prune` -> GC (`storage collect --category history`) -> `storage vacuum`; the last step is explicit, needs the owner stopped (so it is refused from inside Shellboy) and is the user's to run (`shellboy storage vacuum --dry-run` shows what it would return). Do this only when the task or user asks for it; nothing prunes automatically.
 
@@ -727,6 +732,7 @@ entry from generation tool definitions and keeps command-based rows.
 Use bounded saved usage, not direct access to the owner's database:
 
 ```sh
+shellboy usage get --thread THREAD_ID --include-children --since-node NODE --until 2026-10-31T12:00:00Z # NODE must be on this Thread path
 shellboy usage get --group-by thread --since 2026-10-31T06:00:00Z --until 2026-10-31T12:00:00Z
 ```
 

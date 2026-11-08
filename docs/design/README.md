@@ -66,3 +66,5 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
 - [Recoverable automatic attempt record](compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226)
   (#226): stage facts written in the stage adoption transaction; complete or
   explicitly `unknown` after post-commit storage failure. Adopted and implemented.
+
+- [Branch-relative usage and provenance (#273)](usage-aggregates.md#branch-point-lower-bound-273)

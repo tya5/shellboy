@@ -122,3 +122,8 @@ with its Thread/Run/Turn references. Cache ratio is sum(cached)/sum(input) over
 terminal attempts with both fields known; zero denominator is null, inconsistent
 provider measurements are not clamped. Paired/unknown counts expose coverage.
 No money, unrecorded summary/embedding usage or inferred tokens are added.
+
+
+### Branch-point lower bound (#273)
+
+`--since-node NODE` resolves one saved node timestamp on the selected Thread path into the existing `[since,until)` period. It is an alternative to `--since`; grouped reads are anchored to the selected Thread rather than the default all-Thread scope. It uses the same period SQL for totals/model/summary, and adds one indexed `(thread_id,node_id)` lookup but no extra candidate-row pass or aggregate statement. Include period, query count, EXPLAIN plan and fixed VM-step ceiling in regressions.

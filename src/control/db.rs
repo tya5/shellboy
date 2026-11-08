@@ -1291,13 +1291,49 @@ impl Store {
                 MutationResult::value(crate::readback::shells(tx, args, &self.instance_id)?)
             }
             Command::UsageGet(args) => {
+                let mut args = args.clone();
+                if let Some(node_id) = &args.since_node_id {
+                    let scope_thread = if let Some(turn) = &args.turn_id {
+                        tx.query_row("SELECT thread_id FROM turn WHERE id=?1", [turn], |r| {
+                            r.get::<_, String>(0)
+                        })
+                        .optional()
+                        .map_err(sql_error)?
+                        .ok_or_else(|| {
+                            error(ErrorCode::TargetUnavailable, "Usage scope is unavailable")
+                        })?
+                    } else if let Some(run) = &args.run_id {
+                        tx.query_row("SELECT thread_id FROM run WHERE id=?1", [run], |r| {
+                            r.get::<_, String>(0)
+                        })
+                        .optional()
+                        .map_err(sql_error)?
+                        .ok_or_else(|| {
+                            error(ErrorCode::TargetUnavailable, "Usage scope is unavailable")
+                        })?
+                    } else {
+                        target(args.thread_id.as_deref(), caller)?
+                    };
+                    let at: String = tx.query_row("SELECT n.created_at FROM node n JOIN thread_path p ON p.node_id=n.id AND p.thread_id=?2 WHERE n.id=?1 AND n.deleted_reason IS NULL", params![node_id,scope_thread], |r| r.get(0)).optional().map_err(sql_error)?
+                        .ok_or_else(|| error(ErrorCode::TargetUnavailable, "Usage start node is unavailable on the selected Thread path"))?;
+                    args.since = Some(at);
+                    args.since_node_id = None;
+                    // Grouped requests otherwise default to every Thread; anchor them to this path.
+                    if args.group_by.is_some()
+                        && args.thread_id.is_none()
+                        && args.run_id.is_none()
+                        && args.turn_id.is_none()
+                    {
+                        args.thread_id = Some(scope_thread);
+                    }
+                }
                 if let Some(attempt) = &args.attempt_id {
                     return MutationResult::value(crate::usage_totals::read_attempt(tx, attempt)?);
                 }
                 if args.group_by.is_some() {
                     return MutationResult::value(crate::usage_totals::breakdown::read(
                         tx,
-                        args,
+                        &args,
                         &self.instance_id,
                     )?);
                 }

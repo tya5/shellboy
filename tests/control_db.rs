@@ -2058,9 +2058,9 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     let c = child.thread_id.clone();
     store.database.call(move|db|{
         for (id,thread) in [("usage-parent",p),("usage-child",c)] {
-            db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','2026-10-30T00:00:00Z','2026-10-30T00:00:01Z')",rusqlite::params![id,thread])?;
-            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,?2,?1,'completed','2026-10-30T00:00:00Z','2026-10-30T00:00:01Z')",rusqlite::params![id,thread])?;
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?1,0,0,'test','fixture',0,'completed','{}','{\"input_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":0}}','2026-10-30T00:00:00Z','2026-10-30T00:00:00.010Z')",[id])?;
+            db.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','2026-10-30T00:00:00+00:00','2026-10-30T00:00:01+00:00')",rusqlite::params![id,thread])?;
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES(?1,?2,?1,'completed','2026-10-30T00:00:00+00:00','2026-10-30T00:00:01+00:00')",rusqlite::params![id,thread])?;
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,usage_json,started_at,ended_at)VALUES(?1,?1,0,0,'test','fixture',0,'completed','{}','{\"input_tokens\":10,\"input_tokens_details\":{\"cached_tokens\":0}}','2026-10-30T00:00:00+00:00','2026-10-30T00:00:00.010+00:00')",[id])?;
         }
         Ok(())
     }).await.unwrap();
@@ -2108,12 +2108,84 @@ async fn saved_usage_queries_and_gets_share_totals_without_receipts_or_schema_ch
     assert_eq!(turn["usage_totals"]["run"]["status"], "not_applicable");
     assert_eq!(turn["usage_totals"]["turn_lifetime_ms"], 1000);
     let req = request(Command::UsageGet(UsageGetArgs {
-        thread_id: Some(parent.thread_id),
+        thread_id: Some(parent.thread_id.clone()),
         include_children: true,
         ..Default::default()
     }));
     let first = store.execute(req.clone(), None).await.unwrap().result;
     assert_eq!(first["selected_threads"], 2);
+    let parent_path = parent.thread_id.clone();
+    let child_path = child.thread_id.clone();
+    store.database.call(move |db| {
+        db.execute("UPDATE model_attempt SET started_at='2026-10-30T00:00:01+00:00' WHERE id='usage-parent'", [])?;
+        db.execute("UPDATE model_attempt SET started_at='2026-10-29T00:00:00+00:00' WHERE id='usage-child'", [])?;
+        db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('usage-marker','usage-parent','user','2026-10-30T00:00:00+00:00','{}',2)", [])?;
+        db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES(?1,0,'usage-marker')", [&parent_path])?;
+        db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('usage-child-marker','usage-child','user','2026-10-30T00:00:00+00:00','{}',2)", [])?;
+        db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES(?1,0,'usage-child-marker')", [&child_path])?;
+        Ok(())
+    }).await.unwrap();
+    let after_node = store
+        .execute(
+            request(Command::UsageGet(UsageGetArgs {
+                thread_id: Some(parent.thread_id.clone()),
+                since_node_id: Some("usage-marker".into()),
+                ..Default::default()
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        after_node["model_attempts"]["completed"]["input_tokens"]["known_sum"],
+        10
+    );
+    let grouped_node = store
+        .execute(
+            request(Command::UsageGet(UsageGetArgs {
+                thread_id: Some(parent.thread_id.clone()),
+                since_node_id: Some("usage-marker".into()),
+                group_by: Some("thread".into()),
+                ..Default::default()
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(
+        grouped_node["items"].as_array().unwrap().len(),
+        1,
+        "{grouped_node}"
+    );
+    assert_eq!(grouped_node["items"][0]["key"], parent.thread_id);
+    let until = store
+        .execute(
+            request(Command::UsageGet(UsageGetArgs {
+                thread_id: Some(parent.thread_id.clone()),
+                since_node_id: Some("usage-marker".into()),
+                until: Some("2026-10-30T00:00:00.500Z".into()),
+                ..Default::default()
+            })),
+            None,
+        )
+        .await
+        .unwrap()
+        .result;
+    assert!(until["model_attempts"].get("completed").is_none());
+    let foreign_node = store
+        .execute(
+            request(Command::UsageGet(UsageGetArgs {
+                thread_id: Some(parent.thread_id.clone()),
+                since_node_id: Some("usage-child-marker".into()),
+                ..Default::default()
+            })),
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(foreign_node.code, ErrorCode::TargetUnavailable);
     assert_eq!(
         first["model_attempts"]["completed"]["input_tokens"]["known_sum"],
         20

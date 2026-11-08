@@ -853,3 +853,8 @@ index without extracting or backfilling old payload JSON. Legacy columns remain 
 covering index: it accesses neither the node table record nor the payload/JSON functions. At most 16384 metadata
 bytes are parsed, independent of spill payload size. No new table, worker or queue is added. A plain indexed node
 lookup was insufficient: parsing payload JSON before applying substring limits still scaled with its size.
+### #273 branch-relative usage and provenance
+
+`UsageGetArgs.since_node_id` (`--since-node NODE`) is an alternative to `since`; the saved node timestamp is the inclusive period lower bound. JSON compatibility is additive: clients that omit the field retain previous behavior. Before aggregation, the DB worker resolves exactly one non-collected node timestamp through the selected Thread's `(thread_id,node_id)` path uniqueness and rejects a node from another Thread/path. The timestamp becomes the existing inclusive `since` boundary; `until` remains exclusive. The same resolved time is used by grouped and ungrouped usage. When grouping has no explicit Thread, node resolution anchors the grouped scope to that Thread rather than all Threads. No candidate scan, aggregate statement, query count, or page bound is added; only a two-index point lookup is added.
+
+`thread.branch_kind` records `fork` or `rewind` when a branch is created. Pre-migration rows and non-branch roots retain NULL and serialize as `unknown`; no kind is inferred from path shape. Migration 37 adds only this nullable checked field.

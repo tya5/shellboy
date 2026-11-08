@@ -184,6 +184,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0036_spill_tool_metadata.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 37,
+        sql: include_str!("../../migrations/0037_thread_branch_kind.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

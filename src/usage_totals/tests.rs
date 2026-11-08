@@ -879,3 +879,122 @@ fn connection_rate_wait_saturation_reports_overflow() {
     assert_eq!(value["http_429"], 1);
     assert_eq!(value["http_5xx"], 1);
 }
+
+#[test]
+fn bounded_usage_plan_and_vm_steps_do_not_grow_for_node_lower_bound() {
+    let mut c = db();
+    seed(&mut c, 2, false);
+    c.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes) VALUES('n1','u0','user','2026-10-29T00:00:00Z','{}',2)", []).unwrap();
+    c.execute(
+        "INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('t0',0,'n1')",
+        [],
+    )
+    .unwrap();
+    c.execute(
+        "UPDATE model_attempt SET started_at='2026-10-29T00:00:00Z' WHERE turn_id='u0'",
+        [],
+    )
+    .unwrap();
+    let scope = Scope::Thread {
+        id: "t0".into(),
+        children: false,
+    };
+    let all_window =
+        crate::readback::Window::new(Some("2026-10-28T00:00:00Z"), Some("2026-11-02T00:00:00Z"))
+            .unwrap();
+    let after_window =
+        crate::readback::Window::new(Some("2026-10-30T00:00:00Z"), Some("2026-11-02T00:00:00Z"))
+            .unwrap();
+    let mut all = Trace::default();
+    inspect_period(&c, &scope, &mut all, &all_window, false).unwrap();
+    let mut after = Trace::default();
+    inspect_period(&c, &scope, &mut after, &after_window, false).unwrap();
+    assert_eq!(
+        all.statements.len(),
+        after.statements.len(),
+        "lower bound adds no aggregate query/scan"
+    );
+    let all_model = all
+        .statements
+        .iter()
+        .find(|(sql, _)| sql.contains("FROM model_attempt a INDEXED BY attempts_by_turn"))
+        .unwrap();
+    let after_model = after
+        .statements
+        .iter()
+        .find(|(sql, _)| sql.contains("FROM model_attempt a INDEXED BY attempts_by_turn"))
+        .unwrap();
+    assert!(all_model.0.contains("attempts_by_turn") && after_model.0.contains("attempts_by_turn"));
+    assert!(
+        after_model.1 <= all_model.1,
+        "narrower time window cannot increase aggregate VM steps: all={}, filtered={}",
+        all_model.1,
+        after_model.1
+    );
+    assert!(
+        all_model.1 <= 40_000,
+        "pinned per-query step budget: {}",
+        all_model.1
+    );
+    let mut all_model_plan = c
+        .prepare(&format!("EXPLAIN QUERY PLAN {}", all_model.0))
+        .unwrap();
+    let all_model_plan_details = all_model_plan
+        .query_map(rusqlite::params!["[\"t0\"]", "2026-11-01T00:00:00Z"], |r| {
+            r.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        all_model_plan_details
+            .iter()
+            .any(|line| line.contains("attempts_by_turn")),
+        "{all_model_plan_details:?}"
+    );
+    let mut after_model_plan = c
+        .prepare(&format!("EXPLAIN QUERY PLAN {}", after_model.0))
+        .unwrap();
+    let after_model_plan_details = after_model_plan
+        .query_map(rusqlite::params!["[\"t0\"]", "2026-11-01T00:00:00Z"], |r| {
+            r.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        after_model_plan_details
+            .iter()
+            .any(|line| line.contains("attempts_by_turn")),
+        "{after_model_plan_details:?}"
+    );
+    let node_sql = "SELECT n.created_at FROM node n JOIN thread_path p ON p.node_id=n.id AND p.thread_id=?2 WHERE n.id=?1 AND n.deleted_reason IS NULL";
+    let mut plan = c
+        .prepare(&format!("EXPLAIN QUERY PLAN {node_sql}"))
+        .unwrap();
+    let details = plan
+        .query_map(["n1", "t0"], |r| r.get::<_, String>(3))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert!(
+        details
+            .iter()
+            .any(|line| line.contains("SEARCH n USING INDEX sqlite_autoindex_node_1")),
+        "{details:?}"
+    );
+    assert!(
+        details
+            .iter()
+            .any(|line| line
+                .contains("SEARCH p USING COVERING INDEX sqlite_autoindex_thread_path_2")),
+        "{details:?}"
+    );
+    let mut statement = c.prepare(node_sql).unwrap();
+    let _: String = statement.query_row(["n1", "t0"], |r| r.get(0)).unwrap();
+    let steps = statement.get_status(StatementStatus::VmStep) as u64;
+    assert!(
+        steps <= 30,
+        "single-node indexed lookup step budget: {steps}"
+    );
+}

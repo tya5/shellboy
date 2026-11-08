@@ -170,6 +170,9 @@ async fn fork_and_rewind_children_appear_as_branches_with_their_divergence_point
     assert_eq!(value["root_thread_id"], "T");
     assert_eq!(value["family_threads"], 3);
     assert_eq!(item(&value, "T")["state"], "current");
+    assert_eq!(item(&value, "T")["branch_kind"], "unknown");
+    assert_eq!(item(&value, &forked)["branch_kind"], "fork");
+    assert_eq!(item(&value, &cut)["branch_kind"], "rewind");
     // The fork shares n1..n3 with the path T had then; T now ends at n2, so the fork extends it.
     assert_eq!(item(&value, &forked)["divergence"]["node_id"], "n2");
     assert_eq!(

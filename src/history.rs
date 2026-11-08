@@ -424,6 +424,22 @@ pub fn fork_thread(
     new_thread_id: &str,
     now: &str,
 ) -> Result<(), ApiError> {
+    fork_thread_kind(tx, args, new_thread_id, now, "fork")
+}
+
+pub fn fork_thread_kind(
+    tx: &Transaction<'_>,
+    args: &ThreadForkArgs,
+    new_thread_id: &str,
+    now: &str,
+    branch_kind: &str,
+) -> Result<(), ApiError> {
+    if !matches!(branch_kind, "fork" | "rewind") {
+        return Err(ApiError::new(
+            ErrorCode::InvalidArgument,
+            "invalid branch kind",
+        ));
+    }
     if args.agents.is_some() {
         return Err(ApiError::new(
             ErrorCode::InvalidArgument,
@@ -472,8 +488,8 @@ pub fn fork_thread(
         (source.0, source.1)
     };
     tx.execute(
-        "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,auto_compact_at,segment_chars,reduce_rounds) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12,?13,?14)",
-        params![new_thread_id,args.thread_id,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now,source.7,source.8,source.9],
+        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,auto_compact_at,segment_chars,reduce_rounds) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13,?14,?15)",
+        params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now,source.7,source.8,source.9],
     ).map_err(sql_error)?;
     tx.execute(
         "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,ordinal,node_id FROM thread_path WHERE thread_id=?2 AND ordinal<=?3 ORDER BY ordinal",

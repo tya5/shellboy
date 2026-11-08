@@ -305,7 +305,7 @@ pub enum UsageCommand {
 #[derive(Debug, Clone, Args)]
 pub struct UsageOptions {
     /// Inspect one saved attempt's usage, cache diagnostic and request byte facts.
-    #[arg(long="attempt", conflicts_with_all=["thread_id","run_id","turn_id","include_children","since","until","group_by","timezone","limit","cursor"])]
+    #[arg(long="attempt", conflicts_with_all=["thread_id","run_id","turn_id","include_children","since","since_node_id","until","group_by","timezone","limit","cursor"])]
     pub attempt_id: Option<String>,
     /// Return bounded saved-attempt groups instead of ungrouped totals.
     #[arg(long, value_parser = ["hour", "day", "thread", "model", "shell-exit"])]
@@ -318,8 +318,11 @@ pub struct UsageOptions {
     pub limit: Option<u32>,
     #[arg(long, requires = "group_by")]
     pub cursor: Option<String>,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "since_node_id")]
     pub since: Option<String>,
+    /// Start at this saved node; mutually exclusive with --since.
+    #[arg(long = "since-node", conflicts_with = "since")]
+    pub since_node_id: Option<String>,
     #[arg(long)]
     pub until: Option<String>,
     #[arg(long="thread", conflicts_with_all=["run_id","turn_id"])]
@@ -1239,6 +1242,7 @@ impl Cli {
                 limit: a.limit,
                 cursor: a.cursor.map(String::into_boxed_str),
                 since: a.since,
+                since_node_id: a.since_node_id,
                 until: a.until,
                 thread_id: a.thread_id,
                 run_id: a.run_id,

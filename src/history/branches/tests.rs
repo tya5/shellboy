@@ -156,6 +156,28 @@ fn nested_forks_and_ancestors_are_found_from_any_member() {
 }
 
 #[test]
+fn branch_kind_is_reported_only_from_persisted_creation_facts() {
+    let db = db();
+    thread(&db, "root", None, "Root");
+    thread(&db, "fork", Some("root"), "Fork");
+    thread(&db, "rewind", Some("root"), "Rewind");
+    thread(&db, "legacy", Some("root"), "Legacy");
+    db.execute("UPDATE thread SET branch_kind='fork' WHERE id='fork'", [])
+        .unwrap();
+    db.execute(
+        "UPDATE thread SET branch_kind='rewind' WHERE id='rewind'",
+        [],
+    )
+    .unwrap();
+    let value = read(&db, "root");
+    assert_eq!(find(&value, "root")["branch_kind"], "unknown");
+    assert_eq!(find(&value, "root")["parent_thread_id"], Value::Null);
+    assert_eq!(find(&value, "fork")["branch_kind"], "fork");
+    assert_eq!(find(&value, "rewind")["branch_kind"], "rewind");
+    assert_eq!(find(&value, "legacy")["branch_kind"], "unknown");
+}
+
+#[test]
 fn deleted_parent_roots_its_own_family_and_deleted_children_are_skipped() {
     let db = db();
     thread(&db, "gone", None, "Gone");
