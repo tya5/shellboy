@@ -354,7 +354,7 @@ fn inspect(
     db: &Connection,
     args: &WaitArgs,
     caller: Option<&Origin>,
-    _initial: bool,
+    initial: bool,
 ) -> Result<Observation> {
     let mut observation = Observation {
         matched: vec![],

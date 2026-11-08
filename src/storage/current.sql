@@ -30,14 +30,14 @@ CREATE INDEX thread_path_node ON thread_path(node_id,thread_id);
 
 CREATE TABLE run(
  id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id),
- owner_run_id TEXT REFERENCES run(id), state TEXT NOT NULL
+ state TEXT NOT NULL
  CHECK(state IN ('live','stopping','completed','stopped','failed')),
  created_at TEXT NOT NULL, ended_at TEXT, stop_reason TEXT,
- CHECK(owner_run_id IS NULL OR owner_run_id<>id), UNIQUE(id,thread_id));
+ UNIQUE(id,thread_id));
 
 CREATE UNIQUE INDEX one_live_run ON run(thread_id) WHERE state IN ('live','stopping');
 
-CREATE INDEX runs_by_owner ON run(owner_run_id,state);
+
 
 CREATE TABLE turn(
  id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES thread(id), run_id TEXT NOT NULL,
@@ -80,21 +80,9 @@ CREATE TRIGGER reject_edge_update_cycle BEFORE UPDATE OF src,dst ON edge
  SELECT 1 FROM reached WHERE id=NEW.src)
  BEGIN SELECT RAISE(ABORT,'conversation edge cycle'); END;
 
-CREATE TRIGGER reject_owner_cycle_insert BEFORE INSERT ON run
- WHEN NEW.owner_run_id IS NOT NULL AND EXISTS(
- WITH RECURSIVE owners(id) AS(
- SELECT NEW.owner_run_id UNION SELECT r.owner_run_id FROM run r JOIN owners o ON r.id=o.id
- WHERE r.owner_run_id IS NOT NULL)
- SELECT 1 FROM owners WHERE id=NEW.id)
- BEGIN SELECT RAISE(ABORT,'run ownership cycle'); END;
 
-CREATE TRIGGER reject_owner_cycle_update BEFORE UPDATE OF owner_run_id ON run
- WHEN NEW.owner_run_id IS NOT NULL AND EXISTS(
- WITH RECURSIVE owners(id) AS(
- SELECT NEW.owner_run_id UNION SELECT r.owner_run_id FROM run r JOIN owners o ON r.id=o.id
- WHERE r.owner_run_id IS NOT NULL)
- SELECT 1 FROM owners WHERE id=NEW.id)
- BEGIN SELECT RAISE(ABORT,'run ownership cycle'); END;
+
+
 
 CREATE TABLE instruction_snapshot(
  id TEXT PRIMARY KEY NOT NULL, source_path TEXT NOT NULL, content_hash TEXT NOT NULL,
@@ -726,4 +714,6 @@ PRAGMA user_version=35;
 INSERT INTO schema_migration(version,name) VALUES(36,'0036_spill_tool_metadata');
 PRAGMA user_version=36;
 INSERT INTO schema_migration(version,name) VALUES(37,'0037_thread_branch_kind');
+
+INSERT INTO schema_migration(version,name) VALUES(37,'0037_independent_runs');
 PRAGMA user_version=37;

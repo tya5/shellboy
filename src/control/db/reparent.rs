@@ -139,18 +139,17 @@ pub(super) fn annotate(
     thread: &str,
     moved: &Moved,
 ) -> super::Result<()> {
-    let live: Option<(String, Option<String>)> = tx
+    let live: Option<String> = tx
         .query_row(
-            "SELECT id,owner_run_id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
+            "SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping')",
             [thread],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .optional()
         .map_err(sql_error)?;
     result.result["parent_change"] = json!({
         "previous_parent_id": moved.previous,
-        "live_run_id": live.as_ref().map(|(run, _)| run),
-        "live_run_owner_run_id": live.and_then(|(_, owner)| owner),
+        "live_run_id": live,
     });
     Ok(())
 }

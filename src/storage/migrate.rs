@@ -189,6 +189,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0037_thread_branch_kind.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 37,
+        sql: include_str!("../../migrations/0037_independent_runs.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -202,6 +207,10 @@ pub(super) fn run(
         .filter(|migration| migration.version > version)
     {
         report(migration.version - version, super::SCHEMA_VERSION - version);
+        // Rebuild the Run table without changing referent IDs or dependent rows.
+        if migration.version == 37 {
+            connection.pragma_update(None, "foreign_keys", false)?;
+        }
         let transaction =
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let additive_column_already_present = match migration.version {
@@ -233,6 +242,9 @@ pub(super) fn run(
             migrate_attachment_sources(&transaction)?;
         }
         transaction.commit()?;
+        if migration.version == 37 {
+            connection.pragma_update(None, "foreign_keys", true)?;
+        }
     }
     validation();
     validate_schema(connection)?;
