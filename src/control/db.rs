@@ -3334,13 +3334,15 @@ mod thread_list_plan_tests {
                  SELECT printf('thread-%05d',x),'/','','p','m','now',
                         CASE WHEN x%2=0 THEN 'archived' ELSE NULL END FROM n",
                 [thread_count as i64 + 1],
-            ).unwrap();
+            )
+            .unwrap();
             db.execute(
                 "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?1)
                  INSERT INTO node(id,kind,created_at,payload_json)
                  SELECT printf('node-%05d',x),'message',printf('%05d',x),'{}' FROM n",
                 [thread_count as i64 + 1],
-            ).unwrap();
+            )
+            .unwrap();
             db.execute(
                 r#"WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?1)
                  INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)
@@ -3348,7 +3350,8 @@ mod thread_list_plan_tests {
                         printf('thread-%05d',x),printf('node-%05d',x),'applied',printf('%05d',x),
                         '{"reply":{"state":"pending"},"to_human":true}' FROM n"#,
                 [thread_count as i64 + 1],
-            ).unwrap();
+            )
+            .unwrap();
             let sql = awaiting_human_sql(ArchivedFilter::Exclude);
             let mut stmt = db.prepare(&sql).unwrap();
             let rows = stmt
