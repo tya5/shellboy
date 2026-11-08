@@ -3544,7 +3544,7 @@ mod thread_list_plan_tests {
             Some("receipt-0")
         );
         let sql = awaiting_human_candidates_sql();
-        let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let mut plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
         let details: Vec<String> = plan
             .query_map(
                 params![
