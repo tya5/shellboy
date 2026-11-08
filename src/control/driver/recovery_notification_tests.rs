@@ -18,8 +18,8 @@ pub(super) fn assert_reason_and_event(
     chrono::DateTime::parse_from_rfc3339(timestamp).expect("RFC3339 transition time");
     let event: String = db
         .query_row(
-            "SELECT payload_ref_json FROM event WHERE id=?1 AND kind='child_recovery_wait'",
-            [format!("child-recovery-{turn}-{generation}")],
+            "SELECT payload_ref_json FROM event WHERE id=?1 AND kind='recovery_wait'",
+            [format!("recovery-{turn}-{generation}")],
             |r| r.get(0),
         )
         .unwrap();
@@ -158,7 +158,7 @@ async fn preparation_recovery_also_publishes_only_the_new_transition() {
                     r.get::<_, String>(0)
                 })?,
                 db.query_row(
-                    "SELECT count(*) FROM event WHERE kind='child_recovery_wait'",
+                    "SELECT count(*) FROM event WHERE kind='recovery_wait'",
                     [],
                     |r| r.get::<_, i64>(0),
                 )?,
@@ -188,7 +188,7 @@ async fn preparation_recovery_also_publishes_only_the_new_transition() {
             );
             assert_eq!(
                 db.query_row(
-                    "SELECT count(*) FROM event WHERE kind='child_recovery_wait'",
+                    "SELECT count(*) FROM event WHERE kind='recovery_wait'",
                     [],
                     |r| r.get::<_, i64>(0)
                 )?,
@@ -351,7 +351,7 @@ async fn recovery_timestamp_is_atomic_fenced_and_preserves_details() {
                 |r| r.get(0),
             )?;
             let count: i64 = db.query_row(
-                "SELECT count(*) FROM event WHERE kind='child_recovery_wait'",
+                "SELECT count(*) FROM event WHERE kind='recovery_wait'",
                 [],
                 |r| r.get(0),
             )?;
@@ -378,7 +378,7 @@ async fn recovery_timestamp_is_atomic_fenced_and_preserves_details() {
                 );
                 assert_eq!(
                     db.query_row(
-                        "SELECT count(*) FROM event WHERE kind='child_recovery_wait'",
+                        "SELECT count(*) FROM event WHERE kind='recovery_wait'",
                         [],
                         |r| r.get::<_, i64>(0)
                     )?,
@@ -403,7 +403,7 @@ async fn recovery_timestamp_is_atomic_fenced_and_preserves_details() {
             );
             assert_eq!(
                 db.query_row(
-                    "SELECT count(*) FROM event WHERE kind='child_recovery_wait'",
+                    "SELECT count(*) FROM event WHERE kind='recovery_wait'",
                     [],
                     |r| r.get::<_, i64>(0)
                 )?,

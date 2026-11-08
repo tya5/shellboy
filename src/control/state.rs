@@ -322,7 +322,7 @@ pub(super) fn recover_turn_tx(
         record_recovery_event(
             tx,
             run,
-            &format!("child-recovery-{turn}-{generation}"),
+            &format!("recovery-{turn}-{generation}"),
             "recovery_wait",
             json!({"thread_id":thread,"run_id":run,"turn_id":turn,"generation":generation,"state":"recovery_wait","error":reason}),
         )?;

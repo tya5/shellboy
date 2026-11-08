@@ -12,5 +12,8 @@ ALTER TABLE independent_run RENAME TO run;
 CREATE UNIQUE INDEX one_live_run ON run(thread_id) WHERE state IN ('live','stopping');
 CREATE INDEX run_thread_created ON run(thread_id,created_at DESC,id DESC);
 CREATE INDEX wait_run_state ON run(thread_id,state);
+DROP INDEX wait_recovery_thread;
+UPDATE event SET kind='recovery_wait' WHERE kind='child_recovery_wait';
+CREATE INDEX wait_recovery_thread ON event(json_extract(payload_ref_json,'$.thread_id')) WHERE kind='recovery_wait';
 INSERT INTO schema_migration(version,name) VALUES(38,'0038_independent_runs');
 PRAGMA user_version=38;

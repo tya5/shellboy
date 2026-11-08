@@ -4959,7 +4959,7 @@ mod thread_deletion_notification_tests {
     use super::*;
     use crate::{
         app::DataOwner,
-        control::{Control, EngineEvent},
+        control::Control,
     };
     use std::collections::BTreeSet;
 
@@ -5174,11 +5174,11 @@ mod thread_deletion_notification_tests {
 }
 
 #[cfg(test)]
-mod owned_child_notification_tests {
+mod independent_run_notification_tests {
     use super::*;
     use crate::{
         app::DataOwner,
-        control::{Control, EngineEvent},
+        control::Control,
     };
     use futures_util::FutureExt;
 
@@ -5361,7 +5361,7 @@ mod driverless_child_stop_notification_tests {
     use super::*;
     use crate::{
         app::DataOwner,
-        control::{Control, EngineEvent},
+        control::Control,
     };
     use futures_util::FutureExt;
 
@@ -5493,7 +5493,7 @@ mod browser_creation_notification_tests {
     use super::*;
     use crate::{
         app::DataOwner,
-        control::{Control, EngineEvent},
+        control::Control,
     };
     async fn fixture() -> (tempfile::TempDir, DataOwner, Arc<Control>) {
         let root = tempfile::tempdir().unwrap();

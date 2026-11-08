@@ -796,7 +796,6 @@ async fn obsolete_recovery_keeps_raw_audit_without_reviving_cancelled_attempt_or
 #[tokio::test]
 async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
     let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
-    let thread = accepted.thread_id.clone();
     let run = accepted.run_id.clone().unwrap();
     let turn = accepted.turn_id.clone().unwrap();
     let answer = accepted.message_id.clone();

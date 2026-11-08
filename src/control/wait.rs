@@ -527,7 +527,7 @@ mod tests {
         let control = Control::new(&owner, directory.path().to_path_buf());
         control.store.database.call(|db| {
             let tx=db.transaction()?;
-            for (thread,run,turn,shell,parent) in [("parent","rp","tp","sp",None),("a","ra","ta","sa",Some("rp")),("b","rb","tb","sb",Some("rp"))] {
+            for (thread,run,turn,shell) in [("parent","rp","tp","sp"),("a","ra","ta","sa"),("b","rb","tb","sb")] {
                 tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','','','now')",[thread])?;
                 tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
                 tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'running','now')",rusqlite::params![turn,thread,run])?;
