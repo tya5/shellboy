@@ -14,12 +14,13 @@
 - Connection setup and live connection generations improve configuration and keep each Run on its selected generation (#269). Live defaults do not overwrite saved Thread choices.
 - Recovery-wait behavior is safer (#263). Editing a request now refuses while its Run is active instead of stopping it (#258). The #262 reply-waiting list, with a 16-item rejection limit, is planned for this release but is not yet landed.
 - Compaction avoids repeated oversized-summary retries and repeated spill near the trigger (#251, #271); Thread inspection labels retained compaction facts as incomplete when an expired restore may be missing (#264).
+- Durable status attempts expose ordered `response_nodes` references for saved assistant responses (#279). Each ref has a node ID and nullable provider item ID and phase; `history.window` can read the saved node while it remains on the selected path. At most 256 candidates and 64 refs are examined/published. `response_nodes_truncated=true` means coverage is incomplete: an empty truncated list does not prove there was no saved response. There is no continuation cursor.
 - `usage get --group-by model` groups saved attempts by model; summary usage without a saved model is not attributed (#272). Capacity reporting shows configured thresholds (#268).
 - Global instructions can be configured for all Threads (#270). History exposes execution descriptions, and the core guides no longer point to Studio Apps. Other documentation and bounded-read fixes improve inspection.
 
 ## Release Scope
 
-#279 is being prepared independently as a minimal nullable reference; it is not implemented or accepted for this candidate. Its adoption requires a separate design, review and same-SHA CI decision. #278 remains excluded.
+#279 is accepted for this candidate; #278 remains excluded. Final candidate validation follows #262 landing.
 
 
 The candidate consists of current main plus the #262 16-item rejection variant, pending landing and review. #276 and #280 are deferred to the next release. #278 and continuing-failure prompt improvements are also deferred unless a separate scope decision approves them. Main advanced after this branch base; final notes and validation must be reconciled with the exact candidate tip.
@@ -48,6 +49,7 @@ Each row names its issue, landed implementation SHA and acceptance section. CI `
 | #267; `f01aee7f76`; `acceptance.md`: #267 bounded index reclamation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #265; `20b5ea8338`; `acceptance.md`: #265 storage threshold read | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #272; `10a7fa0ec5`; `acceptance.md`: #272 model-grouped bounded usage | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #279; `292ccca74560e56227f76ed4271dae70e1392926`; `acceptance.md`: #279 saved attempt response references | Yes | Yes | Prior landed SHA: normal `42491328721`, all-OS `42491337302` success; final tip pending | Unverified |
 | #270; `7aa2ef3dd1`; `acceptance.md`: #270 planned/implemented acceptance | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #273; `c54ed50c98`; `acceptance.md`: #273 branch-relative usage and kind | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #264; `e7a7242d55`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
