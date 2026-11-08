@@ -234,7 +234,11 @@ async fn observe_inner(
                 .any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. })))
             && let Some(caller) = &caller
         {
-            let mut entries = control.waits.entries.lock().expect("wait registry poisoned");
+            let mut entries = control
+                .waits
+                .entries
+                .lock()
+                .expect("wait registry poisoned");
             let registration = Registration {
                 source: format!("shell:{}", caller.execution_id),
             };
@@ -382,7 +386,6 @@ fn inspect(
                     if state != "pending" {
                         observation.matched.push(condition.clone());
                     } else {
-
                     }
                 } else {
                     missing(&mut observation, initial, "Message", message_id)?;
@@ -420,7 +423,6 @@ fn inspect(
                     } else if state == "recovery_wait" {
                         observation.recovery = true;
                     }
-
                 } else {
                     missing(&mut observation, initial, "Turn", turn_id)?;
                 }
@@ -436,7 +438,6 @@ fn inspect(
                     } else if recovery {
                         observation.recovery = true;
                     }
-
                 } else {
                     missing(&mut observation, initial, "Run", run_id)?;
                 }
@@ -458,7 +459,6 @@ fn inspect(
                             observation.matched.push(condition.clone());
                         }
                     }
-
                 } else {
                     missing(&mut observation, initial, "shell", execution_id)?;
                 }
@@ -551,7 +551,7 @@ mod tests {
             let tx=db.transaction()?;
             for (thread,run,turn,shell,parent) in [("parent","rp","tp","sp",None),("a","ra","ta","sa",Some("rp")),("b","rb","tb","sb",Some("rp"))] {
                 tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','','','now')",[thread])?;
-                tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,parent])?;
+                tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
                 tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'running','now')",rusqlite::params![turn,thread,run])?;
                 tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,?2,?3,?1,'running','/','{}','UTF-8','UTF-8','open','now')",rusqlite::params![shell,run,turn])?;
             }
@@ -596,14 +596,13 @@ mod tests {
                 "z:operation".into(),
                 Registration {
                     source: "shell:execution:日本".into(),
-
                 },
             );
             entries.insert(
                 "a:operation".into(),
                 Registration {
                     source: "shell:shell:nested".into(),
-                            },
+                },
             );
         }
         assert_eq!(
@@ -626,7 +625,7 @@ mod tests {
                     format!("operation-{index}"),
                     Registration {
                         source: format!("shell:execution-{index}"),
-                                    },
+                    },
                 );
             }
         }
@@ -635,7 +634,7 @@ mod tests {
             "overflow".into(),
             Registration {
                 source: "shell:last".into(),
-                    },
+            },
         );
         assert!(
             control.pending_wait_sources().is_none(),

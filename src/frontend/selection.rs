@@ -138,8 +138,7 @@ impl Selection {
         }
     }
     pub(super) fn dependent_parent(&self, changed: &str) -> Option<String> {
-        (self.notice_children.iter()
-            .any(|child| child == changed)
+        (self.notice_children.iter().any(|child| child == changed)
             || self.tool_scope.as_ref().is_some_and(|scope| {
                 scope.nodes.iter().any(|node| {
                     node.presentation
@@ -197,7 +196,7 @@ impl Selection {
                 .await;
             }
             Err(error) => {
-                        self.progress_running = false;
+                self.progress_running = false;
                 update(
                     updates,
                     UiUpdate::ActivityUnavailable {
@@ -494,7 +493,7 @@ mod live_child_tests {
     fn only_visible_child_dependencies_route_to_parent_and_switch_clears_them() {
         let mut selection = Selection::default();
         selection.select_thread("parent".into(), 2);
-        selection.observe_notices("parent",2,selection.progress_epoch,vec!["child".into()]);
+        selection.observe_notices("parent", 2, selection.progress_epoch, vec!["child".into()]);
         assert_eq!(
             selection.dependent_parent("child").as_deref(),
             Some("parent")
@@ -507,9 +506,9 @@ mod live_child_tests {
             selection.changed(&parent);
         }
         assert!(!selection.refresh_ready(&parent, start + std::time::Duration::from_millis(499)));
-        selection.observe_notices("parent",2,selection.progress_epoch,vec![]);
+        selection.observe_notices("parent", 2, selection.progress_epoch, vec![]);
         assert!(selection.dependent_parent("child").is_none());
-        selection.observe_notices("parent",2,selection.progress_epoch,vec!["child".into()]);
+        selection.observe_notices("parent", 2, selection.progress_epoch, vec!["child".into()]);
         selection.select_thread("other".into(), 3);
         assert!(selection.dependent_parent("child").is_none());
     }

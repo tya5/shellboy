@@ -152,7 +152,7 @@ pub(super) fn read_tx_limited(
         result.shells = row.get::<_, i64>(8)? as u64;
         result.children = row.get::<_, i64>(9)? as u64;
         result.known_waits = row.get::<_, i64>(10)? as u64;
-        result.duplicate_shells = row.get::<_, i64>(18)? as u64;
+        result.duplicate_shells = row.get::<_, i64>(13)? as u64;
         result.waits = (known && row.get::<_, i64>(11)? == 0).then_some(result.known_waits);
         if let Some(kind) = row.get::<_, Option<String>>(0)? {
             result.rows.push(RawRow {
@@ -400,7 +400,7 @@ mod tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now'),('child','/','','p','m','now'),('lineage','/','','p','m','now');
             UPDATE thread SET parent_thread_id='t' WHERE id='lineage';
             INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','2020-01-01T00:00:00Z'),('lineage-run','lineage','live','2010-01-01T00:00:00Z');
-            INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','r','live','2020-01-01T00:00:01Z');
+            INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','2020-01-01T00:00:01Z');
             INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2020-01-01T00:00:00Z');").unwrap();
         for (id, owner, start) in [
             ("s-old", "r", "2020-01-01T00:00:00Z"),
@@ -680,9 +680,7 @@ mod tests {
             (4, 1, Some(1), 2)
         );
         assert_eq!(snapshot.rows.len(), 3);
-        assert!(
-            matches!(&snapshot.rows[0].target, LiveWorkTarget::ChildRun { run_id, .. } if run_id == "child-run")
-        );
+        assert!(snapshot.rows.iter().all(|row| !row.label.contains("child")));
         assert!(
             matches!(&snapshot.rows[1].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "wait-old")
         );
@@ -751,16 +749,10 @@ mod tests {
             [],
         )
         .unwrap();
-        let child = prepare(raw)
-            .rows
-            .into_iter()
-            .find(|row| matches!(row.target, LiveWorkTarget::ChildRun { .. }))
-            .unwrap();
-        assert_eq!(child.label, "Known child question");
-        assert_eq!(
-            child.state,
-            crate::activity::ActivityPhase::Recovery.column_label()
-        );
+        assert!(prepare(raw).rows.iter().all(|row| matches!(
+            row.target,
+            LiveWorkTarget::Shell { .. } | LiveWorkTarget::Wait { .. }
+        )));
     }
 
     #[test]
@@ -810,9 +802,10 @@ mod tests {
         assert!(
             matches!(&snapshot.rows[1].target,LiveWorkTarget::Shell{execution_id,..}if execution_id=="s-new")
         );
-        assert!(
-            matches!(&snapshot.rows[2].target,LiveWorkTarget::ChildRun{run_id,..}if run_id=="child-run")
-        );
+        assert!(matches!(
+            &snapshot.rows[2].target,
+            LiveWorkTarget::Shell { .. }
+        ));
     }
 
     #[test]

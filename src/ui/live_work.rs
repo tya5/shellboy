@@ -150,7 +150,7 @@ impl<'a> WorkMessage<'a> {
             (Ja, Self::PreviewLoading) => "  |   | 出力を取得中.".into(),
         };
         match self {
-            Self::State(_) | Self::ChildState(_) => rendered,
+            Self::State(_) => rendered,
             Self::PreviewNotice | Self::PreviewLoading => {
                 let prefix = format!("  {}   {} ", glyphs::vertical(), glyphs::vertical());
                 let body = rendered.strip_prefix("  |   | ").unwrap_or(&rendered);
@@ -1108,7 +1108,10 @@ mod tests {
                 },
                 LiveWorkRow {
                     description: None,
-                    target: LiveWorkTarget::Wait { operation_id: "child-run".into(), execution_id: "child-thread".into() },
+                    target: LiveWorkTarget::Wait {
+                        operation_id: "child-run".into(),
+                        execution_id: "child-thread".into(),
+                    },
                     label: "child task".into(),
                     state: "live".into(),
                     started_at: None,
@@ -2234,7 +2237,10 @@ mod language_tests {
                 execution_id: "shell-id".into(),
                 turn_id: None,
             },
-            LiveWorkTarget::Wait { operation_id: "child-run".into(), execution_id: "child-thread".into() },
+            LiveWorkTarget::Wait {
+                operation_id: "child-run".into(),
+                execution_id: "child-thread".into(),
+            },
             LiveWorkTarget::Wait {
                 operation_id: "wait-id".into(),
                 execution_id: "shell-id".into(),
@@ -2369,12 +2375,11 @@ mod language_tests {
             row.state = crate::activity::ActivityPhase::Recovery
                 .column_label()
                 .into();
-                assert_eq!(
-                    WorkMessage::state(&row).render(UiLanguage::En),
-                    "Recovery needed"
-                );
-                assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
-
+            assert_eq!(
+                WorkMessage::state(&row).render(UiLanguage::En),
+                "Recovery needed"
+            );
+            assert_eq!(WorkMessage::state(&row).render(UiLanguage::Ja), row.state);
         }
         crate::ui::text_width::clear_terminal_width();
     }
@@ -2388,7 +2393,10 @@ mod language_tests {
             data.rows = (0..COUNT)
                 .map(|index| {
                     let mut row = child.clone();
-                    row.target = LiveWorkTarget::Wait { operation_id: format!("child-run-{index}"), execution_id: format!("child-thread-{index}") };
+                    row.target = LiveWorkTarget::Wait {
+                        operation_id: format!("child-run-{index}"),
+                        execution_id: format!("child-thread-{index}"),
+                    };
                     row.state = crate::activity::ActivityPhase::Recovery
                         .column_label()
                         .into();

@@ -3582,7 +3582,7 @@ mod activity_list_tests {
         db.execute("UPDATE shell_execution SET state='exited'", [])
             .unwrap();
         verify(ActivityPhase::Continuing, "completed");
-        db.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at) VALUES('kid','child','r','live','2026-10-29T00:00:00Z')", []).unwrap();
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('kid','child','live','2026-10-29T00:00:00Z')", []).unwrap();
         verify(ActivityPhase::Background, "completed");
         db.execute("UPDATE run SET state='stopping' WHERE id='kid'", [])
             .unwrap();
@@ -5338,7 +5338,7 @@ mod owned_child_notification_tests {
             let control = Control::new(&owner, root.path().into());
             let state = parent_state.to_owned();
             owner.db.call(move |db| {
-                db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','parent','/','','p','m','now'),('child','child','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','parent-run','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','recovery_wait','now');")?;
+                db.execute_batch("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','parent','/','','p','m','now'),('child','child','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('child-turn','child','child-run','recovery_wait','now');")?;
                 db.execute("UPDATE run SET state=?1 WHERE id='parent-run'",[state])?;Ok(())
             }).await.unwrap();
             // An existing synthetic driver captures the pre-existing quiet
@@ -5425,7 +5425,7 @@ mod driverless_child_stop_notification_tests {
                 for index in 0..4 {
                     let thread=format!("child-{index}");let run=format!("run-{index}");let turn=format!("turn-{index}");
                     tx.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,?1,'/','','p','m','now')",[&thread])?;
-                    tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,'parent-run','live',?3)",params![run,thread,format!("2026-10-25T00:00:0{}Z",index+1)])?;
+                    tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,format!("2026-10-25T00:00:0{}Z",index+1)])?;
                     tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'recovery_wait','2026-10-25T00:00:00Z')",params![turn,thread,run])?;
                 }
                 let oldest=tx.prepare("SELECT id FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping') ORDER BY created_at,id LIMIT 3")?.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;

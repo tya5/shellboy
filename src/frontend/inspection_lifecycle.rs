@@ -16,7 +16,6 @@ const OWNED_EXECUTIONS: &str = "WITH starting AS MATERIALIZED (SELECT CASE WHEN 
 
 const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' ELSE r.thread_id END,
     CASE WHEN octet_length(r.state)>512 THEN '' ELSE r.state END,
-    NULL,
     CASE WHEN octet_length(r.created_at)>512 THEN '' ELSE r.created_at END,
     CASE WHEN octet_length(r.ended_at)>512 THEN '' ELSE r.ended_at END,
     CASE WHEN octet_length(r.stop_reason)>512 THEN '' ELSE r.stop_reason END,
@@ -40,7 +39,6 @@ const TURN_SQL: &str =
     "SELECT CASE WHEN octet_length(u.thread_id)>512 THEN '' ELSE u.thread_id END,
     CASE WHEN octet_length(u.run_id)>512 THEN '' ELSE u.run_id END,
     CASE WHEN octet_length(u.state)>512 THEN '' ELSE u.state END,
-    NULL,
     CASE WHEN octet_length(u.created_at)>512 THEN '' ELSE u.created_at END,
     CASE WHEN octet_length(u.ended_at)>512 THEN '' ELSE u.ended_at END,
     CASE WHEN octet_length(u.answer_node_id)>512 THEN '' ELSE u.answer_node_id END,
@@ -60,7 +58,6 @@ struct RawRun {
     scalar_overflow: bool,
     thread: String,
     state: String,
-    owner: Option<String>,
     created: String,
     ended: Option<String>,
     stop_reason: Option<String>,
@@ -69,8 +66,6 @@ struct RawRun {
     reason: Option<String>,
     reason_limited: bool,
     revisit: Option<crate::protocol::RevisitSummary>,
-    owned_runs: Vec<String>,
-    runs_limited: bool,
     executions: Vec<String>,
     executions_limited: bool,
 }
@@ -79,7 +74,6 @@ struct RawTurn {
     thread: String,
     run: String,
     state: String,
-    owner: Option<String>,
     created: String,
     ended: Option<String>,
     answer: Option<String>,
@@ -128,20 +122,18 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                 .query_row(RUN_SQL, rusqlite::params![id, JSON_BYTES as i64], |row| {
                     Ok(RawRun {
                         waiting_reason: None,
-                        scalar_overflow: row.get(10)?,
+                        scalar_overflow: row.get(9)?,
                         thread: row.get(0)?,
                         state: row.get(1)?,
-                        owner: row.get(2)?,
-                        created: row.get(3)?,
-                        ended: row.get(4)?,
-                        stop_reason: row.get(5)?,
-                        turn: row.get(6)?,
-                        answer: row.get(7)?,
-                        reason: row.get(8)?,
-                        reason_limited: row.get(9)?,
+
+                        created: row.get(2)?,
+                        ended: row.get(3)?,
+                        stop_reason: row.get(4)?,
+                        turn: row.get(5)?,
+                        answer: row.get(6)?,
+                        reason: row.get(7)?,
+                        reason_limited: row.get(8)?,
                         revisit: None,
-                        owned_runs: Vec::new(),
-                        runs_limited: false,
                         executions: Vec::new(),
                         executions_limited: false,
                     })
@@ -160,16 +152,16 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
             RawBody::Turn(
                 db.query_row(TURN_SQL, rusqlite::params![id, JSON_BYTES as i64], |row| {
                     Ok(RawTurn {
-                        scalar_overflow: row.get(9)?,
+                        scalar_overflow: row.get(8)?,
                         thread: row.get(0)?,
                         run: row.get(1)?,
                         state: row.get(2)?,
-                        owner: row.get(3)?,
-                        created: row.get(4)?,
-                        ended: row.get(5)?,
-                        answer: row.get(6)?,
-                        reason: row.get(7)?,
-                        reason_limited: row.get(8)?,
+
+                        created: row.get(3)?,
+                        ended: row.get(4)?,
+                        answer: row.get(5)?,
+                        reason: row.get(6)?,
+                        reason_limited: row.get(7)?,
                     })
                 })
                 .optional()?
@@ -425,7 +417,7 @@ mod tests {
             let thread = format!("child-{i}");
             let run = format!("child-run-{i}");
             db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'Child','/','','p','m','now')",[&thread]).unwrap();
-            db.execute("INSERT INTO run(id,thread_id,state,owner_run_id,created_at)VALUES(?1,?2,'live','r',?3)",params![run,thread,format!("stamp-{i:05}")]).unwrap();
+            db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live',?3)",params![run,thread,format!("stamp-{i:05}")]).unwrap();
             db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,'r','u',?1,'running','/','{}','UTF-8','UTF-8','open',?2)",params![format!("shell-{i}"),format!("stamp-{i:05}")]).unwrap();
         }
     }

@@ -18,7 +18,7 @@ async fn closed_start_gate_only_defers_a_waiting_message_and_preserves_child_com
         .unwrap();
         let control = Control::new(&owner, root.path().into());
         control.store.database.call(move |db| {
-            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/','/AGENTS.md','fixture','fixture','now'),('child','/','/AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','parent-run','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('child-turn','child','child-run','completed','now','now');")?;
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/','/AGENTS.md','fixture','fixture','now'),('child','/','/AGENTS.md','fixture','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('child-turn','child','child-run','completed','now','now');")?;
             if waiting {
                 db.execute_batch("INSERT INTO node(id,kind,created_at,payload_json)VALUES('waiting','user','now','{}'); INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,hold_reason,result_json)VALUES('receipt','fixture:waiting','null','child','waiting','held','now','run_completion','{\"deliver\":\"complete\"}');")?;
             }

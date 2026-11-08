@@ -221,7 +221,7 @@ async fn activity_uses_recorded_run_turn_attempt_priority_and_remains_read_only(
         !continuing.poll_running,
         "local pulse must not add periodic database targets"
     );
-    change(&db,"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('child-run','child','r','live','now');").await;
+    change(&db,"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now');").await;
     assert_eq!(
         projection(&db).await.snapshot.phase,
         ActivityPhase::Background,

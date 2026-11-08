@@ -17,7 +17,7 @@ impl Fixture {
             .await
             .unwrap();
         db.call(|db|{db.execute_batch("INSERT INTO thread(id,parent_thread_id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('a',NULL,'Alpha','/fixture','/fixture/AGENTS.md','current-profile','current-model','2026-10-25T08:00:00Z'),('b','a','Thread child','/fixture','/fixture/AGENTS.md','current-profile','current-model','2026-10-25T08:00:00Z'),('c',NULL,'Owned work','/fixture','/fixture/AGENTS.md','current-profile','current-model','2026-10-25T08:00:00Z');
-        INSERT INTO run(id,thread_id,owner_run_id,state,created_at,ended_at)VALUES('root','a',NULL,'live','2026-10-25T07:00:00Z',NULL),('owned','c','root','live','2026-10-25T07:01:00Z',NULL),('unrelated','b',NULL,'completed','2026-10-25T06:00:00Z','2026-10-25T07:30:00Z');
+        INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES('root','a','live','2026-10-25T07:00:00Z',NULL),('owned','c','live','2026-10-25T07:01:00Z',NULL),('unrelated','b','completed','2026-10-25T06:00:00Z','2026-10-25T07:30:00Z');
         INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at)VALUES('turn-root','a','root','running','2026-10-25T07:02:00Z',NULL),('turn-owned','c','owned','waiting','2026-10-25T07:03:00Z',NULL),('turn-other','b','unrelated','completed','2026-10-25T06:05:00Z','2026-10-25T07:30:00Z');
         INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes)VALUES('held-node',NULL,'user','2026-10-25T07:04:00Z','\"PRIVATE_BODY\"',14),('answer','turn-other','assistant','2026-10-25T07:30:00Z','\"PRIVATE_ANSWER\"',16),('applied-node','turn-other','user','2026-10-25T06:05:00Z','\"PRIVATE_BODY\"',14);
         UPDATE turn SET answer_node_id='answer' WHERE id='turn-other';

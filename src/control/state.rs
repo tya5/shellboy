@@ -426,7 +426,6 @@ pub(super) fn complete_answer_turn(
                 ApiError::new(code, "Turn did not complete at its expected boundary").into(),
             );
         }
-
     }
     Ok(())
 }

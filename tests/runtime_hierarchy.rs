@@ -421,7 +421,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         let tx=db.transaction()?;
         for (thread,run,turn,parent) in [("parent","old-parent","parent-turn",None),("child","old-child","child-turn",Some("old-parent")),("grandchild","old-grandchild","grandchild-turn",Some("old-child"))] {
             tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','/AGENTS.md','test','fixture','now')",[thread])?;
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,parent])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?2,?3,'running','now')",rusqlite::params![turn,thread,run])?;
         }
         tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('old-shell','old-parent','parent-turn','old-shell-op','running','/','{}','UTF-8','UTF-8','open','now')",[])?;
@@ -432,7 +432,7 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         for number in 0..66 {
             let shell=format!("old-shell-{number:03}");
             tx.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES(?1,'old-parent','parent-turn',?1,'running','/','{}','UTF-8','UTF-8','open','now')",[shell])?;
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at,ended_at)VALUES(?1,'child','old-parent','completed','now','now')",[format!("old-completed-child-{number:03}")])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at) VALUES(?1,'child','completed','now','now')",[format!("old-completed-child-{number:03}")])?;
             let operation=format!("old-wait-{number:03}");
             let body=json!({"operation_id":operation,"caller":{"thread_id":"parent","run_id":"old-parent","turn_id":"parent-turn","execution_id":"old-shell","token":"secret-must-not-survive"},"conditions":conditions,"timeout_ms":30000,"accepted_at":"now"}).to_string();
             tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)",rusqlite::params![format!("wait.pending.{operation}"),body])?;
@@ -718,7 +718,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     owner.db.call(move|db|{
         let tx=db.transaction()?;
         for (thread,run,turn,owner) in [(&child_query,"recovery-child","recovery-child-turn",parent_run.as_str()),(&grandchild_query,"recovery-grandchild","recovery-grandchild-turn","recovery-child")] {
-            tx.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES(?1,?2,?3,'live','now')",rusqlite::params![run,thread,owner])?;
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')",rusqlite::params![run,thread])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES(?1,?2,?3,'recovery_wait','now','{\"reason\":\"fixture_proxy_failure\"}')",rusqlite::params![turn,thread,run])?;
         }
         tx.commit()?;Ok(())

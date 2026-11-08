@@ -673,9 +673,7 @@ mod tests {
             ('parent','Parent','/','','p','m','2026-11-01T00:00:00Z'),
             ('scope','Current title','/','','current-profile','current-model','2026-11-01T00:00:00Z');
           UPDATE thread SET parent_thread_id='parent' WHERE id='scope';
-          INSERT INTO run(id,thread_id,state,created_at,ended_at,owner_run_id,stop_reason) VALUES
-            ('owner','parent','completed','2026-11-01T00:00:00Z','2026-11-01T00:00:01Z',NULL,NULL),
-            ('r','scope','failed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','owner','saved-stop');
+          INSERT INTO run(id,thread_id,state,created_at,ended_at,stop_reason) VALUES('owner','parent','completed','2026-11-01T00:00:00Z','2026-11-01T00:00:01Z',NULL),('r','scope','failed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','saved-stop');
           INSERT INTO node(id,kind,created_at,payload_json) VALUES('answer','assistant','2026-11-01T00:00:01Z','{}'),('message','user','2026-11-01T00:00:00Z','{}');
           INSERT INTO turn(id,thread_id,run_id,state,created_at,ended_at,answer_node_id,recovery_reason_json) VALUES
             ('t','scope','r','failed','2026-11-01T00:00:00Z','2026-11-01T00:00:02Z','answer','{"kind":"saved-recovery"}');

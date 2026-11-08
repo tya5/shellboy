@@ -323,7 +323,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
     // this does not claim a native child process was exercised.
     control.store.database.call(move|db|{
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('owned-child','/','/AGENTS.md','test','fixture','now')",[])?;
-        db.execute("INSERT INTO run(id,thread_id,owner_run_id,state,created_at)VALUES('owned-child-run','owned-child',?1,'live','now')",[child_owner])?;Ok(())
+        db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('owned-child-run','owned-child','live','now')",[])?;Ok(())
     }).await.unwrap();
     let queued = command(
         &control,

@@ -1202,3 +1202,78 @@ async fn schema_thirteen_records_positive_admission_evidence_and_keeps_uncertain
         writer.shutdown().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("legacy.sqlite");
+    let db = DbWorker::open(&path).await.unwrap();
+    db.call(|db| {
+        seed_thread(db,"parent")?; seed_thread(db,"child")?;
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('parent-run','parent','completed','now'),('child-run','child','live','now');
+          INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('child-turn','child','child-run','running','now');
+          INSERT INTO shell_execution(id,owner_run_id,turn_id,state,shell_json,started_at) VALUES('owned-shell','child-run','child-turn','running','{}','now');
+          INSERT INTO app_meta(key,value) VALUES('reply-migration-witness','preserve');")?;
+        Ok(())
+    }).await.unwrap();
+    db.shutdown().await.unwrap();
+    let legacy = Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id);
+        UPDATE run SET owner_run_id='parent-run' WHERE id='child-run';
+        CREATE INDEX runs_by_owner ON run(owner_run_id,state);
+        DELETE FROM schema_migration WHERE version=38; PRAGMA user_version=37;",
+        )
+        .unwrap();
+    legacy.close().unwrap();
+    for _ in 0..2 {
+        let db = DbWorker::open(&path).await.unwrap();
+        db.call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )?,
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT owner_run_id FROM shell_execution WHERE id='owned-shell'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                "child-run"
+            );
+            assert_eq!(
+                db.query_row("SELECT run_id FROM turn WHERE id='child-turn'", [], |r| {
+                    r.get::<_, String>(0)
+                })?,
+                "child-run"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT value FROM app_meta WHERE key='reply-migration-witness'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                "preserve"
+            );
+            assert_eq!(
+                db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))?,
+                1
+            );
+            assert!(
+                db.prepare("PRAGMA foreign_key_check")?
+                    .query([])?
+                    .next()?
+                    .is_none()
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+        db.shutdown().await.unwrap();
+    }
+}
