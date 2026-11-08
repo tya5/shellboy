@@ -49,22 +49,27 @@ saved activity classifier and frame-boundary writer, not a conversation renderer
   opt-in comparison identity, bounded attempt observations, and read-only
   single-attempt inspection. Sticky headers are explicitly deferred.
 
-- [Reply-expected messages](reply-expected-messages.md) (#194, adopted, not
-  implemented): `--expect-reply`, `message reply`, `wait reply_received`,
-  Run-end reminder, end-message rename, `exec --result reply|turn-end|run-end`
-  and delegation unification, with a six-step implementation plan.
+- [Reply-expected messages](reply-expected-messages.md) (#194; implemented on
+  main): reply duties use existing receipts, `message reply`,
+  `wait reply_received`, Run-end reminders, end-message results, and the
+  bounded per-Thread reply inbox. The design retains the implementation plan
+  and later decisions as history; see [current status](../development/status.md).
 
 - [Secretary stack](secretary-stack.md) (decision memo, 2026-11-07): which generic
   lower layers an AI secretary needs and where each lives (external app, CLI, core,
-  bridge, docs), with per-issue status, risks and an on-site recipe outline.
+  bridge, docs), with per-issue status, risks and an on-site recipe outline. Its
+  point-in-time implementation table is historical, not current status.
 
 ## Proposed Drafts (Not Adopted)
 
 - [Connection-wide rate feedback](connection-rate-limit.md) (#224, Phase 1):
   measured 429 recording gaps and a proposed shared wait/retry/fairness design.
-  No runtime behavior changes or parallel-map implementation are adopted.
+  The runtime design and parallel-map implementation are not adopted; any
+  specific infrastructure already landed is described in the current document,
+  not implied by this proposal.
 - [Recoverable automatic attempt record](compaction.md#adopted-recoverable-automatic-attempt-record-after-post-commit-failure-226)
   (#226): stage facts written in the stage adoption transaction; complete or
-  explicitly `unknown` after post-commit storage failure. Adopted and implemented.
+  explicitly `unknown` after post-commit storage failure. Adopted and implemented
+  on main.
 
-- [Branch-relative usage and provenance (#273)](usage-aggregates.md#branch-point-lower-bound-273)
+- [Usage aggregates](usage-aggregates.md): bounded grouped CLI reads (#101/#272), grouped compaction usage (landed on main at `16784db966`), and branch-relative usage with provenance (#273, landed at `c54ed50c98` and finalized at `dc98c52cb3`).

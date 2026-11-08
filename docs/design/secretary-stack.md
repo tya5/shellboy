@@ -1,10 +1,11 @@
 # Secretary Stack: Generic Lower Layers and Where They Live (Memo)
 
-Status: **decision memo**. The decisions in section 2 were made by the user on
-2026-11-07. It adopts no new mechanism: each part keeps its own issue and design.
-Statements about what exists were read from docs and code at `origin/main`
-`5e140d3011`. **Nothing was run for this memo.** A statement here is not a
-verification; see [acceptance](../validation/acceptance.md).
+Status: **historical decision memo**, based on `origin/main` at
+`5e140d3011` (2026-11-07). Its decisions remain contextual; its implementation
+inventory and proposed guide timing are not current status. For current main and
+open branch work, see [development status](../development/status.md). The memo's
+point-in-time observations were not independently validated here; validation
+claims require the cited [acceptance](../validation/acceptance.md) evidence.
 
 Goal: an AI secretary on the Shellboy the user runs at work (Windows, TUI today, Web
 UI expected to become main, a resident server on 127.0.0.1 acceptable). Scheduled
@@ -27,14 +28,14 @@ lower stack; section 6 is the outline for the on-site part.
 | Running owner | Core | TUI, or `serve --data-dir DIR` | Exists; the CLI never starts one (section 3) |
 | Structured handoff | CLI | `exec --schema` | Exists, with a limited validator (section 4, R1) |
 | Change following | Core + CLI | `events.wait` / `events wait` | Exists (#243) |
-| Stable external contract | Core + docs | Protocol policy, `shellboy protocol schema` | Only unknown-field replies (#244 A1) |
-| Model asks a human | Core + CLI + TUI | Reply-expected to a human (#262) | Not on main |
-| No caller-based refusals | Core | #256, #259 | Stop, retry, shell done; rest not on main |
-| Disk guard | Core | Capacity gate plus volume floor (#261) | Logical limit only |
+| Stable external contract | Core + docs | Protocol policy, `shellboy protocol schema` | Protocol 4, strict requests, tolerant result records, `events.reasoning_activity` capability and generated schema (#244/#275) |
+| Model asks a human | Core + CLI + TUI | `message ask`, unified per-Thread reply inbox (#262) | Landed on main; 128 shared pending-reply cap, default `awaiting_human_rows=1` |
+| No caller-based refusals | Core | #256 and #259 | Stop/retry/shell authority and the separately identified non-boundary message/exec restrictions are removed; this is not an OS permission boundary |
+| Disk guard | Core | Logical data cap and free-disk floor (#261) | 50 GiB default data cap, 40 GiB warning, 5 GiB free-space minimum; running-command writes are not stopped |
 | Thread cleanup | Core + CLI | `thread archive` (#222 stage 1) | Exists |
-| Tags, re-parent | Core + CLI | #222 stages 2-3 | Re-parent on main; tags and cwd filter on branch issue-222/tags-4 |
+| Tags, re-parent | Core + CLI | #222 stages 2-3 | Archive, re-parent, tags, `thread cwds`, and list cwd filter landed on main |
 | Knowledge | CLI + files | `rag`, `history search`, plain files | Exists |
-| Cheaper index | Core | #253, #254 | Not on main |
+| Cheaper index | Core | #253, #254 | API-free int8 conversion and explicit remove/revert behavior (#253); configurable automatic node kinds (#254) are on main |
 | Web UI | Bridge (separate repo `shellboy-studio`) | Local IPC to the owner; HTTP/WebSocket to the browser on localhost | Not usable yet per its README |
 | TUI on a running owner | Core | #247 | Study only; not a prerequisite |
 | Spend limit | External | Provider or LiteLLM budget | No spend limit in Shellboy |
@@ -65,16 +66,17 @@ Run; retry by generation CAS; one reply per message; reply only after applicatio
 
 | Issue | On main | Not on main |
 |---|---|---|
-| #222 | Stage 1: `thread archive`, `thread unarchive`, `thread list --archived`, TUI keys. Stage 2: `thread set --parent` | Stage 3: `thread tag`, `thread tags`, `thread cwds`, `thread list --tag/--cwd` are on branch issue-222/tags-4; the TUI browser filter was left for later by the user. Pin dropped |
-| #243 | Stages B, C: `events wait`, chat on hints | Live text deltas (E3) |
-| #244 | A1: typed `invalid_argument` for unknown commands and fields | A2 (protocol 3, capabilities), D (`protocol schema`). [Its design](events-and-external-protocol.md) requires both before `shellboy-studio` depends on the RPC |
-| #247 | Nothing. `serve` guide: "A TUI cannot be attached later" | All |
-| #253 | Nothing; no int8 code | All |
-| #254 | Only the on/off switch `indexing.auto_history` | Target selection and its default |
-| #256 (closed) | Stop, retry and shell write/EOF/stop have no authority check | |
-| #259 | In progress on `issue-259/remove-constraints`: remove caller/recipient gates and low exec input cap | CI and handoff remain |
-| #261 | Logical limit only, defaults 8 GiB warning and 10 GiB stop (`src/config.rs`, `require_capacity_tx` in `src/gc.rs`). `storage status` already reports `filesystem_free_bytes` | Floor, new defaults, 2x-floor warning |
-| #262 | Nothing. Reused parts exist: `--expect-reply`, `message reply`, `wait reply_received`, TUI `/replies`, `RegionLayout` (`src/ui/region.rs`) | All. Follows #259 |
+| #222 | Stages 1–3 (archive, re-parent, tags/cwd filter) landed on main after this snapshot; verify current surfaces in thread-organization design and CLI reference | The TUI browser filter and pin were not in the adopted scope at this snapshot |
+| #243 | Stages B, C and E3 plan A (live text on `events.wait`) landed on main after this snapshot; see D-243-1/2 | A persistent stream (E3 plan B) remains deferred unless plan A proves insufficient |
+| #244 | A1, A2 (protocol 3/capabilities), and D (`protocol schema`) landed on main; #275 then advanced to protocol 4. See the current [protocol contract](protocol.md) and [design status](README.md) | The proposal's mixed-release compatibility risks remain relevant; see D-244-2 |
+| #247 | Open study only; the supported TUI owner is not attached to an already-running `serve` owner | No dependency for the secretary flow |
+| #253 | API-free int8 conversion, explicit vector removal, and revert to float32; landed at `5806aa7783` | Real query quality and cold-cache timing remain unmeasured on the user's database |
+| #254 | Configurable automatic node kinds; default user, summary and assistant_response; landed at `05ef67a631` | Real-owner/provider behavior and the live pagination loop were not measured in the recorded acceptance |
+| #256 (closed) | Stop, retry and shell write/EOF/stop have no caller authority check; landed at `5e140d3011` | This is not an OS boundary |
+| #259 (closed) | Removes the listed non-boundary restrictions on message actors/recipients and `exec` input size; landed at `dfffde451f` | OS/user-account permissions remain the boundary |
+| #261 (closed) | Data cap defaults to 50 GiB, warning at 40 GiB, and admission floor at 5 GiB; landed at `facc05669c` | Already-running command writes are not stopped |
+| #262 (closed) | `message ask`, human-recipient reply duties, per-Thread inbox and TUI region; landed at `6960a27e3f` | No cross-Thread inbox; real Studio behavior was not exercised in its acceptance |
+| #272/#273 | Model-grouped usage (grouped compaction totals at `16784db966`) and `--since-node` branch-relative usage with branch kind (#273 at `c54ed50c98`, finalized `dc98c52cb3`) | Grouped compaction follow-up is represented by open PR #223; its reviewed delta is separate from already-landed behavior |
 
 ## 3. Owner modes
 
@@ -102,10 +104,10 @@ explicit decision; elapsed time alone does not resume it.
 | R4 | No spend limit in Shellboy | No price catalogue (effective spec). `usage get --group-by day` reports saved usage, not money. A provider spend-limit 429 fails until access resumes | Provider or LiteLLM budget first (not tried here). Add to the capacity gate only if needed |
 | R5 | Long-lived secretary Thread versus a fresh Thread per job | **Cost unmeasured.** No figure assumed | Run both on one real job; compare `usage get --thread T` per landed item; keep the cheaper |
 | R6 | Liveness and failure alerts | External | Scheduler history, exit codes, a heartbeat file (section 6) |
-| R7 | Archive can hide a question | #262 unarchives when a question is created. An archive afterwards hides the Thread's pending count from the default list | Cleanup excludes Threads with a pending count. #262 should settle whether `thread archive` reports them |
-| R8 | Question cap versus "can accumulate" | Today: 128 pending per recipient Thread. How to count for a human recipient is an open #262 item | Decide in #262 |
+| R7 | Archive can hide a question | #262 unarchives when a question is created. Archiving afterward hides the Thread's pending count from the default list | Cleanup excludes Threads with a pending count; the archive operation itself remains metadata-only |
+| R8 | Question cap versus "can accumulate" | Human questions share the existing 128 pending-reply cap per recipient Thread | The UI exposes one configured row by default and `/replies` remains the overflow path |
 | R9 | Disk guard limit | A running command's own writes are not stopped. Free space that cannot be read does not hold work | Stated in #261; guide text with it |
-| R10 | Web readiness | Bridge depends on #244 A2 and D, which are not on main | Keep TUI or CLI as the fallback |
+| R10 | Web readiness | Protocol 4 and generated schema (#244/#275) are on main; the separate `shellboy-studio` bridge's usability was not verified by these Core changes | Keep TUI or CLI as the fallback until the bridge itself is checked |
 
 ## 5. Windows: check on a real machine
 
@@ -244,13 +246,17 @@ binary. Until the last row below lands, hand it to the on-site Shellboy as a fil
 | #222 stages land | Tags in the cleanup step, Agent Guide organization text |
 | After #259, #261, #262 | Move section 6 to a bundled guide (new `docs.rs` catalogue entry, `link_target`, `tests/docs_cli.rs`) and link it from the Agent Guide. Needs a build and CI, unlike this memo |
 
-## 8. Stale text and tensions found (not changed here)
+## 8. Historical stale-text audit
+
+This table records what the memo identified at `5e140d3011`; rows are not current
+findings. Later work in this documentation-sync branch updates the linked source
+documents where the observation is still applicable.
 
 | Where | Says | Actual |
 |---|---|---|
 | `docs/design/effective-spec.md` (list of what is not adopted) | "web UI, archive" not adopted | Archive is on main; the Web UI is a separate adopted project |
 | `docs/guides/cli-reference.md` (`message send`) | Ordinary machine messages are held at `recovery_wait`; `--resume-recovery` is explicit | Updated for #263 |
 | #262 issue body | `message list --awaiting-human` | Superseded by its later comment and D4 |
-| `docs/design/README.md` | Reply-expected "adopted, not implemented" | Implemented |
-| `docs/development/status.md` | #256 and others "on branch, CI pending" | On main |
+| `docs/design/README.md` | Reply-expected "adopted, not implemented" | Updated: implemented on main |
+| `docs/development/status.md` | Branch-by-branch handoffs and pending CI were mixed into current status | Updated: current-main snapshot; the old ledger is archived in `status-history.md` |
 | D5 in this memo | "Origin only records who acted" | Origin also grants Run ownership on a parent's send and holds a model's message to `recovery_wait`. Neither is a refusal, neither is in #256 or #259; recorded here as remaining behaviour |

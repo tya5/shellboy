@@ -1,33 +1,18 @@
 # Development status
 
-## Model-grouped usage (#272; W8 approved, latest-main revalidation)
+Snapshot: `origin/main` at `482e7eadb39b0bed4059135842c9b148c162f70d` (2026-11-08). This page describes the checked-out main state, not release certification. The exact base commit and open PR were checked against Git history and GitHub on this date.
 
-Adds `usage.get --group-by model` using saved attempt model IDs and the existing
-10,000-rowid candidate window, group page limit and cursor. It intentionally skips
-the app_meta summary-usage read: saved summary records have no model ID, so their
-counts/tokens are explicitly unknown for model groups rather than misattributed.
-Thread-level shell exit-code trends and model-shell joins remain a separate stage.
-W8 review approved this bounded model-grouping slice for landing. Revalidating the
-focused tests and query plan on current `origin/main`; CI will run on the fresh branch.
-Thread-level shell exit-code aggregation is the next separate issue step.
+## Main
 
+The current main implements the adopted reply-expected lifecycle (#194), protocol 4 with strict requests, tolerant result records, capability metadata and a generated schema (#244/#275), change-hint waits with separately opt-in answer text and reasoning activity (#243/#275), model-grouped and grouped compaction usage (#272), and branch-relative usage with branch provenance (#273). Thread archive/re-parent/tags and the bounded maintenance/recovery work described by the effective spec are also landed. The exact-tip validation for #275 (standard and all-OS CI) remains pending in the current main status record; other environment-specific limits are in [acceptance](../validation/acceptance.md). The design index links adopted contracts; individual designs may include historical proposal material, which is identified in context rather than representing current behavior.
 
-## Recovery-wait external CLI messages (#263; branch issue-263/review-fixes-1)
+## Branch work
 
-Non-human `message send` inputs remain held at a live `recovery_wait` Turn by
-default; `--resume-recovery` explicitly resumes the same Turn and records a distinct
-`external_cli` actor (shell-origin callers retain shell identity). Caller-less human
-`message reply` is marked as human input when delivered back to its model sender, so
-it resumes that sender's recovery Turn; model-origin replies remain non-human and held.
-Tests: `tests/reply.rs` covers human/model reply behavior; `tests/control_db.rs` checks
-external CLI actor provenance. Focused local tests passed. Final SHA `9a07276e5a5344037829b4670cbac32486cb6242` passed default CI `42397206194` and all-OS CI `42397208374`. W8 P1/P2 addressed; Studio/provider behavior not exercised.
+Open pull request #223 (`issue-217/compaction-usage`, head `3c7491264d993441e5f3d35628079fa7f05a4853`) proposes grouped compaction usage totals. Grouped compaction usage is already present on main from `16784db966`; the PR is not treated as product state beyond its reviewed delta. Other local or remote branches are not treated as product state unless an open PR or an explicit current handoff identifies them.
 
-## Secretary stack memo (docs only; on branch doc/secretary-stack)
+## Not verified by repository CI
 
-[Secretary stack](../design/secretary-stack.md) records the user's 2026-11-07 decisions, where
-each generic layer lives, per-issue status at `5e140d3011`, risks, real-machine Windows checks and
-the on-site recipe outline. Nothing was run. No guide changed. Resume: section 7 of the memo lists
-guide text to add as #259, #261, #262, #253, #254 land, and section 8 lists stale text to fix.
+CI is not evidence of real-provider behavior, physical-terminal behavior, production-database performance, or release readiness unless a validation record names that environment and exact SHA. Current acceptance limitations and evidence are tracked in [acceptance](../validation/acceptance.md); do not infer these checks from an adopted design or a passing build.
 
 ## No stop/retry authority check (#256; on branch issue-256/retry-authority, CI pending)
 
@@ -5311,3 +5296,4 @@ Adds `usage get --since-node NODE`, resolving one selected-path node timestamp t
 ### #275 live reasoning activity
 
 `events.wait --reasoning-activity` returns bounded active-attempt metadata independently of `--text`: request attempt elapsed time and cumulative observed reasoning UTF-8 bytes (unknown until deltas arrive), without reasoning content. It reuses the existing in-memory change clock, attempt cap and stream guard; no saved data or worker added. `events.reasoning_activity` advertises support. `cargo check --locked --tests` and focused clippy pass. Clock/runtime unit regressions pass. The first standard CI found a missing generated schema registration and a test expectation mismatch; both are fixed. Protocol-v4 schema is regenerated with the `events.wait` request option and the `events.reasoning_activity` capability; all 32 protocol integration tests pass. Exact-tip focused change-clock (19), events-text (9 plus 1 ignored), and events-wait (17) suites pass; the CLI independent-opt-in test passes. The language audit scanned 417 files with no inventory change. Push and exact-tip standard/all-OS CI remain pending.
+The previous branch-by-branch ledger is retained in [status history](status-history.md) as a point-in-time archive; its branch names, pending checks, and handoffs are not current status.

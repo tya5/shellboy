@@ -1,7 +1,6 @@
 # Event subscription and the external RPC contract (#243, #244)
 
-Status: adopted in principle by the user (2026-11-06); stages A1, B, C and E3 plan A are implemented
-(see 5, 2.5; C measured in docs/validation/acceptance.md), the rest is not. Evidence refers to `origin/main` at `b0d9c94284` (v0.9.0 RC).
+Status: the #243 event-wait stages A1, B, C and E3 plan A, the #244 external-contract stages A1, A2 and D, and #275 reasoning-activity support are implemented on main at `482e7ead`. The current handshake is protocol 4; exact-tip standard/all-OS validation for #275 is still pending in the main status record. Current transport, compatibility and generated-schema behavior is specified in [protocol.md](protocol.md) and `docs/reference/protocol.schema.json`. Proposal-era alternatives below are historical context, not the current contract. The persistent multi-frame stream (E2), persistent digest (E1), durable change log (E4), and E3 plan B remain deferred.
 User decisions on stage B (#243): long-polls share the ordinary request slots (Q6), models
 may use `events.wait` (Q3), no change record is persisted (Q8), name `events.wait` (Q7).
 Live text deltas (E3) move ahead of stage B's successors: plan A (same long-poll, unsaved),
@@ -52,7 +51,7 @@ pass writes a `wait.pending.<id>` row to `app_meta` (`wait.rs:212-217`).
 
 - Framing: 4-byte big-endian length + UTF-8 JSON, 8 MiB max (`protocol.rs:840-870`).
 - One connection = `Hello{protocol_version}` → `Welcome{protocol_version,
-  instance_id}` → exactly one `Request` → exactly one `Response`, then close
+  capabilities, instance_id}` → exactly one `Request` → exactly one `Response`, then close
   (`src/ipc.rs:72-145`, client `call_stream` `ipc.rs:313-381`). The reply is a
   `oneshot`; while waiting, the server reads one byte to detect peer
   disconnect and cancels `Invocation.disconnected`.
@@ -80,7 +79,7 @@ new change-sequence column or table written in every relevant transaction.
 That conflicts with #243's "no new table" direction and is not required:
 clients' state is saved facts, so a missed hint is repaired by re-reading.
 
-### 1.4 How chat (#242) polls
+### 1.4 How chat (#242) used to poll (historical observation; superseded by stage C)
 
 `ChatSession::follow` (`src/chat_client.rs:258-397`) loops: `run.get` (Run
 modes) + `turn.get` + `shell.list(limit 50)` (`tool_progress`, `:505-573`) +
@@ -89,34 +88,28 @@ connections; a running tool yields roughly that per second, and tool
 start/finish lines appear up to ~1 s late because `wait` is not woken by a
 tool start (no condition matches it). Nothing was measured; see §3.
 
-### 1.5 Versioning and decode strictness (relevant to #244)
+### 1.5 Versioning and decode strictness (current main)
 
-- `PROTOCOL_VERSION = 2` (`protocol.rs:10`); owner and client both reject any
-  other version at endpoint metadata and Welcome (`ipc.rs:85, 235, 332`).
-  protocol.md (PR1-10, Issue #33) states "Use the same release for CLI and
-  owner … No capability negotiation". `shellboy-studio` breaks that assumption.
-- Every `args!` type has `#[serde(deny_unknown_fields)]` (`protocol.rs:376-383`),
-  and the **same macro defines result records** (`ThreadDetails :922`,
-  `RunDetails :934`, `TurnDetails :935`, `MessageAccepted :762`,
-  `WaitResult :783`; 67 `args!` uses). `Hello`, `Welcome` (`ipc.rs:25-35`) and
-  `Endpoint` (`app.rs:128-135`) are strict too. So today an added field is
-  not compatible in either direction for a Rust client: an old owner rejects a
-  new request field; an old client rejects a new result field.
-- `Request` has a hand-written `Deserialize` (`protocol.rs:262-284`); an
-  unknown command or unknown args field fails inside `read_frame`, and
-  `serve_connection` returns via `??` **without writing a reply**. The client
-  then reports "Connection ended before reply; the operation result is
-  unconfirmed" (`ipc.rs:359-366`). Concretely: a new `chat` (sending
-  `message.send.human`, #242) against an older protocol-2 owner gets an
-  "uncertain mutation" message instead of "owner does not support this field".
-  (Code reading; add a regression test when fixing.)
-- Results are partly untyped: record types contain 16 `Value` fields
-  (`snapshot`, `last_end_message`, `last_input`, `awaiting_reply`,
-  `context_usage`, …), several operations build results with `json!` in
-  `control/db.rs` and the client side receives `Response<Value>`. There is no
-  code-level map from command to result type.
-- `shellboy` is a lib + bin crate with `pub mod protocol` (`src/lib.rs:36`),
-  `publish = false`. No JSON Schema dependency exists (`Cargo.toml:32-61`).
+Protocol 4 is the current version (`src/protocol.rs:11`). It adds independently
+opt-in `events.reasoning_activity` to the protocol-3 baseline. Owner and client
+require an exact version match; no protocol-2/3 downgrade or version range is
+supported (`src/ipc.rs`, `src/app.rs`). Request argument records remain strict: unknown
+fields are rejected before dispatch with a typed `invalid_argument` response
+and `request_may_have_been_applied=false`. Output records use the separate
+`record!` macro and tolerate unknown additive fields. `Hello`, `Welcome`, and
+`Endpoint` also tolerate unknown additive metadata. `Welcome.capabilities` currently advertises `events.reasoning_activity`; future
+additive request features must be gated by an advertised capability, while an
+incompatible strict result shape still requires a version bump. Protocol 3
+behavior is adopted in D-244-2 and protocol 4 reasoning activity in D-275-1; [protocol.md](protocol.md) is the current behavioral contract.
+
+The earlier proposal text retained in sections 4.2–4.4 and 5 records the
+alternatives and implementation plan before #244 landed. In particular, the
+compatibility analysis, strict-output description, capability questions, schema
+generation options, and staged-plan recommendations below are not current behavior.
+Protocol 4's `events.wait` result is strict and typed; see the versioned schema
+and current protocol design.
+The original proposal's `Welcome.capabilities` baseline was empty; protocol 4 now
+advertises `events.reasoning_activity`.
 
 ## 2. Event model (#243)
 
@@ -160,8 +153,10 @@ Request `EventsWaitArgs`:
 - `thread_ids: Vec<String>` — optional filter, 0..64 (0 = all Threads),
   same ID bounds as `thread_settled`.
 - `timeout_ms: u64` — default 30 000, 0 allowed (same as `wait`).
+- `include_text: bool` — default false; returns bounded, lossy non-reasoning answer text.
+- `include_reasoning_activity: bool` — default false; requires `events.reasoning_activity` and returns bounded activity metadata without reasoning content.
 
-Result `EventsWaitResult { status, cursor, changes: [{thread_id, seq}], more }`:
+Result `EventsWaitResult` contains `status`, `cursor`, `changes`, and `more`; protocol 4 adds optional `live_text` and `reasoning_activity` fields, independently requested by the two request flags:
 
 | status | when | client action |
 |---|---|---|
@@ -212,18 +207,22 @@ stage E1, only if measurement shows follow-up reads dominate.
 
 Shell output bytes are not Thread hints (#28 intentionally uses the separate
 output `Notify`); clients use `shell read` / `wait shell_output` for live output.
-Model text deltas (`EngineEvent::Stream`) are never saved and are not Thread hints;
-a client asks for them separately with `include_text` (2.5).
+Model text deltas (`EngineEvent::Stream`) are never saved and are not Thread hints. Clients
+independently opt into answer text with `include_text` (`--text`) (2.5) or
+reasoning activity with `include_reasoning_activity` (`--reasoning-activity`)
+(2.6).
 
 CLI (implemented): `shellboy events wait [--after CURSOR] [--thread ID]... [--timeout-ms N] [--text] [--reasoning-activity]`
-prints one JSON result per call; a `--follow` loop is not implemented (clients loop). Also usable by
+prints one JSON result per call; clients loop for continued observation. Answer
+text is bounded and lossy; reasoning activity exposes only timing and observed
+reasoning-byte metadata, never reasoning content. The command is also usable by
 scripts and as the reference consumer for the contract tests.
 
-### 2.4 Correctness risk: hint completeness
+### 2.4 Hint completeness and its verification
 
-The scheme is only lossless if every commit that changes a client-visible
-saved fact of Thread T is followed by `changed(T)`. The TUI's 500 ms progress
-refresh can mask a missing call today. Stage B must add a test per mutation
+Hint completeness depends on every commit that changes a client-visible
+saved fact of Thread T being followed by `changed(T)`. The TUI's 500 ms progress
+refresh can mask a missing call. The implemented stage B has a test per mutation
 family (send/held/cancel, run/turn transitions, tool start/end, compaction,
 create/fork/rewind/delete, reply, recovery) asserting the clock advanced for
 the affected Thread(s), and treat a gap as a bug in the producer.
@@ -246,7 +245,7 @@ one poll and one cursor, so it holds one of the 24 shared slots, not two, and a 
 delayed by a text wait or the reverse. Requested text and changes are computed in one lock, so
 the pair is consistent.
 
-Request: `include_text: bool` and `include_reasoning_activity: bool`, both default false. Result gains `live_text`, present only when asked:
+Each request flag defaults to false. The result includes `live_text` only when `include_text` is true; `reasoning_activity` is governed independently by `include_reasoning_activity`:
 
 ```json
 {"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,
@@ -333,7 +332,7 @@ Limits on what this shows: the driver's event loop stops at response end and can
 queued events undelivered, as for the TUI, so a preview's last text can be missing; saved output
 covers it. Compaction and other model calls that do not go through `stream_response` produce no text.
 
-## 3. Chat and TUI
+## 3. Chat and TUI (proposal design; consult status above for implementation)
 
 Chat switch (stage C), still a thin client:
 
@@ -362,7 +361,11 @@ What to measure (record as facts in validation, no bounds asserted):
 - Per-poll connect + handshake time on Unix socket and Windows named pipe, to
   decide whether a persistent stream (E2) is worth it.
 
-## 4. External contract (#244)
+## 4. External contract (#244; proposal-era design record)
+
+This section records the proposal as written before #244 implementation. For
+the current contract, use [protocol.md](protocol.md), D-244-2 in
+[decisions.md](../development/decisions.md), and the generated schema.
 
 ### 4.1 Covered (clients may rely on)
 
@@ -381,7 +384,7 @@ text formats of errors and hints.
 Schema-valid is not accepted: limits and cross-field rules stay in Rust
 validation and are documented in prose.
 
-### 4.2 Version and compatibility policy (proposal)
+### 4.2 Version and compatibility policy (historical proposal; superseded by D-244-2)
 
 - Requests stay strict (owner rejects unknown fields). A client must not send
   a new optional field or operation unless the owner advertises it.
@@ -398,40 +401,36 @@ validation and are documented in prose.
 - The owner keeps accepting exactly one version (current-only, Issue #33);
   supporting a range is open (Q2).
 
-### 4.3 Capability advertisement
+### 4.3 Capability advertisement (historical proposal; protocol 4 is current)
 
-`Welcome` gains `capabilities: Vec<String>` (names like `events.wait`,
-`message.send.human`). Welcome arrives before the request, so a client can
+`Welcome` gained `capabilities: Vec<String>` with protocol 3 (names like `events.wait`,
+`message.send.human`); protocol 4 adds `events.reasoning_activity`. Welcome arrives before the request, so a client can
 decide before sending anything. Clients ignore capability names they do not
 recognize and only gate use of capabilities they do recognize. Because current
 clients decode `Welcome` strictly, adding the field is itself breaking: do it once, together with the
 tolerant-record split, as **protocol 3**. Everything present at protocol 3 is
-the baseline. The list holds only additions after that and starts empty or
-nearly empty. A strict result-shape extension is not additive for old typed
+the baseline. Later protocol 4 added an independently advertised reasoning-activity
+capability; current capabilities are not empty. A strict result-shape extension is not additive for old typed
 clients: #275 advances to protocol 4 and advertises `events.reasoning_activity`.
 The list is a `const` slice checked by a test against an exhaustive match over
 `Command`, not a registry.
 
-Old owner + new client:
-- owner on protocol 2 → existing clear version-mismatch error before sending
-  (the `human` case is solved this way, since `human` is in the v3 baseline);
-- owner on protocol 3 → protocol-4 client rejects the version before sending;
-- owner on protocol 4 without a capability → client omits the feature or
+Compatibility examples (historical proposal, updated for current versions):
+- owner on protocol 2 or 3 → protocol-4 client rejects the version before sending
+  (the `human` case was included in the protocol-3 baseline);
+- owner on protocol 4 without `events.reasoning_activity` → client omits activity or
   reports "owner does not support X" before sending.
 
-Independently, and without a version change (stage A1): `serve_connection`
-should parse the frame as `Value`, extract a non-empty `operation_id`, and
-on unknown command/field reply `invalid_argument` with
-`request_may_have_been_applied=false`. Today it closes without a reply, which
-is reported as an uncertain mutation. This matches protocol.md P5 ("decodable
-request rejected → reply with its own ID").
+Stage A1's adopted implementation parses enough of the frame to preserve the
+operation ID and returns typed `invalid_argument` with
+`request_may_have_been_applied=false` for decodable unknown commands/fields.
+See D-244-1 and the current [protocol contract](protocol.md).
 
-This supersedes "No capability negotiation" in protocol.md PR1-10 and needs
-the user's approval (Q1).
+### 4.4 JSON Schema generation (historical plan; implemented on main)
 
-### 4.4 JSON Schema generation
-
-Requirement: generated from the Rust types, not hand-written, with a drift check.
+Implemented on main with Schemars-derived wire types, `shellboy protocol schema`,
+and an exact generated-artifact drift test. The options and dependency proposal
+below are historical; D-244-2 records the adopted dependency and constraints.
 
 Options:
 
@@ -461,20 +460,24 @@ fails with the regeneration command. It runs under the existing `cargo test`
 in `scripts/check.sh` and CI, so no new CI step. Whether an edit is additive
 or breaking stays a review decision.
 
-## 5. Staged plan
+## 5. Original staged plan (#243/#244; proposal record)
+
+A1, B, C, E3 plan A, A2, D and protocol-4 reasoning activity (#275) are on main; see the status above.
+The entries below preserve original sequencing and do not imply pending
+implementation for completed stages.
 
 | Stage | Content | New mechanism |
 |---|---|---|
 | A1 | Reply typed `invalid_argument` for decodable unknown command/field instead of closing; regression test (done, D-244-1) | none |
 | B (done, #243: `src/control/change_clock.rs`, `tests/events_wait.rs`) | `ChangeClock` + `events.wait` + `shellboy events wait`; tests: ordering, coalescing, `more`, filter, baseline, resume, floor → resync, instance change → resync, forged cursor, timeout 0, disconnect, shutdown, hint completeness per mutation family; protocol/CLI docs | one bounded in-memory map in `Control`, one operation |
 | C (done, #243: `src/chat_client.rs`) | chat uses `events.wait`; before/after measurements (§3) recorded in validation. Chosen details: baseline taken after thread creation and before every `message.send`; one cursor per process, filter = the shown Thread; every result (`changed`, `timeout`, `resync_required`) re-reads, so a missing hint is bounded by one 30 s window; `more` drained with timeout 0; call length min(30000, deadline); an owner without `events.wait` is an error (no fallback, no reconnect) | none |
-| A2 | Protocol 3: `record!` split (tolerant results), tolerant `Welcome`/`Endpoint` decode, `Welcome.capabilities`, version policy section in protocol.md; supersede PR1-10 | handshake field |
-| D | `schemars`, command→result match, `shellboy protocol schema`, committed schema + drift test, contract section | one dependency |
+| A2 (done, #244) | Protocol 3: `record!` split (tolerant results), tolerant `Welcome`/`Endpoint` decode, `Welcome.capabilities`, version policy section in protocol.md | handshake field |
+| D (done, #244) | `schemars`, command→result match, `shellboy protocol schema`, committed schema + drift test, contract section | one dependency |
 | E3 plan A (done, #243: `src/control/change_clock.rs`, `tests/events_text.rs`, 2.5) | `events.wait` `include_text`, `live_text`, `shellboy events wait --text` | bounded per-attempt text in the clock, one `Notify` |
 | E (measure first) | E1 per-Thread digest in `changes`; E2 persistent multi-frame stream (also E3 plan B, only if A proves not smooth enough); E4 durable typed change log (schema change) | each needs its own decision |
 
 A1 and B are the smallest valuable first steps: B alone removes chat polling.
-A2 and D must land before `shellboy-studio` depends on the RPC.
+A2 and D landed before external clients depend on the RPC. #275 later advanced the handshake to protocol 4. Remaining stage E work is deferred pending evidence and a separate decision.
 
 ## 6. Risks
 
@@ -488,11 +491,14 @@ A2 and D must land before `shellboy-studio` depends on the RPC.
 - Coalescing hides intermediate states; documented, durable facts remain.
 - E3's preview is lossy by design (2.5): attempts past the first 16 show no text until one ends, and a reader behind by
   more than 64 KiB counted sees a gap. Polling per delta costs a connection per reply on the current transport.
-- Protocol 3 breaks every mixed-release pair once (acceptable pre-1.0 under
+- Protocol 3 and later protocol 4 each break mixed-release pairs once (acceptable pre-1.0 under
   the current same-release rule, but it is a visible break).
 - Schema truthfulness is limited by `Value` fields until they are typed.
 
-## 7. Questions for the user (Q3, Q6, Q7, Q8 answered 2026-11-06; see the status line; the rest open)
+## 7. Questions from the original proposal (answered or superseded)
+
+These questions are retained as historical rationale. The current decisions
+are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protocol.md](protocol.md).
 
 1. Approve replacing "no capability negotiation" (protocol.md PR1-10) with
    `Welcome.capabilities` and a one-time bump to protocol 3?

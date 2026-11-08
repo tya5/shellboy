@@ -37,6 +37,8 @@ watchdogs remain unchanged.
 
 ## Current conversation storage
 
+The current database schema is conversation version 37; see its versioned migrations and the [storage design](storage.md). The schema sequence below is additive: versions 28–31 and 35–37 are not enumerated in this summary.
+
 Issue #170 adds schema21 derived event-retention lookup indexes and bounded
 maintenance of terminal-Run pending deliveries and unreferenced shell
 completion events. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
@@ -223,9 +225,10 @@ UIは既存のイベント・世代付き応答へリアクティブに追従し
 | docs・独立RAG | [採用仕様](docs-and-rag-spec.md)、[実装設計](docs-and-rag.md) | docsはowner/API不要。RAGは別store。履歴は明示read-only scope、生成モデルなし |
 | 現在の作業状態・実行との関連・回復導線 | [work observability](work-observability.md) | 既存保存情報のprojection。statusはdurable_onlyでOS生存/独立RAGの統合snapshotではない |
 
-PTY、MCP、permission engine、web UI、archive、成果物専用機構、pipeline、Windows本体からのWSL直接起動、
+PTY、MCP、permission engine、成果物専用機構、pipeline、Windows本体からのWSL直接起動、
 常駐する所有外Run、モデル価格カタログ、RAG内部でのLLM生成は採用対象に含めない。
-将来一般的なskill対応と衝突させず、同梱ガイドのコマンド名は `docs` とする。
+Shellboy CoreにはWeb UIを含めず、別プロジェクト `shellboy-studio` を同一マシンの外部IPC client/bridgeとして扱う。
+Thread archiveは#222 stage 1としてmainに実装済み。将来一般的なskill対応と衝突させず、同梱ガイドのコマンド名は `docs` とする。
 
 ## 人向けの状態と復旧契約
 
@@ -432,7 +435,7 @@ processing. Conversation data is read-only; derived data has independent bounds.
 ## Guarded Thread Deletion (#122)
 
 Adopt the optional bounded target marker and transaction-local comparison in
-[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). Protocol2
+[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). Protocol 3 is current; `thread.delete`
 adds no mandatory request field. Marked execution never falls back to unbounded
 selection; incomplete or different targets return typed preview_stale before
 mutation. Legacy unmarked behavior and existing Run-state checks remain. The UI

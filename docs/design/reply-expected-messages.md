@@ -1,8 +1,8 @@
 # Reply-expected messages (#194)
 
-Status: **Implemented on the migration-26 integration branch (2026-11-03);
-final checks, independent review and main landing remain gates.** This design turns the
-user's decisions on #194 (comments marked "決定" and the answers to the memo's
+Status: **Implemented on main** (originally landed in the migration-26
+integration, 2026-11-03). This design turns the user's decisions on #194
+(comments marked "決定" and the answers to the memo's
 questions, 2026-11-03) into a concrete design, lists every existing behaviour
 it touches, records the answered questions under [Decisions](#decisions) and
 ends with a landable [implementation plan](#implementation-plan). Points the

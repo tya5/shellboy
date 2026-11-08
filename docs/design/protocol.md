@@ -22,7 +22,7 @@ wait条件は `type` tagの `turn_completed/run_ended/shell_ended/shell_output` 
 
 ## External client stability and versioning (Issue #244 A2)
 
-The local owner handshake is the compatibility boundary for external clients, including a Web UI in a separate repository. Protocol 3 added an explicit capability list to `Welcome`; protocol 4 advances the handshake for the strict `events.wait` result extension (#275). `events.reasoning_activity` advertises support. Clients must compare `protocol_version` first, ignore capability names they do not recognize, and use only known capabilities the owner advertises. There is no silent protocol-2 downgrade. `Endpoint` and `Welcome` tolerate unknown additive fields so metadata readers can ignore future fields, but typed RPC results tolerate additive fields only on the records explicitly marked as open result records. Request args remain strict: unknown operations/fields/types are rejected before dispatch with A1's typed `invalid_argument` and `request_may_have_been_applied: false`.
+The local owner handshake is the compatibility boundary for external clients, including a Web UI in a separate repository. Protocol 3 added an explicit capability list to `Welcome`; protocol 4 adds independently opt-in `events.reasoning_activity` to `events.wait` (#275). `events.reasoning_activity` advertises support. Clients must compare `protocol_version` first, ignore capability names they do not recognize, and use only known capabilities the owner advertises. This owner advertises `events.reasoning_activity`. There is no silent downgrade across protocol versions. `Endpoint` and `Welcome` tolerate unknown additive fields so metadata readers can ignore future fields, but typed RPC results tolerate additive fields only on the records explicitly marked as open result records. Request args remain strict: unknown operations/fields/types are rejected before dispatch with A1's typed `invalid_argument` and `request_may_have_been_applied: false`.
 
 A wire change that a supported peer cannot safely ignore requires a protocol version bump and coordinated release. Use additive result fields only where the older client uses tolerant decoding; never infer compatibility from syntactic JSON parsing. The dynamic `events.wait` result may carry an additive field only with a protocol-version bump: typed RPC results are strict even when JSON is syntactically extensible. A capability documents the feature but does not make an old client tolerant. External clients may rely on documented commands/arguments, response fields and omission rules, enumerated errors, cursor behavior, sender provenance, capabilities, and documented bounds. They must not depend on SQLite tables, internal logs, undocumented `details`, implementation module names, event timing, or incidental ordering not stated here. Operation receipts make retries safe only with the same operation ID and same request; transport uncertainty is not evidence a mutation was unapplied. Cursor tokens are opaque and scoped to the issuing owner/query; restart or expiry requires resynchronization, not decoding or editing the token.
 
@@ -302,13 +302,13 @@ request and never deletes a space. `index.remove` takes `space_id` and optional 
 one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
 source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
 and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
-the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2. See
+the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 4 is current after #275. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 
 thread.create/set/fork accept optional `agents`; thread.get returns required
-`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2.
+`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 4 is current after #275.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
 
@@ -443,7 +443,7 @@ filters. Existing any-condition results keep their shape, with a Thread cursor
 and snapshot.changes/more when these conditions are present. ThreadSummary and
 ThreadDetails add last_end_message/last_input optional saved-fact objects. They do not
 change lifecycle, authorization, MessageSender identity or model-facing tools.
-At the time this historical section was written, Schema16 contained only derived indexes and protocol version remained 2; Issue #244 A2 later advanced the wire handshake to protocol 3.
+At the time this historical section was written, Schema16 contained only derived indexes and protocol version remained 2; Issue #244 A2 later advanced the wire handshake to protocol 3; #275 later advanced it to protocol 4.
 
 ## Terminal-free startup rows (#5 stage 2)
 
@@ -500,7 +500,9 @@ state is created. Existing ungrouped response shape is unchanged.
 
 ## Optional Deletion Target Marker (#122)
 
-Protocol2 `thread.delete` accepts optional `args.preview_marker` with
+`thread.delete` accepts the optional `args.preview_marker` additively under the
+current protocol 4 contract; older protocol-2/3 notes about the original change
+are historical, not the current wire version. The marker contains
 `thread_count` (1..257) and `ids_hash` (64 lowercase SHA-256 hex characters).
 Old requests omitting it, or using null, retain unguarded current behavior;
 serialization of None omits the field. Preview responses include the marker or
