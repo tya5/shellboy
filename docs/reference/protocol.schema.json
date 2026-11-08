@@ -540,6 +540,22 @@
         {
           "properties": {
             "args": {
+              "$ref": "#/definitions/MessageAskArgs"
+            },
+            "command": {
+              "const": "message.ask",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "args"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
               "$ref": "#/definitions/MessageSendArgs"
             },
             "command": {
@@ -2656,6 +2672,9 @@
         "thread_id": {
           "type": "string"
         },
+        "to_human": {
+          "type": "boolean"
+        },
         "turn_id": {
           "type": [
             "string",
@@ -2670,6 +2689,24 @@
         "assignment"
       ],
       "title": "MessageAccepted",
+      "type": "object"
+    },
+    "MessageAskArgs": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "text"
+      ],
       "type": "object"
     },
     "MessageCancelArgs": {
@@ -2721,6 +2758,7 @@
         "already_cancelled",
         "already_admitted",
         "not_found",
+        "forbidden",
         "unavailable"
       ],
       "type": "string"
@@ -2777,6 +2815,9 @@
         },
         "thread_id": {
           "type": "string"
+        },
+        "to_human": {
+          "type": "boolean"
         },
         "turn_id": {
           "type": [
@@ -2848,6 +2889,9 @@
             "string",
             "null"
           ]
+        },
+        "to_human": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -3818,6 +3862,35 @@
             },
             "command": {
               "const": "message.reply",
+              "type": "string"
+            },
+            "operation_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "origin": true,
+            "protocol_version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "args",
+            "command",
+            "operation_id",
+            "protocol_version"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "args": {
+              "$ref": "#/definitions/MessageAskArgs"
+            },
+            "command": {
+              "const": "message.ask",
               "type": "string"
             },
             "operation_id": {
@@ -5836,7 +5909,22 @@
             "null"
           ]
         },
+        "awaiting_human": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "awaiting_replies": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
         "awaiting_reply": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "awaiting_thread_replies": {
           "default": [],
           "items": true,
           "type": "array"
@@ -6192,6 +6280,36 @@
             "string",
             "null"
           ]
+        },
+        "awaiting_human_count": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "awaiting_replies": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "awaiting_reply": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "awaiting_thread_count": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "awaiting_thread_replies": {
+          "default": 0,
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         },
         "cwd": {
           "type": "string"
@@ -7223,6 +7341,9 @@
         "thread_id": {
           "type": "string"
         },
+        "to_human": {
+          "type": "boolean"
+        },
         "turn_id": {
           "type": [
             "string",
@@ -7268,6 +7389,9 @@
         "thread_id": {
           "type": "string"
         },
+        "to_human": {
+          "type": "boolean"
+        },
         "turn_id": {
           "type": [
             "string",
@@ -7310,6 +7434,9 @@
         },
         "thread_id": {
           "type": "string"
+        },
+        "to_human": {
+          "type": "boolean"
         },
         "turn_id": {
           "type": [
@@ -7756,7 +7883,22 @@
             "null"
           ]
         },
+        "awaiting_human": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "awaiting_replies": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
         "awaiting_reply": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "awaiting_thread_replies": {
           "default": [],
           "items": true,
           "type": "array"
@@ -7952,7 +8094,22 @@
             "null"
           ]
         },
+        "awaiting_human": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "awaiting_replies": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
         "awaiting_reply": {
+          "default": [],
+          "items": true,
+          "type": "array"
+        },
+        "awaiting_thread_replies": {
           "default": [],
           "items": true,
           "type": "array"
