@@ -506,7 +506,7 @@ async fn extra_instructions_missing_file_is_visible_and_never_sends_partial_requ
         assert!(reason.to_string().contains("Extra instruction file cannot be inspected"),"{reason}");
         assert!(receive.try_recv().is_err());
         let id=target.clone();
-        let snapshots=control.store.database.call(move |db|Ok(db.query_row("SELECT count(*) FROM turn WHERE thread_id=?1 AND instruction_snapshot_id IS NOT NULL",[id],|r|r.get::<_,u64>(0))?)).await.unwrap();
+        let snapshots=control.store.database.call(move |db|Ok(db.query_row("SELECT count(*) FROM turn WHERE thread_id=?1 AND instruction_snapshot_id IS NOT NULL",[id],|r|r.get::<_,i64>(0))?)).await.unwrap();
         assert_eq!(snapshots,0);
         control.shutdown().await; owner.shutdown().await.unwrap(); server.abort();
     }).await;
