@@ -175,12 +175,16 @@ def check_migration(db, before, start, target):
         indexes = {row[0]: row[1] for row in db.execute("SELECT name,sql FROM sqlite_master WHERE type='index' AND name IN ('thread_tag_by_tag','threads_cwd_updated')")}
         assert set(indexes) == {'thread_tag_by_tag', 'threads_cwd_updated'}, 'migration 34 must create the tag and cwd list indexes'
         assert 'WHERE' in indexes['threads_cwd_updated'], 'the cwd list index must be partial'
+    if target >= 36:
+        index = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='receipt_human_reply_pending'").fetchone()
+        assert index is not None and 'target_thread_id,created_at' in index[0], 'migration 36 must index human reply targets and timestamps'
+        assert "json_extract(result_json,'$.reply.state')='pending'" in index[0] and "json_extract(result_json,'$.to_human')=1" in index[0], 'migration 36 must index only pending human replies'
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34) and target in (14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
@@ -194,11 +198,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.9.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34), default=34,
-                        help='34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 36), default=36,
+                        help='36 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:
