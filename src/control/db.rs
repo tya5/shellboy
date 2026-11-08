@@ -5667,6 +5667,40 @@ mod thread_deletion_notification_tests {
     }
 
     #[tokio::test]
+    async fn deleting_thread_handles_empty_and_legacy_over_cap_reply_sets() {
+        for count in [0, 33] {
+            let (root, owner) = fixture().await;
+            seed(&owner.db).await;
+            if count > 0 {
+                owner.db.call(move |db| {
+                    for index in 0..count {
+                        let message = format!("legacy-{index}");
+                        db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user','old','{}')", [&message])?;
+                        db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{\"kind\":\"human\"}','parent',?1,'applied',datetime('now'),'{\"reply\":{\"state\":\"pending\"}}')", [&message])?;
+                    }
+                    Ok(())
+                }).await.unwrap();
+            }
+            let store = Store::new(
+                owner.db.clone(),
+                Arc::new(owner.loaded.config.clone()),
+                root.path().into(),
+                owner.instance_id.clone(),
+            );
+            store
+                .execute(delete(&owner.instance_id, false), None)
+                .await
+                .unwrap();
+            let states = owner.db.call(|db| Ok(db.query_row(
+                "SELECT count(*),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='parent'",
+                [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+            )?)).await.unwrap();
+            assert_eq!(states, (count as i64, count as i64));
+            owner.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn deleting_a_thread_removes_its_automatic_compaction_metadata() {
         let (root, owner) = fixture().await;
         seed(&owner.db).await;

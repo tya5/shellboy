@@ -424,7 +424,7 @@ fn outcome_tx(
     Ok(None)
 }
 
-// Per-recipient pending duties are capped at 16 by send admission.
+// Process bounded batches; pre-cap legacy databases may contain more than 16.
 const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT ?2";
 
 /// All selected Threads are already marked deleted. No sender-side scan here.
@@ -436,23 +436,31 @@ pub(crate) fn deleted_threads_tx(
     let mut wakes = Vec::new();
     let mut query = db.prepare(DELETED_RECIPIENT_REPLIES)?;
     for target in targets {
-        let rows = query
-            .query_map([target], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (message, sender, saved) in rows {
-            if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
-                let saved: Value = serde_json::from_str(&saved)
-                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-                if saved["to_human"] != true
-                    && let Some(thread) = outcome_tx(db, &message, &sender, "recipient_deleted", at)?
-                { wakes.push(thread); }
-                db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
+        loop {
+            let rows = query
+                .query_map(
+                    params![target, crate::protocol::MAX_PENDING_REPLY_DUTIES as i64],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            if rows.is_empty() {
+                break;
+            }
+            for (message, sender, saved) in rows {
+                if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
+                    let saved: Value = serde_json::from_str(&saved)
+                        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                    if saved["to_human"] != true
+                        && let Some(thread) = outcome_tx(db, &message, &sender, "recipient_deleted", at)?
+                    { wakes.push(thread); }
+                    db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
+                }
             }
         }
     }
