@@ -565,6 +565,8 @@ fn spill_tool_sources_window_vm_steps_do_not_grow_with_sixteen_mib_payload() {
                 [json!({"output":"x".repeat(size)}).to_string()],
             )
             .unwrap();
+            // Warm statement/schema caches equally before comparing steady-state work.
+            window(db, &request).unwrap();
             steps.store(0, Ordering::Relaxed);
             let page = window(db, &request).unwrap();
             measured.push(steps.load(Ordering::Relaxed));
@@ -573,7 +575,7 @@ fn spill_tool_sources_window_vm_steps_do_not_grow_with_sixteen_mib_payload() {
                 "c"
             );
         }
-        db.progress_handler(0, None::<fn() -> bool>);
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
         assert_eq!(measured[0], measured[1], "{measured:?}");
         assert!(measured[0] < 1000, "{measured:?}");
     });

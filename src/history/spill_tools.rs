@@ -230,7 +230,7 @@ mod bounded_tests {
         }
         assert_eq!(counts[0], counts[1]);
         assert!(counts[0] < 100, "{counts:?}");
-        db.progress_handler(0, None::<fn() -> bool>);
+        db.progress_handler(0, None::<fn() -> bool>).unwrap();
         db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
             .unwrap();
         let mut statement = db.prepare(&format!("EXPLAIN {LOOKUP_SQL}")).unwrap();
