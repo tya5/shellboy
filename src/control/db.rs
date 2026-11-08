@@ -3364,6 +3364,7 @@ mod thread_list_plan_tests {
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .unwrap();
+            let vm_steps = stmt.get_status(rusqlite::StatementStatus::VmStep);
             let page = thread_list_awaiting_human(
                 &db,
                 &ThreadListArgs {
@@ -3378,7 +3379,7 @@ mod thread_list_plan_tests {
             )
             .unwrap();
             (
-                stmt.get_status(rusqlite::StatementStatus::VmStep),
+                vm_steps,
                 rows,
                 page.items
                     .into_iter()
