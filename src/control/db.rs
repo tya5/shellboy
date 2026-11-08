@@ -4957,10 +4957,8 @@ mod message_acknowledgement_state_tests {
 #[cfg(test)]
 mod thread_deletion_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::Control,
-    };
+    use crate::control::EngineEvent;
+    use crate::{app::DataOwner, control::Control};
     use std::collections::BTreeSet;
 
     async fn fixture() -> (tempfile::TempDir, DataOwner) {
@@ -5176,10 +5174,7 @@ mod thread_deletion_notification_tests {
 #[cfg(test)]
 mod independent_run_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::Control,
-    };
+    use crate::{app::DataOwner, control::Control};
     use futures_util::FutureExt;
 
     fn parent_origin() -> Origin {
@@ -5359,10 +5354,8 @@ mod independent_run_notification_tests {
 #[cfg(test)]
 mod driverless_child_stop_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::Control,
-    };
+    use crate::control::EngineEvent;
+    use crate::{app::DataOwner, control::Control};
     use futures_util::FutureExt;
 
     #[tokio::test]
@@ -5491,10 +5484,8 @@ mod driverless_child_stop_notification_tests {
 #[cfg(test)]
 mod browser_creation_notification_tests {
     use super::*;
-    use crate::{
-        app::DataOwner,
-        control::Control,
-    };
+    use crate::control::EngineEvent;
+    use crate::{app::DataOwner, control::Control};
     async fn fixture() -> (tempfile::TempDir, DataOwner, Arc<Control>) {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("config.toml");
