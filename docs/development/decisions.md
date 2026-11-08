@@ -4304,3 +4304,9 @@ reply is ordinarily delivered to that Thread, including by starting a new indepe
 Progress uses normal messages. Schema 38 removes the ownership field and related policy indexes/triggers, preserving
 referent IDs and shell ownership. The local recovery event replaces child-forwarding nomenclature; existing recovery
 facts migrate their event kind/index without rewriting payloads. Landing is deferred until after v0.11.0.
+
+### D-276 review correction: direct self-wait guard
+
+Claude's accepted review changes candidate 1 only: keep direct invoking Run/Turn/shell ID rejection with typed
+`self_wait`. Remove the dependency graph, not this constant-time input guard. Ancestor and sibling observations do
+not need classification. The prior self-wait acceptance statement is superseded, not implemented as a fallback.

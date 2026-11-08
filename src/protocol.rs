@@ -260,6 +260,7 @@ macro_rules! states {
 }
 states!(ErrorCode {
     InvalidArgument,
+    SelfWait,
     ConfigInvalid,
     AppNotRunning,
     ProtocolMismatch,
@@ -383,6 +384,7 @@ impl ApiError {
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
             ErrorCode::CursorEncodingMismatch => "Restart shell read without the old cursor and specify the desired encoding; previously read bytes may be returned again",
             ErrorCode::OutputExpired => "Inspect shell state and retained history; unavailable raw output cannot be reconstructed by retrying read",
+            ErrorCode::SelfWait => "Observe another Run, Turn or shell; do not wait for the invoking resource itself",
             ErrorCode::InputLimit => "Inspect the input bound in command help; do not treat truncated input as accepted",
             ErrorCode::StorageLimit => "Inspect shellboy storage status and storage capacity; resolve the cause before explicitly choosing a recovery action",
             ErrorCode::SaveFailed => "Preserve unsaved input and inspect capacity/permissions; do not keep submitting mutations while saving is unavailable",

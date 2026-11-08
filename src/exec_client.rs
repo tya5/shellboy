@@ -109,7 +109,8 @@ impl Failure {
             ErrorCode::InvalidArgument
             | ErrorCode::ThreadNotFound
             | ErrorCode::InputLimit
-            | ErrorCode::ConfigInvalid => 2,
+            | ErrorCode::ConfigInvalid
+            | ErrorCode::SelfWait => 2,
             ErrorCode::InvalidState | ErrorCode::TargetUnavailable => 4,
             _ => 6,
         };
