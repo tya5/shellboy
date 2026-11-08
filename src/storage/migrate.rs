@@ -190,8 +190,8 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         foreign_keys: Some(Impact::IndexOnly),
     },
     Migration {
-        version: 37,
-        sql: include_str!("../../migrations/0037_independent_runs.sql"),
+        version: 38,
+        sql: include_str!("../../migrations/0038_independent_runs.sql"),
         foreign_keys: None,
     },
 ];
@@ -208,7 +208,7 @@ pub(super) fn run(
     {
         report(migration.version - version, super::SCHEMA_VERSION - version);
         // Rebuild the Run table without changing referent IDs or dependent rows.
-        if migration.version == 37 {
+        if migration.version == 38 {
             connection.pragma_update(None, "foreign_keys", false)?;
         }
         let transaction =
@@ -242,7 +242,7 @@ pub(super) fn run(
             migrate_attachment_sources(&transaction)?;
         }
         transaction.commit()?;
-        if migration.version == 37 {
+        if migration.version == 38 {
             connection.pragma_update(None, "foreign_keys", true)?;
         }
     }

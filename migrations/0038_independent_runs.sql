@@ -10,5 +10,5 @@ INSERT INTO independent_run(id,thread_id,state,created_at,ended_at,stop_reason)
 DROP TABLE run;
 ALTER TABLE independent_run RENAME TO run;
 CREATE UNIQUE INDEX one_live_run ON run(thread_id) WHERE state IN ('live','stopping');
-INSERT INTO schema_migration(version,name) VALUES(37,'0037_independent_runs');
-PRAGMA user_version=37;
+INSERT INTO schema_migration(version,name) VALUES(38,'0038_independent_runs');
+PRAGMA user_version=38;

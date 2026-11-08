@@ -715,5 +715,5 @@ INSERT INTO schema_migration(version,name) VALUES(36,'0036_spill_tool_metadata')
 PRAGMA user_version=36;
 INSERT INTO schema_migration(version,name) VALUES(37,'0037_thread_branch_kind');
 
-INSERT INTO schema_migration(version,name) VALUES(37,'0037_independent_runs');
-PRAGMA user_version=37;
+INSERT INTO schema_migration(version,name) VALUES(38,'0038_independent_runs');
+PRAGMA user_version=38;

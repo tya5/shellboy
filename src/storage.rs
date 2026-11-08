@@ -56,7 +56,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (35, "0035_index_reclaim_lookup"),
     (36, "0036_spill_tool_metadata"),
     (37, "0037_thread_branch_kind"),
-    (37, "0037_independent_runs"),
+    (38, "0038_independent_runs"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
