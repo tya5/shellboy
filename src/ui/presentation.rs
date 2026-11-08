@@ -969,9 +969,7 @@ fn notice_symbol(kind: Option<&str>) -> &'static str {
     use crate::ui::text_width::glyphs;
     match kind.unwrap_or("") {
         "shell_ended" => glyphs::SHELL,
-        "recovery_wait" | "reply_reminder" | "reply_outcome" => {
-            glyphs::WAIT
-        }
+        "recovery_wait" | "reply_reminder" | "reply_outcome" => glyphs::WAIT,
         "thread_settings"
         | "thread_parent"
         | "connection_changed"

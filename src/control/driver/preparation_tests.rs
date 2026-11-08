@@ -836,14 +836,10 @@ async fn settled_run_and_turn_completion_never_rewrite_answer_or_ending_time() {
             tx.execute("UPDATE run SET state='completed'", [])?;
             tx.execute("UPDATE turn SET state='completed'", [])?;
             assert_eq!(
-                super::super::state::complete_answer_turn(
-                    &tx,
-                    &turn,
-                    "different-answer"
-                )
-                .unwrap_err()
-                .into_api_error()
-                .code,
+                super::super::state::complete_answer_turn(&tx, &turn, "different-answer")
+                    .unwrap_err()
+                    .into_api_error()
+                    .code,
                 ErrorCode::OperationConflict
             );
             assert_eq!(

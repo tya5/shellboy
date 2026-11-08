@@ -337,4 +337,3 @@ mod refresh_scope_tests {
         assert!(selected.tool_scope.is_none());
     }
 }
-

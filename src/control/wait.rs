@@ -349,7 +349,14 @@ fn inspect(
     for condition in &args.conditions {
         match condition {
             WaitCondition::ReplyReceived { message_id } => {
-                let row = db.query_row("SELECT r.result_json FROM receipt r WHERE r.message_node_id=?1", [message_id], |r| r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?;
+                let row = db
+                    .query_row(
+                        "SELECT r.result_json FROM receipt r WHERE r.message_node_id=?1",
+                        [message_id],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .optional()
+                    .map_err(sql_error)?;
                 if let Some(saved) = row {
                     let saved: Value = saved
                         .as_deref()

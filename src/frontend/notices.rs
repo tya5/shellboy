@@ -187,8 +187,16 @@ pub(super) fn apply(nodes: &mut [UiNode], facts: &[Fact]) {
             node.presentation.metadata_limited = true;
         }
         node.presentation.fields.extend(fields);
-        let source_error=(fact.source.is_none() || fact.source_deleted.is_some()).then_some(Text::NoticeSourceUnavailable);
-        let notice=if fact.available_execution.is_none() || fact.group.is_none() {Message::Text(Text::NoticeCallUnavailable)} else {Message::CommandNotice{command:fact.command.as_deref().map(clean).filter(|s|!s.is_empty()),background:fact.background}};
+        let source_error = (fact.source.is_none() || fact.source_deleted.is_some())
+            .then_some(Text::NoticeSourceUnavailable);
+        let notice = if fact.available_execution.is_none() || fact.group.is_none() {
+            Message::Text(Text::NoticeCallUnavailable)
+        } else {
+            Message::CommandNotice {
+                command: fact.command.as_deref().map(clean).filter(|s| !s.is_empty()),
+                background: fact.background,
+            }
+        };
         node.presentation
             .ui_messages
             .set_notice(notice, source_error);
@@ -267,14 +275,8 @@ mod tests {
                 background: Some(true),
             })
         );
-        assert_eq!(
-            nodes[1].presentation.ui_messages.notice,
-            None
-        );
-        assert_eq!(
-            nodes[2].presentation.ui_messages.notice,
-            None
-        );
+        assert_eq!(nodes[1].presentation.ui_messages.notice, None);
+        assert_eq!(nodes[2].presentation.ui_messages.notice, None);
         let serialized = serde_json::to_value(&nodes[0].presentation).unwrap();
         let mut without_typed = nodes[0].presentation.clone();
         without_typed.ui_messages.notice = None;
@@ -297,10 +299,7 @@ mod tests {
             Some(Text::NoticeSourceUnavailable)
         );
         assert!(value(&nodes[0], "source_error").is_some());
-        assert_eq!(
-            nodes[1].presentation.ui_messages.notice,
-            None
-        );
+        assert_eq!(nodes[1].presentation.ui_messages.notice, None);
         apply(&mut nodes, &[]);
         for node in &nodes {
             assert_eq!(node.presentation.ui_messages.notice, None);
@@ -354,8 +353,8 @@ mod tests {
         assert!(value(&nodes[0], "title").unwrap().contains("CORRECT"));
         assert!(!value(&nodes[0], "title").unwrap().contains("WRONG"));
         assert!(value(&nodes[0], "title").unwrap().contains("背景指定あり"));
-        assert!(value(&nodes[1],"thread_id").is_none());
-        assert!(value(&nodes[2],"unavailable").is_none());
+        assert!(value(&nodes[1], "thread_id").is_none());
+        assert!(value(&nodes[2], "unavailable").is_none());
         for node in &nodes {
             assert_eq!(node.text, "CANONICAL_SENTINEL");
             assert!(node.presentation.metadata_bytes() <= crate::presentation::MAX_METADATA_BYTES);
@@ -384,13 +383,13 @@ mod tests {
     }
     #[test]
     fn child_lifecycle_facts_are_not_decorated_or_refreshed() {
-        let db=fixture();
-        let ids=vec!["node-child-notice".into()];
-        let mut nodes=vec![node("child-notice")];
-        assert!(read_tx(&db,&ids).unwrap().is_empty());
-        apply(&mut nodes,&[]);
-        assert!(value(&nodes[0],"title").is_none());
-        assert_eq!(nodes[0].text,"CANONICAL_SENTINEL");
+        let db = fixture();
+        let ids = vec!["node-child-notice".into()];
+        let mut nodes = vec![node("child-notice")];
+        assert!(read_tx(&db, &ids).unwrap().is_empty());
+        apply(&mut nodes, &[]);
+        assert!(value(&nodes[0], "title").is_none());
+        assert_eq!(nodes[0].text, "CANONICAL_SENTINEL");
         let trace = super::super::sql_trace::Statements::new(&db);
         assert!(read_tx(&db, &vec!["x".into(); 129]).is_err());
         assert!(read_tx(&db, &[]).unwrap().is_empty());

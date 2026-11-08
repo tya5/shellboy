@@ -10921,3 +10921,25 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 - [x] Paged activity snapshots contain no attempt state whose latest sequence exceeds that page cursor; tests page across attempt start and end.
 - [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
 - [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.
+
+### #276 independent Runs: incremental evidence (work in progress)
+
+Stage-1 inventory and the seven simplification decisions are posted on issue #276. The branch is not ready for
+handoff until corrected-tip normal and all-OS CI pass, and it must not land before v0.11.0.
+
+- Storage: 25 focused tests pass, including fresh/upgrade schema identity, removal of the Run-owner column/index/
+  cycle triggers, retained active-Run uniqueness and Thread DAG checks, and a synthetic v37→v38 upgrade with two
+  reopens preserving Run/Turn IDs, shell ownership, actual pending expected-reply receipt metadata and FK validity.
+- Shell/wait read model: all 15 focused tests pass after removing child rows/index probes/counts; shell ownership,
+  output timing, wait scope and bounded SQL assertions remain. No performance gain is inferred from fewer queries.
+- Wait observations: 19/20 initially pass; one transient-recovery cursor regression exposed the old child-event
+  index/query name. The current correction uses local recovery events and migrates the event-kind index; rerun
+  is pending. Self/ancestor/composed observations no longer reject cycles and retain normal timeout/cancellation.
+- Python: 206 tests pass before the final schema artifact refresh. Language classifications are individually
+  re-reviewed for changed shell/Watch source arms; six removed child literals lose their obsolete decisions.
+
+Explicit RunEnded/TurnCompleted observation and bounded interrupted-wait records remain general inspection tools;
+they are not the child delegation lifecycle. Reply duties use one recipient-tagged list. A Run owns shells only,
+and Thread parentage remains organizational. New native shell/HTTP independence tests and completed-sender reply
+admission are implemented but still await focused validation. The nested OS-owner cleanup cases are shell ownership
+and intentionally unchanged. No real provider or user database is used.

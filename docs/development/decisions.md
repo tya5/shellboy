@@ -4292,3 +4292,15 @@ W8 P2 correction: the all-bytes barrier moved the control probe too late. Keep a
 instead: first stdout batch committed, Thread-create response while stderr is held, assert incomplete total, then
 release stderr and close stdin. Remove the running-state assertion rather than forcing it. This preserves evidence
 of control progress before saving finishes without depending on natural process duration.
+
+### D-276: independent Runs and expected-reply delegation
+
+Issue #276 adopts removal of Run-to-Run ownership, without replacing it with another dependency graph. Keep shell
+ownership, Thread organization, explicit general observations and unanswered-reply reminders. Remove child-based
+retention/stop propagation and lifecycle forwarding. One tagged reply-duty list replaces the three aliases.
+
+Child requests use accepted expected-reply messages. End the sender Turn when only the result remains; the explicit
+reply is ordinarily delivered to that Thread, including by starting a new independent Run after the sender ends.
+Progress uses normal messages. Schema 38 removes the ownership field and related policy indexes/triggers, preserving
+referent IDs and shell ownership. The local recovery event replaces child-forwarding nomenclature; existing recovery
+facts migrate their event kind/index without rewriting payloads. Landing is deferred until after v0.11.0.

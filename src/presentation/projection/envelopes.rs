@@ -80,9 +80,7 @@ fn event(
                 EventClass::Attention
             }
             "recovery_wait" => EventClass::Attention,
-            "recovery_resumed"
-            | "thread_unarchived"
-            | "shell_ended" => EventClass::Change,
+            "recovery_resumed" | "thread_unarchived" | "shell_ended" => EventClass::Change,
             "index_state"
             | "thread_settings"
             | "thread_parent"
