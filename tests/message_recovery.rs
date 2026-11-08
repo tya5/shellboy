@@ -529,25 +529,17 @@ async fn only_human_or_live_direct_parent_restart_authorizes_old_unadmitted_inpu
         let current = snapshot(&owner, &old.message_id).await;
         assert_provenance(&before, &current);
         assert_eq!(
-            current.on_path, own_parent,
+            current.on_path, false,
             "unrelated machine send cannot recover older instructions"
         );
-        if own_parent {
-            assert_eq!(current.state, "applied");
-            assert_eq!(
-                current.reason.as_deref(),
-                Some("recovered_at_explicit_resume")
-            );
-            let replay = control
-                .store
-                .execute(req, Some(origin.clone()))
-                .await
-                .unwrap();
-            assert_eq!(replay.result, first.result);
-            assert_eq!(snapshot(&owner, &old.message_id).await, current);
-        } else {
-            assert_eq!(current.admission, "unadmitted");
-        }
+        assert_eq!(current.admission, "unadmitted");
+        let replay = control
+            .store
+            .execute(req, Some(origin.clone()))
+            .await
+            .unwrap();
+        assert_eq!(replay.result, first.result);
+        assert_eq!(snapshot(&owner, &old.message_id).await, current);
         proxy.no_pending_request();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

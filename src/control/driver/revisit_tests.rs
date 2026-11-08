@@ -34,7 +34,7 @@ async fn closed_start_gate_only_defers_a_waiting_message_and_preserves_child_com
             assert_eq!(state,if waiting{"live"}else{"completed"});
             assert!(reason.is_none(),"a normal completion must not acquire app_shutdown");
             let events:i64=db.query_row("SELECT count(*) FROM event WHERE kind='child_run_ended' AND target_run_id='parent-run' AND json_extract(payload_ref_json,'$.state')='completed'",[],|r|r.get(0))?;
-            assert_eq!(events,if waiting{0}else{1});
+            assert_eq!(events,0);
             if waiting {
                 let saved:(String,Option<String>)=db.query_row("SELECT state,run_id FROM receipt WHERE id='receipt'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
                 assert_eq!(saved,("held".into(),None),"no Turn starts after Quit");

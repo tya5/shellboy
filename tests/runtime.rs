@@ -1771,7 +1771,7 @@ async fn real_shell_cli_may_write_and_stop_an_independent_runs_shell_and_run() {
             let attacker = attacker.run_id.clone().unwrap();
             move |db| {
                 let independent: i64 = db.query_row(
-                    "SELECT count(*) FROM run WHERE id IN (?1,?2) AND owner_run_id IS NULL",
+                    "SELECT count(*) FROM run WHERE id IN (?1,?2)",
                     [victim, attacker],
                     |row| row.get(0),
                 )?;

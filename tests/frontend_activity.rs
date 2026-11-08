@@ -224,8 +224,8 @@ async fn activity_uses_recorded_run_turn_attempt_priority_and_remains_read_only(
     change(&db,"INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','/','/AGENTS.md','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now');").await;
     assert_eq!(
         projection(&db).await.snapshot.phase,
-        ActivityPhase::Background,
-        "owned child Run is recorded background work"
+        ActivityPhase::Continuing,
+        "an independent Run does not retain this Run in background"
     );
     change(&db,"UPDATE run SET state='completed' WHERE id='r'; INSERT INTO run(id,thread_id,state,created_at)VALUES('new-run','t','stopped','now');").await;
     let latest = projection(&db).await;

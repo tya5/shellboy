@@ -1239,7 +1239,6 @@ fn interruption_group(nodes: &[UiNode]) -> Option<usize> {
                 "runs"
                     | "turns"
                     | "shells"
-                    | "owned_children"
                     | "unreflected_messages"
                     | "cancelled_waits"
                     | "pending_operations_with_unknown_targets"
@@ -3438,7 +3437,6 @@ mod tests {
                 "runs",
                 "turns",
                 "shells",
-                "owned_children",
                 "pending_operations_with_unknown_targets",
             ] {
                 let saved = &value["change"][section];
@@ -3479,7 +3477,7 @@ mod tests {
             crate::presentation::fields_of_value(&serde_json::json!({"text":small.to_string()}));
         assert!(generic.len() + wrapped.len() > 128);
         let nodes = scene(&small, "interruption_context");
-        assert_eq!(interruption_group(&nodes), Some(5));
+        assert_eq!(interruption_group(&nodes), Some(4));
         assert!(
             nodes
                 .last()
@@ -3508,7 +3506,7 @@ mod tests {
         );
         assert_eq!(
             interruption_group(&scene(&large, "interruption_context")),
-            Some(5)
+            Some(4)
         );
         assert_eq!(interruption_group(&scene(&small, "tool_result")), None);
         let mut unknown_kind = small.clone();

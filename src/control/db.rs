@@ -3140,10 +3140,6 @@ mod thread_list_plan_tests {
             plans.iter().any(|p| p.contains("shell_active_owner")),
             "{plans:?}"
         );
-        assert!(
-            plans.iter().any(|p| p.contains("runs_by_owner")),
-            "{plans:?}"
-        );
         // The outer Thread pagination may sort; the scalar Run lookup must use
         // its covering index instead of reading every Run in each Thread.
     }
@@ -3586,10 +3582,10 @@ mod activity_list_tests {
             .unwrap();
         verify(ActivityPhase::Continuing, "completed");
         db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('kid','child','live','2026-10-29T00:00:00Z')", []).unwrap();
-        verify(ActivityPhase::Background, "completed");
+        verify(ActivityPhase::Continuing, "completed");
         db.execute("UPDATE run SET state='stopping' WHERE id='kid'", [])
             .unwrap();
-        verify(ActivityPhase::Background, "completed");
+        verify(ActivityPhase::Continuing, "completed");
         db.execute("UPDATE run SET state='completed' WHERE id='kid'", [])
             .unwrap();
         verify(ActivityPhase::Continuing, "completed");
@@ -4755,7 +4751,7 @@ mod interrupted_message_assignment_tests {
                 .unwrap();
             assert_eq!(
                 count,
-                if caller_kind == "foreign" { 0 } else { 1 },
+                if caller_kind == "human" { 1 } else { 0 },
                 "{caller_kind}"
             );
             let original: (String, String) = tx

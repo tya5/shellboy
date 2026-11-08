@@ -571,7 +571,7 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         request.provenance.origin_thread_id.as_deref(),
         Some("thread")
     );
-    assert_eq!(request.context.owner_run_id.as_deref(), Some("parent-run"));
+    assert!(request.context.owner_run_id.is_none());
     assert_eq!(request.selection.thread_id, "fork");
     assert_eq!(request.selection.current_cwd, "/fork-current");
     assert_eq!(request.execution_count, 9);

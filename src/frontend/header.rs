@@ -1078,7 +1078,7 @@ mod header_scalar_bound_tests {
             .unwrap()
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
-        for alias in ["t", "r", "u", "child", "s"] {
+        for alias in ["t", "r", "u", "s"] {
             assert!(
                 plans
                     .iter()

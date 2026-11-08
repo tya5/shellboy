@@ -791,3 +791,9 @@ Protocol 5 removes Run ownership and the duplicate reply-duty lists. Use `awaiti
 tag. External peers must match the advertised version exactly; update Studio/clients with the owner, without a v4
 fallback. A Run owns shells only. Explicit own Run/Turn/invoking-shell waits fail with `self_wait`; other observations
 have no dependency graph. Child requests use expected replies and normal delivery after the sender Turn ends.
+
+## Wait for any child Thread
+
+Use expected replies rather than supervising child Runs: retain each accepted request ID and finish your Turn.
+External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
+`last_end_message` without treating recovery_wait as terminal or automatically replaying an interrupted wait.

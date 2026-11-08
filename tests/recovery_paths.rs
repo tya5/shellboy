@@ -376,10 +376,7 @@ async fn graceful_shutdown_preserves_wait_children_shell_and_recovery_context_af
         parent["change"]["cancelled_waits"]["items"][0]["operation_id"],
         operation
     );
-    assert_eq!(
-        parent["change"]["owned_children"]["items"][0]["run_id"],
-        "r-child"
-    );
+    assert!(parent["change"].get("owned_children").is_none());
     assert_eq!(
         parent["change"]["shells"]["items"][0]["execution_id"],
         "s-parent"

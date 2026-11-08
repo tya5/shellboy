@@ -468,7 +468,7 @@ mod tests {
         let expected = canonical(&db, &run());
         let trace = Statements::new(&db);
         let raw = read_tx(&db, &run()).unwrap();
-        assert_eq!(trace.count(), 6);
+        assert_eq!(trace.count(), 5);
         drop(trace);
         let prepared = prepare(raw).unwrap();
         assert_eq!(prepared.value, expected);
@@ -498,7 +498,7 @@ mod tests {
                 assert_eq!(
                     trace.count(),
                     if matches!(command, Command::RunGet(_)) {
-                        5
+                        4
                     } else {
                         1
                     }
@@ -577,7 +577,7 @@ mod tests {
             let mut statement = db.prepare(RUN_SQL).unwrap();
             let turns = statement
                 .query_map(params!["r", JSON_BYTES as i64], |row| {
-                    row.get::<_, Option<String>>(6)
+                    row.get::<_, Option<String>>(5)
                 })
                 .unwrap()
                 .collect::<rusqlite::Result<Vec<_>>>()

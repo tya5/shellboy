@@ -63,15 +63,15 @@ replying (`ignored`), or its Thread is deleted (`recipient_deleted`), a model
 sender receives a `reply_outcome` notice in its live Run. Without a live Run,
 the notice is available at the next Turn and does not start a Run. If an admitted
 duty is cancelled, the recipient receives `reply_cancelled` at its next request
-boundary; this notice does not wake it. Progress reports remain ordinary
+boundary, including ordinary activation after its previous Run ends. Progress reports remain ordinary
 messages. `satisfied` is not necessarily success: inspect the reply snapshot's
 `state` (`replied`, `ignored`, `cancelled`, or `recipient_deleted`). A pending
 reply has no deadline; a timeout limits only that wait call. At normal Run end,
 one reminder is delivered for unanswered applied requests; if still unanswered,
 they become `ignored`. Human decision questions are distinct: they do not trigger
 these outcomes or pause another reply duty you hold. Tell your requester you are
-blocked on the human before ending the Run. A stopped or recovery-waiting Run
-leaves an ordinary reply pending.
+blocked on the human before ending the Run. A recovery-waiting Run leaves the reply pending; an actual terminal replyless normal completion, explicit stop or
+terminal failure resolves it as `ignored` and delivers that outcome to the requesting Thread.
 Use `thread_settled` for stalls and an explicit recovery decision; do not resend
 the same request merely because it is held or the wait timed out. Cancellation
 can withdraw a reply duty even after admission; inspect the receipt.
@@ -179,3 +179,9 @@ for stalled or recovery-waiting work. Cancel an obsolete request with `message
 cancel` (including after admission), and use ordinary messages for progress.
 A separate `--deliver complete` "did you report?" reminder is unnecessary:
 the Run-end reply reminder provides that check.
+
+## Waiting for several Threads
+
+For subagent requests, send each request with `--expect-reply`, retain its accepted message ID and end your Turn.
+Normal explicit replies or terminal outcomes deliver the results to your Thread. External observers may use the
+explicit conditions described in Waiting for replies; do not keep a parent Run alive for child lifecycle events.
