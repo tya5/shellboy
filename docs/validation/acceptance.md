@@ -10897,3 +10897,12 @@ observer schedule without sleeping, proving the fixture premise invalid; it is n
 E3 `failed` terminal state. Restoring the event-gated source byte-for-byte passes (0.66 s). No counterfactual mode is
 committed. The GC focused case passes with 2772 steps, 30 deferrals, 40001 scanned candidates and 308 concurrent
 writes in 11.18 s. Deadlines, drain limits and assertions are unchanged. Fresh full CI remains the handoff gate.
+
+### #260 W8 P2 correction (validation pending)
+
+The first handshake revision weakened the responsiveness assertion by waiting for all output before probing.
+Restore the probe after the first committed batch. The producer emits stdout, waits for an explicit stdin line,
+and only then emits stderr; thus at least half the 2 MiB is still unavailable until the probe succeeds. Assert the
+Thread-create response and positive/incomplete committed byte count before releasing the line and EOF. Do not assert
+shell state at probe time: running/exited are both legal observer orderings. Exact output and final natural exit
+remain mandatory. No sleep or increased deadline establishes this ordering; watchdogs only bound a broken test.

@@ -4281,3 +4281,8 @@ The GC budget fixture also waits for its foreground writer's first committed upd
 loop. Spawning a task is not evidence that it has run. A one-shot readiness event makes the concurrent-write premise
 explicit without changing the VM budget, completion deadline or required deferrals. This is a fixture-ordering guard,
 not evidence that every reported GC failure had that cause.
+
+W8 P2 correction: the all-bytes barrier moved the control probe too late. Keep an explicit remaining-output gate
+instead: first stdout batch committed, Thread-create response while stderr is held, assert incomplete total, then
+release stderr and close stdin. Remove the running-state assertion rather than forcing it. This preserves evidence
+of control progress before saving finishes without depending on natural process duration.

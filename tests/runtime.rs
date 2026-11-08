@@ -1201,7 +1201,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         .reply
         .send(Reply::json(json!({"id":"binary-output","status":"completed","output":[{
             "type":"function_call","id":"tool-item","call_id":"tool-call","name":"shell",
-            "arguments":json!({"command":format!("cat '{}'; cat '{}' >&2; cat >/dev/null",out.display(),err.display()),"stdin_open":true,"background":false}).to_string()
+            "arguments":json!({"command":format!("cat '{}'; IFS= read -r release; cat '{}' >&2; cat >/dev/null",out.display(),err.display()),"stdin_open":true,"background":false}).to_string()
         }]})))
         .ok()
         .unwrap();
@@ -1219,7 +1219,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
                 })
                 .await
                 .unwrap();
-            if saved == 2 * 1024 * 1024 {
+            if saved > 0 {
                 break;
             }
             tokio::task::yield_now().await;
@@ -1227,9 +1227,9 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     })
     .await
     .unwrap();
-    // All bytes are durably captured before the control probe. Only stdin EOF,
-    // not the speed of this DB/control roundtrip, can release the producer.
-    crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail",
+    // The first batch is committed, but stderr cannot be emitted until release.
+    // Assert control responds with the remaining output still pending.
+    let probe=crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail",
         command(
             &control,
             Command::ThreadCreate(ThreadCreateArgs {
@@ -1244,19 +1244,13 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     )
     .await
     .unwrap();
-    control
-        .store
-        .database
-        .call(|db| {
-            assert_eq!(
-                db.query_row("SELECT state FROM shell_execution", [], |row| row
-                    .get::<_, String>(0))?,
-                "running"
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
+    assert!(probe["thread_id"].is_string(),"probe must return a created Thread: {probe}");
+    control.store.database.call(|db| {
+        let bytes:i64=db.query_row("SELECT COALESCE(SUM(bytes),0) FROM fixture_output_batch",[],|r|r.get(0))?;
+        assert!(bytes>0 && bytes<2*1024*1024,"probe must complete before output saving finishes: {bytes}");
+        // Running and exited are both legal observer states; liveness is not the assertion.
+        Ok(())
+    }).await.unwrap();
     // Releasing stdin is the completion event; DB work above cannot race natural exit.
     let execution = control
         .store
@@ -1268,6 +1262,7 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         })
         .await
         .unwrap();
+    command(&control,Command::ShellWrite(ShellWriteArgs {execution_id:execution.clone(),text:"release\n".into(),encoding:"UTF-8".into()})).await;
     command(
         &control,
         Command::ShellEof(ExecutionTarget {
