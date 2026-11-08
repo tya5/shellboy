@@ -136,6 +136,7 @@ mod native {
         }
         serde_json::from_slice(&bytes[end.unwrap()..end.unwrap() + length]).unwrap()
     }
+    #[cfg(unix)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn tty_lifecycle_and_shell_osc_are_isolated_in_on_and_off_modes() {
         crate::test_watchdog::watchdog("tests/program_status.rs: tty_lifecycle_and_shell_osc_are_isolated_in_on_and_off_modes",async {
