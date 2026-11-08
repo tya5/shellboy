@@ -3509,10 +3509,10 @@ mod thread_list_plan_tests {
             .unwrap()
         };
         let saturated = page(&db);
-        assert_eq!(saturated.items[0].awaiting_human_count, 17);
+        assert_eq!(saturated.items[0].awaiting_human_count, 129);
         assert!(!saturated.items[0].awaiting_human_count_exact);
         assert_eq!(saturated.items[0].awaiting_human_oldest_at, None);
-        db.execute("UPDATE receipt SET result_json='{\"reply\":{\"state\":\"replied\"},\"to_human\":true}' WHERE id='receipt-16'", []).unwrap();
+        db.execute("UPDATE receipt SET result_json='{\"reply\":{\"state\":\"replied\"},\"to_human\":true}' WHERE id='receipt-128'", []).unwrap();
         let exact = page(&db);
         assert_eq!(exact.items[0].awaiting_human_count, 16);
         assert!(exact.items[0].awaiting_human_count_exact);
@@ -4658,8 +4658,8 @@ mod agents_reference_tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::ReplyLimit);
-        assert_eq!(error.details.as_ref().unwrap()["limit"], 16);
-        assert_eq!(error.details.as_ref().unwrap()["current_count"], 16);
+        assert_eq!(error.details.as_ref().unwrap()["limit"], 128);
+        assert_eq!(error.details.as_ref().unwrap()["current_count"], 128);
         assert!(error.message.contains("reply to or cancel"));
         let retained_thread = thread.clone();
         let retained = store.database.call(move |db| Ok(db.query_row(
@@ -4667,7 +4667,7 @@ mod agents_reference_tests {
             [&retained_thread], |row| row.get::<_, i64>(0),
         )?)).await.unwrap();
         assert_eq!(
-            retained, 16,
+            retained, 128,
             "refusing the 17th must retain all pre-existing duties"
         );
         let reply_store = store.clone();
