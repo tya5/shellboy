@@ -10965,3 +10965,19 @@ The existing Rust synthetic upgrade regression verifies shell/Turn IDs and pendi
 new schema/index and direct-self-wait changes still require the final focused checks and CI. Backup belongs to binary
 replacement operations, not a new migration shim. A stopped preliminary fixture setup did not produce a measurement;
 only the completed star-shaped fixture run supplies the numbers above.
+
+### #276 reviewed implementation validation update
+
+After rebasing onto main `0ac5087af2`, #275 already occupies protocol 4. The breaking #276 wire therefore uses
+protocol **5**, retaining `events.reasoning_activity`; #280 comment 6722194384 supersedes the earlier v4 proposal.
+The regenerated schema and 34 protocol tests pass. Strict all-target Clippy (`-D warnings`) passes. The injected
+migration-38 failure regression passes, showing rollback and restored FK checking. The large-DB measurement above
+covers the Run-DDL method only, not seed/copy work or all event-index work in migration 38.
+
+Focused evidence: 20 wait tests, 9 reply integration tests (pending through recovery then explicit Run retry and
+same-request reply), 4 independent-runtime tests with real child/grandchild shell PIDs, 4 shell-notice tests, and
+34 work-panel tests pass. A native HTTP test covers replyless normal completion (including the retained one-time
+reminder), explicit stop, and cancellation after the requesting Run completes; each outcome reaches a new requesting
+Run's model input through normal delivery. Terminal `failed` is covered by the shared terminal helper's synthetic
+DB test, not a real provider failure: retry exhaustion remains recoverable and must not be mislabeled terminal.
+The actual final-SHA CI evidence will be reported separately; these focused passes do not claim a full-suite pass.
