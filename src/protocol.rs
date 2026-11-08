@@ -170,6 +170,7 @@ pub fn schema_json() -> String {
     add_root!("Origin", Origin);
     add_root!("PageCursor", PageCursor);
     add_root!("EventCursor", EventCursor);
+    add_root!("EventsWaitResult", EventsWaitResult);
     add_root!("Hello", crate::ipc::Hello);
     add_root!("Welcome", crate::ipc::Welcome);
     add_root!("Endpoint", crate::app::Endpoint);
@@ -225,8 +226,8 @@ pub fn schema_json() -> String {
     remove_nested_definitions(&mut operation_results);
     let document = serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://shellboy.dev/schema/protocol-v3.json",
-        "title": "Shellboy local RPC protocol v3",
+        "$id": "https://shellboy.dev/schema/protocol-v4.json",
+        "title": "Shellboy local RPC protocol v4",
         "protocol_version": PROTOCOL_VERSION,
         "capabilities": PROTOCOL_CAPABILITIES,
         "operation_results": operation_results,
@@ -1684,7 +1685,7 @@ mod message_acknowledgement_tests {
                 "missing result schema for {name}"
             );
         }
-        assert_eq!(results.len(), 62);
+        assert_eq!(results.len(), 63);
         for name in ["status", "thread.create", "shell.list", "config.get"] {
             assert_eq!(
                 results[name],

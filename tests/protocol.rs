@@ -1095,5 +1095,9 @@ fn protocol_v4_handshake_advertises_reasoning_activity_capability_and_tolerates_
         schema["capabilities"],
         serde_json::json!(["events.reasoning_activity"])
     );
-    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 62);
+    assert_eq!(
+        schema["operation_results"]["events.wait"]["properties"]["reasoning_activity"]["type"],
+        "array"
+    );
+    assert_eq!(schema["operation_results"].as_object().unwrap().len(), 63);
 }
