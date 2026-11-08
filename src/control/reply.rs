@@ -645,13 +645,36 @@ mod tests {
                 "SELECT target_thread_id,rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id>'a' AND json_extract(result_json,'$.reply.state')='pending' ORDER BY target_thread_id,rowid LIMIT 128",
                 "SELECT target_thread_id,rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='target' AND rowid>1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY rowid LIMIT 128",
             ] {
-                let plans=db.prepare(&format!("EXPLAIN QUERY PLAN {query}")).unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-                assert!(plans.iter().any(|p|p.contains("SEARCH receipt USING INDEX")),"{plans:?}");
-                assert!(!plans.iter().any(|p|p.contains("TEMP B-TREE")),"{plans:?}");
-                let mut stmt=db.prepare(query).unwrap();
-                let count=stmt.query_map([],|_|Ok(())).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap().len();
-                assert_eq!(count,128);
-                assert!(stmt.get_status(rusqlite::StatementStatus::VmStep)<2500,"{}",stmt.get_status(rusqlite::StatementStatus::VmStep));
+                let plans = db
+                    .prepare(&format!("EXPLAIN QUERY PLAN {query}"))
+                    .unwrap()
+                    .query_map([], |r| r.get::<_, String>(3))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap();
+                assert!(
+                    plans
+                        .iter()
+                        .any(|p| p.contains("SEARCH receipt USING INDEX")),
+                    "{plans:?}"
+                );
+                assert!(
+                    !plans.iter().any(|p| p.contains("TEMP B-TREE")),
+                    "{plans:?}"
+                );
+                let mut stmt = db.prepare(query).unwrap();
+                let count = stmt
+                    .query_map([], |_| Ok(()))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+                    .len();
+                assert_eq!(count, 128);
+                assert!(
+                    stmt.get_status(rusqlite::StatementStatus::VmStep) < 2500,
+                    "{}",
+                    stmt.get_status(rusqlite::StatementStatus::VmStep)
+                );
             }
             let immediate = terminal_tx(&db, "r", "1").unwrap();
             assert_eq!(immediate.len(), 128);

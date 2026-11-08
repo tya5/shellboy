@@ -3019,7 +3019,7 @@ async fn startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch() {
                 .store
                 .execute(
                     Request::new(
-                        uuid::Uuid::new_v4().to_string(),
+                        format!("{}:{}", control.store.instance_id, uuid::Uuid::new_v4()),
                         Command::ThreadCreate(ThreadCreateArgs {
                             agents: None,
                             connection: None,
