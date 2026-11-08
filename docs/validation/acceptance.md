@@ -11027,3 +11027,14 @@ match the authorized counts only; no claim is made about real payload sizes or d
 - `end_message_node_id` remains final-Turn-only. No schema table, migration, worker, or adapter added. Protocol remains v4 because `status` was an opaque result and request/event contracts are unchanged.
 - Synthetic tests cover commentary and final nodes, duplicate output items sharing a node, null and no-row results, eligible tails after 256 noneligible candidates, all-noneligible exact/overflow boundaries, VM-step counts before/after 100k extra rows, selected-path readback eligibility, the composite-key query plan, status projection, and durable change-clock cursor advancement.
 - No live owner or billing APIs are used. Re-run review, light checks, push, and both CI matrices on the repaired SHA; the earlier e39c658 CI is not evidence for this P1 repair.
+
+Post-W8 boundedness evidence: `bounded_terminal_sweeps_resume_all_senders_without_cross_run_scans_or_duplicates`
+passes for completed/stopped/failed with 261 applied requests, two senders and 4,096 unrelated pending receipts on
+other Runs of the same target. Each sweep examines at most 128 candidates, survives rollback and cursor loss on DB
+reopen, settles all 261 exactly once, retains all unrelated held duties, and verifies indexed seek/no-sort plans and
+less than 2,500 SQLite VM steps for each candidate-selection query. The fixed test pass budget is not a runtime cap.
+`startup_maintenance_settles_terminal_reply_backlog_beyond_one_batch` starts a disposable Control with 261 saved
+terminal requests and no run-ended signal; existing startup maintenance settles all requests and issues real local
+mock HTTP input containing the outcome for each tested terminal state. The real user owner is not used or restarted.
+Explicit FK-OFF detection, rollback/restoration and the legacy partial-index migration regression also pass. These
+focused results precede the new final-SHA CI; the older 6cad05f0 CI is not evidence for the correction.
