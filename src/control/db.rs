@@ -3325,9 +3325,7 @@ mod thread_list_plan_tests {
 
     #[test]
     fn awaiting_human_page_has_fixed_vm_steps_with_thousands_of_pending_threads() {
-        fn page_steps(
-            thread_count: usize,
-        ) -> (i32, Vec<(String, i64, String)>, Vec<String>, bool) {
+        fn page_steps(thread_count: usize) -> (i32, Vec<(String, i64, String)>, Vec<String>, bool) {
             let db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             db.execute(
