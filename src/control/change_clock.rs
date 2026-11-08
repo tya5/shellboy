@@ -237,16 +237,15 @@ impl ChangeClock {
         let start = text.ceil_char_boundary(text.len().saturating_sub(room));
         let offset = offset + text[..start].chars().count() as u64;
         let kept = &text[start..];
-        if reasoning {
-            if let Some(activity) = inner
+        if reasoning
+            && let Some(activity) = inner
                 .reasoning_activity
                 .get_mut(thread)
                 .filter(|activity| activity.attempt == attempt)
-            {
-                let bytes = activity.received_bytes.get_or_insert(0);
-                *bytes = bytes.saturating_add(text.len() as u64);
-                activity.sequence = seq;
-            }
+        {
+            let bytes = activity.received_bytes.get_or_insert(0);
+            *bytes = bytes.saturating_add(text.len() as u64);
+            activity.sequence = seq;
         }
         let entry = inner.text.get_mut(thread).expect("entry inserted above");
         if start > 0 {
