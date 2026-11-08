@@ -237,6 +237,16 @@ async fn maintenance_loop(
                     match result {
                         Err(error) if error.is_storage_failure() => {if let Some(control)=control.upgrade(){control.fail_storage().await;}return;}
                         Ok(report) => {
+                            // Reply outcomes are committed in the GC batch before
+                            // these bounded, post-commit driver kicks are emitted.
+                            for thread in report.reply_wake_threads {
+                                if let Some(control) = control.upgrade() {
+                                    control.changed(&thread);
+                                    control.kick_quiet(thread).await;
+                                } else {
+                                    return;
+                                }
+                            }
                             // Deferred units resume on the next pass; nothing
                             // else repeats until a new mark or deadline.
                             signals.restore(report.deferred_kinds);
@@ -391,6 +401,9 @@ impl Control {
                 let stop = self.stop.clone();
                 let control = Arc::downgrade(self);
                 let signals = self.store.database.signals().clone();
+                // Re-discover durable history jobs left by a prior owner before
+                // maintenance starts; in-memory marks do not survive restart.
+                signals.mark_all(&crate::maintenance::Work::DELETION);
                 Mutex::new(Some(tokio::spawn(async move {
                     if let Err(error) = attachments.restart_cleanup().await
                         && error.is_storage_failure()

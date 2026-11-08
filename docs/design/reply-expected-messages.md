@@ -155,10 +155,13 @@ provenance, not a distinct node kind.
 | `replied` | `message reply` commits | original `reply` object; reply node; delivery receipt for model senders |
 | `ignored` | second Run-end detection (D1) | original `reply` object; notice to a model sender |
 | `cancelled` | sender (or a human) runs `message cancel` while pending; also when the sender's Thread is deleted (`cancel_reason: sender_deleted`, decision Q4) | original `reply` object; notice to the recipient if it had already received the message |
-| `recipient_deleted` | `thread delete` of the recipient Thread while pending | original `reply` object, in the deletion transaction; notice to a model sender |
+| `recipient_deleted` | `thread delete` of the recipient Thread while pending | original `reply` object; first 16 duties are transitioned in the deletion transaction, remaining legacy duties by existing history-GC batches; notice to a model sender is delivered after that batch commits |
 
 Every terminal transition happens in one DB transaction on the existing DB
-worker, after which the existing wait `Notify` and `Changed` fire. Terminal
+worker, after which the existing wait `Notify` and `Changed` fire. The delete
+request commits a durable history-GC job; its success does not promise every
+legacy outcome has already been delivered. GC processes at most 128 receipt
+candidates per transaction and dispatches sender wakes after commit. Terminal
 states never change again.
 
 ### Fail-safe cap
@@ -580,7 +583,7 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Recovery decision | `run get` / `turn get` / `run retry` / `run stop` | unchanged; the pending reply survives retry and is answered after it | no |
 | Stop a child | `run stop --run CHILD_RUN` | unchanged; pending reply stays pending (decision Q2); parent may `message cancel` it | no |
 | After restart | interruption context + stored answers + unprocessed messages | same, with `awaiting_replies` and reply states instead of answers | no |
-| Delete child | `thread delete-preview` / `thread delete` | unchanged; pending replies become `recipient_deleted` and the parent is notified | no |
+| Delete child | `thread delete-preview` / `thread delete` | unchanged; up to 16 pending replies become `recipient_deleted` synchronously; legacy excess is completed by bounded history GC and the parent is notified after each committed batch | no |
 | Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `awaiting_replies` | no |
 | "Make sure you report before finishing" via `--deliver complete` | leader's workaround | unnecessary: the Run-end rule is that check | removed |
 
@@ -622,7 +625,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G13 | Who may cancel | Decided | sender may cancel (decided); authority reuses the existing cancel rule |
 | G14 | Human reply in TUI | Decided | CLI works at once; TUI reply mode in this issue, last step (Q7) |
 | G15 | Receipt GC and capacity pressure | Design | message receipts are not collected (fact 1); reply node rooted by receipt or Turn; operation-outcome expiry handled by G2; reply bodies count toward logical history like any message |
-| G16 | Recipient Thread deleted | Decided | `recipient_deleted` in the deletion transaction, waits released, model sender notified (D5) |
+| G16 | Recipient Thread deleted | Decided | at most 16 `recipient_deleted` transitions in the deletion transaction; legacy excess by durable 128-candidate history-GC batches before receipt collection; waits released and model sender notified after each commit (D5, #262 accepted delayed-delivery contract) |
 | G17 | Sender Thread deleted | Decided | pending messages it sent become `cancelled` (`cancel_reason: sender_deleted`) in the deletion transaction and admitted recipients are notified (Q4) |
 | G18 | Two replies racing | Design | single DB lane; first commit wins; the second gets `invalid_state` `reply_state=replied` |
 | G19 | Reply vs cancel vs Run-end races | Design | same serialisation; whichever commits first decides the outcome |
@@ -925,8 +928,12 @@ existing `message reply` flow, including the existing reply mark and reply notic
 
 On answer, the receipt resolves and the answer is admitted to that Thread as an
 ordinary human message, starting a Run if none is live. Cancellation is terminal
-without a wake; deletion resolves as `recipient_deleted` through existing receipt
-collection. Asking an archived Thread unarchives it with reason
+without a wake; recipient deletion resolves as `recipient_deleted` through the
+existing bounded history-GC receipt phase. Up to 16 duties in a deletion cascade
+are resolved in the delete transaction; legacy excess is resolved by later GC
+batches before receipt collection. Delete success does not wait for those later
+sender deliveries; each committed batch dispatches its stable-ID outcomes after
+commit, and no delivery deadline is promised. Asking an archived Thread unarchives it with reason
 `question_asked`, consistent with the reply-resume unarchive behavior.
 
 A model that has an outstanding reply duty while asking the human must tell its

@@ -5668,7 +5668,7 @@ mod thread_deletion_notification_tests {
 
     #[tokio::test]
     async fn deleting_thread_handles_empty_and_legacy_over_cap_reply_sets() {
-        for count in [0, 33] {
+        for count in [0, 17, 33, 129, 1024] {
             let (root, owner) = fixture().await;
             seed(&owner.db).await;
             if count > 0 {
@@ -5695,9 +5695,136 @@ mod thread_deletion_notification_tests {
                 "SELECT count(*),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='parent'",
                 [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
             )?)).await.unwrap();
-            assert_eq!(states, (count as i64, count as i64));
+            let synchronous = count.min(crate::protocol::MAX_PENDING_REPLY_DUTIES as usize) as i64;
+            assert_eq!(states, (count as i64, synchronous));
+            let durable_job = owner
+                .db
+                .call(|db| {
+                    Ok(db.query_row(
+                        "SELECT count(*) FROM gc_job WHERE kind='history' AND state='pending'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )?)
+                })
+                .await
+                .unwrap();
+            assert!(
+                durable_job > 0,
+                "delete commits durable history continuation for {count} legacy receipts"
+            );
             owner.shutdown().await.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn thread_delete_history_job_resumes_after_owner_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let config_path = root.path().join("config.toml");
+        std::fs::write(&config_path, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
+        let data_dir = root.path().join("data");
+        let owner = DataOwner::start(
+            Some(config_path.clone()),
+            Some(data_dir.clone()),
+            root.path().into(),
+        )
+        .await
+        .unwrap();
+        seed(&owner.db).await;
+        owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('reply-sender','','','fixture','synthetic','now')", [])?;
+            db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('sender-run','reply-sender','live','now')", [])?;
+            for index in 0..129 {
+                let message = format!("reopen-{index}");
+                db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user',datetime('now'),'{}')", [&message])?;
+                let sender = serde_json::json!({"kind":"model","instance_id":"fixture","thread_id":"reply-sender","run_id":"sender-run","turn_id":format!("turn-{index}"),"execution_id":format!("execution-{index}")}).to_string();
+                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,?2,'parent',?1,'applied',datetime('now'),'{\"reply\":{\"state\":\"pending\"}}')", rusqlite::params![message, sender])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let before = owner
+            .db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT coalesce(max(rowid),0) FROM gc_job WHERE kind='history'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        let control = Control::new(&owner, root.path().into());
+        let mut events = control.subscribe();
+        let deleted = control.request(delete(&owner.instance_id, false)).await;
+        assert!(deleted.ok, "{deleted:?}");
+        let job_rowid = owner
+            .db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT max(rowid) FROM gc_job WHERE kind='history'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(job_rowid > before);
+        let initial = owner.db.call(|db| Ok(db.query_row(
+            "SELECT sum(json_extract(result_json,'$.reply.state')='recipient_deleted'),sum(json_extract(result_json,'$.reply.state')='pending') FROM receipt WHERE target_thread_id='parent'",
+            [], |r| Ok((r.get::<_,Option<i64>>(0)?.unwrap_or(0),r.get::<_,Option<i64>>(1)?.unwrap_or(0))),
+        )?)).await.unwrap();
+        assert_eq!(initial, (16, 113));
+        control.shutdown().await.unwrap();
+        while events.try_recv().is_ok() {}
+        let pending_job = owner
+            .db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM gc_job WHERE kind='history' AND state='pending'",
+                    [],
+                    |r| r.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(pending_job > 0);
+        owner.shutdown().await.unwrap();
+
+        // No special recovery request is sent: the existing owner startup and
+        // history-GC worker discover the committed job and resume its cursor.
+        let reopened = DataOwner::start(Some(config_path), Some(data_dir), root.path().into())
+            .await
+            .unwrap();
+        let control = Control::new(&reopened, root.path().into());
+        control.start().await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let pending = reopened.db.call(|db| Ok(db.query_row(
+                    "SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='pending'",
+                    [], |r|r.get::<_,i64>(0),
+                )?)).await.unwrap();
+                if pending == 0 { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.expect("reopened existing history worker drains bounded continuation");
+        let completed = reopened.db.call(move |db| Ok((
+            db.query_row("SELECT count(*) FROM event WHERE id LIKE 'reply-outcome-reopen-%' AND kind='reply_outcome'",[],|r|r.get::<_,i64>(0))?,
+            db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.id LIKE 'reply-outcome-reopen-%' AND d.recipient_id='sender-run' AND d.state='pending'",[],|r|r.get::<_,i64>(0))?,
+            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='recipient_deleted'",[],|r|r.get::<_,i64>(0))?,
+        ))).await.unwrap();
+        assert_eq!(
+            completed.0, 16,
+            "only the synchronous batch runs before shutdown terminates the sender Run"
+        );
+        assert_eq!(
+            completed.1, 0,
+            "shutdown leaves no live sender Run to receive a delivery"
+        );
+        assert_eq!(
+            completed.2, 129,
+            "the reopened history worker resolves all pending legacy receipts"
+        );
+        control.shutdown().await.unwrap();
+        reopened.shutdown().await.unwrap();
     }
 
     #[tokio::test]

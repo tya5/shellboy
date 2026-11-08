@@ -571,16 +571,19 @@ sender's Run, or is saved as a context_changed notice for its next actual Turn
 when no Run is live; it never starts an idle sender. External senders observe
 terminal receipt facts with message get / wait reply_received, not an inbox.
 
-Deletion transitions pending recipient duties to recipient_deleted using indexed
-per-recipient lookups (at most 128 each). These CAS transitions and outcome
-notices are atomic with deletion. Sender-deleted cancellation and its notice
-are deferred to the history-GC receipt phase, bounded to 128 scanned rows per
-transaction, with cancelled_by and cancel_reason=sender_deleted. No foreground
-sender-JSON scan or new schema is needed. Recipient deletion takes precedence
-when both ends are deleted. No pending-reply receipt is collected. The history-GC owner reclaims
-eligible deleted-target terminal receipts in batches of 128, preserving those
-still owned by a live sender. Receipts targeting live recipients remain rooted
-even if the sender was deleted. See gc.md and storage.md.
+Thread deletion transitions at most 16 pending recipient duties synchronously
+across the entire cascade. Remaining legacy duties are durable in the existing
+history-GC job: its receipt phase examines at most 128 candidates per transaction,
+records recipient_deleted plus any stable-ID sender outcome/delivery before it
+can collect the receipt, and advances the rowid cursor in that same commit.
+Each pass yields after one batch; the existing History work is re-marked for a
+later pass. A crash resumes from the committed cursor, and retrying a row before
+cursor commit is idempotent. Deletion success means the Thread and GC job were
+committed, not that all legacy reply outcomes were already delivered. Their
+sender notifications are dispatched after the corresponding GC batch commits;
+there is no deadline guarantee. Recipient deletion takes precedence when both
+ends are deleted. The normal GC retention policy may later collect terminal
+receipts after the outcome event/delivery is durable. See gc.md and storage.md.
 
 ## Shell argument policy
 
