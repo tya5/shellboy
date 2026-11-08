@@ -6690,9 +6690,10 @@ mod language_tests {
         );
         assert!(labels.contains("人の判断待ち1件"), "{labels}");
         row.awaiting_human_count_saturated = true;
-        let labels = format_reply_waits(128, true, 0, UiLanguage::Ja);
+        let labels = format_reply_waits(128, true, 1, UiLanguage::Ja);
         assert!(labels.contains("人の判断待ち128+件"), "{labels}");
         assert!(labels.contains("スレッド返信待ち1件"), "{labels}");
+        row.awaiting_human_count_saturated = false;
         let before = format!("{row:?}");
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let info = BrowserMessage::Info {
