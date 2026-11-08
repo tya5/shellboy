@@ -207,7 +207,17 @@ pub(crate) fn leading_items(
         json!({"role":"system","content":[{"type":"input_text","text":"You are Shellboy, a native personal agent. A Thread is a continuing conversation; a Turn is one response interval; a Run owns its shells and child Runs, and may outlive a completed Turn. Execute your own commands by calling the shell function directly. shellboy message send delivers conversation text; it does not execute that text as a shell command. Sending to your own Thread adds input to your current conversation, not a separate agent. A shell tool result's execution_id always identifies the process started by that call, including a CLI process; that process's stdout may itself be JSON. For background work, take the returned execution_id and observe it in a later shell call. Use shellboy shell get --execution ID to check the actual command, cwd, Thread, Run and Turn before diagnosing unexpected output. CLI IDs require named flags, not positional arguments; consult the specific subcommand --help before guessing syntax. Guides are bundled with the executable: use shellboy docs list or shellboy docs search --query TEXT, then shellboy docs get --id ID to read the relevant guide before unfamiliar operations, especially delegation. No repository path is required. Use shellboy --help and shellboy history commands to inspect state, send messages, create children, wait, attach files and retrieve original history. Report actual results and errors. Commands share filesystem access; histories and cwd are per Thread."}]}),
     ];
     if let Some(body) = instruction_body {
-        input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(agents, body)?}]}));
+        if let Some(bundle)=crate::instructions::bundle(body) {
+            for file in bundle["extra"].as_array().into_iter().flatten() {
+                let path=std::path::Path::new(file["path"].as_str().unwrap_or(""));
+                input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(path,file["body"].as_str().unwrap_or(""))?}]}));
+            }
+            if let Some(body)=bundle["local"].as_str() {
+                input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(agents,body)?}]}));
+            }
+        } else {
+            input.push(json!({"role":"developer","content":[{"type":"input_text","text":instruction_message(agents, body)?}]}));
+        }
     }
     Ok(input)
 }
@@ -425,5 +435,23 @@ mod instruction_header_tests {
             "Working instructions from \"/role.md\" (user-editable; re-read at each new Turn start; same-Turn retries use the saved snapshot):\n"
         );
         assert_eq!(message.split_once('\n').unwrap().1, "");
+    }
+}
+
+#[cfg(test)]
+mod extra_instruction_request_tests {
+    use super::*;
+    #[test]
+    fn extra_instructions_keep_global_prefix_separate_from_thread_role_and_stable() {
+        let body=json!({"shellboy_instruction_bundle_v1":true,"extra":[{"path":"/studio.md","body":"studio"},{"path":"/user.md","body":"common"}],"local":"thread role"}).to_string();
+        let first=leading_items(std::path::Path::new("/AGENTS.md"),Some(&body)).unwrap();
+        assert_eq!(first.len(),4);
+        assert!(first[1].to_string().contains("studio"));
+        assert!(first[2].to_string().contains("common"));
+        assert!(first[3].to_string().contains("thread role"));
+        assert_eq!(first,leading_items(std::path::Path::new("/AGENTS.md"),Some(&body)).unwrap());
+        let changed=body.replace("thread role","different role");
+        let changed=leading_items(std::path::Path::new("/AGENTS.md"),Some(&changed)).unwrap();
+        assert_eq!(first[..3],changed[..3]);
     }
 }

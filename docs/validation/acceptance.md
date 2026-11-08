@@ -10741,3 +10741,11 @@ SQL boundary deterministically instead of relying on a timing threshold. Focused
 - [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
 - [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
 - [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.
+
+### #270 planned/implemented acceptance
+
+Synthetic coverage targets explicit-only registration, ordered common/Thread instruction items, unchanged shared
+prefix bytes, file edits observed only by a newly prepared snapshot, missing optional AGENTS, file-size boundaries,
+missing/nonregular/invalid-UTF-8 errors, path/list limits, live `config.set` adoption, same-Turn tool continuation,
+next-Turn use and source metadata without bodies. No passing execution is claimed here yet. Real providers, cache
+hit-rate measurements, adversarial filesystem races and user-consent UI workflows are outside these fixtures.

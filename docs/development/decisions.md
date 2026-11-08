@@ -4186,3 +4186,19 @@ the decision transaction. Per-unit row budgets do not promise a fixed wall-clock
 Decision: models use `message ask` for a human decision, one question per message. The default `ui.awaiting_human_rows` is 1. Human questions share the per-Thread pending-reply receipt cap and `thread.get.awaiting_replies` projection, but carry a durable recipient-kind discriminator: they do not wake a model while pending and do not become Run-end reminders or `ignored` outcomes. The answer is a human message in the asking Thread and resumes ordinary admission. Existing thread-scoped replies retain their recipient and lifecycle rules. The visible inbox is scoped to the displayed Thread; there is no cross-Thread inbox endpoint. `events.wait --thread` is a change hint and clients reread that Thread. No new table, migration, worker or queue is introduced.
 
 Recheck when: the receipt query plan changes, either recipient kind starts sharing notification behavior, or the UI adds a cross-Thread inbox.
+
+### D-270: explicit common instructions fail closed at Turn preparation
+
+Adopt an ordered root `extra_instructions` path array, eight absolute UTF-8 paths (4096 bytes each) and 8192 captured
+bytes per file. This is small opt-in guidance, not implicit global AGENTS discovery or a replacement for Thread
+roles. Files that cannot be read correctly stop preparation visibly rather than silently changing instruction
+semantics. Operators repair/remove entries and retry; configuration validation checks structure, not file existence.
+
+Use the existing bounded file lane and immutable instruction snapshot for the whole composition. Place common
+sources before the Thread file as separate developer items so shared prefixes stay stable. Store only captured
+content/hash/size, not read timestamps in prompt text. Reuse the existing live configuration adoption boundary for
+path-list edits, but read its current generation only for a new Turn, never pinning it to the Run's model registry.
+No watcher, worker, queue or table is justified. User consent belongs to the registering component's workflow; the
+API cannot infer it. Revisit the eight/8192-byte limits only with observed guide-size requirements, not to embed
+large manuals. Filesystem multi-file atomicity, adversarial local path replacement and real-provider cache hit rates
+are not promised by this change.

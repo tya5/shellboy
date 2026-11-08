@@ -51,6 +51,7 @@ pub struct Config {
     #[serde(skip)]
     pub live_connections: LiveConnections,
     pub data_dir: Option<PathBuf>,
+    pub extra_instructions: Vec<PathBuf>,
     pub default_connection: Option<String>,
     pub default_model: Option<String>,
     pub connections: BTreeMap<String, Connection>,
@@ -703,6 +704,7 @@ impl Config {
             current.connections = snapshot.connections.clone();
             current.default_connection = snapshot.default_connection.clone();
             current.default_model = snapshot.default_model.clone();
+            current.extra_instructions = snapshot.extra_instructions.clone();
         }
         current
     }

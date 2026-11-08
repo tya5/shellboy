@@ -445,3 +445,69 @@ async fn live_connections_run_pins_proactive_threshold_and_summary_endpoint() {
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();old_server.abort();new_server.abort();
     }).await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extra_instructions_live_update_waits_for_next_turn_and_saved_sources_are_visible() {
+    crate::test_watchdog::watchdog("extra instruction live Turn snapshot", async {
+        let root=tempfile::tempdir().unwrap();
+        let (url,mut receive,server)=proxy().await;
+        let owner=owner(root.path(),&url).await;
+        let control=Control::new(&owner,root.path().into());
+        let common=root.path().join("common.md");
+        let next=root.path().join("next.md");
+        std::fs::write(&common,"global instruction old").unwrap();
+        std::fs::write(&next,"global instruction new").unwrap();
+        std::fs::write(root.path().join("AGENTS.md"),"thread role instructions").unwrap();
+        let changed=edit(&control,vec![change("extra_instructions",json!([common]))]).await;
+        assert_eq!(changed["restart_required"],false);
+        assert_eq!(changed["applied_to_running_owner"],true);
+        let target=thread(&control).await;
+        send(&control,&target,"first turn").await;
+        let first=incoming(&control,&mut receive).await;
+        assert!(first.body.to_string().contains("global instruction old"));
+        edit(&control,vec![change("extra_instructions",json!([next]))]).await;
+        std::fs::write(&common,"must not appear in existing turn").unwrap();
+        first.reply.send((200,json!({"id":"extra-tool","status":"completed","output":[{
+            "type":"function_call","call_id":"extra-tool","name":"shell","arguments":json!({"command":"echo synthetic-extra-instructions"}).to_string()
+        }]}))).unwrap();
+        let continued=incoming(&control,&mut receive).await;
+        assert!(continued.body.to_string().contains("global instruction old"));
+        assert!(!continued.body.to_string().contains("global instruction new"));
+        assert!(!continued.body.to_string().contains("must not appear"));
+        continued.reply.send((200,answer("done"))).unwrap();
+        completed_run(&control,&target).await;
+        let details=request(&control,Command::ThreadGet(shellboy::protocol::ThreadTarget { thread_id:Some(target.clone()) })).await;
+        let sources=&details["instruction_sources"];
+        assert_eq!(sources["extra"][0]["path"],json!(common));
+        assert!(sources["extra"][0].get("body").is_none());
+        send(&control,&target,"next turn").await;
+        let second=incoming(&control,&mut receive).await;
+        // The saved first Turn can appear in replay; check the leading global item.
+        let text=second.body["input"][1].to_string();
+        assert!(text.contains("global instruction new"),"{}",second.body);
+        second.reply.send((200,answer("done again"))).unwrap();
+        completed_run(&control,&target).await;
+        control.shutdown().await; owner.shutdown().await.unwrap(); server.abort();
+    }).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn extra_instructions_missing_file_is_visible_and_never_sends_partial_request() {
+    crate::test_watchdog::watchdog("extra instruction preparation failure", async {
+        let root=tempfile::tempdir().unwrap();
+        let (url,mut receive,server)=proxy().await;
+        let owner=owner(root.path(),&url).await;
+        let control=Control::new(&owner,root.path().into());
+        let missing=root.path().join("explicit-missing.md");
+        edit(&control,vec![change("extra_instructions",json!([missing]))]).await;
+        let target=thread(&control).await;
+        send(&control,&target,"do not send without configured instructions").await;
+        let reason=recovery(&control,&target).await;
+        assert!(reason.to_string().contains("Extra instruction file cannot be inspected"),"{reason}");
+        assert!(receive.try_recv().is_err());
+        let id=target.clone();
+        let snapshots=control.store.database.call(move |db|Ok(db.query_row("SELECT count(*) FROM turn WHERE thread_id=?1 AND instruction_snapshot_id IS NOT NULL",[id],|r|r.get::<_,u64>(0))?)).await.unwrap();
+        assert_eq!(snapshots,0);
+        control.shutdown().await; owner.shutdown().await.unwrap(); server.abort();
+    }).await;
+}

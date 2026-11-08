@@ -797,3 +797,19 @@ still requires explicit `storage vacuum` to shrink; logical usage decreases as c
 `unfinished_jobs_pending: null`. Actual freed/deleted counts remain zero. A null quantity is unknown, not zero.
 Dry-run returns `counts_exact: true` and exact numeric projections, and can take time proportional to index size.
 The actual decision never calls these COUNT queries, even before its short write transaction.
+
+## #270 common instruction configuration and inspection
+
+The root configuration field `extra_instructions` is an ordered array of absolute UTF-8 file paths, default `[]`.
+`config.get` exposes it and hash-checked `config.set` accepts its replacement. Path/list validation occurs before
+writing; file readability and captured-content bounds are checked during Turn preparation. Runtime edits report
+`applied_to_running_owner: true`, `restart_required: false` for this field; independent mixed-field flags retain
+existing semantics. Disk-only edits require restart. Configuration success is not evidence that listed files exist
+or user consent was obtained. A registered file failing observation returns a visible preparation/recovery error,
+not a truncated or partially populated request.
+
+`thread.get` optionally returns `instruction_sources: {extra: [{path,hash,bytes}],snapshot:"latest_prepared_turn"}`
+after preparing common instructions. It omits bodies and is historical, not live file/config state. `thread request`
+also returns `instruction_sources` with extra metadata, `agents_path` and `local_present`, alongside the usual
+per-request item hashes/character counts. Request body output intentionally includes saved text. Saved source order
+matches the instruction-prefix order. No schema migration or new daemon task is required.
