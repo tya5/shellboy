@@ -2216,7 +2216,7 @@
   },
   "src/ui/operations.rs:f2d90a0be0cb1b6e:2": {
     "category": "a",
-    "reason": "Re-reviewed after adding the since-node protocol field initializer: the existing Japanese conversation-ID UI label is unchanged, and the English fallback remains equivalent; no new UI label or command value was added.",
+    "reason": "Re-reviewed after adding the recovery-option field: this is the existing Japanese conversation-ID UI label. Japanese is retained for Ja and the English field-label fallback displays the equivalent English label; the command field value remains unchanged.",
     "source_tokens_sha256": "9159489699bac310d9c6cc814afcae5e4a1d2a3dda3f075441f309a21b130e86"
   },
   "src/ui/operations.rs:b79385f22361b83b:2": {
