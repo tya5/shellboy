@@ -12,8 +12,15 @@ impl Config {
                 "set positive summary_max_chars and/or finite summary_max_percent in (0,100], summary map/reduce request limits in 1..=4096, segment_chars in 2000..=1000000 and reduce_rounds in 1..=16",
             ));
         }
-        if self.extra_instructions.len() > 8 || self.extra_instructions.iter().any(|path| !path.is_absolute() || path.to_str().is_none() || path.as_os_str().len() > 4096) {
-            return Err(invalid("extra_instructions", "list at most 8 absolute UTF-8 file paths, each at most 4096 bytes"));
+        if self.extra_instructions.len() > 8
+            || self.extra_instructions.iter().any(|path| {
+                !path.is_absolute() || path.to_str().is_none() || path.as_os_str().len() > 4096
+            })
+        {
+            return Err(invalid(
+                "extra_instructions",
+                "list at most 8 absolute UTF-8 file paths, each at most 4096 bytes",
+            ));
         }
         self.retention.validate_positive()?;
         self.limits.validate_positive()?;

@@ -726,7 +726,10 @@ fn apply_runtime(
     })
 }
 fn live_field(name: &str, embedding: Option<&str>) -> bool {
-    if matches!(name, "default_connection" | "default_model" | "extra_instructions") {
+    if matches!(
+        name,
+        "default_connection" | "default_model" | "extra_instructions"
+    ) {
         return true;
     }
     if name == "connections" {
