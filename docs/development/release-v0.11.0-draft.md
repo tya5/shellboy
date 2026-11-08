@@ -47,3 +47,5 @@ Each row names its issue, landed implementation SHA and acceptance section. CI `
 | #262 reply queue; landing SHA pending; `acceptance.md`: pending | Yes | Awaiting landing | Awaiting landing | Unverified |
 
 Evidence links refer to `docs/validation/acceptance.md` section names. Where no uniquely matching section is identified, the evidence is pending rather than a confirmed acceptance reference. Final release CI and 32-to-37 binary migration validation remain pending.
+
+Synthetic schema 32-to-37 SQL migration: 3.683 ms in one in-memory run on macOS arm64 with SQLite 3.51.0 (two Threads, one node). This excludes binary startup and is not a production-scale estimate. Ledger and original columns were checked.

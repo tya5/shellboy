@@ -11005,3 +11005,5 @@ and equality with the catalogue label in each language. The strict coverage
 assertion remains unchanged. All integration/termination/crash-recovery targets
 in that failed normal run passed; they do not make the entire run successful.
 A new exact-SHA pair of CI runs and independent review are still required.
+
+Synthetic schema 32-to-37 SQL migration: 3.683 ms in one in-memory run on macOS arm64 with SQLite 3.51.0 (two Threads, one node). This excludes binary startup and is not a production-scale estimate. Ledger and original columns were checked.

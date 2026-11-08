@@ -39,6 +39,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
                 " PRIMARY KEY(thread_id,tag)) WITHOUT ROWID;\n"
                 "CREATE INDEX thread_tag_by_tag ON thread_tag(tag,thread_id);\n")
         self.assertEqual(base.count(tags), 1)
+        base = base.replace(", branch_kind TEXT CHECK(branch_kind IS NULL OR branch_kind IN ('fork','rewind'))", '').replace(', spill_tools_json TEXT CHECK(spill_tools_json IS NULL OR octet_length(spill_tools_json)<=16384)', '').replace('CREATE INDEX node_spill_tools ON node(id,spill_tools_json);\n', '')
         db.executescript(base.replace(suffix, '').replace(column, '').replace(archive_indexes, '').replace(int8_scale, '').replace(chunks_job, '').replace(tags, ''))
         for ident, parent in [('parent', None), ('child', 'parent')]:
             db.execute('INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,updated_at) '
@@ -363,6 +364,12 @@ class ReleaseUpgradeTests(unittest.TestCase):
         db.execute("DROP INDEX index_reclaim_state")
         with self.assertRaisesRegex(AssertionError, 'index_reclaim_state'):
             checks.check_migration(db, before, 32, 35)
+
+    def test_schema32_to37_preserves_rows_and_new_columns(self):
+        db = self.fixture(32)
+        before, records = self.upgrade(db, 32, 37)
+        self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(33, 38)])
+        checks.preserved(db, records)
 
     def test_schema37_to38_checks_only_the_human_pending_index(self):
         db = sqlite3.connect(':memory:')

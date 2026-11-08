@@ -55,8 +55,9 @@ def preserved(db, before):
             query = "SELECT key,value FROM app_meta WHERE key LIKE 'summary.usage.%'"
         else:
             query = f'SELECT * FROM "{table}"'
-        after = set(db.execute(query).fetchall())
-        assert all(row in after for row in rows), f'saved data changed: {table}'
+        after = db.execute(query).fetchall()
+        # Additive migrations append columns; compare all original columns.
+        assert all(any(candidate[:len(row)] == row for candidate in after) for row in rows), f'saved data changed: {table}'
 
 
 def check_migration(db, before, start, target):
@@ -185,6 +186,12 @@ def check_migration(db, before, start, target):
             expected = next(line.rstrip(';') for line in DERIVED[35].read_text().splitlines() if f' {name} ' in line).replace('IF NOT EXISTS ', '')
             row = db.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
             assert row and ' '.join(row[0].split()) == ' '.join(expected.split()), f'{name} differs from migration 35'
+
+    if target >= 36:
+        assert 'spill_tools_json' in {row[1] for row in db.execute('PRAGMA table_info(node)')}, 'migration 36 spill metadata missing'
+        assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='node_spill_tools'").fetchone()[0] == 1, 'migration 36 index missing'
+    if target >= 37:
+        assert 'branch_kind' in {row[1] for row in db.execute('PRAGMA table_info(thread)')}, 'migration 37 branch kind missing'
 
 def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
