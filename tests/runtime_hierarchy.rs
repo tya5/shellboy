@@ -740,7 +740,7 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
         .collect::<Vec<_>>();
     assert_eq!(responses.len(), 3, "{body}");
     assert_eq!(responses[0]["result"]["delivery_status"], "held");
-    // An ancestor that is not the direct owner may retry too (#256).
+    // Thread organization does not restrict explicit retry of an independent Run.
     assert_eq!(responses[1]["ok"], true);
     assert_eq!(responses[2]["ok"], true);
     assert!(
@@ -788,7 +788,9 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
         }),
     )
     .await;
-    state(&control, "run", "recovery-grandchild", "stopped").await;
+    state(&control,"run","recovery-grandchild","live").await;
+    command(&control,Command::RunStop(RunTarget{run_id:"recovery-grandchild".into()})).await;
+    state(&control,"run","recovery-grandchild","stopped").await;
     drop(grandchild_retry);
     drop(parent_continuation);
     local.shutdown().await.unwrap();

@@ -215,9 +215,9 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
+        assert!(details.get("awaiting_reply").is_none());
         assert_eq!(
-            details["awaiting_thread_replies"].as_array().unwrap().len(),
+            details["awaiting_replies"].as_array().unwrap().len(),
             1
         );
         if admitted {
@@ -278,9 +278,9 @@ async fn cancellation_releases_duty_and_lists_no_longer_awaiting() {
             .await
             .unwrap()
             .result;
-        assert!(details["awaiting_reply"].as_array().unwrap().is_empty());
+        assert!(details.get("awaiting_reply").is_none());
         assert!(
-            details["awaiting_thread_replies"]
+            details["awaiting_replies"]
                 .as_array()
                 .unwrap()
                 .is_empty()
@@ -348,23 +348,11 @@ async fn models_can_request_and_reply_across_threads_including_their_own() {
         .await
         .unwrap()
         .result;
-    assert_eq!(details["awaiting_reply"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        details["awaiting_reply"][0]["message_id"],
-        human_ask["message_id"]
-    );
-    assert_eq!(
-        details["awaiting_human"][0]["message_id"],
-        human_ask["message_id"]
-    );
-    assert_eq!(
-        details["awaiting_thread_replies"].as_array().unwrap().len(),
-        1
-    );
-    assert_eq!(
-        details["awaiting_thread_replies"][0]["message_id"],
-        message_id
-    );
+    assert_eq!(details["awaiting_replies"].as_array().unwrap().len(),2);
+    for old in ["awaiting_reply","awaiting_human","awaiting_thread_replies"] {assert!(details.get(old).is_none());}
+    let duties=details["awaiting_replies"].as_array().unwrap();
+    assert_eq!(duties.iter().find(|d|d["recipient_kind"]=="human").unwrap()["message_id"],human_ask["message_id"]);
+    assert_eq!(duties.iter().find(|d|d["recipient_kind"]=="thread").unwrap()["message_id"],message_id);
     let not_applied = store
         .execute(
             request(Command::MessageReply(MessageReplyArgs {
