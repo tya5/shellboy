@@ -961,3 +961,15 @@ existing model mark. `thread list` exposes the count of all pending duties only.
 Overflow remains reachable through `/replies`. Human questions alone are
 suppressed from Run-end reminders and `ignored`; other-Thread duties keep the
 existing rules.
+
+## Adopted G21 replacement (#276)
+
+Reply-expected messages are the single delegation contract. Create/select a child Thread, send an accepted request
+with `expect_reply`, retain its message ID and finish the current Turn if only that result remains. The recipient
+replies to the exact applied message once; ordinary reply delivery resumes the sender Thread through the existing
+message path. Progress is an ordinary message. No Run owns another Run, no parent background state is retained by a
+child, and child answer/end/progress/recovery notifications are not automatically forwarded. Run-end unanswered
+request reminders remain. Human decision questions and sender provenance are unchanged.
+
+Thread-get exposes one `awaiting_replies` list. Each item's `recipient_kind` and `recipient_thread_id` distinguish
+human/thread duties; the duplicate `awaiting_human`, `awaiting_reply` and `awaiting_thread_replies` lists are removed.

@@ -516,3 +516,12 @@ dependency is added; no migration. Stage C (applying `connections` changes witho
 [decisions](../development/decisions.md#d-269-connection-setup-stages-a-and-b-2026-11-07). See
 [config](config.md#stored-api-keys-and-connection-test-269) and
 [protocol](protocol.md#stored-keys-and-connection-test-credentialsset-credentialsclear-connectiontest-269).
+
+## #276 post-v0.11.0 revision
+
+Runs own shells, not Runs. Thread hierarchy is organizational, admission is independent, stop does not cascade
+across Runs, and child lifecycle notifications/owned-child rows are removed. Delegation uses an expected reply and
+normal message delivery after the sender Turn ends. Explicit wait conditions remain observations without a
+resource/cycle graph or self-wait rejection. Thread-get has one recipient-tagged pending reply list. Shell ownership,
+Thread parentage and Run-end unanswered reply reminders remain. Adopted revisions in the control/wait/reply/UI
+specifications supersede earlier Run ownership rules; no legacy compatibility branch is retained.

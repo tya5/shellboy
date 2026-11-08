@@ -569,3 +569,11 @@ does not close on F6-F8, per the overlay policy test). Opening, forking and
 the prune form reuse `select_thread`, `thread fork` and the existing F8 prune form;
 the panel itself never mutates. The F8 entry `会話 | 分岐の木` is the `thread branches`
 operation: submitting its form opens the panel instead of showing raw JSON.
+
+## Adopted ownership removal (#276)
+
+Run-to-Run ownership and automatic child lifecycle/progress rows are superseded. Thread parentage remains for
+organization/forks. Each Run and its shells are inspected/stopped directly; one Run's stop does not cascade to
+another. TUI/Studio background styling denotes owned shell work, not a live child or pending reply. Child requests
+use explicit expected replies and ordinary message/progress rendering. Waiting-for-reply presentation comes from
+one recipient-tagged pending reply list; no child ownership row or parent-owned recovery replay is synthesized.
