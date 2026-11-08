@@ -319,25 +319,25 @@ pub(super) fn recover_turn_tx(
             [thread],
         )?;
         super::revisit::hand_off_tx(tx, Some(thread), "recovery_wait", Some((run, turn)), &now())?;
-        owner_event(
+        record_recovery_event(
             tx,
             run,
             &format!("child-recovery-{turn}-{generation}"),
-            "child_recovery_wait",
+            "recovery_wait",
             json!({"thread_id":thread,"run_id":run,"turn_id":turn,"generation":generation,"state":"recovery_wait","error":reason}),
         )?;
     }
     Ok(changed > 0)
 }
 
-pub(super) fn owner_event(
+pub(super) fn record_recovery_event(
     tx: &rusqlite::Transaction<'_>,
     child_run: &str,
     event_id: &str,
     kind: &str,
     payload: Value,
 ) -> Result<(), crate::storage::StorageError> {
-    if kind == "child_recovery_wait"
+    if kind == "recovery_wait"
         && let Some(thread) = payload.get("thread_id").and_then(Value::as_str)
     {
         tx.execute("INSERT OR IGNORE INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'recovery_wait',?2,?3,?4,?5)",params![event_id,json!({"run_id":child_run}).to_string(),thread,payload.to_string(),now()])?;
@@ -374,13 +374,7 @@ pub(super) fn complete_idle_run(
             Ok(()) // Settled completion or obsolete stopping/terminal ownership.
         };
     }
-    owner_event(
-        tx,
-        run,
-        &format!("child-run-ended-{run}"),
-        "child_run_ended",
-        json!({"thread_id":thread,"run_id":run,"state":"completed"}),
-    )?;
+
     Ok(())
 }
 
@@ -432,13 +426,7 @@ pub(super) fn complete_answer_turn(
                 ApiError::new(code, "Turn did not complete at its expected boundary").into(),
             );
         }
-        owner_event(
-            tx,
-            run,
-            &format!("child-turn-completed-{}", turn),
-            "child_turn_completed",
-            json!({"thread_id":thread,"run_id":run,"turn_id":turn,"state":"completed","end_message_node_id":node}),
-        )?;
+
     }
     Ok(())
 }
@@ -465,16 +453,8 @@ pub(super) fn stop_drained_runs(
         tx.execute("UPDATE turn SET state='stopped',ended_at=?2 WHERE run_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",params![run,now()])?;
         cancel_run_attempts(tx, run, &now())?;
         tx.execute("UPDATE shell_execution SET state='stopped',output_complete=0,ended_at=?2,end_reason='run_stopped_before_spawn_or_collection' WHERE owner_run_id=?1 AND state IN ('starting','running','stopping')",params![run,now()])?;
-        let changed=tx.execute("UPDATE run SET state='stopped',ended_at=?2,stop_reason=COALESCE(stop_reason,?3) WHERE id=?1 AND state IN ('live','stopping')",params![run,now(),if stopping_for_shutdown {Some("app_shutdown")} else {None}])?;
-        if changed > 0 {
-            owner_event(
-                tx,
-                run,
-                &format!("child-run-ended-{run}"),
-                "child_run_ended",
-                json!({"run_id":run,"state":"stopped","end_message_node_id":null,"incomplete":true}),
-            )?;
-        }
+        tx.execute("UPDATE run SET state='stopped',ended_at=?2,stop_reason=COALESCE(stop_reason,?3) WHERE id=?1 AND state IN ('live','stopping')",params![run,now(),if stopping_for_shutdown {Some("app_shutdown")} else {None}])?;
+
         tx.execute("UPDATE receipt SET state='held',hold_reason='stopped',updated_at=?2 WHERE run_id=?1 AND state='accepted'",params![run,now()])?;
     }
     super::message_delivery::repair_terminal_tx(tx, &now())?;

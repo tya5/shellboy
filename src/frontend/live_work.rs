@@ -60,14 +60,7 @@ WITH wait_keys AS MATERIALIZED (
 )
 SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked.state,picked.started_at,picked.output_at,
        counts.shells,counts.children,counts.waits,counts.invalid_waits,
-       NULL,NULL,
-       CASE WHEN NULL='failed' AND child_attempt.generation=child_turn.generation AND json_valid(child_attempt.error_json)
-         THEN json_extract(child_attempt.error_json,'$.automatic_retry') END,
-       CASE WHEN picked.kind='child' THEN
-         EXISTS(SELECT 1 FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=picked.id AND state IN ('starting','running','stopping'))
-         OR EXISTS(SELECT 1 FROM run INDEXED BY runs_by_owner WHERE owner_run_id=picked.id AND state IN ('live','stopping')) ELSE 0 END,
-       CASE WHEN picked.kind='child' AND picked.state='live' AND NULL='running' AND COALESCE(NULL,'')<>'inflight'
-         THEN EXISTS(SELECT 1 FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=NULL AND state='running') ELSE 0 END,picked.description,counts.duplicate_shells,
+       picked.description,counts.duplicate_shells,
        CASE WHEN json_type(w.value,'$.conditions')='array' THEN json_array_length(w.value,'$.conditions') END,
        CASE WHEN json_type(w.value,'$.conditions[0].type')='text' THEN substr(json_extract(w.value,'$.conditions[0].type'),1,64) END,
        CASE WHEN json_type(w.value,'$.timeout_ms')='integer' AND typeof(json_extract(w.value,'$.timeout_ms'))='integer' AND json_extract(w.value,'$.timeout_ms')>=0 THEN json_extract(w.value,'$.timeout_ms') END,
@@ -102,20 +95,12 @@ struct RawRow {
     started_at: Option<String>,
     output_at: Option<String>,
     title: Option<super::header::TitleWitness>,
-    child_phase: Option<ChildPhase>,
     wait_condition_count: Option<i64>,
     wait_kind: Option<String>,
     wait_timeout_ms: Option<i64>,
     wait_target_id: Option<String>,
     wait_thread_count: Option<i64>,
     wait_target: Option<WaitTarget>,
-}
-struct ChildPhase {
-    turn: Option<String>,
-    attempt: Option<String>,
-    retry: Option<String>,
-    owned: bool,
-    tools: bool,
 }
 
 #[cfg(test)]
@@ -176,28 +161,17 @@ pub(super) fn read_tx_limited(
                 related: row.get(2)?,
                 execution: row.get(3)?,
                 label: row.get(4)?,
-                description: row.get(17)?,
+                description: row.get(12)?,
                 state: row.get(5)?,
                 started_at: row.get(6)?,
                 output_at: row.get(7)?,
                 title: None,
-                wait_condition_count: row.get(19)?,
-                wait_kind: row.get(20)?,
-                wait_timeout_ms: row.get(21)?,
-                wait_target_id: row.get(22)?,
-                wait_thread_count: row.get(23)?,
+                wait_condition_count: row.get(14)?,
+                wait_kind: row.get(15)?,
+                wait_timeout_ms: row.get(16)?,
+                wait_target_id: row.get(17)?,
+                wait_thread_count: row.get(18)?,
                 wait_target: None,
-                child_phase: if row.get::<_, String>(0)? == "child" {
-                    Some(ChildPhase {
-                        turn: row.get(12)?,
-                        attempt: row.get(13)?,
-                        retry: row.get(14)?,
-                        owned: row.get(15)?,
-                        tools: row.get(16)?,
-                    })
-                } else {
-                    None
-                },
             });
         }
     }
@@ -285,26 +259,6 @@ pub(super) fn prepare_in(
         .rows
         .into_iter()
         .map(|mut row| {
-            if let Some(phase) = row.child_phase.take() {
-                let retrying = phase
-                    .retry
-                    .as_deref()
-                    .and_then(|body| {
-                        serde_json::from_str::<crate::ui::activity::AutomaticRetrySnapshot>(body)
-                            .ok()
-                    })
-                    .is_some_and(|retry| retry.number > 0 && retry.number <= retry.limit);
-                row.state = crate::activity::classify(
-                    Some(&row.state),
-                    phase.turn.as_deref(),
-                    phase.owned,
-                    phase.attempt.as_deref() == Some("inflight"),
-                    retrying,
-                    phase.tools,
-                )
-                .column_label()
-                .into();
-            }
             if let Some(title) = row.title.take() {
                 row.label = Some(title.prepare());
             }

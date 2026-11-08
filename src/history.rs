@@ -103,7 +103,6 @@ impl History {
                             parent_id: row.get(4)?,
                             run_id: None,
                             turn_id: None,
-                            children_count: 0,
                             shells_count: 0,
                             recovery_reason: None,
                             parent_change: None,

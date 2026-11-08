@@ -211,9 +211,10 @@ pub(super) fn run(
         if migration.version == 38 {
             connection.pragma_update(None, "foreign_keys", false)?;
         }
-        let transaction =
-            connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let additive_column_already_present = match migration.version {
+        let migrated = (|| -> Result<(), StorageError> {
+            let transaction =
+                connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let additive_column_already_present = match migration.version {
             36 => transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_table_info('node') WHERE name='spill_tools_json')",
                 [],
@@ -226,25 +227,28 @@ pub(super) fn run(
             )?,
             _ => false,
         };
-        if additive_column_already_present {
-            // Downgrade fixtures can retain additive columns; keep existing data intact.
-            transaction.execute_batch(
-                migration
-                    .sql
-                    .split_once(';')
-                    .expect("column then metadata")
-                    .1,
-            )?;
-        } else {
-            transaction.execute_batch(migration.sql)?;
-        }
-        if migration.version == 4 {
-            migrate_attachment_sources(&transaction)?;
-        }
-        transaction.commit()?;
+            if additive_column_already_present {
+                // Downgrade fixtures can retain additive columns; keep existing data intact.
+                transaction.execute_batch(
+                    migration
+                        .sql
+                        .split_once(';')
+                        .expect("column then metadata")
+                        .1,
+                )?;
+            } else {
+                transaction.execute_batch(migration.sql)?;
+            }
+            if migration.version == 4 {
+                migrate_attachment_sources(&transaction)?;
+            }
+            transaction.commit()?;
+            Ok(())
+        })();
         if migration.version == 38 {
             connection.pragma_update(None, "foreign_keys", true)?;
         }
+        migrated?;
     }
     validation();
     validate_schema(connection)?;

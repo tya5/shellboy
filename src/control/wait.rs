@@ -1,4 +1,4 @@
-//! Bounded-duration observations and composed ownership/wait graph validation.
+//! Bounded-duration explicit observations without resource dependency policy.
 use super::{Control, foreground::ForegroundSlot};
 use crate::protocol::*;
 use rusqlite::{Connection, OptionalExtension};
@@ -47,7 +47,6 @@ pub(super) struct WaitRegistry {
 #[derive(Clone)]
 struct Registration {
     source: String,
-    targets: Vec<String>,
 }
 struct Guard {
     entries: Arc<StdMutex<HashMap<String, Registration>>>,
@@ -57,7 +56,7 @@ impl Drop for Guard {
     fn drop(&mut self) {
         self.entries
             .lock()
-            .expect("wait graph poisoned")
+            .expect("wait registry poisoned")
             .remove(&self.id);
     }
 }
@@ -66,7 +65,7 @@ impl Control {
     /// Bounded in-process ownership witnesses; the frontend joins these exact
     /// operations to their committed pending records in its normal read snapshot.
     pub(crate) fn pending_wait_sources(&self) -> Option<Vec<(String, String)>> {
-        let entries = self.waits.entries.lock().expect("wait graph poisoned");
+        let entries = self.waits.entries.lock().expect("wait registry poisoned");
         if entries.len() > 128 {
             return None;
         }
@@ -86,7 +85,6 @@ impl Control {
 struct Observation {
     matched: Vec<WaitCondition>,
     snapshot: Value,
-    targets: Vec<String>,
     recovery: bool,
     unavailable: bool,
     interrupted: bool,
@@ -236,10 +234,9 @@ async fn observe_inner(
                 .any(|condition| matches!(condition, WaitCondition::ReplyReceived { .. })))
             && let Some(caller) = &caller
         {
-            let mut entries = control.waits.entries.lock().expect("wait graph poisoned");
+            let mut entries = control.waits.entries.lock().expect("wait registry poisoned");
             let registration = Registration {
                 source: format!("shell:{}", caller.execution_id),
-                targets: observation.targets.clone(),
             };
             entries.insert(operation_id.clone(), registration);
             if guard.is_none() {
@@ -359,7 +356,6 @@ fn inspect(
     let mut observation = Observation {
         matched: vec![],
         snapshot: Value::Null,
-        targets: vec![],
         recovery: false,
         unavailable: false,
         interrupted: false,
@@ -386,7 +382,7 @@ fn inspect(
                     if state != "pending" {
                         observation.matched.push(condition.clone());
                     } else {
-                        observation.targets.push(format!("thread:{thread}"));
+
                     }
                 } else {
                     missing(&mut observation, initial, "Message", message_id)?;
@@ -424,7 +420,7 @@ fn inspect(
                     } else if state == "recovery_wait" {
                         observation.recovery = true;
                     }
-                    observation.targets.push(format!("turn:{turn_id}"));
+
                 } else {
                     missing(&mut observation, initial, "Turn", turn_id)?;
                 }
@@ -440,7 +436,7 @@ fn inspect(
                     } else if recovery {
                         observation.recovery = true;
                     }
-                    observation.targets.push(format!("run:{run_id}"));
+
                 } else {
                     missing(&mut observation, initial, "Run", run_id)?;
                 }
@@ -462,7 +458,7 @@ fn inspect(
                             observation.matched.push(condition.clone());
                         }
                     }
-                    observation.targets.push(format!("shell:{execution_id}"));
+
                 } else {
                     missing(&mut observation, initial, "shell", execution_id)?;
                 }
@@ -479,7 +475,6 @@ fn inspect(
         observation.unavailable |= report.unavailable;
         observation.snapshot["thread_unavailable"] = json!(report.unavailable);
         observation.cursor = Some(report.cursor);
-        observation.targets.extend(report.targets);
     }
     Ok(observation)
 }
@@ -601,15 +596,14 @@ mod tests {
                 "z:operation".into(),
                 Registration {
                     source: "shell:execution:日本".into(),
-                    targets: vec!["run:other".into()],
+
                 },
             );
             entries.insert(
                 "a:operation".into(),
                 Registration {
                     source: "shell:shell:nested".into(),
-                    targets: vec![],
-                },
+                            },
             );
         }
         assert_eq!(
@@ -632,8 +626,7 @@ mod tests {
                     format!("operation-{index}"),
                     Registration {
                         source: format!("shell:execution-{index}"),
-                        targets: vec![],
-                    },
+                                    },
                 );
             }
         }
@@ -642,8 +635,7 @@ mod tests {
             "overflow".into(),
             Registration {
                 source: "shell:last".into(),
-                targets: vec![],
-            },
+                    },
         );
         assert!(
             control.pending_wait_sources().is_none(),

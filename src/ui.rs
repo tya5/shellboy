@@ -8782,7 +8782,6 @@ mod tool_refresh_tests {
             parent_id: None,
             run_id: None,
             turn_id: None,
-            children_count: 0,
             shells_count: 0,
             recovery_reason: None,
             parent_change: None,
