@@ -2,7 +2,7 @@
 
 [Guide index](README.md) · [Delegation](delegation.md) · [Shell](shell.md) · [CLI reference](cli-reference.md)
 
-This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. “Child agent,” “subagent,” and “sub-agent” mean an owned Run started in a child Thread; they do not introduce another model-facing tool.
+This guide describes how a model works in Shellboy. A conversation is a Thread, one response interval is a Turn, and a Run owns execution over its lifetime. A child agent is an independent Run on another Thread. A Run owns its shells, never another Run; Thread parentage only organizes conversations.
 
 ## Read this guide in the running environment
 
@@ -111,11 +111,18 @@ IDs have distinct roles even within the same task. `operation_id` identifies an 
 
 1. Read instructions, current state, and necessary original text.
 2. Perform bounded work through shell. Use background execution for long tasks and track the returned execution.
-3. If dividing work, create a child Thread and send its request. Check assignment after acceptance before waiting.
-4. Check wait status and reply state, then read the original reply node.
+3. If dividing work, create/select a child Thread and send its request with `--expect-reply`; retain the accepted message ID.
+4. End your Turn when only a child result remains. Its explicit reply is normally delivered back to your Thread; read the original reply node.
 5. Report results, verification, failures, and remaining work to the user.
 
-Give children their purpose, scope, permitted files, completion criteria, and expected return information in the request text. Children do not automatically inherit the entire parent conversation. [Delegation](delegation.md) contains a minimal example and pending-assignment handling. A completed parent Turn can coexist with a live parent Run if owned children, grandchildren, or shells remain. Normal Run completion requires no remaining owned work and other completion conditions. Explicitly stopping the parent Run or exiting the application stops and reaps its descendants. If you need a child's result, check `message get` for the reply state and retrieve `reply.node_id` when replied.
+Give children their purpose, scope, permitted files, completion criteria and expected return information in the
+request. They do not inherit the entire parent conversation. Use `message send --thread CHILD_THREAD_ID
+--expect-reply --text ...`, retain `message_id`, and end the Turn instead of synchronously supervising a child Run.
+The child uses `message reply --message MESSAGE_ID --text ...` once the request is applied. A normal delivered reply
+continues the sender's conversation. Inspect `message get` and its `reply.node_id` when evidence is needed; do not
+mistake the child's final Turn text for the requested reply. Progress is an ordinary message. Parent Run completion
+or stop neither adopts nor stops another Thread's Run. Only its own live shells can retain a background Run.
+Unanswered-request reminders at Run completion remain. See [Delegation](delegation.md).
 
 
 ### Waiting for a shell, and leaving shells behind

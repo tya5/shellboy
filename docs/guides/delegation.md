@@ -2,15 +2,16 @@
 
 [Guide index](README.md) · [Agent Guide](agent-guide.md) · [CLI reference](cli-reference.md)
 
-A Shellboy child agent (also called a subagent) is a Run executing on a child Thread. A Thread holds stored conversation and configuration; a Run owns shells and child Runs; a Turn is one response interval. Creating a child alone does not start execution. Sending a request assigns a Run/Turn. Parent and child share the runtime and filesystem, not separate isolated environments.
+A child agent is an independent Run on a child Thread. The Thread hierarchy organizes history and settings, not
+execution ownership. A Run owns shells only. Child work does not keep a parent Run alive, and stopping/retrying a
+parent never stops/replays another Thread's Run. Application shutdown still stops every live Run independently.
 
-## Ownership and human operations
+## Identity and operations
 
-A Thread's `parent_id` describes conversation hierarchy. Check a Run's `owner_run_id` for execution ownership. When a model shell sends to a child Thread whose parent is its own Thread and starts a new Run, that execution belongs to the current parent Run. Merely sending a request to an independent Thread without that hierarchy does not give ownership of its independent Run.
-
-A human's ordinary external CLI has no model Origin. Creating a Thread relationship with `--parent` does not let a human send impersonate ownership by an arbitrary running parent Run. External CLI calls also have no implicit current Thread: specify `--thread` where required, and `--data-dir` for another data directory. A running owner is required; the CLI does not automatically start an owner.
-
-Model shells inherit an issued Origin. There is no need to display, copy, or manually set its token. Do not make an external CLI impersonate model authority. There is no authority check on `run stop`, `run retry` or `shell write/eof/stop`: any caller, model or human, may act on any Run or shell (Shellboy assumes personal use; the Origin is not a security boundary). Ownership still decides who is notified (the owner gets recovery and child-end notices) and what stops with a Run (stopping an owner stops its descendants). Act only on Runs you started or were asked to handle, and check the ID first: stopping or retrying someone else's Run can interrupt the user's conversation.
+Model shells inherit an authenticated Origin identifying the actual sender; do not copy or display its token.
+External CLI calls have no implicit model Thread: select `--thread` and `--data-dir` explicitly where needed.
+Thread parentage confers no additional authority. Shellboy assumes personal use; stop/retry/write operations are not
+a host security boundary. Act only on work you were asked to handle, checking the exact ID first.
 
 ## Creating a child and sending a request
 
@@ -35,7 +36,7 @@ that unverified name.
 
 Creation, sending, and retrieving the reply are separate steps. Distinguish create's `result.thread_id` as `CHILD_THREAD_ID`, send's `result.message_id` as `CHILD_MESSAGE_ID`, and the assigned `result.turn_id` as `CHILD_TURN_ID`. Do not try to retrieve the recipient's reply or shell output using the execution ID of the observing shell that ran send.
 
-Use `shellboy status --thread CHILD_THREAD_ID` to list current stored state, then get individual objects using the returned Run/Turn/shell/message IDs. Thread hierarchy and Run ownership differ: do not infer who is notified or what a stop cascades to from the Thread's appearance. Stop and retry themselves need no authority.
+Use `shellboy status --thread CHILD_THREAD_ID` to list current stored state, then get individual objects using the returned Run/Turn/shell/message IDs. Thread hierarchy is organizational; independent Run stop/retry acts on that Run and its shells only.
 
 Creating with a parent inherits cwd, AGENTS reference, connection, model, and effort. Corresponding create arguments can explicitly override cwd, connection, model, effort and the instruction reference (`--agents PATH`). Without `--agents`, changing cwd when creating a child still preserves its parent's AGENTS reference. The parent's entire history is not copied. Include needed text or node IDs to read through `history get` in the request. See [History and search](history-and-search.md) for independent Threads and history forks.
 
@@ -43,15 +44,12 @@ Creating with a parent inherits cwd, AGENTS reference, connection, model, and ef
 
 ## Waiting for replies
 
-Wait on the accepted message, even while assignment is pending. A reply is a
-specific response to that request, not the recipient's last Turn text.
-
-```bash
-shellboy wait --conditions-json '[{"type":"reply_received","message_id":"CHILD_MESSAGE_ID"}]' --timeout-ms 30000
-shellboy message get --message CHILD_MESSAGE_ID
-# For reply.state=replied, use reply.node_id:
-shellboy history get --node REPLY_NODE_ID --limit-bytes 65536
-```
+After accepting the child request, end your Turn when only the result remains. Do not block the parent Run on a
+child Run/Turn. The explicit reply is delivered as ordinary conversation input and can start the next Turn/Run.
+A reply is tied to the request message, not to the child's most recent final message. `message get` exposes the saved
+reply state and `reply.node_id`, including while assignment remains pending; do not resend a duplicate request.
+For an external observer, explicit `wait` with `reply_received` remains an inspection option, not the delegation
+lifecycle. Ordinary progress updates use `message send`; there are no automatic child lifecycle notifications.
 
 Any model or human caller may reply once the message is applied:
 
