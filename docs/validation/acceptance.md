@@ -10873,5 +10873,6 @@ On macOS arm64, all six turn-interruption tests, background-read isolation and t
 fixture passed. The slow fixture completed in 0.50 s with every byte committed before the control liveness assertion;
 this is not an unmodified-baseline run (the slot acquired after the fixture edit). The historical E3-only failed
 shells were not reproduced by these eight cases, and no product defect or drain-deadline cause is inferred from
-those passes. TUI/nested-owner targeted checks and repeated output-fixture runs are pending. The existing GC budget
-measurement is an ignored observational workload, not a default-CI synchronization regression.
+those passes. TUI/nested-owner targeted checks and repeated output-fixture runs are pending. The GC budget
+measurement is also a default test and still needs separate focused verification; it was not part of these eight
+initial cases.
