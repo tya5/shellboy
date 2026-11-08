@@ -24,9 +24,7 @@ facts AS MATERIALIZED (
    shell.id AS execution,shell.turn_id AS shell_turn,shell.started_at AS shell_started,
    octet_length(shell.shell_json) AS command_bytes,
    (SELECT received_at FROM output_chunk WHERE execution_id=shell.id ORDER BY sequence DESC LIMIT 1) AS output_at,
-   child.id AS child_run,child.thread_id AS child_thread,child.created_at AS child_started,child.state AS child_state,
    (SELECT count(*) FROM shell_execution WHERE owner_run_id=latest.id AND state IN ('starting','running','stopping')) AS shells,
-   (SELECT count(*) FROM run WHERE owner_run_id=latest.id AND state IN ('live','stopping')) AS children,
    (SELECT count(*) FROM receipt r WHERE r.target_thread_id=t.id AND r.state IN ('accepted','held') AND r.path_admission<>'admitted'
      AND NOT EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=r.target_thread_id AND p.node_id=r.message_node_id)) AS pending,
    octet_length(u.recovery_reason_json) AS recovery_bytes,
@@ -37,8 +35,6 @@ facts AS MATERIALIZED (
  LEFT JOIN turn u ON u.id=(SELECT id FROM turn WHERE run_id=latest.id ORDER BY created_at DESC,id DESC LIMIT 1)
  LEFT JOIN shell_execution shell ON shell.id=(SELECT id FROM shell_execution WHERE owner_run_id=latest.id
    AND state IN ('starting','running','stopping') ORDER BY julianday(started_at) IS NULL,julianday(started_at),id LIMIT 1)
- LEFT JOIN run child ON child.id=(SELECT id FROM run WHERE owner_run_id=latest.id AND state IN ('live','stopping')
-   ORDER BY julianday(created_at) IS NULL,julianday(created_at),id LIMIT 1)
  WHERE t.deleted_at IS NULL
 ), sized AS MATERIALIZED (
  SELECT *,COALESCE(CASE WHEN recovery_bytes<=16384 THEN recovery_bytes ELSE 0 END,0)
@@ -52,7 +48,7 @@ SELECT id,parent_thread_id,parent_title,parent_deleted,run_id,execution,shell_tu
  CASE WHEN command_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN
    (SELECT CASE WHEN json_valid(shell_json) THEN CASE WHEN json_type(shell_json,'$.command')='text'
        THEN substr(json_extract(shell_json,'$.command'),1,512) END END FROM shell_execution WHERE id=budgeted.execution) END,
- output_at,child_run,child_thread,child_started,child_state,shells,children,pending,
+ output_at,shells,pending,
  CASE WHEN recovery_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN (SELECT recovery_reason_json FROM turn WHERE id=budgeted.turn_id) END,
  CASE WHEN answer_bytes<=16384 AND source_bytes<=16384 AND used<=65536 THEN (SELECT payload_json FROM node WHERE id=budgeted.answer_node_id) END,
  recovery_bytes IS NOT NULL AND (recovery_bytes>16384 OR source_bytes>16384 OR used>65536),
@@ -73,12 +69,7 @@ struct Extra {
     command: Option<String>,
     command_limited: bool,
     output_at: Option<String>,
-    child_run: Option<String>,
-    child_thread: Option<String>,
-    child_started: Option<String>,
-    child_state: Option<String>,
     shells: u64,
-    children: u64,
     pending: u64,
     recovery: Option<String>,
     answer: Option<String>,
@@ -159,20 +150,15 @@ pub(super) fn read_shared_tx(
                     shell_turn: row.get(6)?,
                     shell_started: row.get(7)?,
                     command: row.get(8)?,
-                    command_limited: row.get(22)?,
+                    command_limited: row.get(17)?,
                     output_at: row.get(9)?,
-                    child_run: row.get(10)?,
-                    child_thread: row.get(11)?,
-                    child_started: row.get(12)?,
-                    child_state: row.get(13)?,
-                    shells: row.get::<_, i64>(14)? as u64,
-                    children: row.get::<_, i64>(15)? as u64,
-                    pending: row.get::<_, i64>(16)? as u64,
-                    recovery: row.get(17)?,
-                    answer: row.get(18)?,
-                    recovery_limited: row.get(19)?,
-                    answer_limited: row.get(20)?,
-                    shell_state: row.get(21)?,
+                    shells: row.get::<_, i64>(10)? as u64,
+                    pending: row.get::<_, i64>(11)? as u64,
+                    recovery: row.get(12)?,
+                    answer: row.get(13)?,
+                    recovery_limited: row.get(14)?,
+                    answer_limited: row.get(15)?,
+                    shell_state: row.get(16)?,
                 },
             ))
         })?
@@ -302,28 +288,15 @@ pub(super) fn prepare_with_language(
                     wait_info: None,
                 });
             }
-            if let (Some(run_id), Some(thread_id)) = (extra.child_run, extra.child_thread) {
-                rows.push(LiveWorkRow {
-                    description: None,
-                    target: LiveWorkTarget::ChildRun { run_id, thread_id },
-                    label: local!(language, "子の会話", "Child conversation").into(),
-                    state: extra.child_state.unwrap_or_default(),
-                    elapsed_base: super::live_work::age(extra.child_started.as_deref(), wall_at),
-                    started_at: extra.child_started,
-                    last_output_at: None,
-                    wait_info: None,
-                    output_age_base: None,
-                });
-            }
             let work = extra
                 .run
-                .filter(|_| extra.shells + extra.children > 0)
+                .filter(|_| extra.shells > 0)
                 .map(|run_id| LiveWorkSnapshot {
                     run_id,
-                    overflow: (extra.shells + extra.children).saturating_sub(rows.len() as u64),
+                    overflow: (extra.shells).saturating_sub(rows.len() as u64),
                     rows,
                     shells: extra.shells,
-                    children: extra.children,
+                    children: 0,
                     waits: None,
                     counts_capped: false,
                     observed_at,

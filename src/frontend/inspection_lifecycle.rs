@@ -12,12 +12,11 @@ const OWNED_IDS: usize = 128;
 // Bound each indexed state prefix BEFORE timestamp sorting. The final sort
 // sees at most258/387 rows, including overflow sentinels, not an owner's entire
 // lifetime. Complete small sets retain the canonical timestamp/ID order.
-const OWNED_RUNS: &str = "WITH live AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(created_at)<=512 THEN created_at ELSE '' END AS created_at,COALESCE(octet_length(id)>512 OR octet_length(created_at)>512,0) AS overflow FROM run INDEXED BY runs_by_owner WHERE owner_run_id=?1 AND state='live' ORDER BY rowid LIMIT 129), stopping AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(created_at)<=512 THEN created_at ELSE '' END AS created_at,COALESCE(octet_length(id)>512 OR octet_length(created_at)>512,0) AS overflow FROM run INDEXED BY runs_by_owner WHERE owner_run_id=?1 AND state='stopping' ORDER BY rowid LIMIT 129), candidates AS (SELECT * FROM live UNION ALL SELECT * FROM stopping) SELECT id,overflow FROM candidates ORDER BY created_at,id LIMIT 129";
 const OWNED_EXECUTIONS: &str = "WITH starting AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(started_at)>512 THEN '' ELSE started_at END AS started_at,COALESCE(octet_length(id)>512 OR octet_length(started_at)>512,0) AS overflow FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?1 AND state='starting' AND state IN ('starting','running','stopping') ORDER BY rowid LIMIT 129), running AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(started_at)>512 THEN '' ELSE started_at END AS started_at,COALESCE(octet_length(id)>512 OR octet_length(started_at)>512,0) AS overflow FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?1 AND state='running' AND state IN ('starting','running','stopping') ORDER BY rowid LIMIT 129), stopping AS MATERIALIZED (SELECT CASE WHEN octet_length(id)<=512 THEN id ELSE '' END AS id,CASE WHEN octet_length(started_at)>512 THEN '' ELSE started_at END AS started_at,COALESCE(octet_length(id)>512 OR octet_length(started_at)>512,0) AS overflow FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=?1 AND state='stopping' AND state IN ('starting','running','stopping') ORDER BY rowid LIMIT 129), candidates AS (SELECT * FROM starting UNION ALL SELECT * FROM running UNION ALL SELECT * FROM stopping) SELECT id,overflow FROM candidates ORDER BY started_at,id LIMIT 129";
 
 const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' ELSE r.thread_id END,
     CASE WHEN octet_length(r.state)>512 THEN '' ELSE r.state END,
-    CASE WHEN octet_length(r.owner_run_id)>512 THEN '' ELSE r.owner_run_id END,
+    NULL,
     CASE WHEN octet_length(r.created_at)>512 THEN '' ELSE r.created_at END,
     CASE WHEN octet_length(r.ended_at)>512 THEN '' ELSE r.ended_at END,
     CASE WHEN octet_length(r.stop_reason)>512 THEN '' ELSE r.stop_reason END,
@@ -29,7 +28,6 @@ const RUN_SQL: &str = "SELECT CASE WHEN octet_length(r.thread_id)>512 THEN '' EL
                 COALESCE(octet_length(u.recovery_reason_json)>?2,0)
                 , (COALESCE(octet_length(r.thread_id)>512,0)
     OR COALESCE(octet_length(r.state)>512,0)
-    OR COALESCE(octet_length(r.owner_run_id)>512,0)
     OR COALESCE(octet_length(r.created_at)>512,0)
     OR COALESCE(octet_length(r.ended_at)>512,0)
     OR COALESCE(octet_length(r.stop_reason)>512,0)
@@ -42,7 +40,7 @@ const TURN_SQL: &str =
     "SELECT CASE WHEN octet_length(u.thread_id)>512 THEN '' ELSE u.thread_id END,
     CASE WHEN octet_length(u.run_id)>512 THEN '' ELSE u.run_id END,
     CASE WHEN octet_length(u.state)>512 THEN '' ELSE u.state END,
-    CASE WHEN octet_length(r.owner_run_id)>512 THEN '' ELSE r.owner_run_id END,
+    NULL,
     CASE WHEN octet_length(u.created_at)>512 THEN '' ELSE u.created_at END,
     CASE WHEN octet_length(u.ended_at)>512 THEN '' ELSE u.ended_at END,
     CASE WHEN octet_length(u.answer_node_id)>512 THEN '' ELSE u.answer_node_id END,
@@ -52,7 +50,6 @@ const TURN_SQL: &str =
             , (COALESCE(octet_length(u.thread_id)>512,0)
     OR COALESCE(octet_length(u.run_id)>512,0)
     OR COALESCE(octet_length(u.state)>512,0)
-    OR COALESCE(octet_length(r.owner_run_id)>512,0)
     OR COALESCE(octet_length(u.created_at)>512,0)
     OR COALESCE(octet_length(u.ended_at)>512,0)
     OR COALESCE(octet_length(u.answer_node_id)>512,0))
@@ -155,7 +152,6 @@ pub(super) fn read_tx(db: &Connection, command: &Command) -> Result<Raw, Storage
                 raw.waiting_reason = crate::readback::run_wait_reason(db, &raw.thread, id)?;
             }
             raw.revisit = crate::control::revisit::summary_for_run(db, id)?;
-            (raw.owned_runs, raw.runs_limited) = owned(db, OWNED_RUNS, id)?;
             (raw.executions, raw.executions_limited) = owned(db, OWNED_EXECUTIONS, id)?;
             RawBody::Run(raw)
         }
@@ -273,16 +269,12 @@ pub(super) fn prepare_in(
             if raw.reason_limited {
                 limited_fields.extend(["recovery_hint".into(), "context.recovery_reason".into()]);
             }
-            if raw.runs_limited {
-                limited_fields.push("owned_run_ids".into());
-            }
             if raw.executions_limited {
                 limited_fields.push("owned_execution_ids".into());
             }
             let recovery_reason = decoded_reason(raw.reason.as_deref(), raw.reason_limited)?;
             let context = ExecutionContext {
                 thread_id: Some(raw.thread.clone()),
-                owner_run_id: raw.owner.clone(),
                 state: raw.state.clone(),
                 created_at: Some(raw.created.clone()),
                 ended_at: raw.ended.clone(),
@@ -324,7 +316,6 @@ pub(super) fn prepare_in(
             let context = ExecutionContext {
                 thread_id: Some(raw.thread.clone()),
                 run_id: Some(raw.run.clone()),
-                owner_run_id: raw.owner,
                 state: raw.state.clone(),
                 created_at: Some(raw.created.clone()),
                 ended_at: raw.ended.clone(),
@@ -545,18 +536,15 @@ mod tests {
             canonical(&db, &run())
         );
         seed_owned(&db, 8, 150);
-        let before = (steps(&db, OWNED_RUNS), steps(&db, OWNED_EXECUTIONS));
+        let before = steps(&db, OWNED_EXECUTIONS);
         let value = prepare(read_tx(&db, &run()).unwrap()).unwrap();
-        for key in ["owned_run_ids", "owned_execution_ids"] {
+        for key in ["owned_execution_ids"] {
             assert_eq!(value.value[key].as_array().unwrap().len(), 128);
             assert!(value.limited_fields.contains(&key.into()));
         }
         seed_owned(&db, 150, 1150);
-        assert_eq!(
-            (steps(&db, OWNED_RUNS), steps(&db, OWNED_EXECUTIONS)),
-            before
-        );
-        for sql in [OWNED_RUNS, OWNED_EXECUTIONS] {
+        assert_eq!(steps(&db, OWNED_EXECUTIONS), before);
+        for sql in [OWNED_EXECUTIONS] {
             let plans = db
                 .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
                 .unwrap()

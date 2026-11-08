@@ -43,24 +43,16 @@ WITH wait_keys AS MATERIALIZED (
         (SELECT received_at FROM output_chunk o WHERE o.execution_id=s.id ORDER BY o.sequence DESC LIMIT 1) AS output_at,
         CASE WHEN json_valid(s.shell_json) THEN CASE WHEN json_type(s.shell_json,'$.description')='text' THEN substr(json_extract(s.shell_json,'$.description'),1,80) END END AS description
  FROM shell_members member CROSS JOIN shell_execution s ON s.id=member.id
-), child_candidates AS MATERIALIZED (
- SELECT id,thread_id,state,created_at FROM run INDEXED BY runs_by_owner
- WHERE owner_run_id=?1 AND state IN ('live','stopping') LIMIT 128
-), children AS MATERIALIZED (
- SELECT 'child' AS kind,r.id AS id,r.thread_id AS related,NULL AS execution,
-        substr(t.title,1,512) AS label,r.state,r.created_at AS started_at,NULL AS output_at,NULL AS description
- FROM child_candidates r JOIN thread t ON t.id=r.thread_id
- ORDER BY julianday(r.created_at) IS NULL,julianday(r.created_at),r.id LIMIT ?3
 ), wait_rows AS MATERIALIZED (
  SELECT 'wait' AS kind,operation_id AS id,NULL AS related,execution_id AS execution,
         NULL AS label,'waiting' AS state,started_at,NULL AS output_at,NULL AS description FROM waits
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),operation_id LIMIT ?3
 ), picked AS MATERIALIZED (
- SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM children UNION ALL SELECT * FROM wait_rows)
+ SELECT * FROM (SELECT * FROM shells UNION ALL SELECT * FROM wait_rows)
  ORDER BY julianday(started_at) IS NULL,julianday(started_at),id,kind LIMIT ?3
 ), counts AS MATERIALIZED (
  SELECT (SELECT count(*) FROM shell_candidates) AS shells,
-        (SELECT count(*) FROM child_candidates) AS children,
+        0 AS children,
         (SELECT count(*) FROM waits) AS waits,
         (SELECT count(*) FROM wait_observations WHERE COALESCE(proof_valid,0)=0) AS invalid_waits,
         (SELECT count(DISTINCT s.id) FROM waits w JOIN shell_execution s ON s.id=w.execution_id
@@ -68,14 +60,14 @@ WITH wait_keys AS MATERIALIZED (
 )
 SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked.state,picked.started_at,picked.output_at,
        counts.shells,counts.children,counts.waits,counts.invalid_waits,
-       child_turn.state,child_attempt.state,
-       CASE WHEN child_attempt.state='failed' AND child_attempt.generation=child_turn.generation AND json_valid(child_attempt.error_json)
+       NULL,NULL,
+       CASE WHEN NULL='failed' AND child_attempt.generation=child_turn.generation AND json_valid(child_attempt.error_json)
          THEN json_extract(child_attempt.error_json,'$.automatic_retry') END,
        CASE WHEN picked.kind='child' THEN
          EXISTS(SELECT 1 FROM shell_execution INDEXED BY shell_active_owner WHERE owner_run_id=picked.id AND state IN ('starting','running','stopping'))
          OR EXISTS(SELECT 1 FROM run INDEXED BY runs_by_owner WHERE owner_run_id=picked.id AND state IN ('live','stopping')) ELSE 0 END,
-       CASE WHEN picked.kind='child' AND picked.state='live' AND child_turn.state='running' AND COALESCE(child_attempt.state,'')<>'inflight'
-         THEN EXISTS(SELECT 1 FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=child_turn.id AND state='running') ELSE 0 END,picked.description,counts.duplicate_shells,
+       CASE WHEN picked.kind='child' AND picked.state='live' AND NULL='running' AND COALESCE(NULL,'')<>'inflight'
+         THEN EXISTS(SELECT 1 FROM tool_group INDEXED BY activity_group_turn_state WHERE turn_id=NULL AND state='running') ELSE 0 END,picked.description,counts.duplicate_shells,
        CASE WHEN json_type(w.value,'$.conditions')='array' THEN json_array_length(w.value,'$.conditions') END,
        CASE WHEN json_type(w.value,'$.conditions[0].type')='text' THEN substr(json_extract(w.value,'$.conditions[0].type'),1,64) END,
        CASE WHEN json_type(w.value,'$.timeout_ms')='integer' AND typeof(json_extract(w.value,'$.timeout_ms'))='integer' AND json_extract(w.value,'$.timeout_ms')>=0 THEN json_extract(w.value,'$.timeout_ms') END,
@@ -86,9 +78,6 @@ SELECT picked.kind,picked.id,picked.related,picked.execution,picked.label,picked
        CASE WHEN json_extract(w.value,'$.conditions[0].type')='thread_settled' AND json_type(w.value,'$.conditions[0].thread_ids')='array' THEN json_array_length(w.value,'$.conditions[0].thread_ids') END
 FROM counts LEFT JOIN picked ON 1
 LEFT JOIN waits w ON picked.kind='wait' AND w.operation_id=picked.id
-LEFT JOIN turn child_turn ON child_turn.id=(SELECT id FROM turn INDEXED BY activity_turn_run WHERE picked.kind='child' AND run_id=picked.id ORDER BY created_at DESC,id DESC LIMIT 1)
-LEFT JOIN model_attempt child_attempt ON child_attempt.rowid=(SELECT rowid FROM model_attempt INDEXED BY activity_attempt_turn WHERE turn_id=child_turn.id
-    AND picked.state='live' AND child_turn.state='running' ORDER BY rowid DESC LIMIT 1)
 ORDER BY julianday(picked.started_at) IS NULL,julianday(picked.started_at),picked.id,picked.kind";
 
 pub(super) struct RawLiveWork {
@@ -214,17 +203,6 @@ pub(super) fn read_tx_limited(
     }
     drop(rows);
     drop(statement);
-    // Final display membership is already capped by the validated limit. Reuse the header's
-    // finite evidence policy only for those children, inside this same read.
-    for row in &mut result.rows {
-        if row.kind == "child" {
-            row.title = super::header::read_title_tx(
-                db,
-                row.related.as_deref().expect("saved child Thread"),
-                row.label.as_deref().unwrap_or_default(),
-            )?;
-        }
-    }
     // Resolve only the selected wait targets by primary key in this snapshot.
     for row in &mut result.rows {
         let (Some(kind), Some(id)) = (row.wait_kind.as_deref(), row.wait_target_id.as_deref())
