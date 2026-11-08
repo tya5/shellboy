@@ -346,8 +346,8 @@ pub(crate) fn complete_tx(
     at: &str,
     wakes: &mut Vec<String>,
 ) -> rusqlite::Result<Option<String>> {
-    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 AND state='applied' ORDER BY created_at,rowid LIMIT 128")?
-        .query_map([thread], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 ORDER BY rowid LIMIT 128")?
+        .query_map([run], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     if !rows.is_empty() {
         db.execute(
             "UPDATE thread SET revision=revision+1 WHERE id=?1",
@@ -382,12 +382,88 @@ pub(crate) fn complete_tx(
 /// Terminal recipient Runs cannot fulfill their applied requests; settle each once.
 pub(crate) fn terminal_tx(db: &Connection, run: &str, at: &str) -> rusqlite::Result<Vec<String>> {
     let mut wakes = Vec::new();
-    let rows=db.prepare("SELECT message_node_id,sender_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=(SELECT thread_id FROM run WHERE id=?1) AND json_extract(result_json,'$.reply.state')='pending' AND run_id=?1 AND state='applied' AND COALESCE(json_extract(result_json,'$.to_human'),0)=0 AND EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed')) ORDER BY rowid LIMIT 128")?.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let rows=db.prepare("SELECT message_node_id,sender_json FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 AND EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed')) ORDER BY rowid LIMIT 128")?.query_map([run],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     for (message, sender) in rows {
         if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
             && let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);}
     }
     Ok(wakes)
+}
+
+/// Resume from an indexed pending-receipt position, not a post-filter LIMIT.
+/// Cursor loss is safe: pending duties are durable and startup starts a new sweep.
+pub(crate) type PendingCursor = (String, i64);
+pub(crate) struct OutcomeBatch {
+    pub cursor: Option<PendingCursor>,
+    pub wakes: Vec<String>,
+    pub examined: usize,
+}
+pub(crate) fn terminal_batch_tx(
+    db: &Connection,
+    after: Option<PendingCursor>,
+    at: &str,
+) -> rusqlite::Result<OutcomeBatch> {
+    let mut rows = Vec::new();
+    if let Some((thread, rowid)) = &after {
+        let mut stmt=db.prepare("SELECT target_thread_id,rowid,message_node_id,sender_json,run_id,state,json_extract(result_json,'$.to_human') FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND rowid>?2 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY rowid LIMIT 128")?;
+        rows.extend(
+            stmt.query_map(params![thread, rowid], pending_row)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        );
+    }
+    if rows.len() < 128 {
+        let mut stmt=db.prepare("SELECT target_thread_id,rowid,message_node_id,sender_json,run_id,state,json_extract(result_json,'$.to_human') FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id>?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY target_thread_id,rowid LIMIT ?2")?;
+        rows.extend(
+            stmt.query_map(
+                params![
+                    after.as_ref().map(|p| p.0.as_str()).unwrap_or(""),
+                    (128 - rows.len()) as i64
+                ],
+                pending_row,
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+        );
+    }
+    let examined = rows.len();
+    let cursor = if examined == 128 {
+        rows.last().map(|r| (r.0.clone(), r.1))
+    } else {
+        None
+    };
+    let mut wakes = Vec::new();
+    for (_, _, message, sender, run, state, human) in rows {
+        if state != "applied" || human == Some(1) {
+            continue;
+        }
+        let terminal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND state IN ('completed','stopped','failed'))",[run],|r|r.get(0))?;
+        if terminal && db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','ignored','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])?==1
+            && let Some(thread)=outcome_tx(db,&message,&sender,"ignored",at)? {wakes.push(thread);}
+    }
+    Ok(OutcomeBatch {
+        cursor,
+        wakes,
+        examined,
+    })
+}
+type PendingRow = (
+    String,
+    i64,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<i64>,
+);
+fn pending_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PendingRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+    ))
 }
 
 pub(crate) fn cancellation_wakes_tx(
@@ -533,6 +609,93 @@ pub(crate) fn deleted_sender_receipt_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bounded_terminal_sweeps_resume_all_senders_without_cross_run_scans_or_duplicates() {
+        for state in ["stopped", "completed", "failed"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("synthetic.db");
+            let mut db = Connection::open(&path).unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('s1','/','','p','m','0'),('s2','/','','p','m','0'),('target','/','','p','m','0'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','target','live','0');").unwrap();
+            let tx = db.transaction().unwrap();
+            for n in 0..4357 {
+                let unrelated = n < 4096;
+                let message = format!("m-{n:06}");
+                let run = if unrelated {
+                    format!("other-{n}")
+                } else {
+                    "r".into()
+                };
+                if unrelated {
+                    tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,'target','completed','0')",[&run]).unwrap();
+                }
+                let sender = json!({"kind":"model","instance_id":"fixture","thread_id":if n%2==0 {"s1"}else{"s2"},"run_id":"sender","turn_id":"sender-turn","execution_id":"sender-shell"});
+                tx.execute(
+                    "INSERT INTO node(id,kind,payload_json,created_at) VALUES(?1,'user','{}','0')",
+                    [&message],
+                )
+                .unwrap();
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,path_admission,created_at,result_json) VALUES(?1,?1,?2,'target',?1,?3,?4,'admitted','0','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",params![message,sender.to_string(),run,if unrelated{"held"}else{"applied"}]).unwrap();
+            }
+            tx.execute("UPDATE run SET state=?1 WHERE id='r'", [state])
+                .unwrap();
+            tx.commit().unwrap();
+            let immediate = terminal_tx(&db, "r", "1").unwrap();
+            assert_eq!(immediate.len(), 128);
+            // A failed transaction cannot advance the in-memory cursor or settle facts.
+            let tx = db.transaction().unwrap();
+            let rolled = terminal_batch_tx(&tx, None, "2").unwrap();
+            assert!(rolled.examined <= 128);
+            tx.rollback().unwrap();
+            // Reopen discards the cursor exactly as a fresh maintenance owner does.
+            drop(db);
+            let mut db = Connection::open(&path).unwrap();
+            let mut cursor = None;
+            let mut finished = false;
+            for pass in 0..40 {
+                let tx = db.transaction().unwrap();
+                let batch = terminal_batch_tx(&tx, cursor, "3").unwrap();
+                assert!(batch.examined <= 128);
+                cursor = batch.cursor;
+                tx.commit().unwrap();
+                if pass == 3 {
+                    drop(db);
+                    db = Connection::open(&path).unwrap();
+                    cursor = None;
+                }
+                if cursor.is_none() && pass != 3 {
+                    finished = true;
+                    break;
+                }
+            }
+            assert!(finished);
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE run_id='r' AND json_extract(result_json,'$.reply.state')='ignored'",[],|r|r.get::<_,i64>(0)).unwrap(),261);
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM event WHERE kind='reply_outcome'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                261
+            );
+            assert_eq!(db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.kind='reply_outcome'",[],|r|r.get::<_,i64>(0)).unwrap(),261);
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE state='held' AND json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0)).unwrap(),4096);
+            assert!(terminal_tx(&db, "r", "4").unwrap().is_empty());
+            let plans=db.prepare("EXPLAIN QUERY PLAN SELECT message_node_id FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id='r' AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 ORDER BY rowid LIMIT 128").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+            assert!(
+                plans
+                    .iter()
+                    .any(|p| p.contains("SEARCH receipt USING INDEX receipt_reply_run_pending")),
+                "{plans:?}"
+            );
+            assert!(
+                !plans.iter().any(|p| p.contains("TEMP B-TREE")),
+                "{plans:?}"
+            );
+        }
+    }
+
     #[test]
     fn terminal_outcomes_wake_completed_sender_once_but_recovery_wait_keeps_pending() {
         for state in [

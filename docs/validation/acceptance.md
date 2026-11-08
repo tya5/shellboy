@@ -10985,3 +10985,29 @@ The actual final-SHA CI evidence will be reported separately; these focused pass
 Correction to the preceding incremental count: the focused protocol suite contains **33** tests, not 34. All 33
 passed against the regenerated version-5 artifact. The latest migration fixture repair also brings storage to
 25/25, including legacy recovery event/index conversion and pending reply preservation over two reopens.
+
+### #276 post-review limited count observation and FK rationale
+
+Claude review comment 6723108515 authorizes only a read-only count observation. A previously explicitly approved DB
+location was verified from the private task memo; it was opened once with `mode=ro`, timeout zero, a two-second
+progress-handler ceiling and one short read transaction. Only three COUNTs were executed, without PRAGMA changes,
+owner operations, copying or reading payload/settings/conversation content. Observed counts: **3,303 Runs**, **22,537
+events**, **49 child_recovery_wait events**. No private path or identifiers are published. These supersede the earlier
+unknown-count statement, not its honest historical measurement scope. The matched synthetic fixture reproduces these
+three counts only, not real content/distributions or whole-user-DB byte size.
+
+The event-kind UPDATE now runs before dropping `wait_recovery_thread`. Synthetic EXPLAIN reports `SCAN event USING
+INDEX wait_recovery_thread` over the 49-row partial index, not the complete event table; the post-migration predicate
+lookup reports `SEARCH event USING INDEX wait_recovery_thread (<expr>=?)`. The migration preserves IDs/payloads.
+
+SQLite's documented generalized ALTER TABLE procedure (https://sqlite.org/lang_altertable.html, section 7) disables
+FK enforcement before starting the transaction, rebuilds the table, runs foreign_key_check, commits, then reenables
+FK enforcement. https://sqlite.org/foreignkeys.html states toggling enforcement inside a transaction is a no-op.
+https://sqlite.org/pragma.html#pragma_foreign_key_check defines an explicit integrity inspection: it reports rows
+violating foreign keys independently of whether mutation-time enforcement is enabled. OFF is therefore not a claim
+of integrity and not a substitute for that check. `src/storage/migrate.rs::run` disables before BEGIN, executes the
+DDL/copy and foreign_key_check inside the transaction, rejects any returned violation, commits only on success, then
+restores FK enforcement on both success and error. Transaction drop rolls back on error before restoration.
+`failed_run_rebuild_rolls_back_and_restores_foreign_keys` injects a DDL failure; the schema-38 upgrade fixture preserves
+actual shell/Turn references and pending receipt IDs over two reopens. These fixtures support, rather than replace,
+the official transaction/enforcement rationale. No one-off backup shim or writable-schema modification is used.

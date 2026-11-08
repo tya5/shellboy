@@ -191,6 +191,11 @@ async fn maintenance_loop(
 ) {
     use crate::maintenance::Work;
     let mut deadlines: HashMap<u32, tokio::time::Instant> = HashMap::new();
+    let mut reply_cursor = None;
+    let mut reply_active = false;
+    let mut reply_rescan = false;
+    let mut reply_requester = None;
+
     loop {
         let now = tokio::time::Instant::now();
         let due: Vec<u32> = deadlines
@@ -204,11 +209,55 @@ async fn maintenance_loop(
                 signals.mark(*work);
             }
         }
+        if stop.is_cancelled() {
+            return;
+        }
         let set = signals.take();
-        if !set.is_empty() {
+        if set.contains(Work::ReplyOutcomes) {
+            if reply_active {
+                reply_rescan = true;
+            } else {
+                reply_active = true;
+            }
+        }
+        if !set.is_empty() || reply_active {
             let Some(strong) = control.upgrade() else {
                 return;
             };
+            if reply_active {
+                let requester = reply_requester.get_or_insert_with(|| {
+                    crate::storage::BackgroundRequester::new(strong.store.database.clone())
+                });
+                let after = reply_cursor.clone();
+                match requester
+                    .unit(std::num::NonZeroU32::new(128).unwrap(), move |db, _| {
+                        let tx = db.transaction()?;
+                        let batch =
+                            reply::terminal_batch_tx(&tx, after, &chrono::Utc::now().to_rfc3339())?;
+                        tx.commit()?;
+                        Ok(batch)
+                    })
+                    .await
+                {
+                    Ok(crate::storage::Background::Done(batch)) => {
+                        debug_assert!(batch.examined<=128);
+                        reply_cursor = batch.cursor;
+                        if reply_cursor.is_none() {
+                            reply_active = reply_rescan;
+                            reply_rescan = false;
+                        }
+                        for thread in batch.wakes {
+                            strong.changed(&thread);
+                            strong.kick_quiet(thread).await;
+                        }
+                    }
+                    Ok(crate::storage::Background::Deferred) => {}
+                    Err(_) => {
+                        strong.fail_storage().await;
+                        return;
+                    }
+                }
+            }
             if set.contains(Work::Receipts) {
                 match strong.store.collect_receipts().await {
                     Ok(pass) => {
@@ -231,7 +280,7 @@ async fn maintenance_loop(
             drop(strong);
             if Work::ALL
                 .iter()
-                .any(|w| *w != Work::Receipts && set.contains(*w))
+                .any(|w| !matches!(w, Work::Receipts | Work::ReplyOutcomes) && set.contains(*w))
             {
                 tokio::select! {biased;_=stop.cancelled()=>return,result=gc.collect_kinds(set,chrono::Utc::now())=>{
                     match result {

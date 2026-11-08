@@ -713,5 +713,6 @@ INSERT INTO schema_migration(version,name) VALUES(36,'0036_spill_tool_metadata')
 PRAGMA user_version=36;
 INSERT INTO schema_migration(version,name) VALUES(37,'0037_thread_branch_kind');
 
+CREATE INDEX receipt_reply_run_pending ON receipt(run_id,state) WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1;
 INSERT INTO schema_migration(version,name) VALUES(38,'0038_independent_runs');
 PRAGMA user_version=38;

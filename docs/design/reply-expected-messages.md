@@ -973,3 +973,20 @@ request reminders remain. Human decision questions and sender provenance are unc
 
 Thread-get exposes one `awaiting_replies` list. Each item's `recipient_kind` and `recipient_thread_id` distinguish
 human/thread duties; the duplicate `awaiting_human`, `awaiting_reply` and `awaiting_thread_replies` lists are removed.
+
+## W8 correction: bounded terminal settlement and restart
+
+A terminal Run's first indexed batch is not its completion guarantee. `receipt_reply_run_pending(run_id,state)`
+partially indexes non-human pending duties, so direct Run completion/stop seeks at most 128 applied candidates
+without scanning pending receipts belonging to other Runs on the same Thread. There is no new recipient cap.
+
+The existing maintenance task also sweeps the durable pending receipts on startup and committed Run-end signals.
+Each background unit selects at most 128 candidates *before* checking Run/state eligibility. Two indexed keyset
+seeks on `receipt_reply_pending(target_thread_id,rowid)` avoid OFFSET, post-filter LIMIT and sorting. An in-memory
+cursor advances after commit; rollback keeps the previous cursor and restart loses it safely, restarting the sweep.
+A new terminal signal during an active sweep requests another sweep to catch eligibility changes behind the cursor.
+The requester yields at existing background-unit boundaries and observes shutdown between units. Idle live/recovery
+requests do not cause repeated sweeps without a new signal. Receipt CAS and the deterministic outcome event ID make
+revisiting a committed batch idempotent. Delivery admission and the post-commit quiet wakes use the existing ordinary
+message mechanism. No new table, queue, worker or durable cursor is introduced. The existing schema-38 migration gains
+only the partial Run/pending index; wire remains protocol 5.
