@@ -5299,3 +5299,7 @@ file bounds and live edits across a tool continuation. Full validation and CI ev
 
 #270 focused six regressions and the full local standard check pass. The remaining handoff gate is the pushed tip's
 normal and all-OS CI. Explicit common files use existing snapshot/file-worker/config adoption paths; no schema added.
+
+#260 continuation investigates the historical load-sensitive integration cases from main `aee6ab96`. A remaining
+slow-DB fixture liveness race is replaced by a committed-byte/explicit-EOF handshake. Focused checks are pending;
+recent unrelated migration/schema failures are kept separate from load evidence.

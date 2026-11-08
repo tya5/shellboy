@@ -4268,3 +4268,11 @@ permits retry. Spill/middle/partial changes alone do not. An adopted closed summ
 resets it, cancellation does not establish a rejection. Active known-source growth and unknown-coverage rules are
 unchanged. No new table, configuration, queue or background task is needed. Restart can allow one extra attempt.
 Do not broaden this into suppressing all known active retries or claim measured savings from synthetic usage.
+
+### D-260 continuation: event-gate the foreground liveness fixture
+
+Keep the slow-DB fixture's output batching and terminal assertions, but do not infer foreground liveness from the
+producer's expected duration. Hold the producer on stdin, await the committed byte total, test control progress and
+then explicitly close stdin. This intentionally tests responsiveness and natural completion as separate ordered
+facts. Existing timeout bounds remain safety limits, not synchronization. Do not classify unrelated migration/schema
+CI failures as load flakes or claim a general product fix without reproducing the historical failed-shell reason.

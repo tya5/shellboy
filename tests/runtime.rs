@@ -1199,10 +1199,10 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     }).await.unwrap();
     request
         .reply
-        .send(tool(
-            &format!("cat '{}'; cat '{}' >&2", out.display(), err.display()),
-            false,
-        ))
+        .send(Reply::json(json!({"id":"binary-output","status":"completed","output":[{
+            "type":"function_call","id":"tool-item","call_id":"tool-call","name":"shell",
+            "arguments":json!({"command":format!("cat '{}'; cat '{}' >&2; cat >/dev/null",out.display(),err.display()),"stdin_open":true,"background":false}).to_string()
+        }]})))
         .ok()
         .unwrap();
     crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail", async {
@@ -1212,14 +1212,14 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
                 .database
                 .call(|db| {
                     Ok(
-                        db.query_row("SELECT COUNT(*) FROM fixture_output_batch", [], |row| {
+                        db.query_row("SELECT COALESCE(SUM(bytes),0) FROM fixture_output_batch", [], |row| {
                             row.get::<_, i64>(0)
                         })?,
                     )
                 })
                 .await
                 .unwrap();
-            if saved > 0 {
+            if saved == 2 * 1024 * 1024 {
                 break;
             }
             tokio::task::yield_now().await;
@@ -1227,7 +1227,8 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     })
     .await
     .unwrap();
-    // Control handles another operation before the foreground shell completes.
+    // All bytes are durably captured before the control probe. Only stdin EOF,
+    // not the speed of this DB/control roundtrip, can release the producer.
     crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail",
         command(
             &control,
@@ -1256,6 +1257,9 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         })
         .await
         .unwrap();
+    // Releasing stdin is the completion event; DB work above cannot race natural exit.
+    let execution=control.store.database.call(|db|Ok(db.query_row("SELECT id FROM shell_execution",[],|r|r.get::<_,String>(0))?)).await.unwrap();
+    command(&control,Command::ShellEof(ExecutionTarget {execution_id:execution})).await;
     let next = match crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail", requests.recv()).await {
         Ok(Some(request)) => request,
         outcome => {

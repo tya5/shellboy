@@ -10854,3 +10854,15 @@ summary requests 15, target-meeting spill stages 2. The short-output case stays 
 These are synthetic tokens/empty summaries, not representative cost measurements. The fix removes duplicate closed
 work but permits the intended new-active-source work; it does not establish fewer total summary requests or savings.
 The source was restored byte-for-byte after the counterfactual; no mutation mode enters the committed implementation.
+
+### #260 load-triage continuation (validation pending)
+
+Recent failed CI runs `42463993273` and `42456784613` contain deterministic branch migration/schema-export failures,
+not evidence of the reported shell load failure. The earlier three fixes on `763a0c07` are already on main.
+
+The slow-binary-output fixture still inferred a live foreground process from slow commits: after observing its first
+batch it issued another control operation and asserted `running`, although natural exit could race that roundtrip.
+The revised fixture emits the same 2 MiB, then waits for stdin EOF. It waits for every byte's committed batch record,
+performs the control probe while the shell is held, and explicitly releases EOF. Natural exit, exact output and
+batching assertions remain; no deadline or drain budget increases. Focused interrupt/background/output checks are
+pending. This does not establish the cause of every historical E3 `failed` shell or real-user failure frequency.
