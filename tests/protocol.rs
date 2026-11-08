@@ -1130,16 +1130,20 @@ fn exported_schema_local_references_resolve() {
 }
 
 #[test]
-fn protocol_v3_handshake_advertises_capabilities_and_tolerates_additive_metadata() {
+fn protocol_v4_handshake_advertises_reasoning_activity_capability_and_tolerates_additive_metadata()
+{
     let welcome: Value = serde_json::from_str(
-        r#"{"protocol_version":3,"instance_id":"i","capabilities":[],"future_metadata":true}"#,
+        r#"{"protocol_version":4,"instance_id":"i","capabilities":["events.reasoning_activity"],"future_metadata":true}"#,
     )
     .unwrap();
     let decoded: shellboy::ipc::Welcome = serde_json::from_value(welcome).unwrap();
     assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
-    assert!(decoded.capabilities.is_empty());
+    assert_eq!(decoded.capabilities, ["events.reasoning_activity"]);
     let schema: Value = serde_json::from_str(&shellboy::protocol::schema_json()).unwrap();
     assert_eq!(schema["protocol_version"], PROTOCOL_VERSION);
-    assert_eq!(schema["capabilities"], serde_json::json!([]));
+    assert_eq!(
+        schema["capabilities"],
+        serde_json::json!(["events.reasoning_activity"])
+    );
     assert_eq!(schema["operation_results"].as_object().unwrap().len(), 62);
 }

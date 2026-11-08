@@ -140,6 +140,7 @@ impl Fixture {
                         changes: vec![],
                         more: false,
                         live_text: None,
+                        reasoning_activity: vec![],
                     };
                     tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -164,6 +165,7 @@ impl Fixture {
                         changes: vec![],
                         more: false,
                         live_text: None,
+                        reasoning_activity: vec![],
                     };
                     let _ = invocation.reply.send(Response::success(
                         invocation.request.operation_id.clone(),

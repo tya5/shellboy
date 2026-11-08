@@ -10914,3 +10914,9 @@ Language and append-only record audits pass. Fresh corrected-tip full CI remains
 ## #273 branch-relative usage and kind (local verification complete; CI pending)
 
 Acceptance targets: time lower bound and `--since-node` totals match; node and time selectors are mutually exclusive; wrong-path/deleted nodes are rejected; `until` remains exclusive; grouped and ungrouped totals share the resolved node time. Plan/steps pin exactly one indexed node lookup and no extra aggregate statements or candidate scan, with an explicit per-query VM step bound. Real `thread.fork` and `thread.rewind` branches report their recorded kinds; migrated/legacy rows remain `unknown`; kind is never inferred. Protocol schema drift check, CLI and Agent Guide examples must be current. Locally verified on this worktree: `cargo check --locked --tests`; focused query-plan/step-count, branch-kind, migration upgrade/integrity, fork/rewind, usage path/group/until, protocol selector, CLI conflict and exported-schema regressions; `cargo fmt --all`; language inventory; `git diff --check`; and test-layout check. Exact-tip default/all-OS CI pending.
+## Live reasoning activity on events.wait (#275)
+
+- [x] Clock and runtime regressions cover attempt start, elapsed, absent unknown byte count, cumulative UTF-8 reasoning bytes, thread filtering, status transitions, end hint and guard cleanup; live metadata contains no text field.
+- [x] Activity is opt-in with `include_text`, shares the existing 16-attempt bound, and attempt end advances the ordinary Thread change hint.
+- [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
+- [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.
