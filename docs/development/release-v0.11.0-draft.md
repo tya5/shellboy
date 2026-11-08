@@ -31,13 +31,13 @@ Each row names its issue, landed implementation SHA and acceptance section. CI `
 | #222 tags/cwd; `2fca25962f`; `acceptance.md`: Thread tags and cwd filter | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #261; `facc05669c`; `acceptance.md`: Free-space guard | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #266; `48cdd9e59e`; `acceptance.md`: Configuration read and write | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
-| #268; `8bdba5a27b`; `acceptance.md`: history.window validation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #268; `8bdba5a27b`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #269; `21e09ac19d`; `acceptance.md`: Stored keys and connection test | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #259; `dfffde451f`; `acceptance.md`: #259 small non-boundary restrictions | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #263; `45ba400bce`; `acceptance.md`: Recovery-wait message sends | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
-| #258; `007f788f58`; `acceptance.md`: edit refusal validation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
-| #251; `c987d76427`; `acceptance.md`: summary regeneration validation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
-| #271; `92281d1095`; `acceptance.md`: proactive spill validation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #258; `007f788f58`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #251; `c987d76427`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #271; `92281d1095`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #267; `f01aee7f76`; `acceptance.md`: #267 bounded index reclamation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #265; `20b5ea8338`; `acceptance.md`: #265 storage threshold read | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #272; `10a7fa0ec5`; `acceptance.md`: #272 model-grouped bounded usage | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
