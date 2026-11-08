@@ -1,4 +1,5 @@
-//! Give an interactive child its disposable PTY as its controlling terminal.
+//! Give an interactive child its disposable PTY as its controlling terminal on Unix.
+#[cfg(unix)]
 pub fn isolate_child(command: &mut tokio::process::Command) {
     // SAFETY: the child only calls async-signal-safe libc operations before exec.
     unsafe {
@@ -12,3 +13,6 @@ pub fn isolate_child(command: &mut tokio::process::Command) {
         });
     }
 }
+
+#[cfg(not(unix))]
+pub fn isolate_child(_command: &mut tokio::process::Command) {}
