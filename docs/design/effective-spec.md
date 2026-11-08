@@ -65,9 +65,10 @@ column and two partial list indexes; archive is organization metadata only. See
 Re-parenting (#222 stage 2, no schema change) lets `thread set --parent` move a Thread under another live
 Thread or detach it; live Run ownership is never transferred. See the same documents.
 
-Human decision requests (#262) reuse schema34 reply receipts; no migration,
-table or worker is needed. `thread.get` is the bounded per-Thread unified reply
-inbox, and Thread lists expose only counts. See [reply-expected messages](reply-expected-messages.md#thread-scoped-reply-inbox-262-unified-for-webtui).
+Human decision requests (#262) reuse reply receipts. Schema36 adds a partial
+index for the cross-Thread human inbox; recursive keyset seeks select a bounded
+candidate page before its exact count/oldest aggregation. `thread.get` remains
+the bounded per-Thread unified reply inbox. See [reply-expected messages](reply-expected-messages.md#thread-scoped-reply-inbox-262-unified-for-webtui).
 
 Conversation schema34 (#222 stage 3) adds the `thread_tag` table, its `(tag, thread_id)` index and the partial
 `threads_cwd_updated` index: `thread tag`, `thread tags`, `thread list --tag/--cwd` and `tags` in `thread list`/`thread get`.
@@ -142,10 +143,11 @@ assistant text is the "end message", not a reply; public `answer_node_id` /
 `exec --result reply|turn-end|run-end` (default `reply`) selects the result;
 an empty end message is a successful empty result (exit 0, not
 Schema-validated), while a Turn ended by
-Esc has no end message and exits 4 like a stopped Turn. No new table, worker or queue is added by this feature; it reuses the
-existing pending-receipt index and requires no schema migration. Human decision
+Esc has no end message and exits 4 like a stopped Turn. No new table, worker or queue is added by this feature; human decision
 requests share the bounded per-Thread inbox but are not model reply duties,
-reminders or `ignored` outcomes.
+reminders or `ignored` outcomes. The cross-Thread human inbox uses the schema36
+partial index and page-first keyset aggregation described in [reply-expected
+messages](reply-expected-messages.md#thread-scoped-reply-inbox-262-unified-for-webtui).
 
 ## Interrupted tool groups (#37)
 

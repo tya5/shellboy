@@ -10741,6 +10741,7 @@ SQL boundary deterministically instead of relying on a timing threshold. Focused
 - [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
 - [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
 - [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.
+- [ ] Cross-Thread inbox uses an indexed keyset page before count/oldest aggregation; VM steps remain identical with 20 versus 5,000 pending Threads and archived candidates (W8 regression).
 ## External RPC contract and schema export (#244 A2/D)
 
 Environment: local macOS, synthetic tests only. `cargo fmt --all --check`,

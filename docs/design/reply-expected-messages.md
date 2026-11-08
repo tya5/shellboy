@@ -915,10 +915,11 @@ Turn is not permission to revive stale/imported assignments from another Turn.
 ## Human decision requests (#262, 2026-11-07)
 
 A model may ask the user for a decision with `shellboy message ask --text ...`.
-The question reuses a reply-expected receipt; no table, schema migration,
-worker, queue, timeout or cross-Thread question browser is introduced. The
-pending receipt records `to_human=true`; reply state remains `pending` until a
-human reply, sender cancellation or recipient Thread deletion. Questions do not
+The question reuses a reply-expected receipt; no new table, worker, queue or
+timeout is introduced. Schema 36 adds a partial index solely for bounded
+cross-Thread human inbox paging; see [storage](storage.md). The pending receipt
+records `to_human=true`; reply state remains `pending` until a human reply,
+sender cancellation or recipient Thread deletion. Questions do not
 create a Run, deliver to a model, trigger Run-end reminders, or become ignored.
 They count toward the same 128 pending-reply cap.
 
@@ -958,10 +959,16 @@ For cross-Thread web inboxes, `thread.list awaiting=human` pages only Threads
 with human-directed pending receipts. Schema 36 adds
 `receipt_human_reply_pending(target_thread_id, created_at)` as a partial index
 on pending human replies, so the listing starts from qualifying receipts and
-never scans the Thread table. Items expose the human wait count and oldest
-saved receipt time; other-Thread duties are excluded. The filter is exclusive
-with query, tags, and cwd and uses an opaque keyset cursor with archived mode
-and receipt watermark. Query-plan and VM-step expectations are pinned by tests.
+never scans the Thread table. Recursive keyset seeks select at most one page of
+candidate Thread IDs from the ordered index before any count/min aggregation;
+counts and oldest times are computed only for those page candidates. Archived
+and deleted candidates are filtered from that bounded page, and the cursor
+advances by the last examined candidate so exclusions do not trigger an
+unbounded search. Items expose the human wait count and oldest saved receipt
+time; other-Thread duties are excluded. The filter is exclusive with query,
+tags, and cwd and uses an opaque keyset cursor with archived mode and receipt
+watermark. A fixture with 5,000 pending Threads pins VM steps against a 20-Thread
+fixture, including archived candidates.
 
 
 The TUI `Pending replies` region is the same unified per-Thread list. It uses the
