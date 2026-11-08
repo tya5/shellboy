@@ -1562,9 +1562,11 @@ mod tests {
         let actions = ui
             .live_work_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE))
             .unwrap();
-        assert!(actions.is_empty(),"owned-child navigation is no longer an action");
+        assert!(
+            actions.is_empty(),
+            "owned-child navigation is no longer an action"
+        );
         assert!(ui.view().live_work.region.active);
-
     }
     #[test]
     fn wait_target_number_and_approximate_deadline_are_visible() {
@@ -2270,12 +2272,7 @@ mod language_tests {
     fn owned_work_is_registered_in_both_languages_and_widths() {
         fn expected(language: UiLanguage) -> &'static [&'static str] {
             match language {
-                UiLanguage::En => &[
-                    "Owned work",
-                    "Shells: 1",
-                    "Running",
-                    "Waiting",
-                ],
+                UiLanguage::En => &["Owned work", "Shells: 1", "Running", "Waiting"],
                 UiLanguage::Ja => &["抱えている作業", "shell 1", "実行中", "待機中"],
             }
         }

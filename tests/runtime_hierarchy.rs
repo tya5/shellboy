@@ -458,10 +458,8 @@ async fn restart_exposes_interrupted_waits_and_assignments_only_on_explicit_new_
         .iter()
         .find(|event| event["change"]["runs"]["items"][0]["run_id"] == "old-parent")
         .unwrap();
-    for (section, last_id) in [
-        ("shells", "old-shell-065"),
-        ("owned_children", "old-completed-child-065"),
-    ] {
+    assert!(parent["change"].get("owned_children").is_none());
+    for (section, last_id) in [("shells", "old-shell-065")] {
         assert_eq!(parent["change"][section]["count"], 67);
         assert_eq!(
             parent["change"][section]["items"].as_array().unwrap().len(),

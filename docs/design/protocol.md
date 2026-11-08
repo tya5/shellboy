@@ -91,7 +91,7 @@ does not alter the command or execution. Reading it adds no table scan.
 
 Thread archive (#222 stage 1) adds `thread.archive` and `thread.unarchive` (both `ThreadArchiveArgs {thread_ids: 0..=200 IDs, descendants}`; empty means the calling Thread, over 200 is `input_limit`) and the `archived` field of `ThreadListArgs` (`exclude` default, `include`, `only`; omitted on the wire when `exclude`, so existing operation fingerprints are unchanged). `ThreadSummary` and `ThreadDetails` carry an optional `archived_at`. Results: `{archived|unarchived, already, not_found, descendants}`. Details: [thread organization](thread-organization.md).
 
-Re-parenting (#222 stage 2) adds the optional `parent_id` to `ThreadSetArgs` (a Thread ID moves the Thread under that live Thread, the empty string detaches it; omitted on the wire when absent, so existing operation fingerprints are unchanged). A successful move adds `parent_change {previous_parent_id, live_run_id, live_run_owner_run_id}` to the `ThreadDetails` result and reports the moved Thread, the old parent and the new parent in the changed set (`Control::changed`, so `events.wait` clients refresh all three). Setting the current parent again is a no-op that publishes nothing. Errors: a self-parent or a new parent inside the Thread's own subtree is `invalid_state`; an unknown, deleted or missing parent or Thread is `thread_not_found`; a new parent with more than 1,024 ancestors is `input_limit`.
+Re-parenting (#222 stage 2) adds the optional `parent_id` to `ThreadSetArgs` (a Thread ID moves the Thread under that live Thread, the empty string detaches it; omitted on the wire when absent, so existing operation fingerprints are unchanged). A successful move adds `parent_change {previous_parent_id, live_run_id}` to the `ThreadDetails` result and reports the moved Thread, the old parent and the new parent in the changed set (`Control::changed`, so `events.wait` clients refresh all three). Setting the current parent again is a no-op that publishes nothing. Errors: a self-parent or a new parent inside the Thread's own subtree is `invalid_state`; an unknown, deleted or missing parent or Thread is `thread_not_found`; a new parent with more than 1,024 ancestors is `input_limit`.
 
 Thread tags (#222 stage 3) add `thread.tag` (`ThreadTagArgs {thread_ids: 0..=200 IDs (empty means the calling Thread), add: 0..=64 tags, remove: 0..=64 tags}`; at least one tag, a tag in both lists is `invalid_argument`) and `thread.tags` (`ThreadTagsArgs {limit 1..=200, cursor}`, a page of distinct tag names in byte order, names only). `ThreadListArgs` gains `tags` (0..=64, AND; omitted on the wire when empty) and `cwd` (the saved cwd compared after the same lexical cleanup as saved cwds; a relative path is `invalid_argument`; omitted when absent), so existing operation fingerprints are unchanged. `ThreadSummary` and `ThreadDetails` gain `tags` (sorted, omitted when empty). A tag is trimmed, one line, 1..=128 Unicode scalar values, no control characters; case matters. A Thread carries at most 64 tags and a call that would exceed that is `input_limit` and changes nothing. `thread.tag` result: `{changed, unchanged, not_found, add, remove}` (`add`/`remove` are the normalized request); `changed_threads` is the changed Threads only, a replay with the same operation ID publishes nothing, `updated_at` is untouched. `thread.cwds` (`ThreadCwdsArgs {limit 1..=200, cursor}`) returns distinct saved cwds of non-deleted Threads (archived included) as strings in byte order, no counts. A list cursor is bound to a digest of the sorted tag set and the cwd (and to the archived mode), so it cannot move between filters (`cursor_expired`). Details: [thread organization](thread-organization.md).
 
@@ -226,7 +226,7 @@ OSごとの所有対象を型の構成で明確にする。Windowsの実機受�
 
 ### 同じwire版の旧ownerと未知操作（PR1-10）
 
-Historical protocol-2 behavior (superseded by Issue #244 A2): protocol-2 request/response envelopes rejected all other versions; current required fields were not made optional for older owners. That version-mismatch diagnostic and receipt guidance remain, but protocol 3 added the capability list and tolerant output records described above; protocol 4 is current for the strict `events.wait` extension. For external clients, the generated contract is `docs/reference/protocol.schema.json`; the version-4 `events.wait` result is included with its concrete type. Other results still represented by `serde_json::Value` remain opaque. The exact drift test keeps it synchronized with the wire types. Additive result fields are accepted by open records; unknown request arguments remain typed `invalid_argument` errors before dispatch. Any incompatible protocol change requires a new `PROTOCOL_VERSION`, exact handshake match, regenerated schema, and an explicit migration note; no silent downgrade is supported. The strict typed `events.wait` result uses protocol 4; capabilities describe feature support but cannot make protocol-3 result decoders tolerate new fields. No capability advertisement alone makes a strict result additive; every incompatible result shape requires a version bump.
+Historical protocol-2 behavior (superseded by Issue #244 A2): protocol-2 request/response envelopes rejected all other versions; current required fields were not made optional for older owners. That version-mismatch diagnostic and receipt guidance remain, but protocol 3 added the capability list and tolerant output records described above; protocol 5 is current after #276 and retains the strict `events.wait` extension. For external clients, the generated contract is `docs/reference/protocol.schema.json`; the version-4 `events.wait` result is included with its concrete type. Other results still represented by `serde_json::Value` remain opaque. The exact drift test keeps it synchronized with the wire types. Additive result fields are accepted by open records; unknown request arguments remain typed `invalid_argument` errors before dispatch. Any incompatible protocol change requires a new `PROTOCOL_VERSION`, exact handshake match, regenerated schema, and an explicit migration note; no silent downgrade is supported. The strict typed `events.wait` result uses protocol 4; capabilities describe feature support but cannot make protocol-3 result decoders tolerate new fields. No capability advertisement alone makes a strict result additive; every incompatible result shape requires a version bump.
 
 ## R3-3 / R3-4: Command分類・語彙・既定値の正本
 
@@ -302,13 +302,13 @@ request and never deletes a space. `index.remove` takes `space_id` and optional 
 one inactive space. Index status adds an optional `shrink` (source_space, target_space, phase,
 source_segments, target_segments, started_at, error), an optional `retained_vector_payload_bytes`,
 and per space an optional `int8_scale` and `retained_remove_with`; `vector_payload_bytes` follows
-the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 4 is current after #275. See
+the element size. At that time the change was additive and left protocol version unchanged; protocol 3 was introduced later by Issue #244 A2; protocol 5 is current after #276. See
 [search and relations](search-and-relations.md#int8-conversion-253).
 
 ## Instruction references (#51)
 
 thread.create/set/fork accept optional `agents`; thread.get returns required
-`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 4 is current after #275.
+`agents_path`. At the time of this change, protocol 2 was retained for this pre-1.0 additive change; protocol 3 was introduced later by Issue #244 A2; protocol 5 is current after #276.
 See [the reference contract](agents-reference.md) for validation, relative paths,
 atomic mutation and context_changed/agents_reference delivery.
 
@@ -501,7 +501,7 @@ state is created. Existing ungrouped response shape is unchanged.
 ## Optional Deletion Target Marker (#122)
 
 `thread.delete` accepts the optional `args.preview_marker` additively under the
-current protocol 4 contract; older protocol-2/3 notes about the original change
+current protocol 5 contract; older protocol-2/3 notes about the original change
 are historical, not the current wire version. The marker contains
 `thread_count` (1..257) and `ids_hash` (64 lowercase SHA-256 hex characters).
 Old requests omitting it, or using null, retain unguarded current behavior;
@@ -864,3 +864,11 @@ lookup was insufficient: parsing payload JSON before applying substring limits s
 `UsageGetArgs.since_node_id` (`--since-node NODE`) is an alternative to `since`; the saved node timestamp is the inclusive period lower bound. JSON compatibility is additive: clients that omit the field retain previous behavior. Before aggregation, the DB worker resolves exactly one non-collected node timestamp through the selected Thread's `(thread_id,node_id)` path uniqueness and rejects a node from another Thread/path. The timestamp becomes the existing inclusive `since` boundary; `until` remains exclusive. The same resolved time is used by grouped and ungrouped usage. When grouping has no explicit Thread, node resolution anchors the grouped scope to that Thread rather than all Threads. No candidate scan, aggregate statement, query count, or page bound is added; only a two-index point lookup is added.
 
 `thread.branch_kind` records `fork` or `rewind` when a branch is created. Pre-migration rows and non-branch roots retain NULL and serialize as `unknown`; no kind is inferred from path shape. Migration 37 adds only this nullable checked field.
+
+## #276 protocol 5: independent Runs
+
+Main protocol 4 already includes #275 reasoning activity. Version 5 retains that capability and removes Run ownership
+and the duplicate Thread-get reply-duty lists; see the exact inventory in events-and-external-protocol.md and #280.
+Only direct invoking Run/Turn/shell ID waits are rejected with `self_wait`; no cycle graph remains. Reply duties stay
+pending through `recovery_wait`, and explicit replies/outcomes use ordinary requesting-Thread delivery after its Run
+ends. Shell ownership and organizational Thread parentage are unchanged. No protocol-4 alias or downgrade is provided.
