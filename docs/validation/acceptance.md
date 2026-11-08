@@ -10906,3 +10906,7 @@ and only then emits stderr; thus at least half the 2 MiB is still unavailable un
 Thread-create response and positive/incomplete committed byte count before releasing the line and EOF. Do not assert
 shell state at probe time: running/exited are both legal observer orderings. Exact output and final natural exit
 remain mandatory. No sleep or increased deadline establishes this ordering; watchdogs only bound a broken test.
+
+The corrected intermediate-output probe passed three focused runs and strict all-target clippy on macOS arm64.
+The separate pre-correction full integration run passed 1343 cases with 19 ignored; it is not evidence for P2.
+Language and append-only record audits pass. Fresh corrected-tip full CI remains required.

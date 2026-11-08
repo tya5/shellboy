@@ -1244,13 +1244,28 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
     )
     .await
     .unwrap();
-    assert!(probe["thread_id"].is_string(),"probe must return a created Thread: {probe}");
-    control.store.database.call(|db| {
-        let bytes:i64=db.query_row("SELECT COALESCE(SUM(bytes),0) FROM fixture_output_batch",[],|r|r.get(0))?;
-        assert!(bytes>0 && bytes<2*1024*1024,"probe must complete before output saving finishes: {bytes}");
-        // Running and exited are both legal observer states; liveness is not the assertion.
-        Ok(())
-    }).await.unwrap();
+    assert!(
+        probe["thread_id"].is_string(),
+        "probe must return a created Thread: {probe}"
+    );
+    control
+        .store
+        .database
+        .call(|db| {
+            let bytes: i64 = db.query_row(
+                "SELECT COALESCE(SUM(bytes),0) FROM fixture_output_batch",
+                [],
+                |r| r.get(0),
+            )?;
+            assert!(
+                bytes > 0 && bytes < 2 * 1024 * 1024,
+                "probe must complete before output saving finishes: {bytes}"
+            );
+            // Running and exited are both legal observer states; liveness is not the assertion.
+            Ok(())
+        })
+        .await
+        .unwrap();
     // Releasing stdin is the completion event; DB work above cannot race natural exit.
     let execution = control
         .store
@@ -1262,7 +1277,15 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         })
         .await
         .unwrap();
-    command(&control,Command::ShellWrite(ShellWriteArgs {execution_id:execution.clone(),text:"release\n".into(),encoding:"UTF-8".into()})).await;
+    command(
+        &control,
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: execution.clone(),
+            text: "release\n".into(),
+            encoding: "UTF-8".into(),
+        }),
+    )
+    .await;
     command(
         &control,
         Command::ShellEof(ExecutionTarget {
