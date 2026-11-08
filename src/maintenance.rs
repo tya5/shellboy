@@ -241,6 +241,7 @@ mod tests {
         assert_eq!(signals.take(), {
             let mut set = WorkSet::default();
             set.insert(Work::EndedRuns);
+            set.insert(Work::ReplyOutcomes);
             set
         });
         signals.run_ended("overflow");

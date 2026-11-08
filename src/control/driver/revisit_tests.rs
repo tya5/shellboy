@@ -69,7 +69,7 @@ async fn reply_reminder_then_ignored_contains_every_sender() {
             } else {
                 json!({"kind":"external_cli","label":format!("sender-{i}")})
             };
-            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,'t',?1,'applied','admitted','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",params![id,sender.to_string()])?;
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,'t',?1,'r','applied','admitted','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')",params![id,sender.to_string()])?;
         }
         Ok(())
     }).await.unwrap();
