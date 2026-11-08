@@ -2439,6 +2439,9 @@ pub(crate) fn thread_list(
     connection: &Connection,
     args: &ThreadListArgs,
 ) -> Result<Page<ThreadSummary>> {
+    if args.awaiting.as_deref() == Some("human") {
+        return thread_list_awaiting_human(connection, args);
+    }
     let filter = args.query.as_deref().unwrap_or("");
     let needle = title_text(filter).to_lowercase();
     // Tags and cwd narrow in SQL; the cursor is bound to them through a digest.
@@ -2547,6 +2550,120 @@ pub(crate) fn thread_list(
     for item in &mut items {
         item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
     }
+    Ok(Page { items, next_cursor })
+}
+
+/// Enumerate only target Threads present in the partial pending-reply index.
+/// The dedicated partial index excludes Thread-directed replies before paging,
+/// so work follows human reply duties rather than the complete Thread table.
+fn thread_list_awaiting_human(
+    connection: &Connection,
+    args: &ThreadListArgs,
+) -> Result<Page<ThreadSummary>> {
+    const SCOPE: &str = "thread.list.awaiting_human";
+    let archived_filter = format!("human:{}", args.archived.as_str());
+    let decoded = args
+        .cursor
+        .as_ref()
+        .map(|token| PageCursor::decode(token, SCOPE, &archived_filter, 0, None))
+        .transpose()?;
+    let watermark: i64 = if let Some(cursor) = &decoded {
+        cursor
+            .watermark
+            .try_into()
+            .map_err(|_| error(ErrorCode::CursorExpired, "invalid reply watermark"))?
+    } else {
+        connection
+            .query_row("SELECT COALESCE(MAX(rowid),0) FROM receipt", [], |row| {
+                row.get(0)
+            })
+            .map_err(sql_error)?
+    };
+    let after = if let Some(cursor) = decoded {
+        cursor.last_sort_key
+    } else {
+        String::new()
+    };
+    let archived = match args.archived {
+        ArchivedFilter::Exclude => " AND t.archived_at IS NULL",
+        ArchivedFilter::Only => " AND t.archived_at IS NOT NULL",
+        ArchivedFilter::Include => "",
+    };
+    let sql = format!(
+        "SELECT r.target_thread_id,count(*),min(r.created_at) \
+         FROM receipt r INDEXED BY receipt_human_reply_pending \
+         CROSS JOIN thread t ON t.id=r.target_thread_id \
+         WHERE r.target_thread_id>?1 AND r.rowid<=?2 \
+           AND json_extract(r.result_json,'$.reply.state')='pending' \
+           AND json_extract(r.result_json,'$.to_human')=1 \
+           AND t.deleted_at IS NULL{archived} \
+         GROUP BY r.target_thread_id ORDER BY r.target_thread_id LIMIT ?3"
+    );
+    let mut statement = connection.prepare(&sql).map_err(sql_error)?;
+    let mut rows = statement
+        .query(params![after, watermark, i64::from(args.limit) + 1])
+        .map_err(sql_error)?;
+    let mut aggregates = Vec::new();
+    while let Some(row) = rows.next().map_err(sql_error)? {
+        aggregates.push((
+            row.get::<_, String>(0).map_err(sql_error)?,
+            row.get::<_, i64>(1).map_err(sql_error)?.max(0) as u64,
+            row.get::<_, String>(2).map_err(sql_error)?,
+        ));
+    }
+    let has_more = aggregates.len() > args.limit as usize;
+    if has_more {
+        aggregates.pop();
+    }
+    let ids: Vec<String> = aggregates.iter().map(|entry| entry.0.clone()).collect();
+    let raw = thread_summary::read_ids_tx(connection, &ids).map_err(storage_error)?;
+    let mut oldest_by_thread: std::collections::HashMap<&str, (&str, u64)> = aggregates
+        .iter()
+        .map(|(id, count, oldest)| (id.as_str(), (oldest.as_str(), *count)))
+        .collect();
+    let mut summaries = std::collections::HashMap::with_capacity(raw.len());
+    for raw in raw {
+        let id = raw.thread_id.clone();
+        let title = thread_display_title(connection, &id, &raw.stored_title)?;
+        let excerpt = thread_excerpt(connection, &id)?;
+        let mut item = thread_summary::prepare(raw, title, excerpt);
+        if let Some((oldest, count)) = oldest_by_thread.remove(id.as_str()) {
+            item.awaiting_human_count = count;
+            item.awaiting_human_oldest_at = Some(oldest.to_owned());
+        }
+        item.last_end_message = crate::thread_observation::last_end_message(connection, &id)?;
+        item.last_input = crate::thread_observation::last_input(connection, &id)?;
+        summaries.insert(id, item);
+    }
+    let mut items: Vec<ThreadSummary> = aggregates
+        .iter()
+        .filter_map(|entry| summaries.remove(&entry.0))
+        .collect();
+    let mut tagged = tags::for_threads(connection, &ids)?;
+    for item in &mut items {
+        item.tags = tagged.remove(&item.thread_id).unwrap_or_default();
+    }
+    let next_cursor = if has_more {
+        let last_id = items
+            .last()
+            .expect("a continued page is nonempty")
+            .thread_id
+            .clone();
+        Some(
+            PageCursor {
+                version: 1,
+                scope: SCOPE.into(),
+                filter: archived_filter,
+                last_sort_key: last_id,
+                watermark: watermark as u64,
+                revision: 0,
+                encoding: None,
+            }
+            .encode()?,
+        )
+    } else {
+        None
+    };
     Ok(Page { items, next_cursor })
 }
 
@@ -3148,6 +3265,47 @@ fn saved_operation(
 #[cfg(test)]
 mod thread_list_plan_tests {
     use super::*;
+    const AWAITING_HUMAN_SQL: &str = "SELECT r.target_thread_id,count(*),min(r.created_at) FROM receipt r INDEXED BY receipt_human_reply_pending CROSS JOIN thread t ON t.id=r.target_thread_id WHERE r.target_thread_id>?1 AND r.rowid<=?2 AND json_extract(r.result_json,'$.reply.state')='pending' AND json_extract(r.result_json,'$.to_human')=1 AND t.deleted_at IS NULL GROUP BY r.target_thread_id ORDER BY r.target_thread_id LIMIT ?3";
+
+    #[test]
+    fn awaiting_human_lookup_seeks_pending_receipts_by_target_and_has_fixed_vm_steps() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        let plan: Vec<String> = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {AWAITING_HUMAN_SQL}"))
+            .unwrap()
+            .query_map(params!["", i64::MAX, 11], |row| row.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|line| line
+                .contains("SEARCH r USING INDEX receipt_human_reply_pending (target_thread_id>?)")),
+            "{plan:?}"
+        );
+        assert!(
+            plan.iter().any(|line| {
+                line.contains("SEARCH t USING PRIMARY KEY (id=?)")
+                    || line.contains("SEARCH t USING INDEX sqlite_autoindex_thread_1 (id=?)")
+            }),
+            "{plan:?}"
+        );
+        assert!(!plan.iter().any(|line| line.contains("SCAN t")), "{plan:?}");
+        let mut stmt = db.prepare(AWAITING_HUMAN_SQL).unwrap();
+        let _: Vec<(String, i64, String)> = stmt
+            .query_map(params!["", i64::MAX, 11], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            stmt.get_status(rusqlite::StatementStatus::VmStep),
+            27,
+            "SQLite VM-step contract changed"
+        );
+    }
+
     #[test]
     fn actual_correlated_thread_list_seeks_latest_run_once_without_per_run_sort() {
         let db = Connection::open_in_memory().unwrap();
@@ -3574,6 +3732,7 @@ mod activity_list_tests {
                     limit: 50,
                     cursor,
                     query: None,
+                    awaiting: None,
                     archived: Default::default(),
                     tags: Vec::new(),
                     cwd: None,

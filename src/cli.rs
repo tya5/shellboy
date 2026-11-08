@@ -536,6 +536,9 @@ pub struct ListOptions {
     pub cursor: Option<String>,
     #[arg(long)]
     pub query: Option<String>,
+    /// Only Threads with at least one unanswered human question.
+    #[arg(long, value_parser = ["human"])]
+    pub awaiting: Option<String>,
     /// Archived Threads: exclude (default, hidden), include, or only.
     #[arg(long, value_enum, default_value_t = wire::ArchivedFilter::Exclude)]
     pub archived: wire::ArchivedFilter,
@@ -1337,6 +1340,7 @@ impl Cli {
                     limit: a.limit,
                     cursor: a.cursor,
                     query: a.query,
+                    awaiting: a.awaiting,
                     archived: a.archived,
                     tags: a.tags,
                     cwd: a

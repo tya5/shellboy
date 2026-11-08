@@ -31,7 +31,8 @@ fn columns_from() -> String {
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
     (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending'),
     (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1),
-    (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1)
+    (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1),
+    (SELECT min(q.created_at) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1)
 FROM thread t {activity_joins}
 "
     )
@@ -102,6 +103,7 @@ pub(crate) struct RawSummary {
     pub(crate) archived_at: Option<String>,
     pub(crate) awaiting_reply: u64,
     pub(crate) awaiting_thread_replies: u64,
+    pub(crate) awaiting_human_oldest_at: Option<String>,
     pub(crate) awaiting_replies: u64,
 }
 
@@ -214,6 +216,7 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         awaiting_replies: row.get::<_, i64>(22)?.max(0) as u64,
         awaiting_reply: row.get::<_, i64>(23)?.max(0) as u64,
         awaiting_thread_replies: row.get::<_, i64>(24)?.max(0) as u64,
+        awaiting_human_oldest_at: row.get(25)?,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
@@ -222,6 +225,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
         awaiting_human_count: raw.awaiting_reply,
+        awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
         awaiting_thread_count: raw.awaiting_thread_replies,
         last_end_message: None,
         last_input: None,

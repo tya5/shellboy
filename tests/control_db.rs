@@ -609,6 +609,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
             limit: 1,
             cursor: None,
             query: None,
+            awaiting: None,
             archived: Default::default(),
             tags: Vec::new(),
             cwd: None,
@@ -624,6 +625,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
             limit: 200,
             cursor: first.next_cursor.clone(),
             query: None,
+            awaiting: None,
             archived: Default::default(),
             tags: Vec::new(),
             cwd: None,
@@ -642,6 +644,7 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
                 limit: 1,
                 cursor: first.next_cursor,
                 query: Some("changed".into()),
+                awaiting: None,
                 archived: Default::default(),
                 tags: Vec::new(),
                 cwd: None,
@@ -650,6 +653,128 @@ async fn list_watermark_and_query_cursor_are_bounded_and_filter_bound() {
         )
         .await;
     assert_eq!(wrong.unwrap_err().code, ErrorCode::CursorExpired);
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_list_awaiting_human_pages_only_human_waits_with_oldest_timestamp() {
+    let (_directory, store) = store().await;
+    let human = create(&store, None).await;
+    let other = create(&store, None).await;
+    let (origin_message, _) = send(&store, &human.thread_id, "model turn").await;
+    let origin = caller(
+        &human.thread_id,
+        origin_message.run_id.as_deref().unwrap(),
+        origin_message.turn_id.as_deref().unwrap(),
+    );
+    let human_receipt = store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                to_human: true,
+                human: false,
+                resume_recovery: false,
+                expect_reply: true,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: None,
+                text: "first question".into(),
+            })),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap();
+    let first_id = serde_json::from_value::<MessageAccepted>(human_receipt.result)
+        .unwrap()
+        .message_id;
+    let second_receipt = store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                to_human: true,
+                human: false,
+                resume_recovery: false,
+                expect_reply: true,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: None,
+                text: "second question".into(),
+            })),
+            Some(origin.clone()),
+        )
+        .await
+        .unwrap();
+    let second_id = serde_json::from_value::<MessageAccepted>(second_receipt.result)
+        .unwrap()
+        .message_id;
+    store
+        .execute(
+            request(Command::MessageSend(MessageSendArgs {
+                to_human: false,
+                human: false,
+                resume_recovery: false,
+                expect_reply: true,
+                sender_label: None,
+                deliver: Deliver::Next,
+                thread_id: Some(other.thread_id.clone()),
+                text: "thread duty".into(),
+            })),
+            Some(origin),
+        )
+        .await
+        .unwrap();
+    let first = execute(
+        &store,
+        Command::ThreadList(ThreadListArgs {
+            limit: 1,
+            cursor: None,
+            query: None,
+            awaiting: Some("human".into()),
+            archived: Default::default(),
+            tags: vec![],
+            cwd: None,
+        }),
+    )
+    .await;
+    let first: Page<ThreadSummary> = serde_json::from_value(first.result).unwrap();
+    assert_eq!(first.items.len(), 1);
+    assert_eq!(first.items[0].thread_id, human.thread_id);
+    assert_eq!(first.items[0].awaiting_human_count, 2);
+    let oldest: String = store
+        .database
+        .call(move |db| {
+            Ok(db.query_row(
+                "SELECT min(created_at) FROM receipt WHERE message_node_id IN (?1,?2)",
+                [first_id, second_id],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        first.items[0].awaiting_human_oldest_at.as_deref(),
+        Some(oldest.as_str())
+    );
+    assert!(first.next_cursor.is_none());
+    let all = execute(
+        &store,
+        Command::ThreadList(ThreadListArgs {
+            limit: 20,
+            cursor: None,
+            query: None,
+            awaiting: Some("human".into()),
+            archived: Default::default(),
+            tags: vec![],
+            cwd: None,
+        }),
+    )
+    .await;
+    let all: Page<ThreadSummary> = serde_json::from_value(all.result).unwrap();
+    assert_eq!(
+        all.items
+            .iter()
+            .map(|i| i.thread_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![human.thread_id.as_str()]
+    );
     store.database.shutdown().await.unwrap();
 }
 
