@@ -349,7 +349,10 @@ mod extra_tests {
     #[test]
     fn extra_instructions_config_requires_bounded_absolute_paths() {
         assert!(Config::parse("extra_instructions=['relative.md']").is_err());
-        let config = Config { extra_instructions: vec![std::env::temp_dir().join("guide.md"); 9], ..Config::default() };
+        let config = Config {
+            extra_instructions: vec![std::env::temp_dir().join("guide.md"); 9],
+            ..Config::default()
+        };
         assert!(config.validate().is_err());
     }
 }
