@@ -10841,3 +10841,16 @@ grown closed source and resetting after adoption/new Turn. Mock-HTTP growing-Tur
 spillable outputs and known coverage with short non-spillable outputs, preserving active retries as new middle
 sources arrive. Existing #248 unknown-coverage empty/provider-failure and explicit-compact checks remain in place.
 No passing execution or real-user frequency/cost measurement is claimed yet.
+
+### #252 counterfactual and focused execution
+
+On macOS arm64, check-tests and two stage-block unit tests passed. Four mock-HTTP integration regressions passed
+(known spilling, known short outputs, #248 unknown empty summary, unknown provider 400), as did all-target strict
+clippy, Python 206, layout/watchdog and language/record audits.
+
+An otherwise identical counterfactual enabling the old unknown-only closed block fails the new spilling regression:
+closed/active rejections 8/2, summary requests 10, target-meeting spill stages 7. Restoring the fix yields 1/14,
+summary requests 15, target-meeting spill stages 2. The short-output case stays 1/16 with 17 summary requests in both.
+These are synthetic tokens/empty summaries, not representative cost measurements. The fix removes duplicate closed
+work but permits the intended new-active-source work; it does not establish fewer total summary requests or savings.
+The source was restored byte-for-byte after the counterfactual; no mutation mode enters the committed implementation.

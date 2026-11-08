@@ -3877,13 +3877,17 @@ async fn growing_turn_with_failing_summaries(
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
         let (mut closed, mut active) = (0, 0);
+        let mut met_spills=0;
         for event in &events {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
             let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
             let record: Value = serde_json::from_str(&record).unwrap();
+            for stage in ["closed_spill","active_spill"] { met_spills += (record["stages"][stage]["outcome"]=="adopted" && record["stages"][stage]["remaining_after"]==0) as u32; }
             closed += (record["stages"]["closed_summary"]["outcome"] == "rejected") as u32;
             active += (record["stages"]["active_summary"]["outcome"] == "rejected") as u32;
         }
+        if spilling {assert!(met_spills>1,"fixture must repeatedly meet target through spill");}
+        eprintln!("known={} spilling={spilling} rejected closed={closed} active={active} summary_requests={summaries} met_spills={met_spills}",!oversized);
         // A later attempt's stage record names the block (compact list).
         let blocked = events.len() > 2 && {
             let attempt = events[0]["attempt_id"].as_str().unwrap().to_owned();
