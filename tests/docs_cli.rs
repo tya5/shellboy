@@ -250,7 +250,7 @@ async fn bundled_agent_guide_explains_thread_wait_continuation_without_an_owner(
             "result.cursor",
             "last_end_message",
             "last_input",
-            "owner restart",
+            "interrupted wait",
         ] {
             assert!(text.contains(required), "{text}");
         }

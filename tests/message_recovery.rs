@@ -475,7 +475,7 @@ async fn terminal_fixture(owner: &DataOwner, accepted: &MessageAccepted) {
 }
 
 #[tokio::test]
-async fn only_human_or_live_direct_parent_restart_authorizes_old_unadmitted_input() {
+async fn organizational_parent_does_not_authorize_old_unadmitted_input() {
     // Store receives an already authenticated Origin. This fixture exercises
     // its authority boundary, without pretending a synthetic token passed IPC.
     for own_parent in [false, true] {

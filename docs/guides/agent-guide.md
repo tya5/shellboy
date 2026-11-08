@@ -796,4 +796,4 @@ have no dependency graph. Child requests use expected replies and normal deliver
 
 Use expected replies rather than supervising child Runs: retain each accepted request ID and finish your Turn.
 External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
-`last_end_message` without treating recovery_wait as terminal or automatically replaying an interrupted wait.
+`last_end_message` and `last_input` without treating recovery_wait as terminal or automatically replaying an interrupted wait.

@@ -4717,7 +4717,7 @@ mod agents_reference_tests {
 mod interrupted_message_assignment_tests {
     use super::*;
     #[test]
-    fn only_human_or_live_direct_parent_new_run_recovers_original_assigned_input() {
+    fn only_human_new_run_recovers_original_assigned_input() {
         for caller_kind in ["human", "parent", "foreign"] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
