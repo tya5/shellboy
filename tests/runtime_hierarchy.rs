@@ -706,7 +706,6 @@ async fn real_parent_cli_holds_ordinary_recovery_message_and_retries_child_and_g
     let first = incoming(&mut requests).await;
     let child = child_thread(&control, &parent.thread_id).await;
     let grandchild = child_thread(&control, &child).await;
-    let parent_run = parent.run_id.clone().unwrap();
     let child_query = child.clone();
     let grandchild_query = grandchild.clone();
     owner.db.call(move|db|{
