@@ -66,8 +66,8 @@ an interruption caused by that reply arriving at the caller.
 
 ## Adopted revision: observation without ownership (#276)
 
-Remove the complete combined resource/dependency graph and all reachability/cycle rejection, including self-waits.
-Explicit Run/Turn/shell/reply/Thread conditions remain observations. They finish on a matching fact, interruption,
+Remove the complete combined resource/dependency graph and all reachability/cycle rejection. A direct invoking
+Run/Turn/shell ID comparison alone rejects `self_wait`. Explicit other Run/Turn/shell/reply/Thread conditions remain observations. They finish on a matching fact, interruption,
 unavailability or the requested observation deadline; a cycle can simply time out. This is not task supervision.
 Retain bounded pending operation bindings and interrupted-wait facts for crash inspection, without graph edges or
 automatic replay. For child tasks use `message send --expect-reply` and end the sender Turn, not synchronous Run/Turn
