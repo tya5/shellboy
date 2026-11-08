@@ -22,7 +22,7 @@ CREATE TABLE blocks(revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal I
 CREATE TABLE chunks(id TEXT PRIMARY KEY,revision_id TEXT NOT NULL REFERENCES revisions(id),ordinal INTEGER NOT NULL,start INTEGER NOT NULL,end INTEGER NOT NULL,hash TEXT NOT NULL,location TEXT NOT NULL,UNIQUE(revision_id,ordinal));
 CREATE TABLE spaces(id TEXT PRIMARY KEY,dimension INTEGER NOT NULL,profile TEXT NOT NULL,model TEXT NOT NULL,endpoint_hash TEXT NOT NULL,table_name TEXT NOT NULL);
 CREATE TABLE embeddings(space_id TEXT NOT NULL REFERENCES spaces(id),hash TEXT NOT NULL,vec_rowid INTEGER NOT NULL,PRIMARY KEY(space_id,hash));
-PRAGMA user_version=4;";
+DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=4;";
 
 // Proven hot paths: max vector row allocation and orphan-hash cleanup (#26).
 const HOT_QUERY_INDEXES: &str = "

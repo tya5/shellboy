@@ -725,6 +725,7 @@ INSERT INTO schema_migration(version,name) VALUES(35,'0035_index_reclaim_lookup'
 PRAGMA user_version=35;
 INSERT INTO schema_migration(version,name) VALUES(36,'0036_spill_tool_metadata');
 PRAGMA user_version=36;
+
 INSERT INTO schema_migration(version,name) VALUES(37,'0037_thread_branch_kind');
 PRAGMA user_version=37;
 
