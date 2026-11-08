@@ -472,7 +472,7 @@ feeds the TUI, without a new Run/Turn state or protocol-version change (#102).
 
 ## Grouped saved usage (#101)
 
-`usage.get` optionally accepts `group_by` (`hour`, `day`, `thread`, `model`), `timezone` (`local`, `UTC`, fixed signed HH:MM), `limit` (1..168), and
+`usage.get` optionally accepts `group_by` (`hour`, `day`, `thread`, `model`, `shell-exit`), `timezone` (`local`, `UTC`, fixed signed HH:MM), `limit` (1..168), and
 `cursor`.
 Timezone/limit/cursor require grouping; existing scope exclusivity still applies.
 Grouped unscoped reads span non-deleted Threads, not an implicitly selected Thread.
@@ -480,6 +480,7 @@ Model groups use saved `model_attempt.model_id`; they retain the same bounded
 rowid window and omit summary-compaction queries because records have no model
 attribution. Summary fields are explicit null/unknown with
 `coverage.summary=not_attributed_by_model`, never assigned to a guessed model.
+For `shell-exit`, terminal records group by owning Thread and persisted exit code; null codes are unknown. Ownership follows `owner_run_id` to `run.thread_id`.
 The default last24h/max31day saved-start period, 10,000+1 candidate scan bound,
 group/scan cursor, page-local statistics, unknown coverage and max-attempt
 references are defined in [usage aggregates](usage-aggregates.md#bounded-grouped-cli-readback-101).

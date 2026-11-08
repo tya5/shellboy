@@ -926,7 +926,7 @@ costs. TUI drafts, submitted-draft restore, Turn interruption and TUI slash-only
 operations have no headless UI. Existing CLI compact operations remain available.
 A TUI cannot be attached later, and owner replacement does not transfer live work.
 
-### Bounded usage breakdowns (#101)
+### Bounded usage breakdowns (#101, #272)
 
 ```sh
 shellboy usage get --group-by thread --since 2026-10-31T06:00:00Z --until 2026-10-31T12:00:00Z
@@ -934,6 +934,8 @@ shellboy usage get --group-by model --since 2026-10-31T00:00:00Z --until 2026-11
 shellboy usage get --group-by hour --timezone +09:00 --since 2026-10-31T00:00:00Z --until 2026-11-01T00:00:00Z
 shellboy usage get --group-by day --timezone UTC --limit 24
 ```
+
+`--group-by shell-exit` returns terminal saved shell executions by Thread and exit code; null exit codes remain unknown.
 
 Grouped reads without an explicit scope cover non-deleted conversations, so the
 first example can identify conversations with mean input above 300,000 tokens. The

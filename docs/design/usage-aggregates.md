@@ -75,9 +75,11 @@ existing request task into the DB job; it is not a protocol option or setting.
 
 ## Bounded grouped CLI readback (#101)
 
-`usage get --group-by hour|day|thread|model` uses the existing finite presentation
+`usage get --group-by hour|day|thread|model|shell-exit` uses the existing finite presentation
 pool and read-only WAL snapshot, not the write DB worker. Ungrouped totals are
 unchanged.
+`shell-exit` reads terminal executions by persisted `started_at` in the half-open period. Candidate selection is capped at 200 rowids per page before Rust scope/time filtering; cursor pages bind the original insertion watermark and report page-local coverage.
+
 Without an explicit scope, grouped reads cover non-deleted Threads. Thread groups
 provide the multi-conversation alternative; model groups key saved attempts by
 `model_attempt.model_id`. One explicit Thread/Run/Turn filter and bounded
