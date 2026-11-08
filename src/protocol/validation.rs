@@ -58,6 +58,20 @@ impl ThreadListArgs {
         limit(self.limit, MAX_LIST_LIMIT)?;
         optional_nonempty(self.cursor.as_deref(), "cursor")?;
         optional_nonempty(self.cwd.as_deref(), "cwd")?;
+        if self
+            .awaiting
+            .as_deref()
+            .is_some_and(|value| value != "human")
+        {
+            return Err(invalid("awaiting must be human"));
+        }
+        if self.awaiting.is_some()
+            && (self.query.is_some() || !self.tags.is_empty() || self.cwd.is_some())
+        {
+            return Err(invalid(
+                "awaiting=human cannot be combined with query, tags, or cwd",
+            ));
+        }
         if self.tags.len() > MAX_THREAD_TAGS {
             return Err(ApiError::new(
                 ErrorCode::InputLimit,

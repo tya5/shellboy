@@ -698,6 +698,7 @@ mod tests {
                     limit: 50,
                     cursor: cursor.clone(),
                     query: None,
+                    awaiting: None,
                     archived: Default::default(),
                     tags: Vec::new(),
                     cwd: None,

@@ -177,6 +177,7 @@ impl<W: Write> Chat<'_, W> {
                 limit: 1,
                 cursor: None,
                 query: None,
+                awaiting: None,
                 archived: Default::default(),
                 tags: Vec::new(),
                 cwd: None,

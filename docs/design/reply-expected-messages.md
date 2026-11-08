@@ -942,8 +942,7 @@ a reason to pause or abandon that reply duty.
 
 ## Thread-scoped reply inbox (#262, unified for web/TUI)
 
-There is no cross-Thread inbox endpoint. The existing `thread.get` read is the
-public, bounded per-Thread inbox: `ThreadDetails.awaiting_replies` is the unified
+`thread.get` remains the public, bounded per-Thread inbox: `ThreadDetails.awaiting_replies` is the unified
 page of pending duties for that one Thread, ordered by saved creation time and
 bounded to 128. Each item has `message_id`, `recipient_kind` (`human` for
 `message ask`, otherwise `thread`), `recipient_thread_id` (the target Thread),
@@ -952,12 +951,23 @@ from saved creation time and observation time), `delivery_status`, and
 `reminded`. `thread.get` is already refreshed by `events.wait --thread THREAD_ID`;
 clients reload only that Thread after a change hint. Answering uses existing
 `message.reply` with `message_id` and text. No new queue or read operation is
-needed. The caller must observe `recipient_kind`, not infer it from sender or
-Thread identity. A thread-targeted duty is not a human notification.
+needed for per-Thread details. The caller must observe `recipient_kind`, not
+infer it from sender or Thread identity. A thread-targeted duty is not a human notification.
+
+For cross-Thread web inboxes, `thread.list awaiting=human` pages only Threads
+with human-directed pending receipts. Schema 36 adds
+`receipt_human_reply_pending(target_thread_id, created_at)` as a partial index
+on pending human replies, so the listing starts from qualifying receipts and
+never scans the Thread table. Items expose the human wait count and oldest
+saved receipt time; other-Thread duties are excluded. The filter is exclusive
+with query, tags, and cwd and uses an opaque keyset cursor with archived mode
+and receipt watermark. Query-plan and VM-step expectations are pinned by tests.
+
 
 The TUI `Pending replies` region is the same unified per-Thread list. It uses the
 existing human mark for `recipient_kind=human`; Thread-targeted duties retain the
-existing model mark. `thread list` exposes the count of all pending duties only.
+existing model mark. `thread list` exposes the count of all pending duties in its ordinary listing;
+`thread list awaiting=human` is a separate cross-Thread human inbox view.
 Overflow remains reachable through `/replies`. Human questions alone are
 suppressed from Run-end reminders and `ignored`; other-Thread duties keep the
 existing rules.

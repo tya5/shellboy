@@ -722,3 +722,10 @@ CREATE INDEX IF NOT EXISTS index_reclaim_state ON index_space(state,id);
 CREATE INDEX IF NOT EXISTS index_reclaim_group_value ON app_meta(value,key) WHERE key>='index.group.' AND key<'index.group/';
 INSERT INTO schema_migration(version,name) VALUES(35,'0035_index_reclaim_lookup');
 PRAGMA user_version=35;
+
+-- Indexed cross-Thread enumeration of only human-directed pending replies.
+CREATE INDEX receipt_human_reply_pending ON receipt(target_thread_id,created_at)
+  WHERE json_extract(result_json,'$.reply.state')='pending'
+    AND json_extract(result_json,'$.to_human')=1;
+INSERT INTO schema_migration(version,name) VALUES(36,'0036_human_reply_pending');
+PRAGMA user_version=36;
