@@ -2,7 +2,7 @@
 
 ## Before upgrading
 
-- The conversation database migrates from schema 32 to 37. Migrations 33-35 add index quantization metadata and lookup indexes, Thread tags and cwd lookup, and bounded reclaim indexes; 36 adds bounded spill provenance and 37 adds branch usage support. Back up data and stop the owner before upgrading; older binaries cannot use the upgraded schema.
+- The conversation database migrates from schema 32 to 37. Migrations 33-35 add index quantization metadata and lookup indexes, Thread tags and cwd lookup, and bounded reclaim indexes; 36 adds bounded spill provenance and 37 records branch kinds. Back up data and stop the owner before upgrading; older binaries cannot use the upgraded schema.
 - Recovery-wait Turns now hold non-human messages by default. Use `--resume-recovery` to resume intentionally; human replies still resume (#263).
 - Several non-safety restrictions on messaging and execution are removed (#259). Live-Run protection and data-integrity checks remain.
 - Index removal reports `removed` for the logical removal decision; physical reclamation is bounded and may continue later (#267). Do not interpret it as proof all bytes have already been reclaimed.
@@ -12,10 +12,14 @@
 - Unsaved model text is exposed through `events wait` with explicit gaps (#243 E3); Thread tags and cwd discovery organize conversations (#222).
 - Owner configuration can be read and changed with `config get` and `config set` (#266); capacity and usage inspection also support external clients (#265). Disk free-space admission and the 50 GiB default are updated (#261).
 - Connection setup and live connection generations improve configuration and keep each Run on its selected generation (#269). Live defaults do not overwrite saved Thread choices.
-- Human reply handling, delivery after rewind, and recovery behavior are more reliable (#262, #263). Editing a request now refuses while its Run is active instead of stopping it (#258).
+- Recovery-wait behavior is safer (#263). Editing a request now refuses while its Run is active instead of stopping it (#258). The #262 reply-waiting list, with a 16-item rejection limit, is planned for this release but is not yet landed.
 - Compaction avoids repeated oversized-summary retries and repeated spill near the trigger (#251, #271); Thread inspection labels retained compaction facts as incomplete when an expired restore may be missing (#264).
 - `usage get --group-by model` groups saved attempts by model; summary usage without a saved model is not attributed (#272). Capacity reporting shows configured thresholds (#268).
-- History exposes execution descriptions, and the core guides no longer point to Studio Apps. Other documentation and bounded-read fixes improve inspection.
+- Global instructions can be configured for all Threads (#270). History exposes execution descriptions, and the core guides no longer point to Studio Apps. Other documentation and bounded-read fixes improve inspection.
+
+## Release Scope
+
+The candidate consists of current main plus the #262 16-item rejection variant, pending landing and review. #276 and #280 are deferred to the next release. #278 and continuing-failure prompt improvements are also deferred unless a separate scope decision approves them. Main advanced after this branch base; final notes and validation must be reconciled with the exact candidate tip.
 
 ## Validation and limitations
 
