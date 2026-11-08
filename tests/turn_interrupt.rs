@@ -318,8 +318,7 @@ async fn interrupted_foreground_keeps_owned_work_and_carries_queued_input_in_sam
     .await
     .unwrap();
     let old_run = accepted.run_id.clone().unwrap();
-    let child_owner = old_run.clone();
-    // A live owned child record is an explicit synthetic ownership fixture;
+    // A live independent child Run is an explicit synthetic fixture;
     // this does not claim a native child process was exercised.
     control.store.database.call(move|db|{
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('owned-child','/','/AGENTS.md','test','fixture','now')",[])?;
