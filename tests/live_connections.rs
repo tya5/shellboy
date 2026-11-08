@@ -487,8 +487,8 @@ async fn extra_instructions_live_update_waits_for_next_turn_and_saved_sources_ar
         assert!(text.contains("global instruction new"),"{}",second.body);
         second.reply.send((200,answer("done again"))).unwrap();
         completed_run(&control,&target).await;
-        control.shutdown().await; owner.shutdown().await.unwrap(); server.abort();
-    }).await;
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+    }).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -508,6 +508,6 @@ async fn extra_instructions_missing_file_is_visible_and_never_sends_partial_requ
         let id=target.clone();
         let snapshots=control.store.database.call(move |db|Ok(db.query_row("SELECT count(*) FROM turn WHERE thread_id=?1 AND instruction_snapshot_id IS NOT NULL",[id],|r|r.get::<_,i64>(0))?)).await.unwrap();
         assert_eq!(snapshots,0);
-        control.shutdown().await; owner.shutdown().await.unwrap(); server.abort();
-    }).await;
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+    }).await.unwrap();
 }

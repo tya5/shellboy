@@ -10757,3 +10757,11 @@ prefix bytes, file edits observed only by a newly prepared snapshot, missing opt
 missing/nonregular/invalid-UTF-8 errors, path/list limits, live `config.set` adoption, same-Turn tool continuation,
 next-Turn use and source metadata without bodies. No passing execution is claimed here yet. Real providers, cache
 hit-rate measurements, adversarial filesystem races and user-consent UI workflows are outside these fixtures.
+
+### #270 focused execution evidence
+
+On macOS arm64, the shared-target `cargo check --locked --tests` passed. Filtered `extra_instructions` tests passed
+four unit cases and two integration cases, including a real mock-HTTP tool continuation with live registration
+updates and a visible missing-file failure with no provider request/snapshot. Python 206 tests, layout/watchdog,
+language classification and append-only record checks passed. The initial standard check found test-only unused
+Results and a clippy initializer warning; these are corrected and the full standard check is running again.
