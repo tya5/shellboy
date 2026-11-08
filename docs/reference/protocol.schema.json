@@ -6580,9 +6580,15 @@
         },
         "awaiting_human_count": {
           "default": 0,
+          "description": "Pending human-directed replies, exact through 128 and capped at 128 above that limit.",
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "awaiting_human_count_saturated": {
+          "default": false,
+          "description": "True exactly when awaiting_human_count exceeds 128; the count is not an estimate.",
+          "type": "boolean"
         },
         "awaiting_human_oldest_at": {
           "type": [

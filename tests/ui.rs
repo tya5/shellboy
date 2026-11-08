@@ -2989,6 +2989,7 @@ fn dense_thread_rows_and_selected_preview_stay_compact() {
                 awaiting_reply: 0,
                 awaiting_thread_replies: 0,
                 awaiting_human_count: 0,
+                awaiting_human_count_saturated: false,
                 awaiting_thread_count: 0,
                 awaiting_human_oldest_at: None,
                 awaiting_replies: 0,
