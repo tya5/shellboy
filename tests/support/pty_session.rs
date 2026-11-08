@@ -15,4 +15,5 @@ pub fn isolate_child(command: &mut tokio::process::Command) {
 }
 
 #[cfg(not(unix))]
+#[allow(dead_code)]
 pub fn isolate_child(_command: &mut tokio::process::Command) {}
