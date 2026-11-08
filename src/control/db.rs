@@ -3413,7 +3413,7 @@ mod thread_list_plan_tests {
             large_rows,
             vec![
                 ("thread-00001".into(), 1, "00001".into()),
-                ("thread-00002".into(), 1, "00002".into())
+                ("thread-00003".into(), 1, "00003".into())
             ]
         );
         assert_eq!(small_page, large_page);
