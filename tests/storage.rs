@@ -1222,7 +1222,7 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
     let legacy = Connection::open(&path).unwrap();
     legacy
         .execute_batch(
-            "ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id);
+            "DROP INDEX receipt_reply_run_pending; ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id);
         UPDATE run SET owner_run_id='parent-run' WHERE id='child-run';
         CREATE INDEX runs_by_owner ON run(owner_run_id,state);
         DROP INDEX wait_recovery_thread;

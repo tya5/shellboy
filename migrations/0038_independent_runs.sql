@@ -15,6 +15,6 @@ CREATE INDEX wait_run_state ON run(thread_id,state);
 UPDATE event SET kind='recovery_wait' WHERE kind='child_recovery_wait';
 DROP INDEX wait_recovery_thread;
 CREATE INDEX wait_recovery_thread ON event(json_extract(payload_ref_json,'$.thread_id')) WHERE kind='recovery_wait';
-CREATE INDEX receipt_reply_run_pending ON receipt(run_id,state) WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1;
+CREATE INDEX IF NOT EXISTS receipt_reply_run_pending ON receipt(run_id,state) WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1;
 INSERT INTO schema_migration(version,name) VALUES(38,'0038_independent_runs');
 PRAGMA user_version=38;
