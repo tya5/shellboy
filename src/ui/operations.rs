@@ -1005,6 +1005,7 @@ fn english_field_label(label: &str) -> &str {
             "Request text (Ctrl+J for newline)"
         }
         "送信者の表示名（任意）" => "Sender display name (optional)",
+        "回復待ちを解除" => "Explicitly resume recovery wait",
         "届けるとき（空=次の区切り）" => "Delivery time (empty = next boundary)",
         "取消する入力ID（空白区切り）" => "Input IDs to cancel (space-separated)",
         "応答処理ID" => "Response ID",
