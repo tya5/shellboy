@@ -10880,3 +10880,11 @@ initial cases.
 The GC budget fixture now establishes foreground participation with a one-shot sent after its first committed
 write, before measuring concurrent GC. The unchanged completion/deferral assertions and deadline still need the
 focused GC run; task-spawn order is no longer used as proof of participation.
+
+### #260 remaining named-path results
+
+The TUI source-order/cancellation case passed (0.65 s). The nested-parent test passed every run/shell/owner/owner-kill
+mode (5.00 s total), with one side effect, no replayed tool execution and zero live processes afterward. The revised
+slow-output case passed three further runs (0.45/0.55/0.44 s). Check-tests and strict all-target clippy passed. Python
+206 tests, language/record audits and layout/watchdog checks passed. These targeted local passes do not reproduce
+historical E3 failures or constitute a saturation experiment; the GC focused check and fresh full CI remain pending.

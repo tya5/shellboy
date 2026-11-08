@@ -1258,8 +1258,23 @@ async fn slow_database_batches_binary_shell_output_without_losing_natural_exit_t
         .await
         .unwrap();
     // Releasing stdin is the completion event; DB work above cannot race natural exit.
-    let execution=control.store.database.call(|db|Ok(db.query_row("SELECT id FROM shell_execution",[],|r|r.get::<_,String>(0))?)).await.unwrap();
-    command(&control,Command::ShellEof(ExecutionTarget {execution_id:execution})).await;
+    let execution = control
+        .store
+        .database
+        .call(|db| {
+            Ok(db.query_row("SELECT id FROM shell_execution", [], |r| {
+                r.get::<_, String>(0)
+            })?)
+        })
+        .await
+        .unwrap();
+    command(
+        &control,
+        Command::ShellEof(ExecutionTarget {
+            execution_id: execution,
+        }),
+    )
+    .await;
     let next = match crate::test_watchdog::watchdog("tests/runtime.rs: slow_database_batches_binary_shell_output_without_losing_natural_exit_tail", requests.recv()).await {
         Ok(Some(request)) => request,
         outcome => {

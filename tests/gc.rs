@@ -1227,23 +1227,28 @@ async fn history_gc_budget_measurement_with_concurrent_writes() {
     }).await.unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let writes = Arc::new(AtomicUsize::new(0));
-    let (ready,first_write)=tokio::sync::oneshot::channel();
+    let (ready, first_write) = tokio::sync::oneshot::channel();
     let writer = {
         let db = f.db.clone();
         let stop = stop.clone();
         let writes = writes.clone();
         tokio::spawn(async move {
-            let mut ready=Some(ready);
+            let mut ready = Some(ready);
             while !stop.load(Ordering::Relaxed) {
                 db.call(|db| { db.execute("UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'", [])?; Ok(()) }).await.unwrap();
                 writes.fetch_add(1, Ordering::Relaxed);
-                if let Some(ready)=ready.take() {ready.send(()).unwrap();}
+                if let Some(ready) = ready.take() {
+                    ready.send(()).unwrap();
+                }
                 tokio::task::yield_now().await;
             }
         })
     };
     // Establish actual foreground participation before measuring GC, not spawn order.
-    crate::test_watchdog::watchdog("GC foreground writer readiness",first_write).await.unwrap().unwrap();
+    crate::test_watchdog::watchdog("GC foreground writer readiness", first_write)
+        .await
+        .unwrap()
+        .unwrap();
     let started = std::time::Instant::now();
     let (mut steps, mut deferred, mut scanned, mut complete) = (0, 0, 0, false);
     let deadline = crate::test_watchdog::Deadline::new("history GC under sustained writes");
