@@ -19,6 +19,9 @@
 
 ## Release Scope
 
+#279 is being prepared independently as a minimal nullable reference; it is not implemented or accepted for this candidate. Its adoption requires a separate design, review and same-SHA CI decision. #278 remains excluded.
+
+
 The candidate consists of current main plus the #262 16-item rejection variant, pending landing and review. #276 and #280 are deferred to the next release. #278 and continuing-failure prompt improvements are also deferred unless a separate scope decision approves them. Main advanced after this branch base; final notes and validation must be reconciled with the exact candidate tip.
 
 ## Validation and limitations
@@ -41,7 +44,7 @@ Each row names its issue, landed implementation SHA and acceptance section. CI `
 | #263; `45ba400bce`; `acceptance.md`: Recovery-wait message sends | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #258; `007f788f58`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #251; `c987d76427`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
-| #271; `92281d1095`; `acceptance.md`: reference pending | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
+| #271; `92281d1095`; `acceptance.md`: reference pending | Yes | Yes | Prior branch SHA `a302b7be6d`: run `42413703815` passed Linux/macOS/Windows; final tip pending | Unverified |
 | #267; `f01aee7f76`; `acceptance.md`: #267 bounded index reclamation | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #265; `20b5ea8338`; `acceptance.md`: #265 storage threshold read | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
 | #272; `10a7fa0ec5`; `acceptance.md`: #272 model-grouped bounded usage | Yes | Yes | Unverified; run `42475616229` reused | Unverified |
