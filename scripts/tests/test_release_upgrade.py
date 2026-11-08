@@ -371,6 +371,12 @@ class ReleaseUpgradeTests(unittest.TestCase):
         self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(33, 38)])
         checks.preserved(db, records)
 
+    def test_schema32_to38_preserves_rows_and_indexes(self):
+        db = self.fixture(32)
+        before, records = self.upgrade(db, 32, 38)
+        self.assertEqual(checks.ledger(db), before + [(n, checks.DERIVED[n].stem) for n in range(33, 39)])
+        checks.preserved(db, records)
+
     def test_schema37_to38_checks_only_the_human_pending_index(self):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)

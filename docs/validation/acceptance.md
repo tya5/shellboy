@@ -11007,3 +11007,7 @@ in that failed normal run passed; they do not make the entire run successful.
 A new exact-SHA pair of CI runs and independent review are still required.
 
 Synthetic schema 32-to-37 SQL migration: 3.683 ms in one in-memory run on macOS arm64 with SQLite 3.51.0 (two Threads, one node). This excludes binary startup and is not a production-scale estimate. Ledger and original columns were checked.
+
+### v0.11.0 synthetic schema 32-to-38
+
+A two-Thread, one-node in-memory fixture applied migrations 33-38 in 5.101 ms on macOS arm64, SQLite 3.51.0 (one run); migration ledger, retained columns and new indexes were checked. This excludes binary startup and is not a production-sized upgrade.
