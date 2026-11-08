@@ -401,7 +401,7 @@ validation and are documented in prose.
 - The owner keeps accepting exactly one version (current-only, Issue #33);
   supporting a range is open (Q2).
 
-### 4.3 Capability advertisement (historical proposal; protocol 4 is current)
+### 4.3 Capability advertisement (historical proposal; protocol 5 is current)
 
 `Welcome` gained `capabilities: Vec<String>` with protocol 3 (names like `events.wait`,
 `message.send.human`); protocol 4 adds `events.reasoning_activity`. Welcome arrives before the request, so a client can
