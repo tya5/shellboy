@@ -266,6 +266,19 @@ conversation footer. In particular, `state: "completed"` can coexist with
 `background` requires an active owned shell or child Run; `continuing` does
 not assert such work. Exit markers and Revisit are independent of activity.
 
+### Cross-Thread human waiting list
+
+`thread.list` accepts optional `awaiting: "human"` (exclusive with `query`,
+`tags`, and `cwd`; it composes with `archived`, `limit`, and `cursor`). The CLI
+spelling is `shellboy thread list --awaiting human`. This returns a keyset
+page of only Threads with pending human-directed reply receipts. Items carry `awaiting_human_count` and nullable
+`awaiting_human_oldest_at` (the oldest receipt `created_at`). Thread-directed
+reply duties do not qualify. Cursor scope binds the filter, archived mode, and
+receipt watermark. The reader uses the schema-36 partial index
+`receipt_human_reply_pending(target_thread_id, created_at)` and hydrates summary
+rows only for the returned page. Plan and SQLite VM-step counts are fixed by a
+regression test; no full Thread-table scan is permitted.
+
 ### Observing long-running shells (Issue #45)
 
 `shell get --execution ID` and shell entries in `status` expose saved

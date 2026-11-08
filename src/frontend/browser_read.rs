@@ -287,6 +287,7 @@ mod tests {
                 query: None,
                 cursor: None,
                 limit: 50,
+                awaiting: None,
                 archived: Default::default(),
                 tags: Vec::new(),
                 cwd: None,
