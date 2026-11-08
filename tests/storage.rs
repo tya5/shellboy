@@ -1227,7 +1227,7 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
         CREATE INDEX runs_by_owner ON run(owner_run_id,state);
         DROP INDEX wait_recovery_thread;
         CREATE INDEX wait_recovery_thread ON event(json_extract(payload_ref_json,'$.thread_id')) WHERE kind='child_recovery_wait';
-        INSERT INTO event(id,kind,payload_ref_json,source_json,created_at) VALUES('legacy-recovery','child_recovery_wait','{\"thread_id\":\"child\",\"saved\":true}','{}','now');
+        INSERT INTO event(id,target_thread_id,kind,payload_ref_json,source_json,created_at) VALUES('legacy-recovery','child','child_recovery_wait','{\"thread_id\":\"child\",\"saved\":true}','{}','now');
         DELETE FROM schema_migration WHERE version=38; PRAGMA user_version=37;",
         )
         .unwrap();

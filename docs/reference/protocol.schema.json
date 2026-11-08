@@ -8524,6 +8524,6 @@
       "type": "object"
     }
   },
-  "protocol_version": 4,
+  "protocol_version": 5,
   "title": "Shellboy local RPC protocol v4"
 }
