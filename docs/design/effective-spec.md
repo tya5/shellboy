@@ -435,9 +435,10 @@ processing. Conversation data is read-only; derived data has independent bounds.
 ## Guarded Thread Deletion (#122)
 
 Adopt the optional bounded target marker and transaction-local comparison in
-[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). Protocol 3 is current; `thread.delete`
-adds no mandatory request field. Marked execution never falls back to unbounded
-selection; incomplete or different targets return typed preview_stale before
+[deletion impact](deletion-impact.md#guarded-target-set-deletion-122). Protocol 4 is current;
+`thread.delete` adds no mandatory request field. Protocol 3 was the earlier #244
+baseline; #275 advanced the handshake to protocol 4. Marked execution never falls
+back to unbounded selection; incomplete or different targets return typed preview_stale before
 mutation. Legacy unmarked behavior and existing Run-state checks remain. The UI
 uses a fresh preview and new confirmation after stale rejection, never an
 automatic deletion retry. No schema/queue/worker is added. Changed events do not
