@@ -30,9 +30,10 @@ fn columns_from() -> String {
     {revisit_pending},{revisit_delivered},
     u.id,u.answer_node_id,latest.ended_at,a.started_at,u.generation,t.archived_at,
     (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending'),
-    (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1),
     (SELECT count(*) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND COALESCE(json_extract(q.result_json,'$.to_human'),0)<>1),
-    (SELECT min(q.created_at) FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1)
+    (SELECT count(*) FROM (SELECT q.rowid FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 ORDER BY q.created_at LIMIT 129)),
+    (SELECT min(q.created_at) FROM (SELECT q.created_at FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 ORDER BY q.created_at LIMIT 129) q),
+    (SELECT count(*)>128 FROM (SELECT q.rowid FROM receipt q INDEXED BY receipt_reply_pending WHERE q.target_thread_id=t.id AND json_extract(q.result_json,'$.reply.state')='pending' AND json_extract(q.result_json,'$.to_human')=1 ORDER BY q.created_at LIMIT 129))
 FROM thread t {activity_joins}
 "
     )
@@ -104,6 +105,7 @@ pub(crate) struct RawSummary {
     pub(crate) awaiting_reply: u64,
     pub(crate) awaiting_thread_replies: u64,
     pub(crate) awaiting_human_oldest_at: Option<String>,
+    pub(crate) awaiting_human_count_saturated: bool,
     pub(crate) awaiting_replies: u64,
 }
 
@@ -190,7 +192,7 @@ pub(super) fn page_sql(mode: ArchivedFilter, tags: usize, cwd: bool) -> String {
     let columns_from = columns_from.replacen("FROM thread t ", &source, 1);
     format!("{columns_from}WHERE {predicate}t.deleted_at IS NULL{archived} AND {window}")
 }
-pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
+pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
     Ok(RawSummary {
         thread_id: row.get(0)?,
         stored_title: row.get(1)?,
@@ -214,9 +216,10 @@ pub(super) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         revisit_delivered: row.get::<_, i64>(15)?.unsigned_abs(),
         archived_at: row.get(21)?,
         awaiting_replies: row.get::<_, i64>(22)?.max(0) as u64,
-        awaiting_reply: row.get::<_, i64>(23)?.max(0) as u64,
-        awaiting_thread_replies: row.get::<_, i64>(24)?.max(0) as u64,
+        awaiting_reply: row.get::<_, i64>(24)?.max(0) as u64,
+        awaiting_thread_replies: row.get::<_, i64>(23)?.max(0) as u64,
         awaiting_human_oldest_at: row.get(25)?,
+        awaiting_human_count_saturated: row.get(26)?,
     })
 }
 pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> ThreadSummary {
@@ -225,6 +228,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         awaiting_thread_replies: raw.awaiting_thread_replies,
         awaiting_replies: raw.awaiting_replies,
         awaiting_human_count: raw.awaiting_reply,
+        awaiting_human_count_saturated: raw.awaiting_human_count_saturated,
         awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
         awaiting_thread_count: raw.awaiting_thread_replies,
         last_end_message: None,
