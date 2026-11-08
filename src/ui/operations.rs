@@ -1171,7 +1171,6 @@ impl Form {
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                         query: form.optional("query")?,
-                        awaiting: form.optional("awaiting")?,
                         archived: form
                             .optional("archived")?
                             .and_then(|value| ArchivedFilter::parse(&value))
