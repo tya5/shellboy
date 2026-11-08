@@ -85,7 +85,7 @@ shellboy wait --conditions-json '[{"type":"reply_received","message_id":"MESSAGE
 Inspect `matched` and `snapshot.conditions` and wait again for outstanding
 requests. A wait can also combine `reply_received` with `thread_settled` for
 `recovery_wait`, `failed`, or `stopped`. `interrupted` and `unavailable` require
-inspection, not an assumption of success. Waits do not detect cycles or reject self-waits; a dependency cycle can simply time out. Do not replace
+inspection, not an assumption of success. Waits do not detect dependency cycles. Direct own Run/Turn/shell waits return `self_wait`; other dependency cycles can time out. Do not replace
 normal reply delivery with a sleep loop. Ctrl+C or connection loss releases
 the observation, not the target. Follow `next_cursor` for long reply nodes.
 

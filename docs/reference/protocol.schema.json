@@ -1608,6 +1608,7 @@
     "ErrorCode": {
       "enum": [
         "invalid_argument",
+        "self_wait",
         "config_invalid",
         "app_not_running",
         "protocol_mismatch",
@@ -1618,7 +1619,6 @@
         "operation_not_found",
         "invalid_state",
         "preview_stale",
-        "wait_cycle",
         "cursor_expired",
         "cursor_encoding_mismatch",
         "output_expired",
@@ -3346,13 +3346,6 @@
     "ParentChange": {
       "properties": {
         "live_run_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "live_run_owner_run_id": {
           "default": null,
           "type": [
             "string",
@@ -5334,18 +5327,6 @@
           },
           "type": "array"
         },
-        "owned_run_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "owner_run_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "recovery_hint": {
           "type": [
             "string",
@@ -5394,7 +5375,6 @@
         "run_id",
         "thread_id",
         "state",
-        "owned_run_ids",
         "owned_execution_ids"
       ],
       "title": "RunDetails",
@@ -6116,30 +6096,10 @@
             "null"
           ]
         },
-        "awaiting_human": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
         "awaiting_replies": {
           "default": [],
           "items": true,
           "type": "array"
-        },
-        "awaiting_reply": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
-        "awaiting_thread_replies": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
-        "children_count": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         },
         "connection": {
           "type": "string"
@@ -6277,7 +6237,6 @@
         "cwd",
         "connection",
         "model",
-        "children_count",
         "shells_count"
       ],
       "title": "ThreadDetails",
@@ -7776,18 +7735,6 @@
           },
           "type": "array"
         },
-        "owned_run_ids": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "owner_run_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "recovery_hint": {
           "type": [
             "string",
@@ -7836,7 +7783,6 @@
         "run_id",
         "thread_id",
         "state",
-        "owned_run_ids",
         "owned_execution_ids"
       ],
       "title": "RunDetails",
@@ -8142,30 +8088,10 @@
             "null"
           ]
         },
-        "awaiting_human": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
         "awaiting_replies": {
           "default": [],
           "items": true,
           "type": "array"
-        },
-        "awaiting_reply": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
-        "awaiting_thread_replies": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
-        "children_count": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         },
         "connection": {
           "type": "string"
@@ -8303,7 +8229,6 @@
         "cwd",
         "connection",
         "model",
-        "children_count",
         "shells_count"
       ],
       "title": "ThreadDetails",
@@ -8354,30 +8279,10 @@
             "null"
           ]
         },
-        "awaiting_human": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
         "awaiting_replies": {
           "default": [],
           "items": true,
           "type": "array"
-        },
-        "awaiting_reply": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
-        "awaiting_thread_replies": {
-          "default": [],
-          "items": true,
-          "type": "array"
-        },
-        "children_count": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         },
         "connection": {
           "type": "string"
@@ -8515,7 +8420,6 @@
         "cwd",
         "connection",
         "model",
-        "children_count",
         "shells_count"
       ],
       "title": "ThreadDetails",
