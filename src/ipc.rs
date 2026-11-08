@@ -353,16 +353,6 @@ async fn call_stream<S: AsyncRead + AsyncWrite + Unpin>(
             welcome.protocol_version,
         ));
     }
-    if welcome
-        .capabilities
-        .iter()
-        .any(|capability| !crate::protocol::PROTOCOL_CAPABILITIES.contains(&capability.as_str()))
-    {
-        return Err(ApiError::new(
-            ErrorCode::ProtocolMismatch,
-            "owner advertises an unknown RPC capability",
-        ));
-    }
     if welcome.instance_id != endpoint.instance_id {
         return Err(endpoint_mismatch());
     }
@@ -766,6 +756,42 @@ mod frame_delivery_tests {
         assert_eq!(details["request_may_have_been_applied"], true);
         assert_eq!(details["operation_id"], "instance:sent");
         assert_eq!(details["next_operation"]["command"], "operation.get");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unknown_owner_capabilities_are_ignored_and_request_continues() {
+        let (client, mut peer) = tokio::io::duplex(4096);
+        let task = tokio::spawn(async move {
+            read_frame::<_, Hello>(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Welcome {
+                    protocol_version: PROTOCOL_VERSION,
+                    capabilities: vec!["future.capability".into()],
+                    instance_id: "instance".into(),
+                },
+            )
+            .await
+            .unwrap();
+            let request: Request = read_frame(&mut peer).await.unwrap().unwrap();
+            write_frame(
+                &mut peer,
+                &Response::success(request.operation_id, serde_json::json!({})),
+            )
+            .await
+            .unwrap();
+        });
+        let response = call_stream(
+            client,
+            endpoint(),
+            Command::Status(Default::default()),
+            None,
+            None,
+        )
+        .await
+        .expect("an additive capability must not block a same-version connection");
+        assert!(response.ok);
         task.await.unwrap();
     }
 

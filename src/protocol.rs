@@ -200,6 +200,28 @@ pub fn schema_json() -> String {
     for (name, schema) in generator.take_definitions(false) {
         definitions.entry(name).or_insert(schema);
     }
+    // Every fragment shares the document root, so keep referenced definitions there.
+    fn remove_nested_definitions(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(object) => {
+                object.remove("definitions");
+                for child in object.values_mut() {
+                    remove_nested_definitions(child);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for child in items {
+                    remove_nested_definitions(child);
+                }
+            }
+            _ => {}
+        }
+    }
+    for schema in definitions.values_mut() {
+        remove_nested_definitions(schema);
+    }
+    let mut operation_results = operation_results;
+    remove_nested_definitions(&mut operation_results);
     let document = serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://shellboy.dev/schema/protocol-v3.json",

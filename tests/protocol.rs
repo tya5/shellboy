@@ -1041,6 +1041,10 @@ fn exported_schema_local_references_resolve() {
     fn visit(value: &Value, document: &Value, path: &str) {
         match value {
             Value::Object(object) => {
+                assert!(
+                    path == "#" || !object.contains_key("definitions"),
+                    "schema fragments must use the document root definitions at {path}"
+                );
                 if let Some(reference) = object.get("$ref").and_then(Value::as_str)
                     && let Some(pointer) = reference.strip_prefix("#/")
                 {
