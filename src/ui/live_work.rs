@@ -369,7 +369,6 @@ impl LiveWorkView {
                     LiveWorkTarget::Wait { execution_id, .. } => self.rows().iter().find(|row| matches!(
                         &row.target, LiveWorkTarget::Shell { execution_id: id, .. } if id == execution_id
                     )).map(|row| row.target.clone()),
-                    _ => None,
                 };
                 if let Some(replacement) = replacement {
                     self.region.selected = Some(replacement);

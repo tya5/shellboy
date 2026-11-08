@@ -5344,9 +5344,11 @@ mod owned_child_notification_tests {
                     owner.db.call(|db| {db.execute_batch("UPDATE turn SET state='completed' WHERE id='child-turn'; UPDATE run SET state='completed' WHERE id='child-run';")?;Ok(())}).await.unwrap();
                 }
 
-                assert!(matches!(events.try_recv(),Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+                assert!(matches!(
+                    events.try_recv(),
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+                ));
                 assert!(nudge.notified().now_or_never().is_none());
-
             }
             control.live.test_drivers().lock().await.clear();
             owner.shutdown().await.unwrap();
@@ -5458,10 +5460,7 @@ mod driverless_child_stop_notification_tests {
                     other => panic!("unexpected stop notification: {other:?}"),
                 }
             }
-            assert_eq!(
-                parent_notifications,
-                0
-            );
+            assert_eq!(parent_notifications, 0);
             // One hint when the stopping state commits (#243) and one after the drain.
             assert_eq!(child_notifications, 2);
             assert_eq!(errors, usize::from(fail_drain));

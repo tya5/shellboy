@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn row_limit_bounds_the_candidate_merge_without_changing_counts() {
         let db = fixture();
-        for (limit, rows, overflow) in [(1, 1, 4), (3, 3, 2), (10, 5, 0)] {
+        for (limit, rows, overflow) in [(1, 1, 3), (3, 3, 1), (10, 4, 0)] {
             let snapshot = prepare(read_tx_limited(&db, "r", Some(&[]), limit).unwrap());
             assert_eq!(snapshot.rows.len(), rows);
             assert_eq!(snapshot.overflow, overflow);
@@ -439,13 +439,7 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        for index in [
-            "shell_active_owner",
-            "runs_by_owner",
-            "activity_turn_run",
-            "activity_attempt_turn",
-            "activity_group_turn_state",
-        ] {
+        for index in ["shell_active_owner"] {
             assert!(
                 details.iter().any(|detail| detail.contains(index)),
                 "missing {index}: {details:?}"
@@ -653,8 +647,8 @@ mod tests {
         let raw = read_tx(&db, "r", Some(&scope)).unwrap();
         assert_eq!(
             trace.count(),
-            3,
-            "one live batch plus two bounded untitled-child witnesses"
+            1,
+            "one shell/wait batch; no owned-child metadata lookups"
         );
         drop(trace);
         db.execute("UPDATE shell_execution SET state='exited'", [])
@@ -664,17 +658,16 @@ mod tests {
         let snapshot = prepare(raw);
         assert_eq!(
             (snapshot.shells, snapshot.waits, snapshot.overflow),
-            (4, Some(1), 2)
+            (4, Some(1), 1)
         );
         assert_eq!(snapshot.rows.len(), 3);
         assert!(snapshot.rows.iter().all(|row| !row.label.contains("child")));
         assert!(
-            matches!(&snapshot.rows[1].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "wait-old")
+            matches!(&snapshot.rows[0].target, LiveWorkTarget::Wait { operation_id, .. } if operation_id == "wait-old")
         );
         assert!(
-            matches!(&snapshot.rows[2].target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-new")
+            matches!(&snapshot.rows[1].target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-new")
         );
-        assert_eq!(snapshot.rows[0].label, "未送信");
     }
 
     #[test]

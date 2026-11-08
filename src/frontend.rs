@@ -493,12 +493,6 @@ enum BackgroundResult {
         epoch: u64,
         generation: Option<u64>,
     },
-    NoticeDependencies {
-        thread_id: String,
-        generation: u64,
-        epoch: u64,
-        threads: Vec<String>,
-    },
     Progress {
         thread_id: String,
         epoch: u64,
@@ -3425,9 +3419,6 @@ async fn run_with_delivery(
                         Err(error) => status(&updates, Some(thread_id), error).await,
                     }
                 }
-                Some(BackgroundResult::NoticeDependencies {thread_id,generation,epoch,threads})=>{
-                    selection.observe_notices(&thread_id,generation,epoch,threads);
-                },
                 Some(BackgroundResult::ViewFacts {tickets,result})=>{
                     view_read::complete(control.diagnostics(),&mut browser,&mut descendants,&mut management.inspection,&updates,tickets,result.map(|value|*value)).await;
                 },
@@ -3741,12 +3732,6 @@ async fn run_with_delivery(
                     status_dirty |= status_enabled;
                     if recovery && control.store.config.ui.bell {
                         update(&updates, UiUpdate::RecoveryBell).await;
-                    }
-                    // A displayed child changes the selected parent's bounded
-                    // projection, never starts a hidden-child history read.
-                    if let Some(parent) = selection.dependent_parent(&thread_id) {
-                        selection.changed(&parent);
-                        dirty_threads.insert(parent);
                     }
                     browser.changed(&thread_id);descendants.changed(&thread_id);
                     management.inspection.changed(&thread_id);
