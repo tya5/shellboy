@@ -33,12 +33,12 @@ fn send(expected: bool) -> Command {
     })
 }
 #[tokio::test]
-async fn expected_reply_cap_is_128_and_replay_is_not_a_new_duty() {
+async fn expected_reply_cap_is_16_and_replay_is_not_a_new_duty() {
     let (_root, store) = fixture().await;
     let first = request(send(true));
     let accepted = store.execute(first.clone(), None).await.unwrap().result;
     assert_eq!(accepted["expect_reply"], true);
-    for _ in 1..128 {
+    for _ in 1..16 {
         store.execute(request(send(true)), None).await.unwrap();
     }
     assert_eq!(
@@ -57,7 +57,7 @@ async fn expected_reply_cap_is_128_and_replay_is_not_a_new_duty() {
             .await
             .unwrap_err()
             .code,
-        ErrorCode::InputLimit
+        ErrorCode::ReplyLimit
     );
     store.execute(request(send(false)), None).await.unwrap();
     store.database.shutdown().await.unwrap();

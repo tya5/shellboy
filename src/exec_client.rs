@@ -160,6 +160,7 @@ impl Session {
                     limit: 1,
                     cursor: None,
                     query: None,
+                    awaiting: None,
                     archived: Default::default(),
                     tags: Vec::new(),
                     cwd: None,

@@ -68,12 +68,13 @@ These correct or sharpen assumptions in the issue thread.
    replayed as plain `user` text. A model cannot reply to a message it cannot
    name, so admission must add a short notice carrying the ID (see
    [Model-visible notices](#model-visible-notices)).
-5. **Existing windows of 128 are not a queue admission invariant.** The
+5. **The 16-duty admission cap is distinct from existing 128-row windows.** The
    pending-message projection (`/queue`, 128 rows), `message cancel` (1..128 IDs)
-   and the pre-integration interrupted-message recovery all used 128. There is
-   no total cap on ordinary queued messages. The integration replaces the old
+   and the pre-integration interrupted-message recovery use 128. There is no
+   total cap on ordinary queued messages. The integration replaces the old
    recovery refusal with oldest-first progressing units; see the recovery
-   decision at the end of this document. The pending reply-duty cap remains128.
+   decision at the end of this document. Pending reply duties have a separate
+   per-recipient cap of 16.
 6. **The #187 completion hook** is `driver::next`, in the branch where no Turn,
    pending input, event or owned work remains: `revisit::release_tx` runs and,
    if it found nothing, `state::complete_idle_run`. The shutdown gate already
@@ -155,23 +156,18 @@ provenance, not a distinct node kind.
 | `replied` | `message reply` commits | original `reply` object; reply node; delivery receipt for model senders |
 | `ignored` | second Run-end detection (D1) | original `reply` object; notice to a model sender |
 | `cancelled` | sender (or a human) runs `message cancel` while pending; also when the sender's Thread is deleted (`cancel_reason: sender_deleted`, decision Q4) | original `reply` object; notice to the recipient if it had already received the message |
-| `recipient_deleted` | `thread delete` of the recipient Thread while pending | original `reply` object, in the deletion transaction; notice to a model sender |
+| `recipient_deleted` | `thread delete` of the recipient Thread while pending | original `reply` object; first 16 duties are transitioned in the deletion transaction, remaining legacy duties by existing history-GC batches; notice to a model sender is delivered after that batch commits |
 
 Every terminal transition happens in one DB transaction on the existing DB
-worker, after which the existing wait `Notify` and `Changed` fire. Terminal
+worker, after which the existing wait `Notify` and `Changed` fire. The delete
+request commits a durable history-GC job; its success does not promise every
+legacy outcome has already been delivered. GC processes at most 128 receipt
+candidates per transaction and dispatches sender wakes after commit. Terminal
 states never change again.
 
 ### Fail-safe cap
 
-A send with `--expect-reply` is rejected with the existing `input_limit` error
-when the target Thread already has **128** messages with `reply.state =
-pending`. 128 is reused, not chosen: it is the existing bound of the pending
-queue projection, `message cancel` and resume-time message recovery. Reusing it
-also keeps every pending-reply list (`thread get`, the Run-end reminder) inside
-one bounded response with no cursor. Verification will include a test at
-exactly 128/129 and record the size of a 128-entry reminder notice; no timing
-or size is assumed here. The cap is per recipient Thread because the recipient
-is the one that must work through the list (decision Q15).
+A send with `--expect-reply` is rejected with typed `reply_limit` when the target Thread already has 16 pending duties. The count is read with an indexed `LIMIT 17` inside the same write transaction as receipt insertion. The error includes `details.limit` and `details.current_count` and directs the caller to reply to or cancel an outstanding request before retry. This per-recipient cap covers both human asks and Thread replies. Legacy over-limit rows are preserved; reads remain bounded.
 
 ### Migration 26
 
@@ -588,7 +584,7 @@ Every flow in `docs/guides/delegation.md` and the Agent Guide.
 | Recovery decision | `run get` / `turn get` / `run retry` / `run stop` | unchanged; the pending reply survives retry and is answered after it | no |
 | Stop a child | `run stop --run CHILD_RUN` | unchanged; pending reply stays pending (decision Q2); parent may `message cancel` it | no |
 | After restart | interruption context + stored answers + unprocessed messages | same, with `awaiting_replies` and reply states instead of answers | no |
-| Delete child | `thread delete-preview` / `thread delete` | unchanged; pending replies become `recipient_deleted` and the parent is notified | no |
+| Delete child | `thread delete-preview` / `thread delete` | unchanged; up to 16 pending replies become `recipient_deleted` synchronously; legacy excess is completed by bounded history GC and the parent is notified after each committed batch | no |
 | Overview | `thread get` `last_answer` / `last_input` | `last_end_message` / `last_input`, plus `awaiting_replies` | no |
 | "Make sure you report before finishing" via `--deliver complete` | leader's workaround | unnecessary: the Run-end rule is that check | removed |
 
@@ -630,7 +626,7 @@ decided here without an explicit user answer (see [Decisions](#decisions)).
 | G13 | Who may cancel | Decided | sender may cancel (decided); authority reuses the existing cancel rule |
 | G14 | Human reply in TUI | Decided | CLI works at once; TUI reply mode in this issue, last step (Q7) |
 | G15 | Receipt GC and capacity pressure | Design | message receipts are not collected (fact 1); reply node rooted by receipt or Turn; operation-outcome expiry handled by G2; reply bodies count toward logical history like any message |
-| G16 | Recipient Thread deleted | Decided | `recipient_deleted` in the deletion transaction, waits released, model sender notified (D5) |
+| G16 | Recipient Thread deleted | Decided | at most 16 `recipient_deleted` transitions in the deletion transaction; legacy excess by durable 128-candidate history-GC batches before receipt collection; waits released and model sender notified after each commit (D5, #262 accepted delayed-delivery contract) |
 | G17 | Sender Thread deleted | Decided | pending messages it sent become `cancelled` (`cancel_reason: sender_deleted`) in the deletion transaction and admitted recipients are notified (Q4) |
 | G18 | Two replies racing | Design | single DB lane; first commit wins; the second gets `invalid_state` `reply_state=replied` |
 | G19 | Reply vs cancel vs Run-end races | Design | same serialisation; whichever commits first decides the outcome |
@@ -715,7 +711,7 @@ the operation fingerprint), `message reply` (`Command::MessageReply`,
 message items `answer_node_id` → `reply_node_id`,
 `wait reply_received` (condition, snapshot, cycle edge, precedence over
 `interrupted`), `message cancel` outcome `reply_cancelled` and its
-`context_changed` notice, `thread get` `awaiting_reply` for human decisions and `awaiting_thread_replies` for Thread recipients, with additive `awaiting_replies`; admission notices (`reply_expected`, `reply`) and the 128 cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
+`context_changed` notice, `thread get` `awaiting_reply` for human decisions and `awaiting_thread_replies` for Thread recipients, with additive `awaiting_replies`; admission notices (`reply_expected`, `reply`) and the 16-duty `reply_limit` admission cap. Model self-targets and cross-thread reply/cancel actors remain allowed per #259.
 Pending replies have no Run-end effect yet; nothing uses them until step 4/5.
 
 - Schema: `migrations/0026_reply_expected.sql`, `src/storage/current.sql`,
@@ -836,7 +832,7 @@ Integration tests on temporary stores with the local HTTP mock: send with each
 `--deliver` timing; reply by the recipient model through the shell CLI; reply by
 a human (no Origin); delivery to a model sender (new Run, existing Turn, held);
 rejection paths (double reply, not applied, foreign Thread, fork, self target,
-cap 128/129); Run-end reminder then `ignored` with sender notice and wait
+cap 16/17); Run-end reminder then `ignored` with sender notice and wait
 release; ordering with waiting `complete` messages; cancel before and after
 admission; recipient deletion; restart with a pending wait; multiple waiters;
 cycle rejection; exec in each `--result` mode (success, `ignored`, timeout,
@@ -868,7 +864,7 @@ the memo gave no single recommendation, the choice made here is marked
 | Q12 | Remove `history get --final-answer-only` | **Judgement:** not removed. The recommendation assumed exec would stop using it, but the user's Q14 answer (`--result turn-end\|run-end`) needs the end-message projection. It is renamed `--end-message-only` with the rest of the "answer" vocabulary |
 | Q13 | Forks | A fork does not inherit the duty to reply; only the original Thread can reply |
 | Q14 | exec strictness | User: replaced by `exec --result reply\|turn-end\|run-end`, default `reply`. `reply` reminds once and then exits 4 `ignored`; `turn-end` and `run-end` send an ordinary message with no reply duty and never produce the reply outcomes. See [exec](#exec) |
-| Q15 | Cap | 128 pending reply-expected messages per receiving Thread; the 129th send is refused with `input_limit` |
+| Q15 | Cap (superseded by #262 user decision, 2026-11-08) | 16 pending duties per recipient Thread; the 17th new send/ask is refused with `reply_limit` and details containing limit/current_count |
 | Q16 | Asking yourself | A model cannot send a reply-expected message to its own Thread |
 | Q17 | TUI glyph | Option B: no new mark; a label after the existing glyph. See [TUI rendering](#tui-rendering) |
 | D10 | Empty end message (user, after Q14; refined) | A successful empty result: exit 0 in every mode, also with `--schema`; Schema validation and repairs apply only to non-empty text. Exit 0 means valid JSON or an empty end message |
@@ -890,7 +886,7 @@ Other judgements made while finalizing (not covered by a user answer):
 
 ### Recovery queue units after integration with main (2026-11-03)
 
-The 128 pending reply-duty cap is not a general held-message admission bound.
+The pending reply-duty admission cap is not a general held-message admission bound.
 Ordinary sends can accumulate more than 128 held receipts; UI/readback windows
 also do not enforce admission. Per the user's decision, recovery must not refuse
 an oversized queue. Explicit send/retry releases the oldest 128 per pass and
@@ -915,12 +911,13 @@ Turn is not permission to revive stale/imported assignments from another Turn.
 ## Human decision requests (#262, 2026-11-07)
 
 A model may ask the user for a decision with `shellboy message ask --text ...`.
-The question reuses a reply-expected receipt; no table, schema migration,
-worker, queue, timeout or cross-Thread question browser is introduced. The
-pending receipt records `to_human=true`; reply state remains `pending` until a
-human reply, sender cancellation or recipient Thread deletion. Questions do not
+The question reuses a reply-expected receipt; no new table, worker, queue or
+timeout is introduced. Schema 38 adds a partial index solely for bounded
+cross-Thread human inbox paging; see [storage](storage.md). The pending receipt
+records `to_human=true`; reply state remains `pending` until a human reply,
+sender cancellation or recipient Thread deletion. Questions do not
 create a Run, deliver to a model, trigger Run-end reminders, or become ignored.
-They count toward the same 128 pending-reply cap.
+They count toward the same 16 pending-reply cap.
 
 `thread get` exposes unified pending duties for that Thread; `thread list` exposes
 only their count. The TUI renders the same per-Thread list in its `Pending replies`
@@ -932,8 +929,12 @@ existing `message reply` flow, including the existing reply mark and reply notic
 
 On answer, the receipt resolves and the answer is admitted to that Thread as an
 ordinary human message, starting a Run if none is live. Cancellation is terminal
-without a wake; deletion resolves as `recipient_deleted` through existing receipt
-collection. Asking an archived Thread unarchives it with reason
+without a wake; recipient deletion resolves as `recipient_deleted` through the
+existing bounded history-GC receipt phase. Up to 16 duties in a deletion cascade
+are resolved in the delete transaction; legacy excess is resolved by later GC
+batches before receipt collection. Delete success does not wait for those later
+sender deliveries; each committed batch dispatches its stable-ID outcomes after
+commit, and no delivery deadline is promised. Asking an archived Thread unarchives it with reason
 `question_asked`, consistent with the reply-resume unarchive behavior.
 
 A model that has an outstanding reply duty while asking the human must tell its
@@ -942,8 +943,7 @@ a reason to pause or abandon that reply duty.
 
 ## Thread-scoped reply inbox (#262, unified for web/TUI)
 
-There is no cross-Thread inbox endpoint. The existing `thread.get` read is the
-public, bounded per-Thread inbox: `ThreadDetails.awaiting_replies` is the unified
+`thread.get` remains the public, bounded per-Thread inbox: `ThreadDetails.awaiting_replies` is the unified
 page of pending duties for that one Thread, ordered by saved creation time and
 bounded to 128. Each item has `message_id`, `recipient_kind` (`human` for
 `message ask`, otherwise `thread`), `recipient_thread_id` (the target Thread),
@@ -952,12 +952,33 @@ from saved creation time and observation time), `delivery_status`, and
 `reminded`. `thread.get` is already refreshed by `events.wait --thread THREAD_ID`;
 clients reload only that Thread after a change hint. Answering uses existing
 `message.reply` with `message_id` and text. No new queue or read operation is
-needed. The caller must observe `recipient_kind`, not infer it from sender or
-Thread identity. A thread-targeted duty is not a human notification.
+needed for per-Thread details. The caller must observe `recipient_kind`, not
+infer it from sender or Thread identity. A thread-targeted duty is not a human notification.
+
+For cross-Thread web inboxes, `thread.list awaiting=human` pages only Threads
+with human-directed pending receipts. Schema 38 adds
+`receipt_human_reply_pending(target_thread_id, created_at)` as a partial index
+on pending human replies, so the listing starts from qualifying receipts and
+never scans the Thread table. Recursive indexed keyset seeks select at most
+`limit+1` candidate Thread IDs. Each candidate's aggregate reads at most 17
+pending rows. Counts through 16 are exact; a 17-row result is the lower bound
+17+ with `awaiting_human_count_exact=false`, never an assertion of exactly 17.
+The minimum `created_at` is reported only when the full pending set was observed
+(up to 16); with 17+ rows oldest is unknown/null, not an arrival-order guess.
+Archived/deleted candidates are filtered from the bounded candidate page, and
+the cursor advances by the last examined key, so exclusions cannot cause an
+unbounded search. The cursor is live, not a snapshot: v2 is scoped to the human
+inbox and archived mode; v1 snapshot cursors are rejected. Keys arriving before
+the cursor are deferred to a fresh listing; future keys may be seen in the
+current traversal. The filter is exclusive with query, tags, and cwd. Stress
+fixtures pin candidate-query VM steps with many late-arrival Threads and exercise
+state churn.
+
 
 The TUI `Pending replies` region is the same unified per-Thread list. It uses the
 existing human mark for `recipient_kind=human`; Thread-targeted duties retain the
-existing model mark. `thread list` exposes the count of all pending duties only.
+existing model mark. `thread list` exposes the count of all pending duties in its ordinary listing;
+`thread list awaiting=human` is a separate cross-Thread human inbox view.
 Overflow remains reachable through `/replies`. Human questions alone are
 suppressed from Run-end reminders and `ignored`; other-Thread duties keep the
 existing rules.
@@ -988,5 +1009,5 @@ A new terminal signal during an active sweep requests another sweep to catch eli
 The requester yields at existing background-unit boundaries and observes shutdown between units. Idle live/recovery
 requests do not cause repeated sweeps without a new signal. Receipt CAS and the deterministic outcome event ID make
 revisiting a committed batch idempotent. Delivery admission and the post-commit quiet wakes use the existing ordinary
-message mechanism. No new table, queue, worker or durable cursor is introduced. The existing schema-38 migration gains
+message mechanism. No new table, queue, worker or durable cursor is introduced. The schema-39 independent-Runs migration gains
 only the partial Run/pending index; wire remains protocol 5.

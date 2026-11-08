@@ -146,6 +146,9 @@ pub struct CollectionReport {
     pub(crate) raw_due: Option<DateTime<Utc>>,
     #[serde(skip)]
     pub(crate) managed_due: Option<DateTime<Utc>>,
+    /// Bounded sender Threads whose reply outcomes committed in this pass.
+    #[serde(skip)]
+    pub(crate) reply_wake_threads: Vec<String>,
 }
 impl CollectionReport {
     fn defer(&mut self, work: Work) {
@@ -184,6 +187,9 @@ pub struct HistoryStep {
     pub stage: String,
     pub root_revision: i64,
     pub scanned: u64,
+    /// Candidate receipts examined by this bounded history-GC step.
+    #[serde(skip)]
+    pub candidates: u64,
     pub nodes_tombstoned: u64,
     pub kept_over_budget: u64,
     pub kept_receipts: u64,
@@ -194,6 +200,9 @@ pub struct HistoryStep {
     /// The step was deferred at the DB step budget and rolled back.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub deferred: bool,
+    /// Bounded sender Threads whose reply outcomes committed in this pass.
+    #[serde(skip)]
+    pub(crate) reply_wake_threads: Vec<String>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct Progress {
@@ -444,24 +453,15 @@ impl GcService {
                 Background::Deferred => report.defer(Work::History),
                 Background::Done(None) => {}
                 Background::Done(Some(job)) => {
-                    let mut restarts = 0;
-                    loop {
-                        let step = self.history_step_held(requester, &job).await?;
-                        if step.deferred {
-                            report.defer(Work::History);
-                            break;
-                        }
+                    let step = self.history_step_held(requester, &job).await?;
+                    if step.deferred {
+                        report.defer(Work::History);
+                    } else {
                         report.nodes_tombstoned += step.nodes_tombstoned;
                         report.history_bytes_collected += step.bytes_collected;
-                        if step.complete {
-                            break;
-                        }
-                        if step.restarted {
-                            restarts += 1;
-                            if restarts >= 3 {
-                                report.deferred = true;
-                                break;
-                            }
+                        report.reply_wake_threads = step.reply_wake_threads;
+                        if !step.complete {
+                            report.defer(Work::History);
                         }
                     }
                 }
@@ -967,6 +967,7 @@ impl GcService {
                 stage: "deferred".into(),
                 root_revision: 0,
                 scanned: 0,
+                candidates: 0,
                 nodes_tombstoned: 0,
                 kept_over_budget: 0,
                 kept_receipts: 0,
@@ -975,6 +976,7 @@ impl GcService {
                 restarted: false,
                 complete: false,
                 deferred: true,
+                reply_wake_threads: Vec::new(),
             },
         };
         if step.deferred {
@@ -1416,6 +1418,207 @@ mod tests {
         assert_eq!(snapshot.stage, "reset");
         assert_eq!(snapshot.restarts, 1);
         db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleted_reply_receipts_resume_in_bounded_gc_batches_after_reopen() {
+        use std::sync::Arc;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("reply-gc.db");
+        let db = crate::storage::DbWorker::open(&path).await.unwrap();
+        let config = crate::config::Config::default();
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        const LEGACY: usize = 1024;
+        const UNRELATED: usize = 257;
+        let sync_wakes = db.call(|db| {
+            let tx = db.transaction()?;
+            for thread in ["deleted-target", "sender-a", "sender-b", "unrelated"] {
+                tx.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,deleted_at) VALUES(?1,'','','p','m','now',CASE WHEN ?1='deleted-target' THEN 'now' ELSE NULL END)", [thread])?;
+            }
+            for (thread, run) in [("sender-a", "run-a"), ("sender-b", "run-b")] {
+                tx.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES(?1,?2,'live','now')", [run, thread])?;
+            }
+            tx.execute("INSERT INTO gc_job VALUES('delete-job','history',0,NULL,'pending',NULL)", [])?;
+            for index in 0..(LEGACY + UNRELATED) {
+                let target = if index < LEGACY { "deleted-target" } else { "unrelated" };
+                let message = format!("message-{index:04}");
+                let sender_thread = if index % 2 == 0 { "sender-a" } else { "sender-b" };
+                let run = if index % 2 == 0 { "run-a" } else { "run-b" };
+                let sender = serde_json::json!({
+                    "kind":"model", "instance_id":"fixture", "thread_id":sender_thread,
+                    "run_id":run, "turn_id":format!("turn-{index}"), "execution_id":format!("exec-{index}")
+                }).to_string();
+                tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user','now','{}')", [&message])?;
+                tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,?2,?3,?1,'applied','now','{\"reply\":{\"state\":\"pending\"},\"to_human\":false}')", rusqlite::params![message, sender, target])?;
+            }
+            // Deletion's first transaction cancels at most 16, while the durable
+            // existing history job remains discoverable for the normal worker.
+            tx.execute("UPDATE thread SET deleted_at='now' WHERE id='deleted-target'", [])?;
+            let wakes = crate::control::reply::deleted_threads_tx(&tx, &["deleted-target".into()], "now")?;
+            assert_eq!(wakes.len(), 2, "duplicate sender IDs are coalesced within the fixed sync cap");
+            tx.commit()?;
+            Ok(wakes)
+        }).await.unwrap();
+        assert_eq!(sync_wakes.len(), 2);
+        let after_sync = db.call(|db| Ok(db.query_row(
+            "SELECT sum(json_extract(result_json,'$.reply.state')='pending'),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='deleted-target'",
+            [], |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+        )?)).await.unwrap();
+        assert_eq!(after_sync, (LEGACY as i64 - 16, 16));
+
+        let job = gc.start_history().await.unwrap().unwrap();
+        db.call(|db| {
+            db.execute_batch("CREATE TEMP TRIGGER fail_reply_outcome BEFORE INSERT ON event WHEN NEW.kind='reply_outcome' BEGIN SELECT RAISE(ABORT,'forced receipt batch rollback'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        let mut rolled_back = false;
+        for _ in 0..40 {
+            match gc.history_step(&job).await {
+                Ok(step) => {
+                    assert!(step.candidates <= super::BATCH as u64);
+                    assert_background_steps_bounded(&db);
+                    db.call(|db| {
+                        db.execute(
+                            "UPDATE thread SET revision=revision+1 WHERE id='unrelated'",
+                            [],
+                        )?;
+                        Ok(())
+                    })
+                    .await
+                    .unwrap();
+                }
+                Err(_) => {
+                    rolled_back = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            rolled_back,
+            "outcome insertion fault aborts one receipt batch transaction"
+        );
+        let after_rollback = db.call(|db| Ok(db.query_row(
+            "SELECT sum(json_extract(result_json,'$.reply.state')='pending'),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='deleted-target'",
+            [], |r| Ok((r.get::<_, Option<i64>>(0)?.unwrap_or(0), r.get::<_, Option<i64>>(1)?.unwrap_or(0))),
+        )?)).await.unwrap();
+        assert_eq!(
+            after_rollback,
+            (LEGACY as i64 - 16, 16),
+            "receipt outcomes roll back with failed batch"
+        );
+        db.call(|db| {
+            db.execute_batch("DROP TRIGGER fail_reply_outcome")?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let mut first_receipt_batch = false;
+        for _ in 0..40 {
+            let step = gc.history_step(&job).await.unwrap();
+            assert!(step.candidates <= super::BATCH as u64);
+            assert_background_steps_bounded(&db);
+            db.call(|db| {
+                db.execute(
+                    "UPDATE thread SET revision=revision+1 WHERE id='unrelated'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+            assert!(step.reply_wake_threads.len() <= super::BATCH);
+            if step.stage == "receipts" && step.candidates > 0 {
+                assert_eq!(step.candidates, super::BATCH as u64);
+                assert!(step.reply_wake_threads.len() <= 2);
+                first_receipt_batch = true;
+                break;
+            }
+        }
+        assert!(
+            first_receipt_batch,
+            "history job reaches its bounded receipt stage"
+        );
+        // Simulate interruption after a committed receipt batch and reopen with
+        // only the existing durable history job/cursor as continuation state.
+        drop(gc);
+        db.shutdown().await.unwrap();
+        let db = crate::storage::DbWorker::open(&path).await.unwrap();
+        let config = crate::config::Config::default();
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            db.clone(),
+            &config,
+            temp.path().to_owned(),
+            "fixture".into(),
+        ));
+        let gc = super::GcService::new(
+            db.clone(),
+            Arc::new(config),
+            temp.path().to_owned(),
+            attachments,
+        );
+        let job = gc.start_history().await.unwrap().unwrap();
+        let mut complete = false;
+        for _ in 0..100 {
+            let step = gc.history_step(&job).await.unwrap();
+            assert!(step.candidates <= super::BATCH as u64);
+            assert_background_steps_bounded(&db);
+            db.call(|db| {
+                db.execute(
+                    "UPDATE thread SET revision=revision+1 WHERE id='unrelated'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+            assert!(step.reply_wake_threads.len() <= super::BATCH);
+            if step.stage == "receipts" && step.candidates > 0 {
+                assert!(step.reply_wake_threads.len() <= 2);
+            }
+            if step.complete {
+                complete = true;
+                break;
+            }
+        }
+        assert!(
+            complete,
+            "finite receipt horizon and monotonically advancing rowid cursor complete the existing job"
+        );
+        let result = db.call(|db| Ok((
+            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='deleted-target' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0))?,
+            db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome' AND target_thread_id IN ('sender-a','sender-b')", [], |r| r.get::<_, i64>(0))?,
+            db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.kind='reply_outcome' AND d.state='pending'", [], |r| r.get::<_, i64>(0))?,
+            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='unrelated' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0))?,
+            db.query_row("SELECT count(*) FROM gc_job WHERE id='delete-job' AND state='done'", [], |r| r.get::<_, i64>(0))?,
+        ))).await.unwrap();
+        assert_eq!(
+            result,
+            (0, LEGACY as i64, LEGACY as i64, UNRELATED as i64, 1)
+        );
+        db.shutdown().await.unwrap();
+    }
+
+    fn assert_background_steps_bounded(db: &crate::storage::DbWorker) {
+        let steps = db.take_background_steps();
+        for (kind, ticks, deferred) in steps {
+            assert!(
+                ticks
+                    <= crate::storage::BACKGROUND_STEP_BUDGET
+                        + crate::storage::PROGRESS_GRANULARITY,
+                "background unit {kind} exceeded its fixed SQLite VM budget: {ticks} (deferred={deferred})"
+            );
+        }
     }
 
     fn fixture(live: usize, deleted: usize, jobs: usize, chunks: usize) -> Connection {

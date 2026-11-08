@@ -244,3 +244,6 @@ mod startup_cli;
 #[cfg(feature = "test-db-observation")]
 #[path = "../db_observation_feature.rs"]
 mod db_observation_feature;
+
+#[path = "../support/history_collection.rs"]
+pub(crate) mod history_collection;

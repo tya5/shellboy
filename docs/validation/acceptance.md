@@ -10741,6 +10741,7 @@ SQL boundary deterministically instead of relying on a timing threshold. Focused
 - [x] Human questions never generate Run-end reminder/ignored outcomes; Thread-targeted duties preserve them (reply reminder query excludes `to_human`; existing duty lifecycle tests pass).
 - [x] `thread.list` count and TUI region include all pending replies; human mark identifies only human decision requests; region is current-Thread scoped and uses existing glyphs (summary/UI focused tests).
 - [ ] Sender cancel, recipient deletion, 128 shared cap, no-schema migration, configuration bounds, and browser-facing presentation remain for final acceptance sweep. Archive clearing is verified by the reply integration test.
+- [ ] Cross-Thread inbox uses an indexed keyset page before count/oldest aggregation; VM steps remain identical with 20 versus 5,000 pending Threads and archived candidates (W8 regression).
 ## External RPC contract and schema export (#244 A2/D)
 
 Environment: local macOS, synthetic tests only. `cargo fmt --all --check`,
@@ -11038,3 +11039,74 @@ terminal requests and no run-ended signal; existing startup maintenance settles 
 mock HTTP input containing the outcome for each tested terminal state. The real user owner is not used or restarted.
 Explicit FK-OFF detection, rollback/restoration and the legacy partial-index migration regression also pass. These
 focused results precede the new final-SHA CI; the older 6cad05f0 CI is not evidence for the correction.
+### #262 per-recipient reply-duty admission cap (validation in progress)
+
+- The single limit constant is 16. Message ask and expect-reply share one
+  write-transaction guard; the query reads no more than 17 pending indexed rows.
+- The 17th addition must return typed `reply_limit` with `limit` and
+  `current_count`; a committed reply or cancellation must allow a subsequent
+  addition. Nothing deletes old over-limit data.
+- Legacy reading must cap per-Thread aggregate samples and use the human partial
+  index for candidate seeks with a receipt-sequence watermark. The EXPLAIN and
+  5,000-Thread/off-page exclusion test must show bounded VM steps; a separate
+  1,000-receipt same-Thread fixture verifies legacy over-limit readability and
+  the per-Thread `LIMIT 17` plan.
+- `count_saturated` is removed from implementation, schema and guidance. Protocol
+  schema, error catalog, Agent Guide and CLI guidance describe the same 16 limit
+  and recovery action.
+- Synthetic fixtures only; no real database, provider or paid API is used. Studio
+  behavior and non-host OS local execution are not dynamically tested; exact-tip
+  normal and all-OS CI remain the cross-platform gate.
+
+### #262 CI fixture repair (2026-11-09, verification pending)
+
+The 38fe69b standard run 42522587870 failed in tests; it is not a green gate.
+Its logs exposed independent RAG-schema SQL contamination, invalid conversation
+schema downgrade DDL, a removed baseline migration-37 additive-column guard,
+and fixtures still assuming admission 128 or single-pass history completion.
+Repairs retain admission 16, summary 17+/exact=false, synchronous deletion 16,
+and durable receipt batches 128. The shared test-only history observer calls
+successive bounded passes; rollback, row-bound and retained-body assertions
+remain enabled. Pending-root fixtures now target live recipients; the existing
+large deleted-recipient restart test checks eventual terminalization separately.
+
+Local macOS synthetic fixtures (no live owner/provider): startup migrations,
+activity migrations, RAG lock/ingest, owner preparation, retained-event upgrade,
+client dispatch, F8 attachment projection, and schema14/15 upgrades pass.
+Integration storage (24), hot-query migrations (6), reply (9), history GC (35,
+plus one pre-existing manual measurement ignored), prune (13), and RAG store
+(25) pass. Python policy/unit tests: 206 pass. The final focused run and exact-SHA
+normal/all-OS CI remain required; these results do not qualify another SHA.
+
+Full-branch language metadata audit against origin/main 292ccca (distinct from
+reviewing only the 34-record follow-up): 495 changed records, all in #262-touched
+sources: src/operations.rs 334 (including two new Awaiting label/help records),
+src/ui/operations.rs 127, src/ui/threads.rs 34. All 493 existing categories are
+unchanged; no records are removed. Outside the 34 explicitly re-reviewed Thread
+rendering records, existing reasons are byte-identical. Every changed source
+fingerprint matches the current scanner inventory. The two new labels have
+matching En/Ja field-label/help arms. Thus the 1,064-line manifest diff is scoped
+source-token pin maintenance, not an unrelated category rollback. The prior
+34-record approval alone was not evidence for this full-branch comparison.
+
+### #262 TUI Awaiting form follow-up
+
+Independent review identified that the Thread-list catalogue/CLI exposed
+`awaiting=human`, but the hand-written TUI form always sent None. The form now
+uses the existing bilingual Awaiting field metadata and blank/human choices,
+and passes the selected value through existing protocol validation. The focused
+bilingual test checks blank=None, human=Some("human"), and rejection of an
+invalid value. No new filter semantics, enum or admission-limit change is made.
+Re-reviewed 127 existing src/ui/operations.rs labels: only their enclosing
+source-token pin changes; all reasons and categories are preserved and the
+English/Japanese label/help paths remain unchanged. Final exact-tip CI and
+independent review are required again; 35103a6c CI does not qualify this change.
+
+The 456e3060 normal run 42524524619 failed exactly one library test: strict
+owner-form coverage found the Awaiting form key missing from metadata_id.
+The follow-up binds that key to FieldId::Awaiting and uses the existing shared
+Japanese label. The bilingual regression now also checks selected help metadata
+and equality with the catalogue label in each language. The strict coverage
+assertion remains unchanged. All integration/termination/crash-recovery targets
+in that failed normal run passed; they do not make the entire run successful.
+A new exact-SHA pair of CI runs and independent review are still required.

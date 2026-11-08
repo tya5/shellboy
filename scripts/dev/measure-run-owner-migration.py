@@ -24,9 +24,9 @@ def main():
     prefix = '''DROP TRIGGER IF EXISTS reject_owner_cycle_insert;
 DROP TRIGGER IF EXISTS reject_owner_cycle_update;
 DROP INDEX IF EXISTS runs_by_owner;'''
-    rebuild = Path('migrations/0038_independent_runs.sql').read_text().split("UPDATE event SET kind='recovery_wait'")[0]
+    rebuild = Path('migrations/0039_independent_runs.sql').read_text().split("UPDATE event SET kind='recovery_wait'")[0]
     methods = {'drop_column': prefix + '\nALTER TABLE run DROP COLUMN owner_run_id;',
-               'rebuild': rebuild, 'full_migration_38': Path('migrations/0038_independent_runs.sql').read_text()}
+               'rebuild': rebuild, 'full_migration_39': Path('migrations/0039_independent_runs.sql').read_text()}
     report = {'environment': {'os': platform.platform(), 'machine': platform.machine(),
                              'python': platform.python_version(), 'sqlite': sqlite3.sqlite_version},
               'base': args.base, 'distribution_limit': 'Counts may match an authorized COUNT observation; content and distributions are synthetic',
@@ -57,7 +57,7 @@ DROP INDEX IF EXISTS runs_by_owner;'''
             try:
                 db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
                 elapsed = time.perf_counter() - started
-                if name=='full_migration_38':
+                if name=='full_migration_39':
                     report['event_counts_after']={k:db.execute('SELECT count(*) FROM event WHERE kind=?',[k]).fetchone()[0] for k in ['child_recovery_wait','recovery_wait','synthetic']}
                     report['event_lookup_plan_after']=[r[3] for r in db.execute("EXPLAIN QUERY PLAN SELECT id FROM event WHERE kind='recovery_wait' AND json_extract(payload_ref_json,'$.thread_id')='synthetic'")]
                 result = {'method': name, 'seconds': elapsed, 'changed_rows': db.total_changes - before,

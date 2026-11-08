@@ -108,36 +108,43 @@ pub(crate) fn awaiting_replies_tx(
     thread: &str,
     human_only: Option<bool>,
 ) -> rusqlite::Result<Vec<Value>> {
-    let mut statement = db.prepare("SELECT r.message_node_id,r.sender_json,r.target_thread_id,r.created_at,r.state,r.result_json,n.payload_json,CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND (?2 IS NULL OR COALESCE(json_extract(r.result_json,'$.to_human'),0)=?2) ORDER BY r.created_at,r.rowid LIMIT 128")?;
+    let mut statement = db.prepare("SELECT r.message_node_id,r.sender_json,r.target_thread_id,r.created_at,r.state,r.result_json,n.payload_json,CAST((julianday('now')-julianday(r.created_at))*86400000 AS INTEGER) FROM receipt r INDEXED BY receipt_reply_pending JOIN node n ON n.id=r.message_node_id WHERE r.target_thread_id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND (?2 IS NULL OR COALESCE(json_extract(r.result_json,'$.to_human'),0)=?2) ORDER BY r.created_at,r.rowid LIMIT ?3")?;
     statement
-        .query_map(rusqlite::params![thread, human_only.map(i64::from)], |r| {
-            let saved: String = r.get(5)?;
-            let saved: Value = serde_json::from_str(&saved)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            let sender: String = r.get(1)?;
-            let payload: Option<String> = r.get(6)?;
-            let excerpt = payload
-                .and_then(|body| serde_json::from_str::<Value>(&body).ok())
-                .map(|value| crate::history::conversation_excerpt(&value, 512))
-                .unwrap_or_default();
-            let excerpt =
-                crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""), 0)
-                    .0
-                    .chars()
-                    .take(512)
-                    .collect::<String>();
-            Ok(json!({
-                "message_id":r.get::<_,String>(0)?,
-                "recipient_kind":if saved["to_human"] == true {"human"} else {"thread"},
-                "recipient_thread_id":r.get::<_,String>(2)?,
-                "sender":crate::protocol::MessageSender::from_saved(Some(&sender)),
-                "created_at":r.get::<_,String>(3)?,
-                "elapsed_ms":r.get::<_,i64>(7)?.max(0),
-                "delivery_status":r.get::<_,String>(4)?,
-                "excerpt":excerpt.lines().next().unwrap_or(""),
-                "reminded":saved["reply"].get("reminded_at").is_some()
-            }))
-        })?
+        .query_map(
+            rusqlite::params![
+                thread,
+                human_only.map(i64::from),
+                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+            ],
+            |r| {
+                let saved: String = r.get(5)?;
+                let saved: Value = serde_json::from_str(&saved)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                let sender: String = r.get(1)?;
+                let payload: Option<String> = r.get(6)?;
+                let excerpt = payload
+                    .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+                    .map(|value| crate::history::conversation_excerpt(&value, 512))
+                    .unwrap_or_default();
+                let excerpt =
+                    crate::presentation::sanitize_plain(excerpt.lines().next().unwrap_or(""), 0)
+                        .0
+                        .chars()
+                        .take(512)
+                        .collect::<String>();
+                Ok(json!({
+                    "message_id":r.get::<_,String>(0)?,
+                    "recipient_kind":if saved["to_human"] == true {"human"} else {"thread"},
+                    "recipient_thread_id":r.get::<_,String>(2)?,
+                    "sender":crate::protocol::MessageSender::from_saved(Some(&sender)),
+                    "created_at":r.get::<_,String>(3)?,
+                    "elapsed_ms":r.get::<_,i64>(7)?.max(0),
+                    "delivery_status":r.get::<_,String>(4)?,
+                    "excerpt":excerpt.lines().next().unwrap_or(""),
+                    "reminded":saved["reply"].get("reminded_at").is_some()
+                }))
+            },
+        )?
         .collect()
 }
 
@@ -148,7 +155,7 @@ fn cancelled_notice_tx(
     at: &str,
 ) -> rusqlite::Result<()> {
     db.execute(
-            "INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)",
+            "INSERT OR IGNORE INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)",
             params![format!("reply-cancelled-{message}"), thread, json!({"kind":"reply_cancelled","message_id":message}).to_string(), at],
         )?;
     Ok(())
@@ -348,6 +355,7 @@ pub(crate) fn complete_tx(
 ) -> rusqlite::Result<Option<String>> {
     let rows = db.prepare("SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_run_pending WHERE run_id=?1 AND state='applied' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1 ORDER BY rowid LIMIT 128")?
         .query_map([run], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+
     if !rows.is_empty() {
         db.execute(
             "UPDATE thread SET revision=revision+1 WHERE id=?1",
@@ -550,20 +558,24 @@ fn outcome_tx(
     Ok(None)
 }
 
-// Per-recipient pending duties are capped at 128 by send admission.
-const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT 128";
+// Thread deletion handles at most this many receipts synchronously. The
+// durable history-GC receipt cursor handles any remaining pending replies.
+const DELETED_RECIPIENT_REPLIES: &str = "SELECT message_node_id,sender_json,result_json FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id=?1 AND json_extract(result_json,'$.reply.state')='pending' ORDER BY created_at,rowid LIMIT ?2";
 
-/// All selected Threads are already marked deleted. No sender-side scan here.
 pub(crate) fn deleted_threads_tx(
     db: &Connection,
     targets: &[String],
     at: &str,
 ) -> rusqlite::Result<Vec<String>> {
-    let mut wakes = Vec::new();
+    let mut wakes = std::collections::BTreeSet::new();
+    let mut budget = crate::protocol::MAX_SYNC_DELETION_REPLY_DUTIES as usize;
     let mut query = db.prepare(DELETED_RECIPIENT_REPLIES)?;
     for target in targets {
+        if budget == 0 {
+            break;
+        }
         let rows = query
-            .query_map([target], |r| {
+            .query_map(params![target, budget as i64], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
@@ -571,18 +583,51 @@ pub(crate) fn deleted_threads_tx(
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        budget = budget.saturating_sub(rows.len());
         for (message, sender, saved) in rows {
             if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE message_node_id=?1 AND json_extract(result_json,'$.reply.state')='pending'",params![message,at])? == 1 {
                 let saved: Value = serde_json::from_str(&saved)
                     .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
                 if saved["to_human"] != true
                     && let Some(thread) = outcome_tx(db, &message, &sender, "recipient_deleted", at)?
-                { wakes.push(thread); }
+                { wakes.insert(thread); }
                 db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
             }
         }
     }
-    Ok(wakes)
+    Ok(wakes.into_iter().collect())
+}
+
+/// Durable history-GC continuation for a reply whose recipient Thread was
+/// deleted. Called for one receipt in a fixed-size GC transaction; the caller's
+/// rowid cursor makes a crash/restart resume after this outcome commit.
+pub(crate) fn deleted_recipient_receipt_tx(
+    db: &Connection,
+    receipt: &str,
+    at: &str,
+) -> rusqlite::Result<Option<String>> {
+    let row: Option<(String, String, String, String, String)> = db.query_row(
+        "SELECT r.message_node_id,r.sender_json,r.target_thread_id,COALESCE(r.result_json,'{}'),r.path_admission FROM receipt r JOIN thread t ON t.id=r.target_thread_id WHERE r.id=?1 AND json_extract(r.result_json,'$.reply.state')='pending' AND t.deleted_at IS NOT NULL",
+        [receipt],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+    ).optional()?;
+    let Some((message, sender, target, saved, admission)) = row else {
+        return Ok(None);
+    };
+    let mut wake = None;
+    if db.execute("UPDATE receipt SET result_json=json_set(result_json,'$.reply.state','recipient_deleted','$.reply.at',?2),updated_at=?2 WHERE id=?1 AND json_extract(result_json,'$.reply.state')='pending'", params![receipt, at])? == 1 {
+        let saved: Value = serde_json::from_str(&saved)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        if saved["to_human"] != true {
+            // outcome_tx stores the sender event and delivery atomically with
+            // this receipt transition; dispatch occurs only after this commits.
+            wake = outcome_tx(db, &message, &sender, "recipient_deleted", at)?;
+        } else if admission == "admitted" {
+            cancelled_notice_tx(db, &target, &message, at)?;
+        }
+        db.execute("UPDATE thread SET revision=revision+1 WHERE id=?1", [target])?;
+    }
+    Ok(wake)
 }
 
 /// Called once per row in the finite, at-most-128-row history-GC receipt batch.
@@ -835,7 +880,10 @@ mod tests {
         let plan: Vec<String> = db
             .prepare(&format!("EXPLAIN QUERY PLAN {DELETED_RECIPIENT_REPLIES}"))
             .unwrap()
-            .query_map(["target-0"], |r| r.get(3))
+            .query_map(
+                params!["target-0", crate::protocol::MAX_PENDING_REPLY_DUTIES as i64],
+                |r| r.get(3),
+            )
             .unwrap()
             .collect::<rusqlite::Result<_>>()
             .unwrap();
@@ -858,9 +906,34 @@ mod tests {
             db.query_row("SELECT count(*) FROM receipt_updates", [], |r| r
                 .get::<_, i64>(0))
                 .unwrap(),
-            128
+            16
         );
+        assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='target-0' AND json_extract(result_json,'$.reply.state')='pending'",[],|r|r.get::<_,i64>(0)).unwrap(),112);
         assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id!='target-0' AND json_extract(result_json,'$.reply.state')='pending' AND updated_at=''",[],|r|r.get::<_,i64>(0)).unwrap(),4096);
+    }
+
+    #[test]
+    fn deleted_reply_sync_work_is_capped_for_17_and_129_legacy_rows() {
+        for count in [17, 129] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','','','p','m','now')", []).unwrap();
+            for index in 0..count {
+                let message = format!("message-{index}");
+                db.execute(
+                    "INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','now','{}')",
+                    [&message],
+                )
+                .unwrap();
+                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,'{\"kind\":\"human\"}','target',?1,'applied','now','{\"reply\":{\"state\":\"pending\"},\"to_human\":false}')", [&message]).unwrap();
+            }
+            let tx = db.transaction().unwrap();
+            let wakes = deleted_threads_tx(&tx, &["target".into()], "now").unwrap();
+            assert!(wakes.is_empty());
+            tx.commit().unwrap();
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='recipient_deleted'", [], |r| r.get::<_, i64>(0)).unwrap(), 16);
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_, i64>(0)).unwrap(), count as i64 - 16);
+        }
     }
 
     #[test]

@@ -752,3 +752,14 @@ inherent migration bookkeeping, not application-table changes requiring a scan.
 ## Storage capacity thresholds in status (#265)
 
 `storage.status` reports the configured logical data warning threshold as `warning_bytes` and the admission limit as `limit_bytes`, alongside the existing observed live-byte total and `warning` / `limit_reached` booleans. These are the active owner's configured byte values, not measurements or estimates. The read adds two scalar fields and performs no extra database work; the UI can draw a meter only when both observed value and configured limit are reported. The separate filesystem free-space guard remains `disk_free_min_bytes` / `disk_free_state`.
+
+
+Schema 38 adds `receipt_human_reply_pending(target_thread_id, created_at)`
+for cross-Thread human inbox pagination. It is partial on pending human-directed
+reply receipts only. The inbox keyset-seeks candidate Thread IDs from this index,
+then computes a count capped at 17 per candidate on the bounded candidate page;
+count is exact through 16 and marked lower-bound at 17+, and oldest is the
+minimum `created_at` only for exact counts. Archived/deleted filtering also
+stays within that page. The cursor is a live Thread-ID keyset, not a snapshot. This is distinct from
+the per-recipient `receipt_reply_pending` index used for bounded Thread inbox and
+lifecycle operations.

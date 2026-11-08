@@ -226,7 +226,8 @@ OSごとの所有対象を型の構成で明確にする。Windowsの実機受�
 
 ### 同じwire版の旧ownerと未知操作（PR1-10）
 
-Historical protocol-2 behavior (superseded by Issue #244 A2): protocol-2 request/response envelopes rejected all other versions; current required fields were not made optional for older owners. That version-mismatch diagnostic and receipt guidance remain, but protocol 3 added the capability list and tolerant output records described above; protocol 5 is current after #276 and retains the strict `events.wait` extension. For external clients, the generated contract is `docs/reference/protocol.schema.json`; the version-4 `events.wait` result is included with its concrete type. Other results still represented by `serde_json::Value` remain opaque. The exact drift test keeps it synchronized with the wire types. Additive result fields are accepted by open records; unknown request arguments remain typed `invalid_argument` errors before dispatch. Any incompatible protocol change requires a new `PROTOCOL_VERSION`, exact handshake match, regenerated schema, and an explicit migration note; no silent downgrade is supported. The strict typed `events.wait` result uses protocol 4; capabilities describe feature support but cannot make protocol-3 result decoders tolerate new fields. No capability advertisement alone makes a strict result additive; every incompatible result shape requires a version bump.
+Historical protocol-2 behavior (superseded by Issue #244 A2): protocol-2 request/response envelopes rejected all other versions; current required fields were not made optional for older owners. That version-mismatch diagnostic and receipt guidance remain. Protocol 3 added capabilities, protocol 4 added the strict `events.wait` result, and protocol 5 adds bounded human-reply count exactness. For external clients, `docs/reference/protocol.schema.json` is generated from the wire types and the exact drift test keeps it synchronized. Other results still represented by `serde_json::Value` remain opaque. Unknown request arguments remain typed `invalid_argument` errors before dispatch. Any incompatible strict result shape requires a new `PROTOCOL_VERSION`, exact handshake match, regenerated schema, and explicit migration note; no silent downgrade is supported. Capabilities do not make older strict typed result decoders tolerate new fields.
+
 
 ## R3-3 / R3-4: Command分類・語彙・既定値の正本
 
@@ -265,6 +266,28 @@ conversation footer. In particular, `state: "completed"` can coexist with
 `activity: "background"` or `"continuing"` while the latest Run remains live.
 `background` requires an active owned shell or child Run; `continuing` does
 not assert such work. Exit markers and Revisit are independent of activity.
+
+### Cross-Thread human waiting list
+
+`thread.list` accepts optional `awaiting: "human"` (exclusive with `query`,
+`tags`, and `cwd`; it composes with `archived`, `limit`, and `cursor`). The CLI
+spelling is `shellboy thread list --awaiting human`. This returns a keyset
+page of only Threads with pending human-directed reply receipts. Items carry
+`awaiting_human_count` and `awaiting_human_count_exact`: through 16 the count is
+exact and the bool is omitted/default true; 17 with false means 17 or more.
+`awaiting_human_oldest_at` is the minimum `created_at` only when all pending
+receipts were observed (at most 16); it is null/absent when the bounded 17-row
+sample proves an overflow. Legacy receipts are preserved. Thread-directed
+reply duties do not qualify. Cursor v2 is scoped to this live Thread-ID keyset
+and archived mode, has no receipt watermark, and rejects the old snapshot cursor
+(v1) with `cursor_expired`. The cursor is validated before its keyset is used;
+malformed, wrong-scope/filter, or older-version cursors never silently restart.
+It is not a snapshot: changes before the cursor require restarting without a
+cursor; additions after it may appear while paging. This neither promises a
+consistent snapshot nor hides same-Thread count/state changes between pages. The reader uses the
+schema-38 partial index `receipt_human_reply_pending(target_thread_id, created_at)` and hydrates summary
+rows only for the returned page. Plan and SQLite VM-step counts are fixed by a
+regression test; no full Thread-table scan is permitted.
 
 ### Observing long-running shells (Issue #45)
 
@@ -878,6 +901,17 @@ Durable `status` attempt WorkItems expose `response_nodes`, an output-item-order
 
 The query first reads at most 257 rows from the existing `(attempt_id, ordinal)` primary-key range. It examines at most 256 candidate rows, publishes at most 64 eligible output-item refs, and sets `response_nodes_truncated=true` if either limit leaves a row unexamined. Thus truncated means the result is incomplete, not that omitted eligible responses are known to exist. There is no continuation cursor for this nested list; clients must not claim complete coverage, and an empty+truncated list must not be treated as proof no response was saved. No new index/table/migration is added.
 
-This is additive to protocol 4. Before this change `status` result was an opaque JSON value; existing readers were already required to tolerate its fields and additive output. The new fields are not added to `events.wait`, do not change request args, and do not change the meaning of `end_message_node_id`; no version bump is required under the current additive-result rule. Revisit if a supported status client proves strict against unknown response fields.
+This is additive to protocol 5. Before this change `status` result was an opaque JSON value; existing readers were already required to tolerate its fields and additive output. The new fields are not added to `events.wait`, do not change request args, and do not change the meaning of `end_message_node_id`; no version bump is required under the current additive-result rule. Revisit if a supported status client proves strict against unknown response fields.
 
 Visibility lifetime: intermediate `assistant_response` rows are appended to the selected `thread_path` in the same transaction as their `output_item` links, so every published `node_id` is immediately a valid `history.window` anchor. A rewind/fork may later remove a node from that selected path; as with other positional history anchors, `history.window` then returns its normal stale-anchor error. No lookup is performed by body text or timestamp. Response adoption calls `Control::changed(thread_id)` after the commit; it records a durable thread change on the `events.wait` clock before notifying waiters, so the persisted-ref change is observable without polling or guessing.
+
+
+## Protocol 5 (Issue #262)
+
+`ThreadSummary.awaiting_human_count` is exact through 16. Value 17 with
+`awaiting_human_count_exact=false` means 17 or more. The bool defaults to true
+when absent and is omitted when true. Protocol 5 is required because strict
+typed response records cannot assume older clients tolerate an added field.
+The human inbox uses live Thread-ID cursor v2; old snapshot cursors expire.
+The exact count and oldest-time semantics follow: 17 with `exact=false` is a
+lower bound (17+), and oldest is null when that bound is inexact.

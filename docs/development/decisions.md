@@ -4317,3 +4317,30 @@ A retry-exhausted Turn in `recovery_wait` is not terminal. Keep the same expecte
 reply after explicit recovery. Only actual replyless normal completion, explicit stop and terminal failure settle
 as ignored. Do not substitute a recovery notification for an invented terminal outcome. Cancellation is its own
 outcome, delivered normally to the requesting Thread. No Run ownership or parent-forwarding policy is reinstated.
+### D-262-5: Reject new reply duties at 16 per recipient Thread
+
+The user's 2026-11-08 decision replaces the previous read-time saturation
+contract. Define the admission limit once in the protocol layer; both `message
+ask` and `expect-reply` sends count all pending duties for the recipient Thread
+with an indexed `LIMIT 17` inside the same serialized write transaction. Reject
+the 17th with `reply_limit`, reporting the limit and current count and explaining
+that replying or cancelling frees capacity. Keep existing over-limit receipts;
+read-side count, oldest sample and awaiting-replies projections use indexed
+bounded reads. No cleanup migration. Migration 38 adds only the partial index
+on `(target_thread_id, created_at)` for pending human replies.
+
+The leader's provisional 2026-11-08 follow-up chooses a single bounded lower
+bound contract: `awaiting_human_count` is exact through 16; value 17 with
+`awaiting_human_count_exact=false` means 17 or more. It does not mean exactly 17.
+The bool defaults to true and is omitted when true; this additive result field
+requires protocol 5 because typed results are strict. No stored receipts are
+deleted, rewritten, or moved to ignored. For inexact counts, oldest timestamp
+is absent/unknown: exact oldest is the minimum `created_at`, not arrival order.
+
+The cross-Thread inbox is a live Thread-ID keyset, not a snapshot. Cursor v2 is
+scoped to `thread.list.awaiting_human.live.v2` and archived filter; v1 snapshot
+cursors expire. Page work uses indexed keyset seeks and bounded per-Thread
+samples, advancing across examined candidates. Live changes may add or remove
+future keys; keys inserted before the cursor require a fresh listing. No new
+table or aggregate cache is permitted. W8 independent review may revise these
+provisional public semantics.

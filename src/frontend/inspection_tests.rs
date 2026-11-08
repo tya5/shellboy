@@ -1462,15 +1462,23 @@ async fn f8_foreign_attachment_list_tracks_saved_remove_with_exact_thread_and_no
     }).await.unwrap();
     // The source has no Turn/path/pending-delivery/pin root. Excluded saved
     // attachment references survive history payload collection.
-    let history = control
-        .gc
-        .collect(
-            crate::protocol::StorageCategory::History,
-            chrono::Utc::now(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(history.nodes_tombstoned, 1);
+    let mut tombstoned = 0;
+    for pass in 0..4096 {
+        let history = control
+            .gc
+            .collect(
+                crate::protocol::StorageCategory::History,
+                chrono::Utc::now(),
+            )
+            .await
+            .unwrap();
+        tombstoned += history.nodes_tombstoned;
+        if !history.deferred {
+            break;
+        }
+        assert!(pass < 4095, "fixture history collection must finish");
+    }
+    assert_eq!(tombstoned, 1);
     pump_until(&mut ui, &sender, &incoming, &mut proofs, |_, p| {
         p.last().is_some_and(|p| {
             p.snapshot.metadata_sequence > after_managed.snapshot.metadata_sequence

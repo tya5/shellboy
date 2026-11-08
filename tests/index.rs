@@ -2495,11 +2495,7 @@ async fn real_thread_delete_hides_path_only_sources_until_gc_reclaims_payload_an
         db.execute_batch("CREATE TRIGGER fail_owner_cleanup BEFORE DELETE ON thread_replacement WHEN OLD.thread_id='deleted' BEGIN SELECT RAISE(ABORT,'owner cleanup failure'); END;")?;Ok(())
     }).await.unwrap();
     assert!(
-        f.raw_gc()
-            .collect(
-                shellboy::protocol::StorageCategory::History,
-                chrono::Utc::now()
-            )
+        crate::history_collection::collect_history(&f.raw_gc(), chrono::Utc::now())
             .await
             .is_err()
     );
@@ -2527,11 +2523,7 @@ async fn real_thread_delete_hides_path_only_sources_until_gc_reclaims_payload_an
     })
     .await
     .unwrap();
-    f.raw_gc()
-        .collect(
-            shellboy::protocol::StorageCategory::History,
-            chrono::Utc::now(),
-        )
+    crate::history_collection::collect_history(&f.raw_gc(), chrono::Utc::now())
         .await
         .unwrap();
     f.db.call(|db| {
@@ -3065,7 +3057,7 @@ async fn old_integer_reset_migrates_before_real_workers_and_exhausted_failures_t
     let path = f._temp.path().join("shellboy.db");
     f.db.shutdown().await.unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN branch_kind; ALTER TABLE thread DROP COLUMN archived_at; DELETE FROM schema_migration WHERE version>=11; PRAGMA user_version=10; INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'0' FROM app_meta WHERE key GLOB 'index.query_profile.*';").unwrap();
+    db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DELETE FROM schema_migration WHERE version>=11; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=10; INSERT OR REPLACE INTO app_meta(key,value) SELECT 'index.common_failures.'||value,'0' FROM app_meta WHERE key GLOB 'index.query_profile.*';").unwrap();
     db.close().unwrap();
     f.db = DbWorker::open(&path).await.unwrap();
     f.service = IndexService::new(f.db.clone(), f.config.clone());

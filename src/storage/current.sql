@@ -711,8 +711,18 @@ INSERT INTO schema_migration(version,name) VALUES(35,'0035_index_reclaim_lookup'
 PRAGMA user_version=35;
 INSERT INTO schema_migration(version,name) VALUES(36,'0036_spill_tool_metadata');
 PRAGMA user_version=36;
+
 INSERT INTO schema_migration(version,name) VALUES(37,'0037_thread_branch_kind');
+PRAGMA user_version=37;
+
+-- Indexed cross-Thread enumeration of only human-directed pending replies.
+CREATE INDEX receipt_human_reply_pending ON receipt(target_thread_id,created_at)
+  WHERE json_extract(result_json,'$.reply.state')='pending'
+    AND json_extract(result_json,'$.to_human')=1;
+INSERT INTO schema_migration(version,name) VALUES(38,'0038_human_reply_pending');
+PRAGMA user_version=38;
 
 CREATE INDEX receipt_reply_run_pending ON receipt(run_id,state) WHERE json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human') IS NOT 1;
-INSERT INTO schema_migration(version,name) VALUES(38,'0038_independent_runs');
-PRAGMA user_version=38;
+INSERT INTO schema_migration(version,name) VALUES(39,'0039_independent_runs');
+
+PRAGMA user_version=39;

@@ -20,3 +20,12 @@ The prior branch-by-branch ledger, including entries added to main after the ori
 stop/wait/UI paths and schema 38 are implemented incrementally, and focused validation is ongoing. General explicit
 Run/Turn observations remain; delegation is expected-reply delivery rather than a supervised live parent Run.
 Handoff requires both normal and all-OS CI on the final rebased tip; landing is after v0.11.0.
+## #262 bounded human reply duties (verification in progress)
+
+Admission is 16 per recipient; legacy summaries report 17+ with exact=false.
+Deletion resolves at most 16 synchronously and continues durably in existing
+history-GC batches of 128. Schema38 adds only the human-pending partial index.
+The historical status ledger is not reintroduced. Current focused repairs cover
+RAG/conversation schema separation, migration fixtures and eventual GC completion.
+Exact-tip independent review and normal/all-OS CI remain required; failed older
+runs are not success evidence. See acceptance.md for validation scope.

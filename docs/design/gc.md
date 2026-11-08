@@ -123,8 +123,9 @@ policy. Existing SQLite pages are reusable but not automatically returned to OS.
 ## Deleted-Thread message receipts (#197, #194 step 3)
 
 The history-GC requester owns receipt reclamation. Thread deletion first commits
-recipient pending-reply terminal transitions and outcome notices in its deletion
-transaction, with indexed lookups bounded by the per-recipient 128 cap. Sender
+up to 16 recipient pending-reply terminal transitions and outcome notices across
+its selected cascade. Remaining legacy duties continue in receipt batches as
+specified below; the per-recipient admission cap is independently 16. Sender
 cancellation is deferred to this receipt phase: each of at most 128 scanned rows
 is checked by receipt primary key for a deleted model sender, then conditionally
 terminalized with cancel_reason=sender_deleted and a recipient cancellation
@@ -211,3 +212,22 @@ GCはDB内のpageを空けるだけでファイルは縮まない。縮める手
 VACUUMはファイルをその場で書き換えるのでdev/inodeは変わらず、[docs-and-rag](docs-and-rag.md) のhistory参照が束縛するfile identityは保たれる。identityが変わる環境では従来どおり保守的に失効し、再検索が必要になる。node ID・版・本文は変わらない。
 
 VACUUMはINTEGER PRIMARY KEYも索引も持たない表のrowidを振り直す。現行スキーマにはその表はなく、将来の表はそのようなrowidに依存してはならない。
+
+
+## Deleted-recipient reply continuation (#262)
+
+Thread deletion resolves at most 16 pending duties synchronously across its
+selected cascade. A durable existing `history` `gc_job` is committed with the
+deleted Thread; its `Work::DELETION` signal is marked after the mutation succeeds,
+and `Control::start` re-marks the existing deletion work set so a new owner
+rediscovers pending durable jobs. The receipts stage
+processes one fixed 128-row cursor page per transaction. Before retention can
+remove an eligible terminal receipt, it writes `recipient_deleted` and the
+stable-ID outcome event/delivery in that same transaction, then advances the
+rowid cursor. Rollback commits neither outcome nor cursor; a restart repeats
+only uncommitted rows, whose state guard and deterministic event ID prevent
+duplicate outcomes. Each collection pass yields after one batch and re-marks
+History, allowing foreground writes between batches. Sender `changed`/wake
+effects are emitted only after the GC transaction commits. Delete success only
+confirms deletion plus durable GC scheduling; legacy outcome delivery is eventual
+with no deadline.

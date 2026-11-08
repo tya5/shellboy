@@ -23,6 +23,7 @@ pub(super) fn history_step(
         stage: state.clone(),
         root_revision: root,
         scanned: 0,
+        candidates: 0,
         nodes_tombstoned: 0,
         kept_over_budget: 0,
         kept_receipts: 0,
@@ -31,6 +32,7 @@ pub(super) fn history_step(
         restarted: false,
         complete: state == "done",
         deferred: false,
+        reply_wake_threads: Vec::new(),
     };
     if report.complete {
         return Ok(report);
@@ -106,19 +108,29 @@ fn receipts_step(
         .query_map(params![progress.last_rowid,progress.receipt_horizon,batch as i64],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,String>(1)?,r.get::<_,i64>(2)?))) .map_err(sql_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql_error)?;
     let sql = format!("DELETE FROM receipt WHERE id=?1 AND {RECEIPT_ELIGIBLE}");
     let at = Utc::now().to_rfc3339();
+    report.candidates = rows.len() as u64;
+    let mut wake_threads = std::collections::BTreeSet::new();
     for (rowid, id, bytes) in &rows {
+        *candidate.lock().expect("history candidate") = Some(id.clone());
+        // Persist recipient-deleted outcome before any payload/receipt sweep.
+        // The reply state guard makes restart/replay idempotent.
+        if let Some(thread) =
+            crate::control::reply::deleted_recipient_receipt_tx(tx, id, &at).map_err(sql_error)?
+        {
+            wake_threads.insert(thread);
+        }
         if keep == Some(id.as_str()) {
             progress.kept_receipts = progress.kept_receipts.saturating_add(1);
             progress.last_rowid = *rowid;
             continue;
         }
-        *candidate.lock().expect("history candidate") = Some(id.clone());
         crate::control::reply::deleted_sender_receipt_tx(tx, id, &at).map_err(sql_error)?;
         if tx.execute(&sql, [id]).map_err(sql_error)? == 1 {
             report.bytes_collected += (*bytes).max(0) as u64;
         }
         progress.last_rowid = *rowid;
     }
+    report.reply_wake_threads = wake_threads.into_iter().collect();
     report.scanned = rows.len() as u64;
     if rows.len() < batch {
         progress.stage = Stage::Roots;

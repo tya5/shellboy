@@ -11,6 +11,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub const PROTOCOL_VERSION: u32 = 5;
 pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_PENDING_REPLY_DUTIES: u64 = 16;
+pub const MAX_SYNC_DELETION_REPLY_DUTIES: u64 = 16;
+pub const MAX_HUMAN_REPLY_SUMMARY_DUTIES: u64 = 16;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 pub const MAX_LIST_LIMIT: u32 = 200;
 pub const DEFAULT_HISTORY_EXCERPT_CHARS: u32 = 512;
@@ -229,7 +232,7 @@ pub fn schema_json() -> String {
     remove_nested_definitions(&mut operation_results);
     let document = serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://shellboy.dev/schema/protocol-v4.json",
+        "$id": "https://shellboy.dev/schema/protocol-v5.json",
         "title": "Shellboy local RPC protocol v4",
         "protocol_version": PROTOCOL_VERSION,
         "capabilities": PROTOCOL_CAPABILITIES,
@@ -278,6 +281,7 @@ states!(ErrorCode {
     CursorEncodingMismatch,
     OutputExpired,
     InputLimit,
+    ReplyLimit,
     StorageLimit,
     SaveFailed,
     IoFailed
@@ -389,6 +393,7 @@ impl ApiError {
             ErrorCode::OutputExpired => "Inspect shell state and retained history; unavailable raw output cannot be reconstructed by retrying read",
             ErrorCode::SelfWait => "Observe another Run, Turn or shell; do not wait for the invoking resource itself",
             ErrorCode::InputLimit => "Inspect the input bound in command help; do not treat truncated input as accepted",
+            ErrorCode::ReplyLimit => "Reply to or cancel an outstanding request in the target Thread, then retry; the rejected message was not accepted",
             ErrorCode::StorageLimit => "Inspect shellboy storage status and storage capacity; resolve the cause before explicitly choosing a recovery action",
             ErrorCode::SaveFailed => "Preserve unsaved input and inspect capacity/permissions; do not keep submitting mutations while saving is unavailable",
             ErrorCode::IoFailed => "Inspect any known operation receipt and saved target state; read shellboy docs get --id shellboy/recovery-and-storage before repeating a side effect",
@@ -909,13 +914,14 @@ impl ArchivedFilter {
         *self == Self::Exclude
     }
 }
-args!(ThreadListArgs { #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
+args!(ThreadListArgs { #[serde(default = "list_limit")] limit: u32, #[serde(default)] cursor: Option<String>, #[serde(default)] query: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting: Option<String>, #[serde(default, skip_serializing_if = "ArchivedFilter::is_exclude")] archived: ArchivedFilter, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] cwd: Option<String> });
 impl Default for ThreadListArgs {
     fn default() -> Self {
         Self {
             limit: list_limit(),
             cursor: None,
             query: None,
+            awaiting: None,
             archived: ArchivedFilter::Exclude,
             tags: Vec::new(),
             cwd: None,
@@ -948,6 +954,12 @@ args!(HistoryWindowArgs { thread_id: String,
 record!(HistoryWindow { thread_id: String, revision: u64, total: u64, items: Vec<HistorySnippet> });
 fn is_false(value: &bool) -> bool {
     !*value
+}
+fn is_true(value: &bool) -> bool {
+    *value
+}
+fn default_true() -> bool {
+    true
 }
 args!(HistoryGetArgs { #[serde(default, skip_serializing_if = "is_false")] end_message_only: bool, #[serde(default, skip_serializing_if = "is_false")] parts: bool, node_id: String, #[serde(default = "body_limit")] limit_bytes: u32, #[serde(default)] cursor: Option<String>, #[serde(default = "utf8")] encoding: String });
 args!(HistorySearchArgs {
@@ -1353,17 +1365,13 @@ pub struct PageCursor {
     pub encoding: Option<String>,
 }
 impl PageCursor {
-    pub fn encode(&self) -> Result<String, ApiError> {
-        serde_json::to_vec(self)
-            .map(|v| URL_SAFE_NO_PAD.encode(v))
-            .map_err(|_| invalid("cursor cannot be encoded"))
-    }
-    pub fn decode(
+    fn decode_version(
         token: &str,
         scope: &str,
         filter: &str,
         revision: u64,
         encoding: Option<&str>,
+        version: u32,
     ) -> Result<Self, ApiError> {
         let expired = || {
             ApiError::new(
@@ -1376,7 +1384,7 @@ impl PageCursor {
         }
         let bytes = URL_SAFE_NO_PAD.decode(token).map_err(|_| expired())?;
         let value: Self = serde_json::from_slice(&bytes).map_err(|_| expired())?;
-        if value.version != 1
+        if value.version != version
             || value.scope != scope
             || value.filter != filter
             || value.revision != revision
@@ -1391,6 +1399,29 @@ impl PageCursor {
             .hint("restart reading without the previous cursor"));
         }
         Ok(value)
+    }
+    pub fn encode(&self) -> Result<String, ApiError> {
+        serde_json::to_vec(self)
+            .map(|v| URL_SAFE_NO_PAD.encode(v))
+            .map_err(|_| invalid("cursor cannot be encoded"))
+    }
+    pub fn decode(
+        token: &str,
+        scope: &str,
+        filter: &str,
+        revision: u64,
+        encoding: Option<&str>,
+    ) -> Result<Self, ApiError> {
+        Self::decode_version(token, scope, filter, revision, encoding, 1)
+    }
+    pub fn decode_live(
+        token: &str,
+        scope: &str,
+        filter: &str,
+        revision: u64,
+        encoding: Option<&str>,
+    ) -> Result<Self, ApiError> {
+        Self::decode_version(token, scope, filter, revision, encoding, 2)
     }
 }
 
@@ -1476,8 +1507,9 @@ record!(RevisitSummary {
     pending: bool,
     consumed_count: u64
 });
-record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default)] awaiting_human_count: u64, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String });
+record!(ThreadSummary { #[serde(default)] awaiting_reply: u64, #[serde(default)] awaiting_thread_replies: u64, #[serde(default)] awaiting_replies: u64, #[serde(default = "default_true", skip_serializing_if = "is_true")] awaiting_human_count_exact: bool, #[serde(default)] #[schemars(description = "Pending human-directed replies: exact through 16; 17 with exact=false means 17 or more.")] awaiting_human_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] awaiting_human_oldest_at: Option<String>, #[serde(default)] awaiting_thread_count: u64, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, activity: crate::activity::ActivityPhase, thread_id: String, title: String, cwd: String, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, state: String, latest_run_stop_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] revisit: Option<RevisitSummary>, updated_at: String, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, excerpt: String });
 record!(ThreadDetails { #[serde(default, skip_serializing_if = "Option::is_none")] instruction_sources: Option<Value>, #[serde(default)] auto_compact_at: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_auto_compact_at: Option<u64>, #[serde(default)] segment_chars: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_segment_chars: Option<u64>, #[serde(default)] reduce_rounds: Option<u64>, #[serde(default, skip_serializing_if = "Option::is_none")] effective_reduce_rounds: Option<u64>, #[serde(default)] awaiting_replies: Vec<Value>, #[serde(default)] last_end_message: Option<Value>, #[serde(default)] last_input: Option<Value>, #[serde(default,skip_serializing_if="Option::is_none")] last_compaction:Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] usage_totals: Option<Value>, agents_path: String, #[serde(default, skip_serializing_if = "Option::is_none")] context_usage: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] context: Option<crate::context::ExecutionContext>, thread_id: String, title: String, cwd: String, connection: String, model: String, #[serde(default, skip_serializing_if = "Option::is_none")] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, shells_count: u64, #[serde(default, skip_serializing_if = "Option::is_none")] archived_at: Option<String>, #[serde(default, skip_serializing_if = "Vec::is_empty")] tags: Vec<String>, #[serde(default, skip_serializing_if = "Option::is_none")] recovery_reason: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_change: Option<ParentChange> });
+
 // Present only in the result of a `thread set --parent` that moved the Thread: where it was and which live Run still answers to its previous owner (#222).
 record!(ParentChange { #[serde(default)] previous_parent_id: Option<String>, #[serde(default)] live_run_id: Option<String> });
 record!(MessageDetails { #[serde(default, skip_serializing_if = "is_false")] to_human: bool, sender: MessageSender, context: crate::context::ExecutionContext, message_id: String, thread_id: String, delivery_status: DeliveryStatus, assignment: Assignment, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] reply: Option<Value>, #[serde(default, skip_serializing_if = "Option::is_none")] reply_to: Option<String> });

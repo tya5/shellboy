@@ -1152,6 +1152,17 @@ impl Form {
                     let mut v = list();
                     v.push(f("query", "絞込み", String::new(), Text));
                     v.push(f(
+                        "awaiting",
+                        OperationId::ThreadList
+                            .spec()
+                            .field(FieldId::Awaiting)
+                            .expect("Thread list Awaiting field metadata")
+                            .field
+                            .label,
+                        String::new(),
+                        Choice(&["", "human"]),
+                    ));
+                    v.push(f(
                         "archived",
                         "アーカイブ済み（空=隠す）",
                         String::new(),
@@ -1171,6 +1182,7 @@ impl Form {
                         limit: form.number("limit")?,
                         cursor: form.optional("cursor")?,
                         query: form.optional("query")?,
+                        awaiting: form.optional("awaiting")?,
                         archived: form
                             .optional("archived")?
                             .and_then(|value| ArchivedFilter::parse(&value))
@@ -3740,7 +3752,7 @@ mod entry_tests {
 
 #[cfg(test)]
 mod language_rendering_tests {
-    use super::{Command, Context, Form, OpKind};
+    use super::{Command, Context, FieldId, Form, OpKind, OperationId, metadata};
     use crate::{config::UiLanguage, ui::UiState};
     use std::path::Path;
 
@@ -3792,6 +3804,48 @@ mod language_rendering_tests {
                     .collect::<Vec<_>>(),
                 "language selection changed command field values for {operation:?}"
             );
+        }
+    }
+
+    #[test]
+    fn thread_list_form_wires_human_filter_and_rejects_invalid_values() {
+        for language in [UiLanguage::En, UiLanguage::Ja] {
+            let mut form = Form::new(OpKind::ThreadList, &Context::default());
+            form.language = language;
+            form.selected = form
+                .fields
+                .iter()
+                .position(|field| field.name == "awaiting")
+                .unwrap();
+            let metadata = form.selected_metadata().expect("Awaiting help metadata");
+            assert_eq!(metadata.field.id, FieldId::Awaiting);
+            assert_eq!(
+                form.field_label_for(&form.fields[form.selected]),
+                metadata::text_for(metadata.field.label_text(OperationId::ThreadList), language)
+            );
+            assert!(
+                !metadata::text_for(metadata.field.help_text(OperationId::ThreadList), language)
+                    .is_empty()
+            );
+            let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
+                panic!("thread list command");
+            };
+            assert_eq!(args.awaiting, None);
+            for (value, accepted) in [("human", true), ("thread", false)] {
+                form.fields
+                    .iter_mut()
+                    .find(|field| field.name == "awaiting")
+                    .unwrap()
+                    .value = value.into();
+                if accepted {
+                    let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
+                        panic!("thread list command");
+                    };
+                    assert_eq!(args.awaiting.as_deref(), Some("human"));
+                } else {
+                    assert!(form.command(Path::new("/")).is_err());
+                }
+            }
         }
     }
 

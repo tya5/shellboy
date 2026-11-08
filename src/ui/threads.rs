@@ -591,6 +591,7 @@ impl BrowserMessage<'_> {
                 one_line(activity_label(thread, language)),
                 format_reply_waits(
                     thread.awaiting_human_count,
+                    thread.awaiting_human_count_exact,
                     thread.awaiting_thread_count,
                     language
                 ),
@@ -630,6 +631,7 @@ impl BrowserMessage<'_> {
                 one_line(activity_label(thread, language)),
                 format_reply_waits(
                     thread.awaiting_human_count,
+                    thread.awaiting_human_count_exact,
                     thread.awaiting_thread_count,
                     language
                 ),
@@ -2620,6 +2622,7 @@ impl ThreadBrowser {
         };
         let waits = format_reply_waits(
             thread.awaiting_human_count,
+            thread.awaiting_human_count_exact,
             thread.awaiting_thread_count,
             self.language,
         );
@@ -2995,21 +2998,28 @@ fn activity_column_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
         super::watch::phase_label(thread.activity, language, false)
     }
 }
-fn format_reply_waits(human: u64, threads: u64, language: UiLanguage) -> String {
+fn format_reply_waits(human: u64, exact: bool, threads: u64, language: UiLanguage) -> String {
+    let human = if exact {
+        human.to_string()
+    } else {
+        format!("{human}+")
+    };
+    let has_human = human != "0";
     match language {
-        UiLanguage::En if human > 0 && threads > 0 => {
+        UiLanguage::En if has_human && threads > 0 => {
             format!(" · {} human decisions · {} thread replies", human, threads)
         }
-        UiLanguage::En if human > 0 => format!(" · {} human decisions", human),
+        UiLanguage::En if has_human => format!(" · {} human decisions", human),
         UiLanguage::En if threads > 0 => format!(" · {} thread replies", threads),
-        UiLanguage::Ja if human > 0 && threads > 0 => {
+        UiLanguage::Ja if has_human && threads > 0 => {
             format!(" · 人の判断待ち{}件・スレッド返信待ち{}件", human, threads)
         }
-        UiLanguage::Ja if human > 0 => format!(" · 人の判断待ち{}件", human),
+        UiLanguage::Ja if has_human => format!(" · 人の判断待ち{}件", human),
         UiLanguage::Ja if threads > 0 => format!(" · スレッド返信待ち{}件", threads),
         _ => String::new(),
     }
 }
+
 fn activity_label(thread: &ThreadSummary, language: UiLanguage) -> &str {
     if thread.thread_id.starts_with("draft:") {
         &thread.state
@@ -3456,8 +3466,10 @@ mod tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
+            awaiting_human_count_exact: true,
             awaiting_human_count: 0,
             awaiting_thread_count: 0,
+            awaiting_human_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -4298,8 +4310,10 @@ mod tests {
         let mut thread = ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
+            awaiting_human_count_exact: true,
             awaiting_human_count: 0,
             awaiting_thread_count: 0,
+            awaiting_human_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -4548,8 +4562,10 @@ mod patch_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
+            awaiting_human_count_exact: true,
             awaiting_human_count: 0,
             awaiting_thread_count: 0,
+            awaiting_human_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -5283,8 +5299,10 @@ mod archive_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
+            awaiting_human_count_exact: true,
             awaiting_human_count: 0,
             awaiting_thread_count: 0,
+            awaiting_human_oldest_at: None,
             awaiting_replies: 0,
             last_end_message: None,
             last_input: None,
@@ -5594,8 +5612,10 @@ mod watch_integration_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
+            awaiting_human_count_exact: true,
             awaiting_human_count: 0,
             awaiting_thread_count: 0,
+            awaiting_human_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -6320,8 +6340,10 @@ mod language_tests {
         ThreadSummary {
             awaiting_reply: 0,
             awaiting_thread_replies: 0,
+            awaiting_human_count_exact: true,
             awaiting_human_count: 0,
             awaiting_thread_count: 0,
+            awaiting_human_oldest_at: None,
             awaiting_replies: 0,
             archived_at: None,
             tags: Vec::new(),
@@ -6661,10 +6683,14 @@ mod language_tests {
         row.awaiting_thread_count = 1;
         let labels = format_reply_waits(
             row.awaiting_reply,
+            row.awaiting_human_count_exact,
             row.awaiting_thread_replies,
             UiLanguage::Ja,
         );
         assert!(labels.contains("人の判断待ち1件"), "{labels}");
+        let labels = format_reply_waits(17, false, 1, UiLanguage::Ja);
+        assert!(labels.contains("人の判断待ち17+件"), "{labels}");
+        assert!(!labels.contains("人の判断待ち17件"), "{labels}");
         assert!(labels.contains("スレッド返信待ち1件"), "{labels}");
         let before = format!("{row:?}");
         for language in [UiLanguage::En, UiLanguage::Ja] {
