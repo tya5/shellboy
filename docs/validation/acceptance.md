@@ -11171,3 +11171,39 @@ does the upgrade reach schema 39 and clear pending metadata. All four active mig
 manual snapshot benchmark remains ignored. No production cache, migration or integrity code changes are necessary.
 Focused tests and `cargo fmt --all -- --check` pass through the shared Rust slot; language inventory passes with the
 19 pre-existing pending entries unchanged. These are component results, not final-train all-OS evidence.
+### #262/#276 Train: Transactional Reopen Evidence
+
+Base `9a63ad76972d01c7e50644345a33d7b80da94a2a`. The earlier owner-reopen
+fixture treated a post-shutdown outcome count as the synchronous deletion count.
+Maintenance was already running and could commit additional GC transactions
+before shutdown drained it. This is a stale observation boundary, not proof of
+a 129-row deletion transaction. #276 does not remove shutdown's all-live-Run
+sweep (`state::finish_drained_shutdown`); that prior hypothesis is corrected.
+`reply::outcome_tx` can create a new independent Run for a live sender Thread,
+so stopping the original Run does not suppress later outcomes.
+
+The replacement fixture invokes real Store deletion before maintenance starts,
+audits receipt transitions inside their write transactions, and injects failures
+after partial synchronous and GC outcome insertion to check atomic rollback.
+It records GC candidate/terminalization counts at each durable receipt-cursor
+commit, requiring synchronous 16 and each GC batch at most 128. After committing
+128 GC candidates (112 new outcomes), it closes the owner with one target still
+pending, reopens, and uses the normal maintenance worker to finish the same job.
+All 129 message IDs must have a unique correct event and one committed delivery
+insertion to the sender Thread, including a new independent Run after reopen.
+Seven unrelated pending receipts and all seven source bodies must survive.
+
+Delivery insertion is audited transactionally: existing event retention may
+legitimately delete pending delivery rows of stopped Runs. Requiring those rows
+to exist forever would introduce another timing-dependent assertion. Actual
+retained event payloads and recipient Thread/Run identities are still checked;
+this is not a claim that an unavailable synthetic model consumed notifications.
+No production, wire, migration or cap change is made. Exact focused/fmt/language
+results accompany the component commit; this component does not run CI or push.
+
+Observed focused audit: synchronous 16; GC committed (candidates, new terminals)
+`[(128,112),(128,0),(8,1)]`. Reopen restarts conservative marking and re-examines
+the prefix without duplicating outcomes. All 129 terminal transitions are unique,
+each has one correct event/delivery insertion, and seven unrelated receipts and
+bodies survive. Both injected partial failures roll back. The original sender
+Run is stopped; the final post-reopen outcome targets a new independent Run.

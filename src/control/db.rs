@@ -5676,115 +5676,259 @@ mod thread_deletion_notification_tests {
 
     #[tokio::test]
     async fn thread_delete_history_job_resumes_after_owner_reopen() {
-        let root = tempfile::tempdir().unwrap();
-        let config_path = root.path().join("config.toml");
-        std::fs::write(&config_path, "default_connection='fixture'\ndefault_model='synthetic'\n[connections.fixture]\nbase_url='http://127.0.0.1:9/v1'\n").unwrap();
-        let data_dir = root.path().join("data");
-        let owner = DataOwner::start(
-            Some(config_path.clone()),
-            Some(data_dir.clone()),
+        let (root, owner) = fixture().await;
+        seed(&owner.db).await;
+        owner.db.call(|db| {
+            db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('sender','sender','/','','fixture','synthetic','now')", [])?;
+            db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('sender-run','sender','live','now')", [])?;
+            let sender = json!({"kind":"model","instance_id":"fixture","thread_id":"sender","run_id":"sender-run","turn_id":"sender-turn","execution_id":"sender-shell"}).to_string();
+            for n in 0..136 {
+                let id = format!("owner-message-{n:03}");
+                db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes)VALUES(?1,'user','now','{}',2)", [&id])?;
+                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,path_admission,created_at,result_json)VALUES(?1,?1,?2,?3,?1,'held','unadmitted','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}')", params![id,sender,if n < 129 {"parent"} else {"unrelated"}])?;
+            }
+            // Audit rows participate in the same transactions as the production
+            // writes. A failed batch cannot leave audit or outcome fragments.
+            db.execute_batch(r#"
+                CREATE TABLE fixture_reply_phase(phase TEXT NOT NULL);
+                INSERT INTO fixture_reply_phase VALUES('sync');
+                CREATE TABLE fixture_reply_transition(message TEXT NOT NULL,phase TEXT NOT NULL,batch INTEGER);
+                CREATE TABLE fixture_reply_batch(id INTEGER PRIMARY KEY,scanned INTEGER NOT NULL,terminalized INTEGER NOT NULL);
+                CREATE TABLE fixture_reply_delivery(event TEXT NOT NULL,run TEXT NOT NULL);
+                CREATE TRIGGER fixture_reply_delivery AFTER INSERT ON delivery
+                WHEN NEW.event_id GLOB 'reply-outcome-owner-message-*'
+                BEGIN INSERT INTO fixture_reply_delivery VALUES(NEW.event_id,NEW.recipient_id); END;
+                CREATE TRIGGER fixture_reply_transition AFTER UPDATE OF result_json ON receipt
+                WHEN json_extract(OLD.result_json,'$.reply.state')='pending'
+                 AND json_extract(NEW.result_json,'$.reply.state')='recipient_deleted'
+                BEGIN
+                    INSERT INTO fixture_reply_transition VALUES(NEW.message_node_id,(SELECT phase FROM fixture_reply_phase),NULL);
+                END;
+                CREATE TRIGGER fixture_reply_batch AFTER UPDATE OF cursor_json ON gc_job
+                WHEN OLD.kind='history' AND json_extract(OLD.cursor_json,'$.stage')='receipts'
+                 AND json_extract(NEW.cursor_json,'$.stage') IN ('receipts','roots')
+                BEGIN
+                    INSERT INTO fixture_reply_batch(scanned,terminalized)
+                    SELECT count(*),(SELECT count(*) FROM fixture_reply_transition WHERE phase='gc' AND batch IS NULL)
+                    FROM receipt WHERE rowid>json_extract(OLD.cursor_json,'$.last_rowid')
+                     AND rowid<=CASE WHEN json_extract(NEW.cursor_json,'$.stage')='receipts'
+                         THEN json_extract(NEW.cursor_json,'$.last_rowid') ELSE json_extract(OLD.cursor_json,'$.receipt_horizon') END;
+                    UPDATE fixture_reply_transition SET batch=last_insert_rowid() WHERE phase='gc' AND batch IS NULL;
+                END;
+                CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON event
+                WHEN NEW.id='reply-outcome-owner-message-005'
+                BEGIN SELECT RAISE(ABORT,'fixture synchronous outcome rollback'); END;
+            "#)?;
+            Ok(())
+        }).await.unwrap();
+        let store = Store::new(
+            owner.db.clone(),
+            Arc::new(owner.loaded.config.clone()),
+            root.path().into(),
+            owner.instance_id.clone(),
+        );
+        let failed = Request::new(
+            format!("{}:delete-rollback", owner.instance_id),
+            delete(&owner.instance_id, false).command,
+        );
+        assert!(store.execute(failed, None).await.is_err());
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM fixture_reply_transition", [], |r| r
+                        .get::<_, i64>(
+                        0
+                    ))?,
+                    0
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM event WHERE kind='reply_outcome'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                assert!(db.query_row(
+                    "SELECT deleted_at IS NULL FROM thread WHERE id='parent'",
+                    [],
+                    |r| r.get::<_, bool>(0),
+                )?);
+                db.execute_batch("DROP TRIGGER fixture_reply_fault")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        store
+            .execute(delete(&owner.instance_id, false), None)
+            .await
+            .unwrap();
+        let job = owner
+            .db
+            .call(|db| {
+                Ok(db.query_row(
+                    "SELECT id FROM gc_job WHERE kind='history' AND state='pending'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        owner.db.call(|db| {
+            let count: i64 = db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='sync'", [], |r| r.get(0))?;
+            assert_eq!(count, 16, "measure the deletion transaction, not a shutdown snapshot");
+            assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome'", [], |r| r.get::<_,i64>(0))?, count);
+            db.execute_batch("UPDATE fixture_reply_phase SET phase='gc'; CREATE TRIGGER fixture_reply_fault BEFORE INSERT ON event WHEN NEW.id='reply-outcome-owner-message-020' BEGIN SELECT RAISE(ABORT,'fixture GC outcome rollback'); END;")?;
+            Ok(())
+        }).await.unwrap();
+        // Before starting the owner worker, drive the real bounded service to
+        // one failed and one committed receipt batch, then close at that boundary.
+        let attachments = Arc::new(crate::attachments::AttachmentService::new(
+            owner.db.clone(),
+            &owner.loaded.config,
+            root.path().into(),
+            owner.instance_id.clone(),
+        ));
+        let gc = crate::gc::GcService::new(
+            owner.db.clone(),
+            Arc::new(owner.loaded.config.clone()),
+            root.path().into(),
+            attachments,
+        );
+        let resumed = gc.start_history().await.unwrap().unwrap();
+        assert_eq!(resumed, job);
+        let mut rollback = false;
+        for _ in 0..40 {
+            match gc.history_step(&job).await {
+                Ok(step) => assert!(step.candidates <= 128),
+                Err(_) => {
+                    rollback = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            rollback,
+            "fault must interrupt a receipt batch after partial work"
+        );
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM fixture_reply_transition", [], |r| r
+                        .get::<_, i64>(
+                        0
+                    ))?,
+                    16
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM event WHERE kind='reply_outcome'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    16
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM fixture_reply_batch", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                db.execute_batch("DROP TRIGGER fixture_reply_fault")?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let batch = gc.history_step(&job).await.unwrap();
+        assert_eq!(batch.candidates, 128);
+        owner.db.call(|db| {
+            assert_eq!(db.query_row("SELECT scanned,terminalized FROM fixture_reply_batch", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?, (128,112));
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='pending'", [], |r| r.get::<_,i64>(0))?, 1);
+            Ok(())
+        }).await.unwrap();
+        drop(gc);
+        drop(store);
+        let control = Control::new(&owner, root.path().into());
+        // No maintenance was started here: shutdown's all-live-Run sweep is
+        // tested separately from the deterministic deletion/batch boundaries.
+        control.shutdown().await.unwrap();
+        owner
+            .db
+            .call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT state FROM run WHERE id='sender-run'", [], |r| {
+                        r.get::<_, String>(0)
+                    })?,
+                    "stopped"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(control);
+        owner.shutdown().await.unwrap();
+
+        let reopened = DataOwner::start(
+            Some(root.path().join("config.toml")),
+            Some(root.path().join("data")),
             root.path().into(),
         )
         .await
         .unwrap();
-        seed(&owner.db).await;
-        owner.db.call(|db| {
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('reply-sender','','','fixture','synthetic','now')", [])?;
-            db.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES('sender-run','reply-sender','live','now')", [])?;
-            for index in 0..129 {
-                let message = format!("reopen-{index}");
-                db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'user',datetime('now'),'{}')", [&message])?;
-                let sender = serde_json::json!({"kind":"model","instance_id":"fixture","thread_id":"reply-sender","run_id":"sender-run","turn_id":format!("turn-{index}"),"execution_id":format!("execution-{index}")}).to_string();
-                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,?2,'parent',?1,'applied',datetime('now'),'{\"reply\":{\"state\":\"pending\"}}')", rusqlite::params![message, sender])?;
-            }
-            Ok(())
-        }).await.unwrap();
-        let before = owner
-            .db
-            .call(|db| {
-                Ok(db.query_row(
-                    "SELECT coalesce(max(rowid),0) FROM gc_job WHERE kind='history'",
-                    [],
-                    |r| r.get::<_, i64>(0),
-                )?)
-            })
-            .await
-            .unwrap();
-        let control = Control::new(&owner, root.path().into());
-        let mut events = control.subscribe();
-        let deleted = control.request(delete(&owner.instance_id, false)).await;
-        assert!(deleted.ok, "{deleted:?}");
-        let job_rowid = owner
-            .db
-            .call(|db| {
-                Ok(db.query_row(
-                    "SELECT max(rowid) FROM gc_job WHERE kind='history'",
-                    [],
-                    |r| r.get::<_, i64>(0),
-                )?)
-            })
-            .await
-            .unwrap();
-        assert!(job_rowid > before);
-        let initial = owner.db.call(|db| Ok(db.query_row(
-            "SELECT sum(json_extract(result_json,'$.reply.state')='recipient_deleted'),sum(json_extract(result_json,'$.reply.state')='pending') FROM receipt WHERE target_thread_id='parent'",
-            [], |r| Ok((r.get::<_,Option<i64>>(0)?.unwrap_or(0),r.get::<_,Option<i64>>(1)?.unwrap_or(0))),
-        )?)).await.unwrap();
-        assert_eq!(initial, (16, 113));
-        control.shutdown().await.unwrap();
-        while events.try_recv().is_ok() {}
-        let pending_job = owner
-            .db
-            .call(|db| {
-                Ok(db.query_row(
-                    "SELECT count(*) FROM gc_job WHERE kind='history' AND state='pending'",
-                    [],
-                    |r| r.get::<_, i64>(0),
-                )?)
-            })
-            .await
-            .unwrap();
-        assert!(pending_job > 0);
-        owner.shutdown().await.unwrap();
-
-        // No special recovery request is sent: the existing owner startup and
-        // history-GC worker discover the committed job and resume its cursor.
-        let reopened = DataOwner::start(Some(config_path), Some(data_dir), root.path().into())
-            .await
-            .unwrap();
         let control = Control::new(&reopened, root.path().into());
         control.start().await.unwrap();
-        crate::test_watchdog::watchdog("reopened existing history worker drains bounded continuation", async {
-            loop {
-                let pending = reopened.db.call(|db| Ok(db.query_row(
-                    "SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='pending'",
-                    [], |r|r.get::<_,i64>(0),
-                )?)).await.unwrap();
-                if pending == 0 { break; }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        }).await.expect("reopened existing history worker drains bounded continuation");
-        let completed = reopened.db.call(move |db| Ok((
-            db.query_row("SELECT count(*) FROM event WHERE id LIKE 'reply-outcome-reopen-%' AND kind='reply_outcome'",[],|r|r.get::<_,i64>(0))?,
-            db.query_row("SELECT count(*) FROM delivery d JOIN event e ON e.id=d.event_id WHERE e.id LIKE 'reply-outcome-reopen-%' AND d.recipient_id='sender-run' AND d.state='pending'",[],|r|r.get::<_,i64>(0))?,
-            db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='parent' AND json_extract(result_json,'$.reply.state')='recipient_deleted'",[],|r|r.get::<_,i64>(0))?,
-        ))).await.unwrap();
-        assert_eq!(
-            completed.0, 16,
-            "only the synchronous batch runs before shutdown terminates the sender Run"
-        );
-        assert_eq!(
-            completed.1, 0,
-            "shutdown leaves no live sender Run to receive a delivery"
-        );
-        assert_eq!(
-            completed.2, 129,
-            "the reopened history worker resolves all pending legacy receipts"
-        );
+        crate::test_watchdog::watchdog(
+            "reopened existing history worker drains bounded continuation",
+            async {
+                loop {
+                    let job = job.clone();
+                    let done = reopened
+                        .db
+                        .call(move |db| {
+                            Ok(db.query_row(
+                                "SELECT state='done' FROM gc_job WHERE id=?1",
+                                [job],
+                                |r| r.get::<_, bool>(0),
+                            )?)
+                        })
+                        .await
+                        .unwrap();
+                    if done {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
+        .await
+        .expect("test watchdog elapsed while waiting for the durable GC continuation");
         control.shutdown().await.unwrap();
+        reopened.db.call(|db| {
+            let mut statement = db.prepare("SELECT scanned,terminalized FROM fixture_reply_batch ORDER BY id")?;
+            let batches = statement.query_map([], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            assert!(batches.len() >= 2, "receipt work must span commits and reopen");
+            assert!(batches.iter().all(|&(scanned,terminalized)| scanned <= 128 && terminalized <= scanned));
+            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='sync'", [], |r| r.get::<_,i64>(0))?, 16);
+            assert_eq!(db.query_row("SELECT count(*),count(DISTINCT message) FROM fixture_reply_transition", [], |r| Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?, (129,129));
+            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_transition WHERE phase='gc' AND batch IS NULL", [], |r| r.get::<_,i64>(0))?, 0);
+            for n in 0..129 {
+                let message = format!("owner-message-{n:03}");
+                let event = format!("reply-outcome-{message}");
+                assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id=?1", [&message], |r| r.get::<_,String>(0))?, "recipient_deleted");
+                assert_eq!(db.query_row("SELECT count(*) FROM event e JOIN fixture_reply_delivery d ON d.event=e.id JOIN run r ON r.id=d.run WHERE e.id=?1 AND e.kind='reply_outcome' AND e.target_thread_id='sender' AND r.thread_id='sender' AND json_extract(e.payload_ref_json,'$.message_id')=?2 AND json_extract(e.payload_ref_json,'$.state')='recipient_deleted'", params![event,message], |r| r.get::<_,i64>(0))?, 1);
+            }
+            assert_eq!(db.query_row("SELECT count(*) FROM event WHERE kind='reply_outcome'", [], |r| r.get::<_,i64>(0))?, 129);
+            assert_eq!(db.query_row("SELECT count(*) FROM fixture_reply_delivery d JOIN run r ON r.id=d.run WHERE d.event='reply-outcome-owner-message-128' AND r.thread_id='sender' AND r.id<>'sender-run'", [], |r| r.get::<_,i64>(0))?, 1, "reopened outcome uses a new independent sender Run");
+            assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='unrelated' AND result_json='{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}'", [], |r| r.get::<_,i64>(0))?, 7);
+            for n in 129..136 {
+                assert_eq!(db.query_row("SELECT payload_json FROM node WHERE id=?1", [format!("owner-message-{n:03}")], |r| r.get::<_,String>(0))?, "{}");
+            }
+            eprintln!("audited sync=16; GC (scanned,terminalized)={batches:?}; unique outcomes/deliveries=129; unrelated receipts=7");
+            Ok(())
+        }).await.unwrap();
         reopened.shutdown().await.unwrap();
     }
-
     #[tokio::test]
     async fn deleting_a_thread_removes_its_automatic_compaction_metadata() {
         let (root, owner) = fixture().await;
