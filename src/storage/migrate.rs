@@ -212,11 +212,7 @@ pub(super) fn run(
         .filter(|migration| migration.version > version)
     {
         report(migration.version - version, super::SCHEMA_VERSION - version);
-        // Rebuild the Run table without changing referent IDs or dependent rows.
-        if migration.version == 39 {
-            connection.pragma_update(None, "foreign_keys", false)?;
-        }
-        let migrated = (|| -> Result<(), StorageError> {
+        let apply = |connection: &mut Connection| -> Result<(), StorageError> {
             let transaction =
                 connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let additive_column_already_present = match migration.version {
@@ -247,17 +243,57 @@ pub(super) fn run(
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
             }
+            if migration.version == 39 {
+                super::check_integrity(&transaction, true, false)?;
+            }
             transaction.commit()?;
             Ok(())
-        })();
+        };
         if migration.version == 39 {
-            connection.pragma_update(None, "foreign_keys", true)?;
+            with_foreign_keys_disabled(connection, apply)?;
+        } else {
+            apply(connection)?;
         }
-        migrated?;
     }
     validation();
     validate_schema(connection)?;
     Ok(())
+}
+
+// The transaction belongs to the callback, so it unwinds/rolls back before this
+// outer guard restores enforcement. Never toggle foreign_keys inside BEGIN.
+struct ForeignKeysDisabled<'a> {
+    connection: &'a mut Connection,
+    restored: bool,
+}
+impl Drop for ForeignKeysDisabled<'_> {
+    fn drop(&mut self) {
+        if !self.restored {
+            // Explicit restoration reports errors normally; Drop also covers panic.
+            let _ = self.connection.pragma_update(None, "foreign_keys", true);
+        }
+    }
+}
+fn with_foreign_keys_disabled<T>(
+    connection: &mut Connection,
+    operation: impl FnOnce(&mut Connection) -> Result<T, StorageError>,
+) -> Result<T, StorageError> {
+    if !connection.is_autocommit() {
+        return Err(StorageError::Schema(
+            "FK rebuild requires an outer transaction boundary".into(),
+        ));
+    }
+    let mut guard = ForeignKeysDisabled {
+        connection,
+        restored: false,
+    };
+    guard
+        .connection
+        .pragma_update(None, "foreign_keys", false)?;
+    let result = operation(guard.connection);
+    guard.connection.pragma_update(None, "foreign_keys", true)?;
+    guard.restored = true;
+    result
 }
 
 /// Preserve known user provenance; unknown legacy origins stay pending and are
@@ -335,6 +371,89 @@ fn migrate_attachment_sources(tx: &rusqlite::Transaction<'_>) -> Result<(), Stor
 #[cfg(test)]
 mod activity_migration_tests {
     use super::*;
+
+    #[test]
+    fn rebuild_fk_violation_rejects_commit_preserves_old_rows_and_restores_enforcement() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.pragma_update(None,"foreign_keys",false).unwrap();
+        db.execute_batch("ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id); CREATE INDEX runs_by_owner ON run(owner_run_id,state); CREATE TABLE synthetic_reference(run_id TEXT REFERENCES run(id)); INSERT INTO synthetic_reference VALUES('missing'); DELETE FROM schema_migration WHERE version=39; PRAGMA user_version=38;").unwrap();
+        db.pragma_update(None, "foreign_keys", true).unwrap();
+        let before: Vec<String> = db
+            .prepare(
+                "SELECT sql FROM sqlite_schema WHERE name IN ('run','runs_by_owner') ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let error = run(&mut db, 38, &|_, _| {}, &|| {}).unwrap_err();
+        assert!(
+            matches!(error,StorageError::Schema(ref message) if message=="foreign key violations")
+        );
+        assert!(db.is_autocommit());
+        assert_eq!(
+            db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            38
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM schema_migration WHERE version=39",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT run_id FROM synthetic_reference", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "missing"
+        );
+        let after: Vec<String> = db
+            .prepare(
+                "SELECT sql FROM sqlite_schema WHERE name IN ('run','runs_by_owner') ORDER BY name",
+            )
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn rebuild_panic_rolls_back_before_restoring_foreign_keys() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON; CREATE TABLE witness(value TEXT); INSERT INTO witness VALUES('before');").unwrap();
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: Result<(), StorageError> = with_foreign_keys_disabled(&mut db, |db| {
+                let tx = db.transaction()?;
+                tx.execute("UPDATE witness SET value='uncommitted'", [])?;
+                panic!("synthetic FK rebuild panic");
+            });
+        }));
+        assert!(panic.is_err());
+        assert!(db.is_autocommit());
+        assert_eq!(
+            db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT value FROM witness", [], |r| r.get::<_, String>(0))
+                .unwrap(),
+            "before"
+        );
+    }
 
     #[test]
     fn foreign_key_check_detects_violations_with_enforcement_disabled() {

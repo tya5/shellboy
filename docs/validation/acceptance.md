@@ -11129,3 +11129,19 @@ unrelated events 22488 unchanged. DROP COLUMN fails on the existing owner CHECK 
 Old partial-index UPDATE plan and new recovery lookup plan remain indexed. Timing excludes fixture setup/copy and
 separate FK checks, is not application startup or real-user DB timing, and matches counts only, not distributions.
 Fresh final-SHA focused validation, normal/all-OS CI and W8 delta review are required separately.
+
+### Correction: schema-39 FK check timing
+
+The earlier statement that the pre-correction runner checked foreign keys inside its migration transaction was
+incorrect. Through `dd88933623`, it committed the rebuild, restored enforcement, and only then ran the existing
+startup pending-Full integrity check. That postcommit check did not prove commit rejection or rollback on an FK
+violation; the previous failure fixture proved only DDL-error rollback and restoration. No claim of precommit
+violation rejection should be inferred from those earlier passing tests or reports.
+
+Following explicit Claude approval, migration 39 now calls the existing FK integrity check before transaction
+commit. An outer restoration guard disables enforcement before BEGIN and reenables it only after the callback's
+transaction has committed or rolled back, including panic unwinding. Other migrations and the existing postcommit
+startup Full check remain unchanged. New synthetic tests require a genuine FK-violation error to leave the old
+Run schema/index, version 38, absent ledger-39 entry and saved rows intact with enforcement ON; a separate panic
+fixture requires rollback of a changed witness row and enforcement ON. Normal 38->39 and DDL-error checks remain.
+These tests use disposable synthetic connections only; no further real DB access is involved.
