@@ -434,7 +434,7 @@ pub(crate) fn deleted_threads_tx(
     at: &str,
 ) -> rusqlite::Result<Vec<String>> {
     let mut wakes = std::collections::BTreeSet::new();
-    let mut budget = crate::protocol::MAX_PENDING_REPLY_DUTIES as usize;
+    let mut budget = crate::protocol::MAX_SYNC_DELETION_REPLY_DUTIES as usize;
     let mut query = db.prepare(DELETED_RECIPIENT_REPLIES)?;
     for target in targets {
         if budget == 0 {

@@ -2670,7 +2670,7 @@ fn awaiting_human_candidates(
             params![
                 after,
                 i64::from(limit) + 1,
-                (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+                (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64
             ],
             |row| {
                 Ok((
@@ -2685,7 +2685,8 @@ fn awaiting_human_candidates(
         .map(|rows| {
             rows.into_iter()
                 .map(|(id, count, oldest)| {
-                    let exact = count < (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64;
+                    let exact =
+                        count < (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64;
                     (
                         id,
                         AwaitingHumanCount {
@@ -3427,7 +3428,7 @@ mod thread_list_plan_tests {
                 params![
                     "",
                     1,
-                    (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+                    (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64
                 ],
                 |r| r.get(3),
             )
@@ -5695,7 +5696,8 @@ mod thread_deletion_notification_tests {
                 "SELECT count(*),sum(json_extract(result_json,'$.reply.state')='recipient_deleted') FROM receipt WHERE target_thread_id='parent'",
                 [], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<i64>>(1)?.unwrap_or(0))),
             )?)).await.unwrap();
-            let synchronous = count.min(crate::protocol::MAX_PENDING_REPLY_DUTIES as usize) as i64;
+            let synchronous =
+                count.min(crate::protocol::MAX_SYNC_DELETION_REPLY_DUTIES as usize) as i64;
             assert_eq!(states, (count as i64, synchronous));
             let durable_job = owner
                 .db

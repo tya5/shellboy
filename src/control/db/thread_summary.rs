@@ -22,8 +22,8 @@ LEFT JOIN model_attempt a ON a.rowid=(SELECT rowid FROM model_attempt WHERE turn
 }
 fn columns_from() -> String {
     let activity_joins = activity_joins();
-    let sample_limit = crate::protocol::MAX_PENDING_REPLY_DUTIES + 1;
-    let limit = crate::protocol::MAX_PENDING_REPLY_DUTIES;
+    let sample_limit = crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1;
+    let limit = crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES;
     let (revisit_pending, revisit_delivered) =
         crate::control::revisit::summary_sql("t.id", "latest.id");
     format!(
@@ -219,7 +219,7 @@ pub(crate) fn decode(row: &Row<'_>) -> rusqlite::Result<RawSummary> {
         awaiting_replies: row.get::<_, i64>(22)?.max(0) as u64,
         awaiting_reply: row.get::<_, i64>(24)?.max(0) as u64,
         awaiting_reply_exact: row.get::<_, i64>(24)?.max(0)
-            < (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64,
+            < (crate::protocol::MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1) as i64,
         awaiting_thread_replies: row.get::<_, i64>(23)?.max(0) as u64,
         awaiting_human_oldest_at: row.get(25)?,
     })
@@ -236,7 +236,7 @@ pub(crate) fn prepare(raw: RawSummary, title: String, excerpt: String) -> Thread
         awaiting_human_count: if raw.awaiting_reply_exact {
             raw.awaiting_reply
         } else {
-            MAX_PENDING_REPLY_DUTIES + 1
+            MAX_HUMAN_REPLY_SUMMARY_DUTIES + 1
         },
         awaiting_human_count_exact: raw.awaiting_reply_exact,
         awaiting_human_oldest_at: raw.awaiting_human_oldest_at,
@@ -412,7 +412,7 @@ mod tests {
                 rusqlite::params![node, at],
             )
             .unwrap();
-            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','t',?2,'applied',?3,'{\"to_human\":true,\"reply\":{\"state\":\"pending\"}}')",rusqlite::params![id,node,if id=="late"{"1"}else{"2"}]).unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','t',?2,'applied',?3,'{\"to_human\":true,\"reply\":{\"state\":\"pending\"}}')",rusqlite::params![id,node,at]).unwrap();
         }
         let raw = read_ids_tx(&db, &["t".into()]).unwrap().pop().unwrap();
         let summary = prepare(raw, "t".into(), String::new());
