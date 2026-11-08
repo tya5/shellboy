@@ -439,7 +439,8 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        for index in ["shell_active_owner"] {
+        {
+            let index = "shell_active_owner";
             assert!(
                 details.iter().any(|detail| detail.contains(index)),
                 "missing {index}: {details:?}"

@@ -534,13 +534,15 @@ mod tests {
         seed_owned(&db, 8, 150);
         let before = steps(&db, OWNED_EXECUTIONS);
         let value = prepare(read_tx(&db, &run()).unwrap()).unwrap();
-        for key in ["owned_execution_ids"] {
+        {
+            let key = "owned_execution_ids";
             assert_eq!(value.value[key].as_array().unwrap().len(), 128);
             assert!(value.limited_fields.contains(&key.into()));
         }
         seed_owned(&db, 150, 1150);
         assert_eq!(steps(&db, OWNED_EXECUTIONS), before);
-        for sql in [OWNED_EXECUTIONS] {
+        {
+            let sql = OWNED_EXECUTIONS;
             let plans = db
                 .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
                 .unwrap()
