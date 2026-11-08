@@ -209,7 +209,7 @@ async fn four_captured_list_routes_observe_eight_ipc_changed_commits_without_ret
                 control.store.database.call(move |db| {
                     assert_eq!(db.execute("UPDATE run SET state=?1 WHERE id='r'",[&current])?,1);
                     assert_eq!(db.execute("UPDATE shell_execution SET state=?1 WHERE id='s'",[&current])?,1);
-                    assert_eq!(db.execute("INSERT INTO app_meta(key,value) VALUES('compact.result.compact-op',json_object('state',?1,'ended_at','2026-11-01T00:00:01Z','outcome',json_object('result',json_object('omitted_nodes',0)))) ON CONFLICT(key) DO UPDATE SET value=json_set(value,'$.state',excluded.value->>'$.state')",[current])?,1);
+                    assert_eq!(db.execute("UPDATE app_meta SET value=json_set(value,'$.state',?1) WHERE key='compact.result.compact-op'",[current])?,1);
                     Ok(())
                 }).await.unwrap();
                 let title = format!("round-{round}");
