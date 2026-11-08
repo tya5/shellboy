@@ -51,22 +51,22 @@ Normal CLI success/failure writes one JSON line to stdout; help/version use ordi
 If a reply is lost, `details.read_only=true` identifies a nonmutating operation. Get/list/search/preview/status create no receipt and recompute current values even with the same operation ID. After disconnect, reissue the same command/filters, but semantic query embedding may charge again. `wait` is not read-only because it may save the caller's waiting state.
 
 ```json
-{"protocol_version":3,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
+{"protocol_version":4,"operation_id":"INSTANCE:NONCE","ok":true,"result":{"accepted":true}}
 ```
 
 ```json
-{"protocol_version":3,"operation_id":"INSTANCE:NONCE","ok":false,"error":{"code":"invalid_state","message":"...","hint":"...","details":{}}}
+{"protocol_version":4,"operation_id":"INSTANCE:NONCE","ok":false,"error":{"code":"invalid_state","message":"...","hint":"...","details":{}}}
 ```
 
-`hint` / `details` are optional; success has no error and failure has no result. Errors before communication can have an empty operation_id. The whole protocol frame is limited to 8MiB. Owner and CLI must use the current protocol version (3); `Welcome` advertises capabilities after the version check; there is no older-owner fallback.
+`hint` / `details` are optional; success has no error and failure has no result. Errors before communication can have an empty operation_id. The whole protocol frame is limited to 8MiB. Owner and CLI must use the current protocol version (4); `Welcome` advertises capabilities after the version check; there is no older-owner fallback.
 
 ### RPC JSON Schema (#244)
 
-`protocol schema` prints the generated JSON Schema document for the current protocol version. It is standalone: it does not open the owner or database, and rejects `--operation-id`. The checked-in `docs/reference/protocol.schema.json` uses JSON Schema Draft 2020-12 and includes the protocol-3 handshake, capabilities, request and response envelopes, and result schemas for all mapped operations except `events.wait`. Dynamic results still represented by `serde_json::Value` are marked opaque rather than assigned invented shapes. The existing test suite compares generated output exactly with this file. Run `shellboy protocol schema` to obtain the schema matching the binary you are using.
+`protocol schema` prints the generated JSON Schema document for the current protocol version. It is standalone: it does not open the owner or database, and rejects `--operation-id`. The checked-in `docs/reference/protocol.schema.json` uses JSON Schema Draft 2020-12 and includes the protocol-4 handshake, capabilities, request and response envelopes, and result schemas for all mapped operations, including the concrete protocol-4 `events.wait` result. Other dynamic results still represented by `serde_json::Value` are marked opaque rather than assigned invented shapes. The existing test suite compares generated output exactly with this file. Run `shellboy protocol schema` to obtain the schema matching the binary you are using.
 
 ### External RPC clients and versioning (#244)
 
-The local owner handshake exposes `protocol_version`; clients in another repository must compare it before use. Protocol 3 has a capability list; clients check the exact version first and use only the advertised capabilities. Result records and `Welcome`/`Endpoint` ignore additive fields, but request args and unknown operation names remain strict. A version mismatch is terminal; there is no protocol-2 downgrade. A wire change that either peer cannot safely ignore requires a protocol version bump and coordinated owner/client release. Rely only on the documented operations, arguments, result fields, errors, cursor rules, and bounds—not internal tables, logs, or undocumented error details. Treat cursors as opaque. For ambiguous mutations, query the saved receipt with the same operation ID; never retry under a fresh ID merely because a transport ended.
+The local owner handshake exposes `protocol_version`; clients in another repository must compare it before use. Protocol 4 has a capability list; clients check the exact version first and use only the advertised capabilities. Open result records and `Welcome`/`Endpoint` ignore additive fields, but closed result records, request args, and unknown operation names remain strict. A version mismatch is terminal; there is no protocol-2 downgrade. A wire change that either peer cannot safely ignore requires a protocol version bump and coordinated owner/client release. Rely only on the documented operations, arguments, result fields, errors, cursor rules, and bounds—not internal tables, logs, or undocumented error details. Treat cursors as opaque. For ambiguous mutations, query the saved receipt with the same operation ID; never retry under a fresh ID merely because a transport ended.
 
 Without an explicit ID, the CLI generates an instance-specific operation ID. For mutations/wait, resending `--operation-id` with the same ID, content, and caller retrieves retained results; changed content yields `operation_conflict`. Reads reobserve under the same ID and create no receipt for themselves. Message acceptance and receipt share one transaction. An accepted side-effect intent with unknown outcome may return pending: **this does not justify reissuing it under another ID**. Inspect `operation get --operation ID` `state` / `outcome` and target state. Old-instance IDs query saved receipts, never execute as new operations. Mutation replay of an unsaved old ID or expired outcome yields `operation_expired`; querying a missing receipt yields `operation_not_found`. Current-instance terminal outcomes may be collected after 24 hours during maintenance or under pressure, retaining expiry metadata to prevent reexecution. Pending and unapplied references remain protected. Check `result_expired` / `replay_policy`; do not blindly repeat a mutation under a new ID after its result disappears.
 
@@ -382,6 +382,10 @@ room frees up. A looping client can get `Local IPC work capacity is busy` at onc
 That is routine and nothing was applied: keep the preview and poll again with the same cursor. Each
 attempt keeps at most 64 KiB of text; text unread when an attempt ends is gone. When you add a Thread to
 `--thread`, take a new baseline.
+
+### Live reasoning activity (#275)
+
+When using `events wait --text`, `reasoning_activity` lists active model request attempts even before any text arrives. `elapsed_ms` is time since the local streaming attempt began; it does not establish when the provider started its own reasoning. `received_bytes` is absent until reasoning text arrives, then counts cumulative UTF-8 bytes of those deltas, not tokens. No reasoning content is exposed. Entries disappear when the attempt ends; a retry uses a new `attempt_id`. Timeout replies refresh elapsed time. This metadata shares the existing bounded, lossy in-memory preview lifecycle and is advertised by the `events.reasoning_activity` capability.
 
 ### Selected-path windows (`history window`, #268)
 

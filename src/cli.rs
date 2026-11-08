@@ -283,7 +283,7 @@ pub enum EventsCommand {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters. --text also returns unsaved model text in live_text (status=text when only text is new): a lossy preview for UI clients, never saved; on gap=true, a new attempt_id or an attempt no longer listed, discard what you showed. Saved output is what stays."
+    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters. Protocol v4 clients must use an owner advertising the same version. --text also returns unsaved model text in live_text and active attempts in reasoning_activity (status=text when either has a new observation): a lossy preview for UI clients, never saved. reasoning_activity.elapsed_ms is local attempt elapsed time; received_bytes is observed UTF-8 reasoning bytes, not tokens, and is omitted while unknown. It never contains reasoning content. On gap=true, a new attempt_id or an attempt no longer listed, discard what you showed. Saved output is what stays."
 )]
 pub struct EventsWaitOptions {
     /// Cursor from a previous events wait; omit for a baseline.

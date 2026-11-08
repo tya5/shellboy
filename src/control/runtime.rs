@@ -466,36 +466,52 @@ impl Control {
         // Shutdown and caller disconnect cancel this future in `runtime_observation`.
         use super::change_clock::Poll;
         let include_text = args.include_text;
-        let result = |status, seq: u64, changes: Vec<(String, u64)>, more, text| {
-            let cursor = EventCursor {
-                v: 1,
-                instance_id: self.store.instance_id.clone(),
-                seq,
-            }
-            .encode();
-            encode_result(
-                EventsWaitResult {
-                    status,
-                    cursor,
-                    changes: changes
-                        .into_iter()
-                        .map(|(thread_id, seq)| EventChange { thread_id, seq })
-                        .collect(),
-                    more,
-                    live_text: include_text.then_some(text),
-                },
-                ErrorCode::InvalidState,
-                "Cannot encode events result",
-            )
-        };
+        let result =
+            |status, seq: u64, changes: Vec<(String, u64)>, more, text, reasoning_activity| {
+                let cursor = EventCursor {
+                    v: 1,
+                    instance_id: self.store.instance_id.clone(),
+                    seq,
+                }
+                .encode();
+                encode_result(
+                    EventsWaitResult {
+                        status,
+                        cursor,
+                        changes: changes
+                            .into_iter()
+                            .map(|(thread_id, seq)| EventChange { thread_id, seq })
+                            .collect(),
+                        more,
+                        live_text: include_text.then_some(text),
+                        reasoning_activity,
+                    },
+                    ErrorCode::InvalidState,
+                    "Cannot encode events result",
+                )
+            };
         let Some(token) = args.after.as_deref() else {
-            let (head, text) = self.change_clock.snapshot(&args.thread_ids, include_text);
-            return result(EventsWaitStatus::Baseline, head, vec![], false, text);
+            let (head, text, activity) = self.change_clock.snapshot(&args.thread_ids, include_text);
+            return result(
+                EventsWaitStatus::Baseline,
+                head,
+                vec![],
+                false,
+                text,
+                activity,
+            );
         };
         let after = EventCursor::decode(token)?;
         if after.instance_id != self.store.instance_id {
-            let (head, text) = self.change_clock.snapshot(&args.thread_ids, include_text);
-            return result(EventsWaitStatus::ResyncRequired, head, vec![], false, text);
+            let (head, text, activity) = self.change_clock.snapshot(&args.thread_ids, include_text);
+            return result(
+                EventsWaitStatus::ResyncRequired,
+                head,
+                vec![],
+                false,
+                text,
+                activity,
+            );
         }
         let deadline = tokio::time::Instant::now()
             .checked_add(std::time::Duration::from_millis(args.timeout_ms));
@@ -518,23 +534,67 @@ impl Control {
                         "events cursor is ahead of this owner; restart without --after",
                     ));
                 }
-                Some(Poll::Resync { head, text }) => {
-                    return result(EventsWaitStatus::ResyncRequired, head, vec![], false, text);
+                Some(Poll::Resync {
+                    head,
+                    text,
+                    reasoning_activity,
+                }) => {
+                    return result(
+                        EventsWaitStatus::ResyncRequired,
+                        head,
+                        vec![],
+                        false,
+                        text,
+                        reasoning_activity,
+                    );
                 }
                 Some(Poll::Ready {
                     changes,
                     more,
                     cursor,
                     text,
+                    reasoning_activity,
+                    reasoning_changed,
                 }) => {
                     if !changes.is_empty() {
-                        return result(EventsWaitStatus::Changed, cursor, changes, more, text);
+                        return result(
+                            EventsWaitStatus::Changed,
+                            cursor,
+                            changes,
+                            more,
+                            text,
+                            reasoning_activity,
+                        );
+                    }
+                    if reasoning_changed {
+                        return result(
+                            EventsWaitStatus::Text,
+                            cursor,
+                            vec![],
+                            false,
+                            text,
+                            reasoning_activity,
+                        );
                     }
                     if text.iter().any(|attempt| !attempt.deltas.is_empty()) {
-                        return result(EventsWaitStatus::Text, cursor, vec![], false, text);
+                        return result(
+                            EventsWaitStatus::Text,
+                            cursor,
+                            vec![],
+                            false,
+                            text,
+                            reasoning_activity,
+                        );
                     }
                     if deadline.is_some_and(|at| tokio::time::Instant::now() >= at) {
-                        return result(EventsWaitStatus::Timeout, cursor, vec![], false, text);
+                        return result(
+                            EventsWaitStatus::Timeout,
+                            cursor,
+                            vec![],
+                            false,
+                            text,
+                            reasoning_activity,
+                        );
                     }
                 }
             }

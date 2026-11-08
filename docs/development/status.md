@@ -5299,3 +5299,8 @@ file bounds and live edits across a tool continuation. Full validation and CI ev
 
 #270 focused six regressions and the full local standard check pass. The remaining handoff gate is the pushed tip's
 normal and all-OS CI. Explicit common files use existing snapshot/file-worker/config adoption paths; no schema added.
+
+
+### #275 live reasoning activity
+
+`events.wait --text` includes bounded active-attempt metadata: request attempt elapsed time and cumulative observed reasoning UTF-8 bytes (unknown until deltas arrive), without reasoning content. It reuses the existing in-memory change clock, attempt cap and stream guard; no saved data or worker added. `events.reasoning_activity` advertises support. `cargo check --locked --tests` passes. Focused clock/runtime/capability regressions are running via the shared rust-slot. The read-only language audit scanned 417 files with no inventory change; generated schema and exact-tip CI remain pending.

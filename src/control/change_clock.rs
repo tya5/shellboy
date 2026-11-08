@@ -5,16 +5,20 @@
 //! older entries are evicted and raise `floor`, so a reader positioned below it
 //! is told to resynchronise instead of silently missing changes.
 //!
-//! The same lock and sequence also carry unsaved model text for clients that opt
-//! in (#243 E3): one lossy tail per streaming attempt, freed when the attempt ends
-//! (`LiveTextGuard`), never saved and never a source of truth. Writers never wait
+//! The same lock and sequence also carry unsaved model text and attempt-scoped
+//! reasoning activity for clients that opt in (#243 E3, #275). Both are freed when
+//! the attempt ends (`LiveTextGuard`), never saved and never a source of truth.
+//! Writers never wait
 //! for a reader: the lock is held only for memory updates and copies, never across
 //! `.await` or I/O, and a reader that stops reading holds nothing here.
-use crate::protocol::{EventLiveText, EventTextDelta, MAX_EVENT_CHANGES, MAX_FRAME_BYTES};
+use crate::protocol::{
+    EventLiveText, EventReasoningActivity, EventTextDelta, MAX_EVENT_CHANGES, MAX_FRAME_BYTES,
+};
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     sync::Mutex,
 };
+use tokio::sync::Notify;
 
 pub(crate) const MAX_CHANGE_THREADS: usize = 4096;
 /// Streaming attempts holding text at once; further attempts are refused until one ends.
@@ -57,6 +61,14 @@ struct Inner {
     by_seq: BTreeMap<u64, String>,
     /// Keyed by Thread: a Thread streams one attempt at a time, and a later attempt replaces it.
     text: HashMap<String, AttemptText>,
+    reasoning_activity: HashMap<String, AttemptActivity>,
+}
+
+struct AttemptActivity {
+    attempt: String,
+    started: std::time::Instant,
+    received_bytes: Option<u64>,
+    sequence: u64,
 }
 
 pub(crate) struct ChangeClock {
@@ -66,7 +78,11 @@ pub(crate) struct ChangeClock {
 
 pub(crate) enum Poll {
     /// Cursor older than the retained window.
-    Resync { head: u64, text: Vec<EventLiveText> },
+    Resync {
+        head: u64,
+        text: Vec<EventLiveText>,
+        reasoning_activity: Vec<EventReasoningActivity>,
+    },
     Ready {
         changes: Vec<(String, u64)>,
         more: bool,
@@ -74,6 +90,8 @@ pub(crate) enum Poll {
         cursor: u64,
         /// Live attempts and their text up to `cursor`; empty unless asked for.
         text: Vec<EventLiveText>,
+        reasoning_activity: Vec<EventReasoningActivity>,
+        reasoning_changed: bool,
     },
 }
 
@@ -82,10 +100,15 @@ pub(crate) struct LiveTextGuard<'a> {
     clock: &'a ChangeClock,
     thread: &'a str,
     attempt: &'a str,
+    changed: &'a Notify,
 }
 impl Drop for LiveTextGuard<'_> {
     fn drop(&mut self) {
         let mut inner = self.clock.lock();
+        let ended = inner
+            .reasoning_activity
+            .get(self.thread)
+            .is_some_and(|activity| activity.attempt == self.attempt);
         if inner
             .text
             .get(self.thread)
@@ -93,6 +116,15 @@ impl Drop for LiveTextGuard<'_> {
         {
             inner.text.remove(self.thread);
         }
+        if ended {
+            inner.reasoning_activity.remove(self.thread);
+        }
+        drop(inner);
+        if ended {
+            // Attempt end is an ephemeral invalidation hint, never persisted state.
+            self.clock.record(self.thread);
+        }
+        self.changed.notify_waiters();
     }
 }
 
@@ -131,11 +163,37 @@ impl ChangeClock {
         &'a self,
         thread: &'a str,
         attempt: &'a str,
+        changed: &'a Notify,
     ) -> LiveTextGuard<'a> {
+        let admitted = {
+            let mut inner = self.lock();
+            if inner.reasoning_activity.len() < MAX_LIVE_TEXT_ATTEMPTS
+                || inner.reasoning_activity.contains_key(thread)
+            {
+                inner.seq += 1;
+                let sequence = inner.seq;
+                inner.reasoning_activity.insert(
+                    thread.to_owned(),
+                    AttemptActivity {
+                        attempt: attempt.to_owned(),
+                        started: std::time::Instant::now(),
+                        received_bytes: None,
+                        sequence,
+                    },
+                );
+                true
+            } else {
+                false
+            }
+        };
+        if admitted {
+            changed.notify_waiters();
+        }
         LiveTextGuard {
             clock: self,
             thread,
             attempt,
+            changed,
         }
     }
     /// `offset` counts the Unicode scalar values already streamed by this attempt.
@@ -174,15 +232,26 @@ impl ChangeClock {
                 },
             );
         }
-        let entry = inner.text.get_mut(thread).expect("entry inserted above");
         // A single oversized delta keeps its tail, cut on a character boundary.
         let room = MAX_ATTEMPT_TEXT_BYTES - DELTA_RECORD_BYTES;
         let start = text.ceil_char_boundary(text.len().saturating_sub(room));
         let offset = offset + text[..start].chars().count() as u64;
+        let kept = &text[start..];
+        if reasoning {
+            if let Some(activity) = inner
+                .reasoning_activity
+                .get_mut(thread)
+                .filter(|activity| activity.attempt == attempt)
+            {
+                let bytes = activity.received_bytes.get_or_insert(0);
+                *bytes = bytes.saturating_add(text.len() as u64);
+                activity.sequence = seq;
+            }
+        }
+        let entry = inner.text.get_mut(thread).expect("entry inserted above");
         if start > 0 {
             entry.floor = seq;
         }
-        let kept = &text[start..];
         entry.charged += DELTA_RECORD_BYTES + kept.len();
         entry.deltas.push_back(Delta {
             seq,
@@ -203,14 +272,19 @@ impl ChangeClock {
         &self,
         filter: &[String],
         include_text: bool,
-    ) -> (u64, Vec<EventLiveText>) {
+    ) -> (u64, Vec<EventLiveText>, Vec<EventReasoningActivity>) {
         let inner = self.lock();
         let text = if include_text {
             inner.live_text(0, inner.seq, filter)
         } else {
             Vec::new()
         };
-        (inner.seq, text)
+        let activity = if include_text {
+            inner.reasoning_activity(filter)
+        } else {
+            Vec::new()
+        };
+        (inner.seq, text, activity)
     }
     /// `None` when `after` is ahead of the clock (a forged or corrupt cursor).
     pub(crate) fn poll(&self, after: u64, filter: &[String], include_text: bool) -> Option<Poll> {
@@ -224,9 +298,15 @@ impl ChangeClock {
             } else {
                 Vec::new()
             };
+            let reasoning_activity = if include_text {
+                inner.reasoning_activity_since(filter, after).0
+            } else {
+                Vec::new()
+            };
             return Some(Poll::Resync {
                 head: inner.seq,
                 text,
+                reasoning_activity,
             });
         }
         let mut changes = Vec::new();
@@ -251,16 +331,57 @@ impl ChangeClock {
         } else {
             Vec::new()
         };
+        let (reasoning_activity, reasoning_changed) = if include_text {
+            inner.reasoning_activity_since(filter, after)
+        } else {
+            (Vec::new(), false)
+        };
         Some(Poll::Ready {
             changes,
             more,
             cursor,
             text,
+            reasoning_activity,
+            reasoning_changed,
         })
     }
 }
 
 impl Inner {
+    fn reasoning_activity(&self, filter: &[String]) -> Vec<EventReasoningActivity> {
+        self.reasoning_activity_since(filter, 0).0
+    }
+
+    fn reasoning_activity_since(
+        &self,
+        filter: &[String],
+        after: u64,
+    ) -> (Vec<EventReasoningActivity>, bool) {
+        let now = std::time::Instant::now();
+        let mut changed = false;
+        let mut items: Vec<_> = self
+            .reasoning_activity
+            .iter()
+            .filter(|(thread, _)| {
+                filter.is_empty() || filter.iter().any(|wanted| wanted == *thread)
+            })
+            .map(|(thread, activity)| {
+                changed |= activity.sequence > after;
+                EventReasoningActivity {
+                    thread_id: thread.clone(),
+                    attempt_id: activity.attempt.clone(),
+                    elapsed_ms: now
+                        .saturating_duration_since(activity.started)
+                        .as_millis()
+                        .min(u64::MAX as u128) as u64,
+                    received_bytes: activity.received_bytes,
+                }
+            })
+            .collect();
+        items.sort_by(|a, b| a.thread_id.cmp(&b.thread_id));
+        (items, changed)
+    }
+
     /// Every live attempt in the filter with its text in `(after, upto]`. Adjacent
     /// deltas of one kind merge; a listed attempt with no text is still live.
     fn live_text(&self, after: u64, upto: u64, filter: &[String]) -> Vec<EventLiveText> {
@@ -301,6 +422,7 @@ impl Inner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
 
     fn ready(poll: Option<Poll>) -> (Vec<(String, u64)>, bool, u64) {
         match poll {
@@ -433,6 +555,67 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_activity_reports_attempt_start_elapsed_and_observed_bytes_only() {
+        let clock = ChangeClock::new();
+        let changed = Notify::new();
+        let guard = clock.live_text_guard("thread", "attempt", &changed);
+        let Some(Poll::Ready {
+            cursor: start_cursor,
+            reasoning_activity,
+            reasoning_changed,
+            ..
+        }) = clock.poll(0, &[], true)
+        else {
+            panic!("expected start");
+        };
+        assert!(reasoning_changed);
+        assert_eq!(reasoning_activity.len(), 1);
+        assert_eq!(reasoning_activity[0].attempt_id, "attempt");
+        assert_eq!(reasoning_activity[0].received_bytes, None);
+        let wire = serde_json::to_value(&reasoning_activity[0]).unwrap();
+        assert!(wire.get("received_bytes").is_none());
+        assert!(wire.get("text").is_none());
+        assert!(reasoning_activity[0].elapsed_ms < 1_000);
+
+        // Counts received UTF-8 reasoning bytes, not tokens or retained preview bytes.
+        clock.record_text("thread", "attempt", 0, "秘密", true);
+        let Some(Poll::Ready {
+            reasoning_activity,
+            reasoning_changed,
+            ..
+        }) = clock.poll(start_cursor, &[], true)
+        else {
+            panic!("expected reasoning delta");
+        };
+        assert!(reasoning_changed);
+        assert_eq!(
+            reasoning_activity[0].received_bytes,
+            Some("秘密".len() as u64)
+        );
+        assert!(
+            clock
+                .poll(0, &["other".into()], true)
+                .is_some_and(|poll| match poll {
+                    Poll::Ready {
+                        reasoning_activity, ..
+                    } => reasoning_activity.is_empty(),
+                    _ => false,
+                })
+        );
+        drop(guard);
+        assert!(
+            clock
+                .poll(start_cursor, &[], true)
+                .is_some_and(|poll| match poll {
+                    Poll::Ready {
+                        reasoning_activity, ..
+                    } => reasoning_activity.is_empty(),
+                    _ => false,
+                })
+        );
+    }
+
+    #[test]
     fn eviction_holds_the_bound_for_any_delta_size_and_reports_the_gap() {
         for size in [1, 7, 1024, MAX_ATTEMPT_TEXT_BYTES / 2] {
             let clock = ChangeClock::new();
@@ -473,8 +656,9 @@ mod tests {
     #[test]
     fn a_new_attempt_replaces_the_old_and_a_stale_guard_frees_nothing_new() {
         let clock = ChangeClock::new();
+        let changed = Notify::new();
         {
-            let _old = clock.live_text_guard("t", "old");
+            let _old = clock.live_text_guard("t", "old", &changed);
             clock.record_text("t", "old", 0, "abc", false);
             clock.record_text("t", "new", 0, "z", false);
             let (attempts, _) = text_poll(&clock, 0, &[]);
@@ -484,7 +668,7 @@ mod tests {
             assert!(!attempts[0].gap);
         }
         assert_eq!(text_poll(&clock, 0, &[]).0[0].attempt_id, "new");
-        drop(clock.live_text_guard("t", "new"));
+        drop(clock.live_text_guard("t", "new", &changed));
         assert!(text_poll(&clock, 0, &[]).0.is_empty());
         assert!(clock.lock().text.is_empty());
     }
@@ -492,6 +676,7 @@ mod tests {
     #[test]
     fn past_the_attempt_cap_newcomers_wait_and_incumbents_keep_their_previews() {
         let clock = ChangeClock::new();
+        let changed = Notify::new();
         let threads = MAX_LIVE_TEXT_ATTEMPTS + 1;
         let mut at = 0;
         for round in 0..200u64 {
@@ -511,7 +696,7 @@ mod tests {
             );
         }
         // An ending attempt makes room: the refused one enters with an explicit gap.
-        drop(clock.live_text_guard("t00", "a"));
+        drop(clock.live_text_guard("t00", "a", &changed));
         let late = format!("t{MAX_LIVE_TEXT_ATTEMPTS:02}");
         clock.record_text(&late, "a", 200, "y", false);
         let (attempts, _) = text_poll(&clock, at, &[]);
@@ -546,6 +731,7 @@ mod tests {
             more,
             cursor,
             text,
+            ..
         }) = clock.poll(0, &[], true)
         else {
             panic!("expected ready")
@@ -584,6 +770,7 @@ mod tests {
                 .collect(),
             more: false,
             live_text: Some(text),
+            reasoning_activity: vec![],
         })
         .unwrap();
         assert!(reply.len() <= MAX_FRAME_BYTES, "{}", reply.len());
@@ -636,6 +823,62 @@ mod tests {
         drain.as_mut().enable();
         drop(closing);
         assert!(drain.as_mut().now_or_never().is_some());
+        server.shutdown().await.unwrap();
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn events_wait_reports_reasoning_activity_start_bytes_and_end() {
+        use crate::protocol::{Command, EventsWaitArgs, Request};
+        let (_root, owner, control, server) = crate::frontend::control_tests::fixture().await;
+        let wait = |after| {
+            Request::new(
+                uuid::Uuid::new_v4().to_string(),
+                Command::EventsWait(EventsWaitArgs {
+                    after,
+                    thread_ids: vec!["t".into()],
+                    timeout_ms: 3_600_000,
+                    include_text: true,
+                }),
+            )
+        };
+        let baseline_response = control.request(wait(None)).await;
+        assert!(baseline_response.ok, "{:?}", baseline_response.error);
+        let baseline = baseline_response.result.unwrap();
+        let cursor = baseline["cursor"].as_str().unwrap().to_owned();
+        let guard = control
+            .change_clock
+            .live_text_guard("t", "attempt", &control.text_changed);
+        let started_response = control.request(wait(Some(cursor.clone()))).await;
+        assert!(started_response.ok, "{:?}", started_response.error);
+        let started = started_response.result.unwrap();
+        assert_eq!(started["status"], "text");
+        assert_eq!(started["reasoning_activity"][0]["attempt_id"], "attempt");
+        assert_eq!(
+            started["reasoning_activity"][0]["received_bytes"],
+            Value::Null
+        );
+        let cursor = started["cursor"].as_str().unwrap().to_owned();
+
+        control.stream_delta("t", "attempt", "秘密", true, 0);
+        let progress_response = control.request(wait(Some(cursor))).await;
+        assert!(progress_response.ok, "{:?}", progress_response.error);
+        let progress = progress_response.result.unwrap();
+        assert_eq!(progress["status"], "text");
+        assert_eq!(
+            progress["reasoning_activity"][0]["received_bytes"],
+            "秘密".len() as u64
+        );
+        assert_eq!(progress["reasoning_activity"][0].get("text"), None);
+        let cursor = progress["cursor"].as_str().unwrap().to_owned();
+        drop(guard);
+        let ended_response = control.request(wait(Some(cursor))).await;
+        assert!(ended_response.ok, "{:?}", ended_response.error);
+        let ended = ended_response.result.unwrap();
+        assert_eq!(ended["status"], "changed");
+        assert_eq!(ended["changes"][0]["thread_id"], "t");
+        assert!(ended["reasoning_activity"].as_array().unwrap().is_empty());
         server.shutdown().await.unwrap();
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();

@@ -315,7 +315,9 @@ pub(super) async fn stream_response(
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
     let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
-    let _live_text = control.change_clock.live_text_guard(thread, attempt);
+    let _live_text = control
+        .change_clock
+        .live_text_guard(thread, attempt, &control.text_changed);
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
     let response = client.response_observed(

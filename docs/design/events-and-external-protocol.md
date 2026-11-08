@@ -228,6 +228,12 @@ family (send/held/cancel, run/turn transitions, tool start/end, compaction,
 create/fork/rewind/delete, reply, recovery) asserting the clock advanced for
 the affected Thread(s), and treat a gap as a bug in the producer.
 
+### 2.6 Live reasoning activity on `events.wait` (#275)
+
+When `include_text: true`, protocol-4 results also contain `reasoning_activity`, a Thread-ID-sorted snapshot of active local response attempts, including before any text delta. Each `{thread_id, attempt_id, elapsed_ms, received_bytes?}` reports that Shellboy admitted a streaming request, monotonic elapsed milliseconds since its local stream wrapper started, and (once observed) cumulative UTF-8 bytes from reasoning-text deltas. It does not claim that the provider has begun internal reasoning; no content, token estimate, or inferred rate is exposed. If the provider supplies no reasoning delta/count, `received_bytes` stays absent rather than guessed. Text/refusal deltas do not increment it.
+
+An activity entry is removed when that attempt completes, errors, or is cancelled; its removal uses the existing per-Thread change hint. A retry has a new attempt ID. Start and reasoning-byte observations are cursor-visible and cause `status:"text"` (unless a Thread change takes precedence); subsequent timeout results refresh elapsed time without synthetic progress ticks. The snapshot is bounded by the existing 16 live-attempt cap and exists only in memory under the change-clock lock. It adds no polling loop, queue, worker, saved event, or persistent schema. Protocol-4 owners advertise `events.reasoning_activity`; clients must gate use on that Welcome capability. When `include_text` is false this field is empty/omitted and no attempt activity is returned.
+
 ### 2.5 Live model text on `events.wait` (E3 plan A)
 
 `events.wait` with `include_text: true` also returns unsaved text being written now. It is an
@@ -399,13 +405,16 @@ recognize and only gate use of capabilities they do recognize. Because current
 clients decode `Welcome` strictly, adding the field is itself breaking: do it once, together with the
 tolerant-record split, as **protocol 3**. Everything present at protocol 3 is
 the baseline. The list holds only additions after that and starts empty or
-nearly empty. The list is a `const` slice checked by a test against an
-exhaustive match over `Command`, not a registry.
+nearly empty. A strict result-shape extension is not additive for old typed
+clients: #275 advances to protocol 4 and advertises `events.reasoning_activity`.
+The list is a `const` slice checked by a test against an exhaustive match over
+`Command`, not a registry.
 
 Old owner + new client:
 - owner on protocol 2 → existing clear version-mismatch error before sending
   (the `human` case is solved this way, since `human` is in the v3 baseline);
-- owner on protocol 3 without a capability → client omits the field or
+- owner on protocol 3 → protocol-4 client rejects the version before sending;
+- owner on protocol 4 without a capability → client omits the feature or
   reports "owner does not support X" before sending.
 
 Independently, and without a version change (stage A1): `serve_connection`

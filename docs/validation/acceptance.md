@@ -10796,3 +10796,11 @@ CI `42444754237` on `f3f802c1d4` failed only the exported-protocol-schema equali
 schema export must include the added optional `ThreadDetails.instruction_sources` field. The schema is regenerated
 with the branch's built CLI and its export regressions are rerun. This is a missing derived artifact, not a flaky
 runtime test. The failed run remains evidence; a new tip and fresh CI pair are required.
+
+
+## Live reasoning activity on events.wait (#275)
+
+- [x] Clock and runtime regressions cover attempt start, elapsed, absent unknown byte count, cumulative UTF-8 reasoning bytes, thread filtering, status transitions, end hint and guard cleanup; live metadata contains no text field.
+- [x] Activity is opt-in with `include_text`, shares the existing 16-attempt bound, and attempt end advances the ordinary Thread change hint.
+- [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
+- [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.

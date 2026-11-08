@@ -187,9 +187,7 @@ re-read every Thread you track. Hints coalesce and are not data; for a conclusio
 must not miss a transition, use `wait` with `thread_settled` (see below). Details:
 [CLI reference](cli-reference.md#change-hints-events-wait-243).
 
-`events wait --text` exists for UI clients that preview an answer being written. Do not use it to follow
-another Thread: the text is unsaved and lossy, can be replaced by a retry, wakes you for each delta at a
-token cost, and may never match the saved answer. Wait for the Thread to settle and read saved history.
+`events wait --text` is for UI clients. It also reports active request attempts in `reasoning_activity`, so a client can show that an attempt is underway while waiting for content. `elapsed_ms` measures time since the local stream attempt started; `received_bytes` is absent until reasoning deltas arrive and then counts their UTF-8 bytes, not tokens. No reasoning content is exposed. Do not use it to follow another Thread: the text remains unsaved/lossy and retries replace it. Wait for the Thread to settle and read saved history.
 
 ### Wait for any child Thread
 
@@ -360,7 +358,7 @@ with `background: true`, and stop persistent owned commands when done.
 
 Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy shell get --execution ID` against the same fields in the launching tool result. If `command` is `shellboy message send ...`, acceptance JSON from read is that process's actual stdout. Do not infer another shell's successful launch or ID from acceptance JSON. Retrieve the tool result that executed the intended command; if it was never executed, pass that command directly to the shell tool. Prefer saved commands and tool arguments over your own description that you “ran it directly.”
 
-Use the same current release for the owner and CLI. The local RPC handshake uses protocol 3 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
+Use the same current release for the owner and CLI. The local RPC handshake uses protocol 4 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
 
 ## List models and change your Thread's model
 

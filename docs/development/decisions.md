@@ -3928,6 +3928,12 @@ new error code, so every existing hold, pause and GC-signal path applies unchang
 twice the minimum, shown on storage surfaces only (no new TUI element). The 5 GiB default is a
 judgement, not a measurement; it is user-settable. Recheck when: a network-filesystem user reports
 DB-lane stalls, or free space reads are shown to be slow on a supported OS.
+## D-275-1: Live reasoning activity on `events.wait` (2026-11-08)
+
+Decision: extend the existing opt-in `events.wait --text` result with bounded active-attempt metadata `{thread_id, attempt_id, elapsed_ms, received_bytes?}`. Presence means the local request attempt started, and elapsed time is measured monotonically from stream start; do not claim provider scheduling or model-internal reasoning start. `received_bytes` is cumulative UTF-8 bytes from observed reasoning deltas, not token usage; omit it until such a delta arrives, preserving unknown when providers report no quantity. Never expose reasoning content through this metadata. Use the existing 16-attempt in-memory cap and guard cleanup; no persistence, worker or queue. Use protocol 4 because strict typed result records reject additive fields; advertise `events.reasoning_activity` and keep the feature opt-in with `include_text`. A timeout includes the latest elapsed snapshot; clients may advance their own monotonic display between polls.
+
+Revisit if provider adapters expose a distinct, documented inference-start event or an authoritative token-count delta; do not infer either from wall-clock gaps or text bytes.
+
 ## D-243-2: Live model text on `events.wait` (2026-11-07)
 
 Decision (E3 plan A, user's choice for Web M1): unsaved text is an opt-in part of `events.wait`

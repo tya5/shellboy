@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const PROTOCOL_VERSION: u32 = 3;
-pub const PROTOCOL_CAPABILITIES: &[&str] = &[];
+pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_CAPABILITIES: &[&str] = &["events.reasoning_activity"];
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_LIST_LIMIT: u32 = 50;
 pub const MAX_LIST_LIMIT: u32 = 200;
@@ -1093,7 +1093,14 @@ record!(EventLiveText {
     gap: bool,
     deltas: Vec<EventTextDelta>
 });
-record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>> });
+record!(EventReasoningActivity {
+    thread_id: String,
+    attempt_id: String,
+    elapsed_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    received_bytes: Option<u64>
+});
+record!(EventsWaitResult { status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default, skip_serializing_if="Vec::is_empty")] reasoning_activity: Vec<EventReasoningActivity> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.
