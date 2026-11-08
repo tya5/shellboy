@@ -68,12 +68,13 @@ These correct or sharpen assumptions in the issue thread.
    replayed as plain `user` text. A model cannot reply to a message it cannot
    name, so admission must add a short notice carrying the ID (see
    [Model-visible notices](#model-visible-notices)).
-5. **Existing windows of 128 are not a queue admission invariant.** The
+5. **The 16-duty admission cap is distinct from existing 128-row windows.** The
    pending-message projection (`/queue`, 128 rows), `message cancel` (1..128 IDs)
-   and the pre-integration interrupted-message recovery all used 128. There is
-   no total cap on ordinary queued messages. The integration replaces the old
+   and the pre-integration interrupted-message recovery use 128. There is no
+   total cap on ordinary queued messages. The integration replaces the old
    recovery refusal with oldest-first progressing units; see the recovery
-   decision at the end of this document. The pending reply-duty cap remains128.
+   decision at the end of this document. Pending reply duties have a separate
+   per-recipient cap of 16.
 6. **The #187 completion hook** is `driver::next`, in the branch where no Turn,
    pending input, event or owned work remains: `revisit::release_tx` runs and,
    if it found nothing, `state::complete_idle_run`. The shutdown gate already
