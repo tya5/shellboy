@@ -10888,3 +10888,12 @@ mode (5.00 s total), with one side effect, no replayed tool execution and zero l
 slow-output case passed three further runs (0.45/0.55/0.44 s). Check-tests and strict all-target clippy passed. Python
 206 tests, language/record audits and layout/watchdog checks passed. These targeted local passes do not reproduce
 historical E3 failures or constitute a saturation experiment; the GC focused check and fresh full CI remain pending.
+
+### #260 deterministic ordering evidence and GC result
+
+An isolated counterfactual removes the stdin hold and waits for the real natural-exit event before issuing the
+control probe: the old liveness assertion fails with `exited` versus `running` (0.37 s). This forces a legal delayed
+observer schedule without sleeping, proving the fixture premise invalid; it is not a reproduction of the historical
+E3 `failed` terminal state. Restoring the event-gated source byte-for-byte passes (0.66 s). No counterfactual mode is
+committed. The GC focused case passes with 2772 steps, 30 deferrals, 40001 scanned candidates and 308 concurrent
+writes in 11.18 s. Deadlines, drain limits and assertions are unchanged. Fresh full CI remains the handoff gate.
