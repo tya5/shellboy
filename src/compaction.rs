@@ -1479,7 +1479,9 @@ fn store_replacement(
     let body = payload.to_string();
     let now = timestamp();
     tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,?2,?3,?4,?5,?6)",params![node,if format==FORMAT{"summary"}else{"spill"},now,body,body.len()as i64,key(payload)])?;
-    if format!=FORMAT { crate::history::spill_tools::save(tx,&node,payload)?; }
+    if format != FORMAT {
+        crate::history::spill_tools::save(tx, &node, payload)?;
+    }
     tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?2,?3,?4,?5,'completed',?6)",params![replacement,node,summary_key(s,sources),format,PROMPT,now])?;
     for (ordinal, source) in sources.iter().enumerate() {
         tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash)VALUES(?1,?2,?3,?4,?5)",params![replacement,ordinal as i64,source.id,source.revision,source.hash])?;

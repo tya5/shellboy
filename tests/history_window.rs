@@ -539,24 +539,42 @@ fn spill_tool_sources_are_identical_in_list_and_window_even_without_excerpts() {
 
 #[test]
 fn spill_tool_sources_window_vm_steps_do_not_grow_with_sixteen_mib_payload() {
-    use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     on_db(|db| {
-        let tx=db.transaction().unwrap();
+        let tx = db.transaction().unwrap();
         append_node(&tx,"t","spill",None,"spill",&json!({"output":[],"spill_tools":{"status":"known","items":[{"call_id":"c"}],"truncated":false}}),"now").unwrap();
         tx.commit().unwrap();
-        let steps=Arc::new(AtomicUsize::new(0));let observed=steps.clone();
-        db.progress_handler(1,Some(move ||{observed.fetch_add(1,Ordering::Relaxed);false}));
-        let mut request=args();request.excerpt_chars=0;
-        let mut measured=Vec::new();
-        for size in [16,16*1024*1024] {
-            db.execute("UPDATE node SET payload_json=?1 WHERE id='spill'",[json!({"output":"x".repeat(size)}).to_string()]).unwrap();
-            steps.store(0,Ordering::Relaxed);
-            let page=window(db,&request).unwrap();
+        let steps = Arc::new(AtomicUsize::new(0));
+        let observed = steps.clone();
+        db.progress_handler(
+            1,
+            Some(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+                false
+            }),
+        );
+        let mut request = args();
+        request.excerpt_chars = 0;
+        let mut measured = Vec::new();
+        for size in [16, 16 * 1024 * 1024] {
+            db.execute(
+                "UPDATE node SET payload_json=?1 WHERE id='spill'",
+                [json!({"output":"x".repeat(size)}).to_string()],
+            )
+            .unwrap();
+            steps.store(0, Ordering::Relaxed);
+            let page = window(db, &request).unwrap();
             measured.push(steps.load(Ordering::Relaxed));
-            assert_eq!(page.items[0].spill_tools.as_ref().unwrap().items[0].call_id,"c");
+            assert_eq!(
+                page.items[0].spill_tools.as_ref().unwrap().items[0].call_id,
+                "c"
+            );
         }
-        db.progress_handler(0,None::<fn()->bool>);
-        assert_eq!(measured[0],measured[1],"{measured:?}");
-        assert!(measured[0]<1000,"{measured:?}");
+        db.progress_handler(0, None::<fn() -> bool>);
+        assert_eq!(measured[0], measured[1], "{measured:?}");
+        assert!(measured[0] < 1000, "{measured:?}");
     });
 }

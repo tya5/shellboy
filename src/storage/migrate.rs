@@ -179,7 +179,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0035_index_reclaim_lookup.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
-    Migration { version:36, sql:include_str!("../../migrations/0036_spill_tool_metadata.sql"), foreign_keys:Some(Impact::IndexOnly) },
+    Migration {
+        version: 36,
+        sql: include_str!("../../migrations/0036_spill_tool_metadata.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(

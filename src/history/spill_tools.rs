@@ -35,8 +35,19 @@ pub(crate) fn from_outputs(output: &[Value]) -> SpillToolSources {
             original_node_id: saved.and_then(|s| identifier(s.get("original_node_id"))),
         });
     }
-    let mut saved=SpillToolSources { status:if items.is_empty(){"unknown"}else{"known"}.into(),items,truncated };
-    while serde_json::to_vec(&saved).expect("serializable spill metadata").len()>16384 { saved.items.pop(); saved.truncated=true; }
+    let mut saved = SpillToolSources {
+        status: if items.is_empty() { "unknown" } else { "known" }.into(),
+        items,
+        truncated,
+    };
+    while serde_json::to_vec(&saved)
+        .expect("serializable spill metadata")
+        .len()
+        > 16384
+    {
+        saved.items.pop();
+        saved.truncated = true;
+    }
     saved
 }
 fn identifier(value: Option<&Value>) -> Option<String> {
@@ -91,12 +102,15 @@ pub(crate) fn load(db: &Connection, id: &str) -> Result<SpillToolSources, ApiErr
 }
 
 /// Store in the same node-creation transaction; the covering index never contains payload bytes.
-pub(crate) fn save(db:&Connection,id:&str,payload:&Value)->Result<(),rusqlite::Error> {
-    if let Some(saved)=payload.get("spill_tools") {
-        if let Ok(saved)=serde_json::from_value::<SpillToolSources>(saved.clone()) {
-            let body=serde_json::to_string(&saved).expect("serializable spill metadata");
-            if body.len()<=16384 && saved.items.len()<=MAX_SOURCES {
-                db.execute("UPDATE node SET spill_tools_json=?2 WHERE id=?1",rusqlite::params![id,body])?;
+pub(crate) fn save(db: &Connection, id: &str, payload: &Value) -> Result<(), rusqlite::Error> {
+    if let Some(saved) = payload.get("spill_tools") {
+        if let Ok(saved) = serde_json::from_value::<SpillToolSources>(saved.clone()) {
+            let body = serde_json::to_string(&saved).expect("serializable spill metadata");
+            if body.len() <= 16384 && saved.items.len() <= MAX_SOURCES {
+                db.execute(
+                    "UPDATE node SET spill_tools_json=?2 WHERE id=?1",
+                    rusqlite::params![id, body],
+                )?;
             }
         }
     }
@@ -155,7 +169,8 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert!(
-            plan.iter().any(|s| s.contains("SEARCH node USING COVERING INDEX node_spill_tools")),
+            plan.iter()
+                .any(|s| s.contains("SEARCH node USING COVERING INDEX node_spill_tools")),
             "{plan:?}"
         );
         assert!(!plan.iter().any(|s| s.contains("SCAN")), "{plan:?}");
@@ -166,34 +181,72 @@ mod tests {
 mod bounded_tests {
     use super::*;
     use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-    use std::sync::{Arc,atomic::{AtomicUsize,Ordering}};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     #[test]
     fn spill_tool_sources_huge_payload_never_read_and_vm_steps_identical() {
-        let db=Connection::open_in_memory().unwrap();
+        let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE node(id TEXT PRIMARY KEY,payload_json TEXT,spill_tools_json TEXT); CREATE INDEX node_spill_tools ON node(id,spill_tools_json);").unwrap();
         let meta=serde_json::to_string(&from_outputs(&[serde_json::json!({"type":"function_call_output","call_id":"c","output":"{\"execution_id\":\"e\"}"})])).unwrap();
-        for (id,size) in [("small",16),("large",16*1024*1024)] {
-            db.execute("INSERT INTO node VALUES(?1,?2,?3)",rusqlite::params![id,serde_json::json!({"output":"x".repeat(size)}).to_string(),meta]).unwrap();
+        for (id, size) in [("small", 16), ("large", 16 * 1024 * 1024)] {
+            db.execute(
+                "INSERT INTO node VALUES(?1,?2,?3)",
+                rusqlite::params![
+                    id,
+                    serde_json::json!({"output":"x".repeat(size)}).to_string(),
+                    meta
+                ],
+            )
+            .unwrap();
         }
         // VM counts alone do not measure JSON function work. Deny payload access as well.
-        db.authorizer(Some(|context:AuthContext<'_>| match context.action {
-            AuthAction::Read {table_name:"node",column_name:"payload_json"} => Authorization::Deny,
-            _=>Authorization::Allow,
-        })).unwrap();
-        let steps=Arc::new(AtomicUsize::new(0));let observed=steps.clone();
-        db.progress_handler(1,Some(move ||{observed.fetch_add(1,Ordering::Relaxed);false}));
-        let mut counts=Vec::new();
-        for id in ["small","large"] {
-            steps.store(0,Ordering::Relaxed);
-            assert_eq!(load(&db,id).unwrap().items[0].execution_id.as_deref(),Some("e"));
+        db.authorizer(Some(|context: AuthContext<'_>| match context.action {
+            AuthAction::Read {
+                table_name: "node",
+                column_name: "payload_json",
+            } => Authorization::Deny,
+            _ => Authorization::Allow,
+        }))
+        .unwrap();
+        let steps = Arc::new(AtomicUsize::new(0));
+        let observed = steps.clone();
+        db.progress_handler(
+            1,
+            Some(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+                false
+            }),
+        );
+        let mut counts = Vec::new();
+        for id in ["small", "large"] {
+            steps.store(0, Ordering::Relaxed);
+            assert_eq!(
+                load(&db, id).unwrap().items[0].execution_id.as_deref(),
+                Some("e")
+            );
             counts.push(steps.load(Ordering::Relaxed));
         }
-        assert_eq!(counts[0],counts[1]); assert!(counts[0]<100,"{counts:?}");
-        db.progress_handler(0,None::<fn()->bool>);
-        db.authorizer(None::<fn(AuthContext<'_>)->Authorization>).unwrap();
-        let mut statement=db.prepare(&format!("EXPLAIN {LOOKUP_SQL}")).unwrap();
-        let opcodes=statement.query_map(["large"],|row|Ok((row.get::<_,String>(1)?,row.get::<_,Option<String>>(5)?))).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
-        assert!(!opcodes.iter().any(|(op,_)|op=="DeferredSeek"));
-        assert!(!opcodes.iter().any(|(op,arg)|op=="Function" && arg.as_ref().is_some_and(|s|s.contains("json"))));
+        assert_eq!(counts[0], counts[1]);
+        assert!(counts[0] < 100, "{counts:?}");
+        db.progress_handler(0, None::<fn() -> bool>);
+        db.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)
+            .unwrap();
+        let mut statement = db.prepare(&format!("EXPLAIN {LOOKUP_SQL}")).unwrap();
+        let opcodes = statement
+            .query_map(["large"], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, Option<String>>(5)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(!opcodes.iter().any(|(op, _)| op == "DeferredSeek"));
+        assert!(
+            !opcodes
+                .iter()
+                .any(|(op, arg)| op == "Function"
+                    && arg.as_ref().is_some_and(|s| s.contains("json")))
+        );
     }
 }
