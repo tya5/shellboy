@@ -3544,12 +3544,15 @@ mod thread_list_plan_tests {
             Some("receipt-0")
         );
         let sql = awaiting_human_candidates_sql();
-        let plan = db
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap();
+        let plan = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
         let details: Vec<String> = plan
             .query_map(
-                params!["", 1, i64::MAX, (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64],
+                params![
+                    "",
+                    1,
+                    i64::MAX,
+                    (crate::protocol::MAX_PENDING_REPLY_DUTIES + 1) as i64
+                ],
                 |r| r.get(3),
             )
             .unwrap()
