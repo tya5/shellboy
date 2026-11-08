@@ -3863,19 +3863,17 @@ async fn growing_turn_with_failing_summaries(
         // An unknown tool name returns a short error, so no spill can shrink it.
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
         let mut summaries = 0;
-        for index in 0..19 {
-            let request = incoming(&control, &mut receive).await;
-            if request.body["tools"] == json!([]) {
-                summaries += 1;
+        for index in 0..=19 {
+            let ordinary=loop {
+                let request=incoming(&control,&mut receive).await;
+                if request.body["tools"]!=json!([]) {break request;}
+                summaries+=1;
+                assert!(summaries<80,"unbounded automatic summary loop");
                 request.reply.send(summary_reply()).unwrap();
-                let ordinary = incoming(&control, &mut receive).await;
-                ordinary.reply.send((200, tool(index, 200 + index))).unwrap();
-                continue;
-            }
-            request.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap();
+            };
+            if index==19 { ordinary.reply.send((200,answer("finished"))).unwrap(); }
+            else { ordinary.reply.send((200,tool(index,if index<2 {100}else{200+index}))).unwrap(); }
         }
-        let last = incoming(&control, &mut receive).await;
-        last.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
         let (mut closed, mut active) = (0, 0);
@@ -5311,7 +5309,7 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         let owner = proactive_owner(root.path(), &url, "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
-        send(&control, &target, &"protected current ".repeat(if oversized {70_000}else{1})).await;
+        send(&control, &target, &"protected current ".repeat(70_000)).await;
         let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
         for index in 0..2 {
             incoming(&control, &mut receive).await.reply.send((200, json!({
