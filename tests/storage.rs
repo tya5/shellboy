@@ -1225,6 +1225,9 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
             "ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id);
         UPDATE run SET owner_run_id='parent-run' WHERE id='child-run';
         CREATE INDEX runs_by_owner ON run(owner_run_id,state);
+        DROP INDEX wait_recovery_thread;
+        CREATE INDEX wait_recovery_thread ON event(json_extract(payload_ref_json,'$.thread_id')) WHERE kind='child_recovery_wait';
+        INSERT INTO event(id,kind,payload_ref_json,source_json,created_at) VALUES('legacy-recovery','child_recovery_wait','{\"thread_id\":\"child\",\"saved\":true}','{}','now');
         DELETE FROM schema_migration WHERE version=38; PRAGMA user_version=37;",
         )
         .unwrap();
@@ -1232,6 +1235,8 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
     for _ in 0..2 {
         let db = DbWorker::open(&path).await.unwrap();
         db.call(|db| {
+            assert_eq!(db.query_row("SELECT kind FROM event WHERE id='legacy-recovery'",[],|r|r.get::<_,String>(0))?,"recovery_wait");
+            assert!(db.query_row("SELECT json_extract(payload_ref_json,'$.saved') FROM event WHERE id='legacy-recovery'",[],|r|r.get::<_,bool>(0))?);
             assert_eq!(
                 db.query_row(
                     "SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",

@@ -332,6 +332,19 @@ mod activity_migration_tests {
     use super::*;
 
     #[test]
+    fn failed_run_rebuild_rolls_back_and_restores_foreign_keys() {
+        let mut db=Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.pragma_update(None,"foreign_keys",true).unwrap();
+        // Inject a collision after FK checks are disabled, before any Run copy.
+        db.execute_batch("CREATE TABLE independent_run(collision INTEGER); DELETE FROM schema_migration WHERE version=38; PRAGMA user_version=37;").unwrap();
+        assert!(run(&mut db,37,&|_,_|{},&||{}).is_err());
+        assert_eq!(db.query_row("PRAGMA foreign_keys",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),37);
+        assert_eq!(db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='run'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+    }
+
+    #[test]
     fn recovery_index_upgrades_from_each_recent_schema() {
         for start in [24, 25, 26, 27, 28] {
             let mut db = Connection::open_in_memory().unwrap();
