@@ -519,12 +519,11 @@ are recorded in D-243-1, D-244-2 and D-275-1 and the adopted behavior in [protoc
 
 Protocol 5 adds `awaiting_human_count_exact` to `ThreadSummary`. It defaults to
 true when absent and is omitted when true; false means the accompanying count
-17 is a lower bound (17 or more), never an exact 17. Since the protocol uses
-strict typed result records, this public response change advances the wire
-version.
+17 is a lower bound (17 or more), never an exact 17. Output records tolerate additive fields; the version boundary is instead due
+to the changed count/oldest semantics and incompatible live cursor behavior.
 
 
 Protocol 5 adds `ThreadSummary.awaiting_human_count_exact`. It defaults to true
 when absent and is omitted when true; false means `awaiting_human_count` 17 is
-a lower bound of 17 or more. The protocol advances because typed result records
-are strict.
+a lower bound of 17 or more. The version boundary accounts for changed existing-field semantics and
+incompatible live cursor behavior, not unknown-field strictness.

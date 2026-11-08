@@ -1,5 +1,9 @@
 # Shellboy v0.11.0 release notes (draft)
 
+## Breaking: Protocol 5
+
+Protocol 5 requires an exact-version handshake: protocol-4 clients and owners cannot communicate with protocol-5 peers. Upgrade the owner, CLI and external clients together; there is no silent downgrade. Human reply counts now represent 17 or more as a lower bound, oldest can be unknown, and old Awaiting snapshot cursors expire under the live cursor contract.
+
 ## Before upgrading
 
 - The conversation database migrates from schema 32 to 38. Migrations 33-35 add index quantization metadata and lookup indexes, Thread tags and cwd lookup, and bounded reclaim indexes; 36 adds bounded spill provenance and 37 records branch kinds, and 38 adds a partial index for pending human replies. Back up data and stop the owner before upgrading; older binaries cannot use the upgraded schema.
@@ -23,7 +27,7 @@
 #279 is accepted for this candidate; #278 remains excluded. Final candidate validation is pending.
 
 
-The candidate consists of main including the reviewed #262 16-item rejection variant. #276 and #280 are deferred to the next release. #278 and continuing-failure prompt improvements are also deferred unless a separate scope decision approves them. Main advanced after this branch base; final notes and validation must be reconciled with the exact candidate tip.
+The candidate consists of main including the reviewed #262 16-item rejection variant. #276 is in scope pending its reviewed train commit; #280 is deferred to the next release. #278 and continuing-failure prompt improvements are also deferred unless a separate scope decision approves them. Main advanced after this branch base; final notes and validation must be reconciled with the exact candidate tip.
 
 ## Validation and limitations
 
@@ -60,3 +64,5 @@ Evidence links refer to `docs/validation/acceptance.md` section names. Where no 
 Synthetic schema 32-to-37 SQL migration: 3.683 ms in one in-memory run on macOS arm64 with SQLite 3.51.0 (two Threads, one node). This excludes binary startup and is not a production-scale estimate. Ledger and original columns were checked.
 
 Synthetic schema 32-to-38 SQL migration: 5.101 ms in one in-memory run on macOS arm64 with SQLite 3.51.0 (two Threads, one node). This excludes binary startup and is not a production-scale estimate. Ledger, original columns and migration checks passed.
+
+| #276 independent Runs and reply outcomes; reviewed train SHA pending; `acceptance.md`: pending train integration | Yes | Pending reviewed integration | Pending final all-OS train CI | Unverified |

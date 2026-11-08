@@ -4307,8 +4307,11 @@ on `(target_thread_id, created_at)` for pending human replies.
 The leader's provisional 2026-11-08 follow-up chooses a single bounded lower
 bound contract: `awaiting_human_count` is exact through 16; value 17 with
 `awaiting_human_count_exact=false` means 17 or more. It does not mean exactly 17.
-The bool defaults to true and is omitted when true; this additive result field
-requires protocol 5 because typed results are strict. No stored receipts are
+The bool defaults to true and is omitted when true; output records tolerate
+unknown additive fields, so this field alone does not require a version bump.
+The adopted protocol 5 boundary instead accounts for the changed semantics of
+the existing count and oldest-time fields and the incompatible live cursor v2.
+Protocol 4 peers cannot safely assume an exact count or snapshot cursor behavior. No stored receipts are
 deleted, rewritten, or moved to ignored. For inexact counts, oldest timestamp
 is absent/unknown: exact oldest is the minimum `created_at`, not arrival order.
 

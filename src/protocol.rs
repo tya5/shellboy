@@ -233,7 +233,7 @@ pub fn schema_json() -> String {
     let document = serde_json::json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "https://shellboy.dev/schema/protocol-v5.json",
-        "title": "Shellboy local RPC protocol v4",
+        "title": "Shellboy local RPC protocol v5",
         "protocol_version": PROTOCOL_VERSION,
         "capabilities": PROTOCOL_CAPABILITIES,
         "operation_results": operation_results,
