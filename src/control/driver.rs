@@ -713,7 +713,6 @@ async fn recover_preparation(
                 execution_id: None,
             });
         control.changed_with_recovery(&target_thread, true);
-
     }
     // Keep the original typed failure as the one driver error. The recovery
     // reason is persisted above; the caller must not silently report success.

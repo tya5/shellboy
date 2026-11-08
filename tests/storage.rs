@@ -1212,7 +1212,9 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
         seed_thread(db,"parent")?; seed_thread(db,"child")?;
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('parent-run','parent','completed','now'),('child-run','child','live','now');
           INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('child-turn','child','child-run','running','now');
-          INSERT INTO shell_execution(id,owner_run_id,turn_id,state,shell_json,started_at) VALUES('owned-shell','child-run','child-turn','running','{}','now');
+          INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('owned-shell','child-run','child-turn','owned-shell','running','/','{}','UTF-8','UTF-8','open','now');
+          INSERT INTO node(id,kind,created_at,payload_json) VALUES('pending-request','user','now','{}');
+          INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('pending-request','pending-request','{}','child','pending-request','held','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');
           INSERT INTO app_meta(key,value) VALUES('reply-migration-witness','preserve');")?;
         Ok(())
     }).await.unwrap();
@@ -1260,6 +1262,7 @@ async fn schema_thirty_eight_detaches_runs_preserving_shells_turns_and_metadata(
                 )?,
                 "preserve"
             );
+            assert_eq!(db.query_row("SELECT json_extract(result_json,'$.reply.state') FROM receipt WHERE id='pending-request'",[],|r|r.get::<_,String>(0))?,"pending");
             assert_eq!(
                 db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))?,
                 1

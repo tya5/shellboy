@@ -487,11 +487,7 @@ mod tests {
         let snapshot =
             prepare(read_tx_limited(&db, "r", Some(&[("w".into(), "s-old".into())]), 10).unwrap());
         assert_eq!(
-            (
-                snapshot.shells,
-                snapshot.waits,
-                snapshot.overflow
-            ),
+            (snapshot.shells, snapshot.waits, snapshot.overflow),
             (4, Some(1), 0)
         );
         assert!(!snapshot.rows.iter().any(|r| matches!(&r.target, LiveWorkTarget::Shell { execution_id, .. } if execution_id == "s-old")));
@@ -667,11 +663,7 @@ mod tests {
         drop(db);
         let snapshot = prepare(raw);
         assert_eq!(
-            (
-                snapshot.shells,
-                snapshot.waits,
-                snapshot.overflow
-            ),
+            (snapshot.shells, snapshot.waits, snapshot.overflow),
             (4, Some(1), 2)
         );
         assert_eq!(snapshot.rows.len(), 3);

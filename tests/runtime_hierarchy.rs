@@ -272,8 +272,7 @@ fn alive(pid: i32) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_independent()
- {
+async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_independent() {
     let _fixture = FIXTURE.lock().await;
     let (url, mut requests, server) = proxy().await;
     let (directory, owner, control) = runtime(&url).await;
@@ -329,10 +328,25 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
     }
     let child_query = child.clone();
     let grand_query = grandchild.clone();
-    let (child_run,grand_run):(String,String)=control.store.database.call(move|db|Ok((
-        db.query_row("SELECT id FROM run WHERE thread_id=?1",[child_query],|r|r.get(0))?,
-        db.query_row("SELECT id FROM run WHERE thread_id=?1",[grand_query],|r|r.get(0))?
-    ))).await.unwrap();
+    let (child_run, grand_run): (String, String) = control
+        .store
+        .database
+        .call(move |db| {
+            Ok((
+                db.query_row(
+                    "SELECT id FROM run WHERE thread_id=?1",
+                    [child_query],
+                    |r| r.get(0),
+                )?,
+                db.query_row(
+                    "SELECT id FROM run WHERE thread_id=?1",
+                    [grand_query],
+                    |r| r.get(0),
+                )?,
+            ))
+        })
+        .await
+        .unwrap();
     command(
         &control,
         Command::RunStop(RunTarget {
@@ -340,13 +354,28 @@ async fn stopping_parent_reaps_only_its_shell_leaving_child_and_grandchild_runs_
         }),
     )
     .await;
-    state(&control,"run",parent.run_id.as_ref().unwrap(),"stopped").await;
-    assert!(!alive(pids[0]),"parent shell must be reaped");
-    for run in [&child_run,&grand_run,independent.run_id.as_ref().unwrap()] {state(&control,"run",run,"live").await;}
-    for pid in &pids[1..] {assert!(alive(*pid),"independent shell {pid} must remain alive");}
+    state(&control, "run", parent.run_id.as_ref().unwrap(), "stopped").await;
+    assert!(!alive(pids[0]), "parent shell must be reaped");
+    for run in [&child_run, &grand_run, independent.run_id.as_ref().unwrap()] {
+        state(&control, "run", run, "live").await;
+    }
+    for pid in &pids[1..] {
+        assert!(alive(*pid), "independent shell {pid} must remain alive");
+    }
     // Stop each independent Run explicitly; its own late response stays fenced.
-    for run in [&child_run,&grand_run] {command(&control,Command::RunStop(RunTarget{run_id:run.clone()})).await;state(&control,"run",run,"stopped").await;}
-    for pid in &pids[..3] {assert!(!alive(*pid));}
+    for run in [&child_run, &grand_run] {
+        command(
+            &control,
+            Command::RunStop(RunTarget {
+                run_id: run.clone(),
+            }),
+        )
+        .await;
+        state(&control, "run", run, "stopped").await;
+    }
+    for pid in &pids[..3] {
+        assert!(!alive(*pid));
+    }
     for thread in [&parent.thread_id, &child, &grandchild] {
         let _ = held
             .remove(thread)

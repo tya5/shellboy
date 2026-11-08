@@ -36,15 +36,8 @@ fn phase_label(state: &str, language: UiLanguage) -> Option<&'static str> {
 #[derive(Clone, Copy)]
 enum WorkMessage<'a> {
     State(&'a str),
-    Heading {
-        empty: bool,
-        folded: bool,
-    },
-    Counts {
-        shells: u64,
-
-        waits: Option<u64>,
-    },
+    Heading { empty: bool, folded: bool },
+    Counts { shells: u64, waits: Option<u64> },
     More(u64),
     OutputAge(u64),
     Elapsed(u64),

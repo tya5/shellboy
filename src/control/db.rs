@@ -5194,7 +5194,7 @@ mod owned_child_notification_tests {
     }
 
     #[tokio::test]
-    async fn owned_new_run_acceptance_notifies_parent_without_waking_it_or_replaying_effects() {
+    async fn new_run_acceptance_is_independent_and_does_not_notify_parent() {
         for mode in ["owned", "human", "foreign", "stopping-owner", "rollback"] {
             let root = tempfile::tempdir().unwrap();
             let db = DbWorker::open(root.path().join("fixture.db"))
@@ -5264,27 +5264,10 @@ mod owned_child_notification_tests {
                 .unwrap();
             } else {
                 let first = result.unwrap();
-                assert_eq!(
-                    first.changed_threads,
-                    if mode == "owned" {
-                        vec!["parent".to_owned()]
-                    } else {
-                        vec![]
-                    }
-                );
+                assert!(first.changed_threads.is_empty());
                 assert_eq!(first.quiet_wake_threads, vec!["child".to_owned()]);
                 assert!(first.wake_threads.is_empty() && first.stop_runs.is_empty());
-                let owner = db
-                    .call(|db| {
-                        Ok(db.query_row(
-                            "SELECT owner_run_id FROM run WHERE thread_id='child'",
-                            [],
-                            |row| row.get::<_, Option<String>>(0),
-                        )?)
-                    })
-                    .await
-                    .unwrap();
-                assert_eq!(owner.as_deref(), (mode == "owned").then_some("parent-run"));
+                db.call(|db| {assert_eq!(db.query_row("SELECT count(*) FROM pragma_table_info('run') WHERE name='owner_run_id'",[],|r|r.get::<_,i64>(0))?,0);Ok(())}).await.unwrap();
                 let replay = store.execute(request, caller.clone()).await.unwrap();
                 assert_eq!(replay.result, first.result);
                 assert!(
@@ -5323,7 +5306,7 @@ mod owned_child_notification_tests {
     }
 
     #[tokio::test]
-    async fn recovery_and_completion_owner_nudges_notify_live_or_stopping_parents_only() {
+    async fn saved_child_transitions_do_not_synthesize_parent_notifications() {
         for parent_state in ["live", "stopping", "completed"] {
             let root = tempfile::tempdir().unwrap();
             let config = root.path().join("config.toml");
@@ -5361,25 +5344,9 @@ mod owned_child_notification_tests {
                     owner.db.call(|db| {db.execute_batch("UPDATE turn SET state='completed' WHERE id='child-turn'; UPDATE run SET state='completed' WHERE id='child-run';")?;Ok(())}).await.unwrap();
                 }
 
-                if parent_state == "completed" {
-                    assert!(matches!(
-                        events.try_recv(),
-                        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                    ));
-                } else {
-                    assert!(
-                        matches!(events.try_recv(),Ok(EngineEvent::Changed {thread_id,recovery:false}) if thread_id=="parent")
-                    );
-                    assert!(matches!(
-                        events.try_recv(),
-                        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-                    ));
-                }
-                assert_eq!(
-                    nudge.notified().now_or_never().is_some(),
-                    parent_state == "live",
-                    "only the existing live-parent quiet nudge may run"
-                );
+                assert!(matches!(events.try_recv(),Err(tokio::sync::broadcast::error::TryRecvError::Empty)));
+                assert!(nudge.notified().now_or_never().is_none());
+
             }
             control.live.test_drivers().lock().await.clear();
             owner.shutdown().await.unwrap();
@@ -5397,7 +5364,7 @@ mod driverless_child_stop_notification_tests {
     use futures_util::FutureExt;
 
     #[tokio::test]
-    async fn stopping_an_offscreen_recovery_child_refreshes_parent_only_after_successful_drain() {
+    async fn stopping_an_offscreen_run_never_refreshes_or_stops_unrelated_runs() {
         for (parent_state, fail_drain) in [
             ("live", false),
             ("stopping", false),
@@ -5430,7 +5397,7 @@ mod driverless_child_stop_notification_tests {
                 }
                 let oldest=tx.prepare("SELECT id FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping') ORDER BY created_at,id LIMIT 3")?.query_map([],|row|row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
                 assert_eq!(oldest,["run-0","run-1","run-2"],"target run-3 is outside the bounded display dependencies");
-                assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,4);
+                assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2','run-3') AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,4);
                 if fail_drain {
                     tx.execute_batch("CREATE TRIGGER reject_child_drain BEFORE UPDATE OF state ON run WHEN OLD.id='run-3' AND NEW.state='stopped' BEGIN SELECT RAISE(ABORT,'synthetic stopped-child rollback'); END;")?;
                 }
@@ -5495,7 +5462,7 @@ mod driverless_child_stop_notification_tests {
             }
             assert_eq!(
                 parent_notifications,
-                usize::from(!fail_drain && parent_state != "completed")
+                0
             );
             // One hint when the stopping state commits (#243) and one after the drain.
             assert_eq!(child_notifications, 2);
@@ -5507,7 +5474,7 @@ mod driverless_child_stop_notification_tests {
             owner.db.call(move |db| {
                 let target=db.query_row("SELECT r.state,u.state FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id='run-3'",[],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?)))?;
                 assert_eq!(target,if fail_drain {("stopping".into(),"recovery_wait".into())}else{("stopped".into(),"stopped".into())});
-                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE owner_run_id='parent-run' AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,if fail_drain {4}else{3});
+                assert_eq!(db.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2','run-3') AND state IN ('live','stopping')",[],|row|row.get::<_,i64>(0))?,if fail_drain {4}else{3});
                 assert_eq!(db.query_row("SELECT count(*) FROM run WHERE id IN ('run-0','run-1','run-2') AND state='live'",[],|row|row.get::<_,i64>(0))?,3);
                 if fail_drain {db.execute_batch("DROP TRIGGER reject_child_drain;")?;}
                 Ok(())
