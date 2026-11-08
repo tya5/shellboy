@@ -82,6 +82,7 @@ impl Form {
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "archived" => FieldId::Archived,
+            "awaiting" => FieldId::Awaiting,
             "tags" => FieldId::Tags,
             "add_tags" => FieldId::AddTags,
             "remove_tags" => FieldId::RemoveTags,

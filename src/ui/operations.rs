@@ -1153,7 +1153,12 @@ impl Form {
                     v.push(f("query", "絞込み", String::new(), Text));
                     v.push(f(
                         "awaiting",
-                        "Awaiting",
+                        OperationId::ThreadList
+                            .spec()
+                            .field(FieldId::Awaiting)
+                            .expect("Thread list Awaiting field metadata")
+                            .field
+                            .label,
                         String::new(),
                         Choice(&["", "human"]),
                     ));
@@ -3747,7 +3752,7 @@ mod entry_tests {
 
 #[cfg(test)]
 mod language_rendering_tests {
-    use super::{Command, Context, Form, OpKind};
+    use super::{Command, Context, FieldId, Form, OpKind, OperationId, metadata};
     use crate::{config::UiLanguage, ui::UiState};
     use std::path::Path;
 
@@ -3807,6 +3812,21 @@ mod language_rendering_tests {
         for language in [UiLanguage::En, UiLanguage::Ja] {
             let mut form = Form::new(OpKind::ThreadList, &Context::default());
             form.language = language;
+            form.selected = form
+                .fields
+                .iter()
+                .position(|field| field.name == "awaiting")
+                .unwrap();
+            let metadata = form.selected_metadata().expect("Awaiting help metadata");
+            assert_eq!(metadata.field.id, FieldId::Awaiting);
+            assert_eq!(
+                form.field_label_for(&form.fields[form.selected]),
+                metadata::text_for(metadata.field.label_text(OperationId::ThreadList), language)
+            );
+            assert!(
+                !metadata::text_for(metadata.field.help_text(OperationId::ThreadList), language)
+                    .is_empty()
+            );
             let Command::ThreadList(args) = form.command(Path::new("/")).unwrap() else {
                 panic!("thread list command");
             };

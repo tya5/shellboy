@@ -10992,3 +10992,12 @@ Re-reviewed 127 existing src/ui/operations.rs labels: only their enclosing
 source-token pin changes; all reasons and categories are preserved and the
 English/Japanese label/help paths remain unchanged. Final exact-tip CI and
 independent review are required again; 35103a6c CI does not qualify this change.
+
+The 456e3060 normal run 42524524619 failed exactly one library test: strict
+owner-form coverage found the Awaiting form key missing from metadata_id.
+The follow-up binds that key to FieldId::Awaiting and uses the existing shared
+Japanese label. The bilingual regression now also checks selected help metadata
+and equality with the catalogue label in each language. The strict coverage
+assertion remains unchanged. All integration/termination/crash-recovery targets
+in that failed normal run passed; they do not make the entire run successful.
+A new exact-SHA pair of CI runs and independent review are still required.
