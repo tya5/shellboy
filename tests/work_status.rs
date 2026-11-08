@@ -79,7 +79,7 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
         .iter()
         .find(|i| i.kind == "run" && i.id == "owned")
         .unwrap();
-    assert_eq!(owned.owner_run_id.as_deref(), Some("root"));
+    assert!(owned.owner_run_id.is_none());
     assert_eq!(owned.parent_thread_id, None);
     let attempt = status.items.iter().find(|i| i.kind == "attempt").unwrap();
     assert_eq!(attempt.current_model, "current-model");
@@ -88,6 +88,7 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     assert_eq!(held.run_id, None);
     assert_eq!(held.message_id.as_deref(), Some("held-node"));
     let shell = status.items.iter().find(|i| i.kind == "shell").unwrap();
+    assert_eq!(shell.owner_run_id.as_deref(),Some("root"));
     assert!(matches!(&shell.targets[0],Command::ShellGet(a)if a.execution_id=="exec"));
     assert!(matches!(&shell.targets[1],Command::ShellRead(a)if a.execution_id=="exec"));
     assert!(shell.operation_id.is_none());

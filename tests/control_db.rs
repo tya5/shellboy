@@ -544,7 +544,7 @@ async fn stopping_one_run_does_not_freeze_organizational_children() {
             Some(origin),
         )
         .await;
-    assert_eq!(result.unwrap().result["assignment"],"new_run");
+    assert_eq!(result.unwrap().result["assignment"], "new_run");
     store
         .database
         .call(|connection| {
