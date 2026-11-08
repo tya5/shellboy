@@ -10943,3 +10943,25 @@ they are not the child delegation lifecycle. Reply duties use one recipient-tagg
 and Thread parentage remains organizational. New native shell/HTTP independence tests and completed-sender reply
 admission are implemented but still await focused validation. The nested OS-owner cleanup cases are shell ownership
 and intentionally unchanged. No real provider or user database is used.
+
+### #276 Claude review: synthetic migration comparison
+
+Command: `python3 scripts/dev/measure-run-owner-migration.py --base dc98c52cb3 --output /tmp/276-migration-comparison.json`.
+Measured on macOS 26.3.1 arm64, Python 3.12.7 / SQLite 3.51.0, using identical copies of a synthetic schema-37 DB.
+The DB contains exactly 1,000,000 completed Runs, one Thread, a star-shaped owner relation, and 512 separate 1 MiB
+unrelated padding rows. Seed size: 797,499,392 bytes. Actual user Run counts and data distribution are unknown;
+this fixture is not a claim to approximate a user's database. Setup/copy time is excluded from migration timing.
+
+Both methods first remove the owner cycle triggers and owner index. `ALTER TABLE run DROP COLUMN owner_run_id`
+fails after 1.2466110000386834 seconds: `error in table run after drop column: no such column: owner_run_id`.
+The remaining table-level owner self-check prevents this method; failure time is not a successful migration time.
+The table rebuild succeeds in 12.380933917011134 seconds, preserves all 1,000,000 Runs, and reports zero FK
+violations. Result DB size: 869,429,248 bytes. The two non-owner Run indexes are recreated; owner indexes/triggers
+are not. The rebuild is the valid minimal method among these two tested alternatives without writable-schema hacks,
+payload rewriting or one-off compatibility machinery. Timings are observations on this synthetic Python/SQLite
+environment, not predictions for real user databases or evidence for Rust's bundled SQLite performance.
+
+The existing Rust synthetic upgrade regression verifies shell/Turn IDs and pending reply receipts over two reopens;
+new schema/index and direct-self-wait changes still require the final focused checks and CI. Backup belongs to binary
+replacement operations, not a new migration shim. A stopped preliminary fixture setup did not produce a measurement;
+only the completed star-shaped fixture run supplies the numbers above.
