@@ -396,7 +396,7 @@ pub(crate) fn cancellation_wakes_tx(
 ) -> rusqlite::Result<Vec<String>> {
     let mut wakes = Vec::new();
     for message in messages {
-        let thread:Option<String>=db.query_row("SELECT e.target_thread_id FROM event e JOIN delivery d ON d.event_id=e.id JOIN run r ON r.id=d.recipient_id WHERE e.id=?1 AND d.state='pending' AND r.state='live'",[format!("reply-outcome-{message}-cancelled")],|r|r.get(0)).optional()?;
+        let thread:Option<String>=db.query_row("SELECT e.target_thread_id FROM event e JOIN delivery d ON d.event_id=e.id JOIN run r ON r.id=d.recipient_id WHERE e.id=?1 AND d.state='pending' AND r.state='live'",[format!("reply-outcome-{message}")],|r|r.get(0)).optional()?;
         if let Some(thread) = thread
             && !wakes.contains(&thread)
         {
@@ -436,15 +436,37 @@ fn outcome_tx(
         )
         .optional()?;
     let id = format!("reply-outcome-{message}");
+    if db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM event WHERE id=?1)",
+        [&id],
+        |r| r.get::<_, bool>(0),
+    )? {
+        return Ok(None);
+    }
     db.execute(
         "UPDATE thread SET revision=revision+1 WHERE id=?1",
         [&thread],
     )?;
     let payload = json!({"kind":"reply_outcome","message_id":message,"state":state});
-    db.execute("INSERT OR IGNORE INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at,source_json) VALUES(?1,?2,?3,?4,?5,?6,'{}')",params![id,thread,run,if run.is_some(){"reply_outcome"}else{"context_changed"},payload.to_string(),at])?;
+    let run = match run {
+        Some(run) => Some(run),
+        None => {
+            let stopping: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",
+                [&thread],
+                |r| r.get(0),
+            )?;
+            if stopping {
+                None
+            } else {
+                Some(super::db::start_run_tx(db, &thread, json!({"kind":"shellboy"}), at)?.0)
+            }
+        }
+    };
+    db.execute("INSERT INTO event(id,target_thread_id,target_run_id,kind,payload_ref_json,created_at,source_json) VALUES(?1,?2,?3,?4,?5,?6,'{}')",params![id,thread,run,if run.is_some(){"reply_outcome"}else{"context_changed"},payload.to_string(),at])?;
     if let Some(run) = run {
         db.execute(
-            "INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) VALUES(?1,?2,'pending')",
+            "INSERT INTO delivery(event_id,recipient_id,state) VALUES(?1,?2,'pending')",
             params![id, run],
         )?;
         return Ok(Some(thread));
