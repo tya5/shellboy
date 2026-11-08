@@ -1077,13 +1077,13 @@ impl std::fmt::Debug for ConnectionTestArgs {
             .finish()
     }
 }
-args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool });
+args!(EventsWaitArgs { #[serde(default, skip_serializing_if="Option::is_none")] after: Option<String>, #[serde(default, skip_serializing_if="Vec::is_empty")] thread_ids: Vec<String>, #[serde(default = "timeout_ms")] timeout_ms: u64, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_text: bool, #[serde(default, skip_serializing_if="std::ops::Not::not")] include_reasoning_activity: bool });
 record!(EventChange {
     thread_id: String,
     seq: u64
 });
-// Unsaved model text (#243 E3). `offset` counts Unicode scalar values of this attempt's
-// stream, reasoning and refusal text included; it restarts with each attempt.
+// Unsaved answer text (#243 E3). `offset` counts Unicode scalar values in the attempt's
+// full model stream, including omitted reasoning deltas; it restarts with each attempt.
 record!(EventTextDelta {
     offset: u64,
     reasoning: bool,

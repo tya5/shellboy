@@ -325,8 +325,8 @@ Logical usage, reclaimable bytes, DB/WAL physical size, and SQLite reusable page
 
 ## Change hints: `events wait` (#243)
 
-`shellboy events wait [--after CURSOR] [--thread THREAD ...] [--timeout-ms N] [--text]` is a
-receipt-free long-poll. It answers "which Threads changed after this cursor?" without
+`shellboy events wait [--after CURSOR] [--thread THREAD ...] [--timeout-ms N] [--text]
+[--reasoning-activity]` is a receipt-free long-poll. It answers "which Threads changed after this cursor?" without
 reading saved data, so a client can stop polling `run get` / `turn get` / `shell list`
 on a timer and read them only after a hint.
 
@@ -336,6 +336,8 @@ on a timer and read them only after a hint.
 | `cursor` | Opaque; pass it as `--after` next time. Keep it even on `timeout`. Never parse it |
 | `changes` | Up to 64 `{thread_id, seq}`, ordered by `seq` ascending. One entry per Thread: repeated changes merge into the latest |
 | `more` | `true` means further matching changes exist already; call again at once with `cursor` |
+| `live_text` | Only with `--text`; non-reasoning answer deltas only, never reasoning content |
+| `reasoning_activity` | Only with `--reasoning-activity`; bounded attempt metadata, never reasoning content |
 
 Example: `{"status":"changed","cursor":"eyJ2IjoxLC4uLn0","changes":[{"thread_id":"01J...","seq":41}],"more":false}`.
 
@@ -385,7 +387,7 @@ attempt keeps at most 64 KiB of text; text unread when an attempt ends is gone. 
 
 ### Live reasoning activity (#275)
 
-When using `events wait --text`, `reasoning_activity` lists active model request attempts even before any text arrives. `elapsed_ms` is time since the local streaming attempt began; it does not establish when the provider started its own reasoning. `received_bytes` is absent until reasoning text arrives, then counts cumulative UTF-8 bytes of those deltas, not tokens. No reasoning content is exposed. Entries disappear when the attempt ends; a retry uses a new `attempt_id`. Timeout replies refresh elapsed time. This metadata shares the existing bounded, lossy in-memory preview lifecycle and is advertised by the `events.reasoning_activity` capability.
+When using `events wait --reasoning-activity`, `reasoning_activity` lists active model request attempts even before any text arrives. `elapsed_ms` is time since the local streaming attempt began; it does not establish when the provider started its own reasoning. `received_bytes` is absent until reasoning text arrives, then counts cumulative UTF-8 bytes of those deltas, not tokens. No reasoning content is exposed. Entries disappear when the attempt ends; a retry uses a new `attempt_id`. Timeout replies refresh elapsed time. This metadata shares the existing bounded, lossy in-memory preview lifecycle and is advertised by the `events.reasoning_activity` capability.
 
 ### Selected-path windows (`history window`, #268)
 

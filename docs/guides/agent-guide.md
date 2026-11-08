@@ -187,7 +187,7 @@ re-read every Thread you track. Hints coalesce and are not data; for a conclusio
 must not miss a transition, use `wait` with `thread_settled` (see below). Details:
 [CLI reference](cli-reference.md#change-hints-events-wait-243).
 
-`events wait --text` is for UI clients. It also reports active request attempts in `reasoning_activity`, so a client can show that an attempt is underway while waiting for content. `elapsed_ms` measures time since the local stream attempt started; `received_bytes` is absent until reasoning deltas arrive and then counts their UTF-8 bytes, not tokens. No reasoning content is exposed. Do not use it to follow another Thread: the text remains unsaved/lossy and retries replace it. Wait for the Thread to settle and read saved history.
+`events wait --reasoning-activity` is for UI clients that want progress metadata without receiving model text. It reports active local request attempts in `reasoning_activity`, including before content arrives. `elapsed_ms` measures time since the local stream attempt started; `received_bytes` is absent until reasoning deltas arrive and then counts their UTF-8 bytes, not tokens. No reasoning content is exposed. `events wait --text` is a separate opt-in that returns unsaved answer deltas; reasoning content is excluded from `live_text` even when this flag is set. Do not use either option to follow another Thread: the text remains unsaved/lossy and retries replace it. Wait for the Thread to settle and read saved history.
 
 ### Wait for any child Thread
 

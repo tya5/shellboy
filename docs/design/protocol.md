@@ -677,12 +677,12 @@ The design is in [config.md](config.md#reading-and-changing-through-the-owner-26
 
 ## Live text on `events.wait` (#243 E3)
 
-`include_text` (default false) adds `live_text` to the result: one entry per attempt in the filter
+`include_text` (default false) adds non-reasoning `live_text` answer deltas to the result: one entry per attempt in the filter
 that holds text, sorted by Thread ID, `{thread_id, attempt_id, gap, deltas:[{offset, reasoning, text}]}`.
 Absent unless asked. `status` gains `text`, returned when text is new and no change is; `baseline` and
 `resync_required` carry everything retained. `offset` counts Unicode scalar values already streamed by
-that attempt, reasoning and refusal included; it restarts with each attempt, and a retry has a new
-`attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
+that attempt, including reasoning and refusal in the model stream; `live_text` omits reasoning deltas. The offset
+restarts with each attempt, and a retry has a new `attempt_id`. `gap:true` means text after the caller's position was lost. A Thread missing from
 `live_text` holds no text: its attempt ended, or 16 others hold text and it enters later with `gap:true`. Start with a baseline.
 A looping client can get "work capacity is busy" at once when ordinary slots are full; nothing was applied, so poll again with the same cursor. The text is never saved, not a position in saved output and not part of any
 receipt; retained text is limited to 64 KiB per attempt, counting 40 bytes per delta, and 16 attempts, and all of it
@@ -691,7 +691,7 @@ and state record: [events-and-external-protocol](events-and-external-protocol.md
 
 ## Live reasoning activity on `events.wait` (#275)
 
-With `include_text` (`shellboy events wait --text`), `reasoning_activity` reports the active model request attempts for the selected Threads, including attempts that have not emitted text yet. Each entry is `{thread_id, attempt_id, elapsed_ms, received_bytes?}`. Presence means the request attempt has started; elapsed time is monotonic time since the local streaming attempt began, not a claim about provider-side scheduling. `received_bytes` is omitted until a reasoning delta is observed, then reports cumulative UTF-8 bytes received in reasoning deltas (not tokens); providers that supply no reasoning text or token count remain unknown. Reasoning content is never included in this field. An attempt retry gets a new ID; a finished attempt disappears. Activity uses the existing 16-attempt in-memory bound and is removed on stream completion/cancellation; it adds no persistence, queue, or worker. Timeout responses include the latest elapsed observation, so clients can use their own monotonic clock between polls. The additive field is covered by the `events.reasoning_activity` protocol capability; clients must check `Welcome.capabilities` before relying on it.
+With `include_reasoning_activity` (`shellboy events wait --reasoning-activity`), `reasoning_activity` reports the active model request attempts for the selected Threads, including attempts that have not emitted text yet. Each entry is `{thread_id, attempt_id, elapsed_ms, received_bytes?}`. Presence means the request attempt has started; elapsed time is monotonic time since the local streaming attempt began, not a claim about provider-side scheduling. `received_bytes` is omitted until a reasoning delta is observed, then reports cumulative UTF-8 bytes received in reasoning deltas (not tokens); providers that supply no reasoning text or token count remain unknown. Reasoning content is never included in this field. An attempt retry gets a new ID; a finished attempt disappears. Activity uses the existing 16-attempt in-memory bound and is removed on stream completion/cancellation; it adds no persistence, queue, or worker. Timeout responses include the latest elapsed observation, so clients can use their own monotonic clock between polls. The additive field is covered by the `events.reasoning_activity` protocol capability; clients must check `Welcome.capabilities` before relying on it.
 
 ## Stored keys and connection test: `credentials.set`, `credentials.clear`, `connection.test` (#269)
 

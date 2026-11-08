@@ -271,6 +271,7 @@ impl ChangeClock {
         &self,
         filter: &[String],
         include_text: bool,
+        include_reasoning_activity: bool,
     ) -> (u64, Vec<EventLiveText>, Vec<EventReasoningActivity>) {
         let inner = self.lock();
         let text = if include_text {
@@ -278,15 +279,21 @@ impl ChangeClock {
         } else {
             Vec::new()
         };
-        let activity = if include_text {
-            inner.reasoning_activity(filter)
+        let activity = if include_reasoning_activity {
+            inner.reasoning_activity_since(filter, 0, inner.seq).0
         } else {
             Vec::new()
         };
         (inner.seq, text, activity)
     }
     /// `None` when `after` is ahead of the clock (a forged or corrupt cursor).
-    pub(crate) fn poll(&self, after: u64, filter: &[String], include_text: bool) -> Option<Poll> {
+    pub(crate) fn poll(
+        &self,
+        after: u64,
+        filter: &[String],
+        include_text: bool,
+        include_reasoning_activity: bool,
+    ) -> Option<Poll> {
         let inner = self.lock();
         if after > inner.seq {
             return None;
@@ -297,8 +304,8 @@ impl ChangeClock {
             } else {
                 Vec::new()
             };
-            let reasoning_activity = if include_text {
-                inner.reasoning_activity_since(filter, after).0
+            let reasoning_activity = if include_reasoning_activity {
+                inner.reasoning_activity_since(filter, after, inner.seq).0
             } else {
                 Vec::new()
             };
@@ -330,8 +337,8 @@ impl ChangeClock {
         } else {
             Vec::new()
         };
-        let (reasoning_activity, reasoning_changed) = if include_text {
-            inner.reasoning_activity_since(filter, after)
+        let (reasoning_activity, reasoning_changed) = if include_reasoning_activity {
+            inner.reasoning_activity_since(filter, after, cursor)
         } else {
             (Vec::new(), false)
         };
@@ -347,34 +354,33 @@ impl ChangeClock {
 }
 
 impl Inner {
-    fn reasoning_activity(&self, filter: &[String]) -> Vec<EventReasoningActivity> {
-        self.reasoning_activity_since(filter, 0).0
-    }
-
     fn reasoning_activity_since(
         &self,
         filter: &[String],
         after: u64,
+        upto: u64,
     ) -> (Vec<EventReasoningActivity>, bool) {
         let now = std::time::Instant::now();
-        let mut changed = false;
+        let changed = self.reasoning_activity.iter().any(|(thread, activity)| {
+            (filter.is_empty() || filter.iter().any(|wanted| wanted == thread))
+                && activity.sequence > after
+                && activity.sequence <= upto
+        });
         let mut items: Vec<_> = self
             .reasoning_activity
             .iter()
-            .filter(|(thread, _)| {
-                filter.is_empty() || filter.iter().any(|wanted| wanted == *thread)
+            .filter(|(thread, activity)| {
+                (filter.is_empty() || filter.iter().any(|wanted| wanted == *thread))
+                    && activity.sequence <= upto
             })
-            .map(|(thread, activity)| {
-                changed |= activity.sequence > after;
-                EventReasoningActivity {
-                    thread_id: thread.clone(),
-                    attempt_id: activity.attempt.clone(),
-                    elapsed_ms: now
-                        .saturating_duration_since(activity.started)
-                        .as_millis()
-                        .min(u64::MAX as u128) as u64,
-                    received_bytes: activity.received_bytes,
-                }
+            .map(|(thread, activity)| EventReasoningActivity {
+                thread_id: thread.clone(),
+                attempt_id: activity.attempt.clone(),
+                elapsed_ms: now
+                    .saturating_duration_since(activity.started)
+                    .as_millis()
+                    .min(u64::MAX as u128) as u64,
+                received_bytes: activity.received_bytes,
             })
             .collect();
         items.sort_by(|a, b| a.thread_id.cmp(&b.thread_id));
@@ -394,6 +400,9 @@ impl Inner {
             for delta in entry.deltas.range(start..) {
                 if delta.seq > upto {
                     break;
+                }
+                if delta.reasoning {
+                    continue;
                 }
                 match deltas.last_mut() {
                     Some(last) if last.reasoning == delta.reasoning => {
@@ -441,16 +450,16 @@ mod tests {
         for id in ["a", "b", "a", "a", "c"] {
             clock.record(id);
         }
-        let (changes, more, cursor) = ready(clock.poll(0, &[], false));
+        let (changes, more, cursor) = ready(clock.poll(0, &[], false, false));
         assert_eq!(
             changes,
             vec![("b".into(), 2), ("a".into(), 4), ("c".into(), 5)]
         );
         assert!(!more);
         assert_eq!(cursor, 5);
-        let (changes, _, _) = ready(clock.poll(2, &[], false));
+        let (changes, _, _) = ready(clock.poll(2, &[], false, false));
         assert_eq!(changes.len(), 2);
-        let (none, _, cursor) = ready(clock.poll(5, &[], false));
+        let (none, _, cursor) = ready(clock.poll(5, &[], false, false));
         assert!(none.is_empty());
         assert_eq!(cursor, 5);
     }
@@ -460,10 +469,10 @@ mod tests {
         let clock = ChangeClock::new();
         clock.record("a");
         clock.record("b");
-        let (changes, _, cursor) = ready(clock.poll(0, &["b".into()], false));
+        let (changes, _, cursor) = ready(clock.poll(0, &["b".into()], false, false));
         assert_eq!(changes, vec![("b".into(), 2)]);
         assert_eq!(cursor, 2);
-        let (changes, _, cursor) = ready(clock.poll(0, &["zzz".into()], false));
+        let (changes, _, cursor) = ready(clock.poll(0, &["zzz".into()], false, false));
         assert!(changes.is_empty());
         assert_eq!(cursor, 2);
     }
@@ -474,11 +483,11 @@ mod tests {
         for i in 0..100 {
             clock.record(&format!("t{i}"));
         }
-        let (first, more, cursor) = ready(clock.poll(0, &[], false));
+        let (first, more, cursor) = ready(clock.poll(0, &[], false, false));
         assert_eq!(first.len(), MAX_EVENT_CHANGES);
         assert!(more);
         assert_eq!(cursor, 64);
-        let (rest, more, cursor) = ready(clock.poll(cursor, &[], false));
+        let (rest, more, cursor) = ready(clock.poll(cursor, &[], false, false));
         assert_eq!(rest.len(), 36);
         assert!(!more);
         assert_eq!(cursor, 100);
@@ -493,11 +502,11 @@ mod tests {
         }
         // "a" (seq 1) was evicted: a reader at 0 may have missed it.
         assert!(matches!(
-            clock.poll(0, &[], false),
+            clock.poll(0, &[], false, false),
             Some(Poll::Resync { head: 4, .. })
         ));
         // A reader at the floor has already seen everything evicted.
-        let (changes, _, _) = ready(clock.poll(1, &[], false));
+        let (changes, _, _) = ready(clock.poll(1, &[], false, false));
         assert_eq!(changes.len(), 3);
         assert!(clock.lock().by_thread.len() <= 3);
     }
@@ -509,12 +518,12 @@ mod tests {
             clock.record("a");
         }
         clock.record("b");
-        let (changes, _, _) = ready(clock.poll(0, &[], false));
+        let (changes, _, _) = ready(clock.poll(0, &[], false, false));
         assert_eq!(changes.len(), 2);
     }
 
     fn text_poll(clock: &ChangeClock, after: u64, filter: &[String]) -> (Vec<EventLiveText>, u64) {
-        match clock.poll(after, filter, true) {
+        match clock.poll(after, filter, true, false) {
             Some(Poll::Ready { text, cursor, .. }) => (text, cursor),
             _ => panic!("expected ready"),
         }
@@ -530,14 +539,16 @@ mod tests {
         clock.record_text("t", "a1", 0, "he", false);
         clock.record_text("t", "a1", 2, "llo", false);
         clock.record_text("t", "a1", 5, "hm", true);
-        clock.record_text("t", "a1", 7, "!", false);
-        clock.record_text("t", "a1", 8, "", false);
+        clock.record_text("t", "a1", 7, "m", true);
+        clock.record_text("t", "a1", 8, "m", true);
+        clock.record_text("t", "a1", 9, "!", false);
+        clock.record_text("t", "a1", 10, "", false);
         // Plain poll: no text, one change, cursor past the text.
-        let (changes, _, cursor) = ready(clock.poll(1, &[], false));
+        let (changes, _, cursor) = ready(clock.poll(1, &[], false, false));
         assert!(changes.is_empty());
-        assert_eq!(cursor, 5);
-        // From seq 2 on: a run of one kind merges; kinds keep their order and offsets.
-        let (text, _) = text_poll(&clock, 2, &[]);
+        assert_eq!(cursor, 7);
+        // From seq 2 on: answer text merges; reasoning is excluded but offsets stay global.
+        let (text, _) = text_poll(&clock, 1, &[]);
         let deltas = &text[0].deltas;
         assert_eq!(text[0].attempt_id, "a1");
         assert!(!text[0].gap);
@@ -546,11 +557,18 @@ mod tests {
                 .iter()
                 .map(|d| (d.offset, d.reasoning, d.text.as_str()))
                 .collect::<Vec<_>>(),
-            [(2, false, "llo"), (5, true, "hm"), (7, false, "!")]
+            [(0, false, "hello!")]
         );
-        let (text, cursor) = text_poll(&clock, 5, &[]);
-        assert!(text[0].deltas.is_empty());
-        assert_eq!(cursor, 5);
+        let (text, cursor) = text_poll(&clock, 6, &[]);
+        assert_eq!(
+            text[0]
+                .deltas
+                .iter()
+                .map(|d| (d.offset, d.reasoning, d.text.as_str()))
+                .collect::<Vec<_>>(),
+            [(9, false, "!")]
+        );
+        assert_eq!(cursor, 7);
     }
 
     #[test]
@@ -563,7 +581,7 @@ mod tests {
             reasoning_activity,
             reasoning_changed,
             ..
-        }) = clock.poll(0, &[], true)
+        }) = clock.poll(0, &[], false, true)
         else {
             panic!("expected start");
         };
@@ -582,7 +600,7 @@ mod tests {
             reasoning_activity,
             reasoning_changed,
             ..
-        }) = clock.poll(start_cursor, &[], true)
+        }) = clock.poll(start_cursor, &[], false, true)
         else {
             panic!("expected reasoning delta");
         };
@@ -593,7 +611,7 @@ mod tests {
         );
         assert!(
             clock
-                .poll(0, &["other".into()], true)
+                .poll(0, &["other".into()], false, true)
                 .is_some_and(|poll| match poll {
                     Poll::Ready {
                         reasoning_activity, ..
@@ -604,7 +622,7 @@ mod tests {
         drop(guard);
         assert!(
             clock
-                .poll(start_cursor, &[], true)
+                .poll(start_cursor, &[], false, true)
                 .is_some_and(|poll| match poll {
                     Poll::Ready {
                         reasoning_activity, ..
@@ -719,30 +737,76 @@ mod tests {
     #[test]
     fn a_paged_change_reply_only_returns_text_up_to_its_cursor() {
         let clock = ChangeClock::new();
+        let changed = Notify::new();
         for i in 0..MAX_EVENT_CHANGES {
             clock.record(&format!("t{i}"));
-            clock.record_text("s", "a", i as u64, "x", false);
         }
-        clock.record("last");
-        clock.record_text("s", "a", 64, "x", false);
+        clock.record_text("attempt-thread", "attempt", 0, "x", false);
+        let text_start_seq = clock.lock().text["attempt-thread"].deltas[0].seq;
+        let guard = clock.live_text_guard("attempt-thread", "attempt", &changed);
+        let start_seq = clock.lock().reasoning_activity["attempt-thread"].sequence;
+        clock.record_text("attempt-thread", "attempt", 1, "x", true);
+        for i in 0..MAX_EVENT_CHANGES {
+            clock.record(&format!("v{i}"));
+        }
+        for i in 0..(MAX_EVENT_CHANGES - 4) {
+            clock.record(&format!("w{i}"));
+        }
+        clock.record("attempt-thread");
         let Some(Poll::Ready {
             changes,
             more,
             cursor,
-            text,
+            reasoning_activity,
             ..
-        }) = clock.poll(0, &[], true)
+        }) = clock.poll(0, &[], false, true)
         else {
-            panic!("expected ready")
+            panic!("expected first page")
         };
-        assert_eq!(changes.len(), MAX_EVENT_CHANGES);
         assert!(more);
-        assert_eq!(cursor, changes.last().unwrap().1);
-        let first: String = text[0].deltas.iter().map(|d| d.text.clone()).collect();
-        let (rest, _) = text_poll(&clock, cursor, &[]);
-        let second: String = rest[0].deltas.iter().map(|d| d.text.clone()).collect();
-        assert_eq!(rest[0].deltas[0].offset as usize, first.len());
-        assert_eq!(first.len() + second.len(), 65);
+        assert_eq!(changes.len(), MAX_EVENT_CHANGES);
+        assert!(cursor < start_seq);
+        assert_eq!(cursor, MAX_EVENT_CHANGES as u64);
+        assert!(text_start_seq > 0);
+        assert!(
+            reasoning_activity.is_empty(),
+            "future attempt leaked into first page"
+        );
+        let Some(Poll::Ready {
+            changes,
+            more,
+            cursor,
+            reasoning_activity,
+            ..
+        }) = clock.poll(cursor, &[], false, true)
+        else {
+            panic!("expected second page")
+        };
+        assert!(more);
+        assert_eq!(changes.len(), MAX_EVENT_CHANGES);
+        assert!(cursor >= start_seq);
+        assert_eq!(reasoning_activity.len(), 1);
+        assert_eq!(reasoning_activity[0].attempt_id, "attempt");
+        drop(guard);
+        let end_seq = clock.lock().seq;
+        assert!(cursor < end_seq, "attempt end must be on a later page");
+        let Some(Poll::Ready {
+            changes,
+            more,
+            cursor,
+            reasoning_activity,
+            ..
+        }) = clock.poll(cursor, &[], false, true)
+        else {
+            panic!("expected final page")
+        };
+        assert!(!more);
+        assert!(changes.iter().any(|(_, seq)| *seq == end_seq));
+        assert!(
+            reasoning_activity.is_empty(),
+            "ended attempt appeared before its end cursor"
+        );
+        assert_eq!(cursor, end_seq);
     }
 
     #[test]
@@ -757,7 +821,7 @@ mod tests {
         for i in 0..MAX_EVENT_CHANGES {
             clock.record(&format!("{id}{i}"));
         }
-        let Some(Poll::Ready { changes, text, .. }) = clock.poll(0, &[], true) else {
+        let Some(Poll::Ready { changes, text, .. }) = clock.poll(0, &[], true, true) else {
             panic!("expected ready")
         };
         let reply = serde_json::to_vec(&crate::protocol::EventsWaitResult {
@@ -789,6 +853,7 @@ mod tests {
                 thread_ids: vec![],
                 timeout_ms: 0,
                 include_text: true,
+                include_reasoning_activity: false,
             })
         };
         let changed = control.changed.notified();
@@ -838,7 +903,8 @@ mod tests {
                     after,
                     thread_ids: vec!["t".into()],
                     timeout_ms: 3_600_000,
-                    include_text: true,
+                    include_text: false,
+                    include_reasoning_activity: true,
                 }),
             )
         };
@@ -869,6 +935,7 @@ mod tests {
             progress["reasoning_activity"][0]["received_bytes"],
             "秘密".len() as u64
         );
+        assert_eq!(progress.get("live_text"), None);
         assert_eq!(progress["reasoning_activity"][0].get("text"), None);
         let cursor = progress["cursor"].as_str().unwrap().to_owned();
         drop(guard);
@@ -899,6 +966,7 @@ mod tests {
                     thread_ids: vec![thread.to_owned()],
                     timeout_ms: 3_600_000,
                     include_text,
+                    include_reasoning_activity: false,
                 }),
             )
         };
@@ -975,6 +1043,7 @@ mod tests {
                                     thread_ids: vec![],
                                     timeout_ms: 0,
                                     include_text: true,
+                                    include_reasoning_activity: true,
                                 }),
                             ))
                             .await;
@@ -999,6 +1068,6 @@ mod tests {
     fn cursor_ahead_of_the_clock_is_rejected() {
         let clock = ChangeClock::new();
         clock.record("a");
-        assert!(clock.poll(2, &[], false).is_none());
+        assert!(clock.poll(2, &[], false, false).is_none());
     }
 }

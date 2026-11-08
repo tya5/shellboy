@@ -172,6 +172,7 @@ fn wait_command(after: Option<&str>, threads: &[&str], timeout_ms: u64, text: bo
         thread_ids: threads.iter().map(|id| (*id).to_owned()).collect(),
         timeout_ms,
         include_text: text,
+        include_reasoning_activity: false,
     })
 }
 fn wait_request(control: &Control, command: Command) -> Request {
@@ -302,11 +303,9 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             read_text(&control, &mut at, &t, 5, " こんに😀").await;
             provider.reasoning("hmm");
             let value = poll(&control, Some(&at), &[&t], 30_000).await;
-            assert_eq!(value["status"], "text");
-            assert_eq!(
-                entry(&value, &t).unwrap()["deltas"],
-                json!([{"offset":10,"reasoning":true,"text":"hmm"}])
-            );
+            assert_eq!(value["status"], "timeout");
+            assert_eq!(entry(&value, &t).unwrap()["deltas"], json!([]));
+            assert_eq!(attempts(&control, &t).await, std::slice::from_ref(&attempt));
             at = cursor(&value);
             // Nothing new: the attempt stays listed with no text at timeout.
             let idle = poll(&control, Some(&at), &[&t], 0).await;
@@ -319,8 +318,8 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             assert_eq!(late["status"], "baseline");
             let tail = entry(&late, &t).unwrap();
             assert_eq!(tail["gap"], false);
-            assert_eq!(tail["deltas"].as_array().unwrap().len(), 2);
-            assert_eq!(joined(tail), "hello こんに😀hmm");
+            assert_eq!(tail["deltas"].as_array().unwrap().len(), 1);
+            assert_eq!(joined(tail), "hello こんに😀");
 
             let saved_text = "hello こんに😀";
             provider.complete(saved_text);

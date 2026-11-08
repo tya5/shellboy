@@ -466,6 +466,7 @@ impl Control {
         // Shutdown and caller disconnect cancel this future in `runtime_observation`.
         use super::change_clock::Poll;
         let include_text = args.include_text;
+        let include_reasoning_activity = args.include_reasoning_activity;
         let result =
             |status, seq: u64, changes: Vec<(String, u64)>, more, text, reasoning_activity| {
                 let cursor = EventCursor {
@@ -491,7 +492,11 @@ impl Control {
                 )
             };
         let Some(token) = args.after.as_deref() else {
-            let (head, text, activity) = self.change_clock.snapshot(&args.thread_ids, include_text);
+            let (head, text, activity) = self.change_clock.snapshot(
+                &args.thread_ids,
+                include_text,
+                include_reasoning_activity,
+            );
             return result(
                 EventsWaitStatus::Baseline,
                 head,
@@ -503,7 +508,11 @@ impl Control {
         };
         let after = EventCursor::decode(token)?;
         if after.instance_id != self.store.instance_id {
-            let (head, text, activity) = self.change_clock.snapshot(&args.thread_ids, include_text);
+            let (head, text, activity) = self.change_clock.snapshot(
+                &args.thread_ids,
+                include_text,
+                include_reasoning_activity,
+            );
             return result(
                 EventsWaitStatus::ResyncRequired,
                 head,
@@ -521,13 +530,15 @@ impl Control {
             notified.as_mut().enable();
             let text_notified = self.text_changed.notified();
             tokio::pin!(text_notified);
-            if include_text {
+            if include_text || include_reasoning_activity {
                 text_notified.as_mut().enable();
             }
-            match self
-                .change_clock
-                .poll(after.seq, &args.thread_ids, include_text)
-            {
+            match self.change_clock.poll(
+                after.seq,
+                &args.thread_ids,
+                include_text,
+                include_reasoning_activity,
+            ) {
                 None => {
                     return Err(ApiError::new(
                         ErrorCode::InvalidArgument,
@@ -600,7 +611,7 @@ impl Control {
             }
             tokio::select! {
                 _ = &mut notified => {}
-                _ = &mut text_notified, if include_text => {}
+                _ = &mut text_notified, if include_text || include_reasoning_activity => {}
                 _ = async { match deadline { Some(at) => tokio::time::sleep_until(at).await, None => std::future::pending().await } } => {}
             }
         }

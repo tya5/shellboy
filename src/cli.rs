@@ -283,7 +283,7 @@ pub enum EventsCommand {
 }
 #[derive(Debug, Clone, Args)]
 #[command(
-    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters. Protocol v4 clients must use an owner advertising the same version. --text also returns unsaved model text in live_text and active attempts in reasoning_activity (status=text when either has a new observation): a lossy preview for UI clients, never saved. reasoning_activity.elapsed_ms is local attempt elapsed time; received_bytes is observed UTF-8 reasoning bytes, not tokens, and is omitted while unknown. It never contains reasoning content. On gap=true, a new attempt_id or an attempt no longer listed, discard what you showed. Saved output is what stays."
+    after_help = "Without --after the call returns a baseline cursor at once. Reuse result.cursor with --after. status=resync_required means re-read everything you show (owner restarted or the cursor fell out of the bounded window). Changes are hints that coalesce; read saved facts with thread get, history list, shell list, turn get. Up to 64 --thread filters. Protocol v4 clients must use an owner advertising the same version. --text also returns unsaved answer text in live_text; reasoning content is excluded. --reasoning-activity returns active attempts without model text (status=text when an activity observation is new): a lossy preview for UI clients, never saved. reasoning_activity.elapsed_ms is local attempt elapsed time; received_bytes is observed UTF-8 reasoning bytes, not tokens, and is omitted while unknown. It never contains reasoning content. On gap=true, a new attempt_id or an attempt no longer listed, discard what you showed. Saved output is what stays."
 )]
 pub struct EventsWaitOptions {
     /// Cursor from a previous events wait; omit for a baseline.
@@ -294,9 +294,12 @@ pub struct EventsWaitOptions {
     pub thread_ids: Vec<String>,
     #[arg(long, default_value_t = wire::DEFAULT_WAIT_TIMEOUT_MS)]
     pub timeout_ms: u64,
-    /// Also return unsaved model text being written now (a lossy preview for UI clients).
+    /// Also return unsaved non-reasoning answer text being written now (a lossy preview for UI clients).
     #[arg(long)]
     pub text: bool,
+    /// Return bounded active-attempt metadata, never model text.
+    #[arg(long)]
+    pub reasoning_activity: bool,
 }
 #[derive(Debug, Clone, Subcommand)]
 pub enum UsageCommand {
@@ -1479,6 +1482,7 @@ impl Cli {
                 thread_ids: a.thread_ids,
                 timeout_ms: a.timeout_ms,
                 include_text: a.text,
+                include_reasoning_activity: a.reasoning_activity,
             }),
             CliCommand::History { command } => match command {
                 HistoryCommand::List(a) => C::HistoryList(wire::HistoryListArgs {

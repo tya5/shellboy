@@ -213,9 +213,9 @@ stage E1, only if measurement shows follow-up reads dominate.
 Shell output bytes are not Thread hints (#28 intentionally uses the separate
 output `Notify`); clients use `shell read` / `wait shell_output` for live output.
 Model text deltas (`EngineEvent::Stream`) are never saved and are not Thread hints;
-a client asks for them with `include_text` (2.5).
+a client asks for them separately with `include_text` (2.5).
 
-CLI (implemented): `shellboy events wait [--after CURSOR] [--thread ID]... [--timeout-ms N]`
+CLI (implemented): `shellboy events wait [--after CURSOR] [--thread ID]... [--timeout-ms N] [--text] [--reasoning-activity]`
 prints one JSON result per call; a `--follow` loop is not implemented (clients loop). Also usable by
 scripts and as the reference consumer for the contract tests.
 
@@ -230,26 +230,28 @@ the affected Thread(s), and treat a gap as a bug in the producer.
 
 ### 2.6 Live reasoning activity on `events.wait` (#275)
 
-When `include_text: true`, protocol-4 results also contain `reasoning_activity`, a Thread-ID-sorted snapshot of active local response attempts, including before any text delta. Each `{thread_id, attempt_id, elapsed_ms, received_bytes?}` reports that Shellboy admitted a streaming request, monotonic elapsed milliseconds since its local stream wrapper started, and (once observed) cumulative UTF-8 bytes from reasoning-text deltas. It does not claim that the provider has begun internal reasoning; no content, token estimate, or inferred rate is exposed. If the provider supplies no reasoning delta/count, `received_bytes` stays absent rather than guessed. Text/refusal deltas do not increment it.
+When `include_reasoning_activity: true`, protocol-4 results contain `reasoning_activity` independently of `include_text`, a Thread-ID-sorted snapshot of active local response attempts, including before any text delta. Each `{thread_id, attempt_id, elapsed_ms, received_bytes?}` reports that Shellboy admitted a streaming request, monotonic elapsed milliseconds since its local stream wrapper started, and (once observed) cumulative UTF-8 bytes from reasoning-text deltas. It does not claim that the provider has begun internal reasoning; no content, token estimate, or inferred rate is exposed. If the provider supplies no reasoning delta/count, `received_bytes` stays absent rather than guessed. Text/refusal deltas do not increment it.
 
-An activity entry is removed when that attempt completes, errors, or is cancelled; its removal uses the existing per-Thread change hint. A retry has a new attempt ID. Start and reasoning-byte observations are cursor-visible and cause `status:"text"` (unless a Thread change takes precedence); subsequent timeout results refresh elapsed time without synthetic progress ticks. The snapshot is bounded by the existing 16 live-attempt cap and exists only in memory under the change-clock lock. It adds no polling loop, queue, worker, saved event, or persistent schema. Protocol-4 owners advertise `events.reasoning_activity`; clients must gate use on that Welcome capability. When `include_text` is false this field is empty/omitted and no attempt activity is returned.
+An activity entry is removed when that attempt completes, errors, or is cancelled; its removal uses the existing per-Thread change hint. A retry has a new attempt ID. Start and reasoning-byte observations are cursor-visible and cause `status:"text"` (unless a Thread change takes precedence). On a paged result, only activity whose latest sequence is at or before that page's cursor is included; later activity appears on a later page. An opt-in activity poll can run without returning `live_text`. Subsequent timeout results refresh elapsed time without synthetic progress ticks. The snapshot is bounded by the existing 16 live-attempt cap and exists only in memory under the change-clock lock. It adds no polling loop, queue, worker, saved event, or persistent schema. Protocol-4 owners advertise `events.reasoning_activity`; clients must gate use on that Welcome capability. When `include_reasoning_activity` is false this field is empty and no attempt activity is returned.
 
 ### 2.5 Live model text on `events.wait` (E3 plan A)
 
-`events.wait` with `include_text: true` also returns unsaved text being written now. It is an
-in-memory, lossy preview: never saved, never a source of truth. Saved output is what stays.
+`events.wait` with `include_text: true` also returns unsaved non-reasoning answer deltas being written
+now. Reasoning content never appears in `live_text`; opt-in activity metadata is available separately.
+It is an in-memory, lossy preview:
+never saved, never a source of truth. Saved output is what stays.
 
-Extending `events.wait` rather than adding an operation: a client wanting changes and text needs
+Extending `events.wait` rather than adding an operation: a client wanting changes, answer text or activity needs
 one poll and one cursor, so it holds one of the 24 shared slots, not two, and a hint cannot be
-delayed by a text wait or the reverse. Both are computed in one lock, so the pair is consistent.
+delayed by a text wait or the reverse. Requested text and changes are computed in one lock, so
+the pair is consistent.
 
-Request: `include_text: bool`, default false. Result gains `live_text`, present only when asked:
+Request: `include_text: bool` and `include_reasoning_activity: bool`, both default false. Result gains `live_text`, present only when asked:
 
 ```json
 {"status":"text","cursor":"eyJ2IjoxLC4uLn0","changes":[],"more":false,
  "live_text":[{"thread_id":"T","attempt_id":"A","gap":false,
-   "deltas":[{"offset":5,"reasoning":false,"text":" こんに😀"},
-             {"offset":10,"reasoning":true,"text":"hmm"}]}]}
+   "deltas":[{"offset":5,"reasoning":false,"text":" こんに😀"}]}]}
 ```
 
 `status` is the new value `text` when only text is new (`changed` wins when both are, and carries the
@@ -313,7 +315,7 @@ Write path: `Control::stream_delta` appends under the lock, publishes the existi
 `notify_waiters` on a separate `text_changed` Notify. No DB work and no await. The lock is held for memory
 updates and copies, never across `.await` or I/O; JSON encoding and socket writes happen outside it,
 so a reader that stops reading holds nothing the driver needs. Deltas do not touch `changed`, which
-wakes `wait` loops and plain polls. Only polls with `include_text` wait on `text_changed`. A finished request
+wakes `wait` loops and plain polls. Polls with `include_text` or `include_reasoning_activity` wait on `text_changed`. A finished request
 normally notifies `changed` too (`RequestGuard`), so a looping client would re-observe every parked `wait`, a database
 transaction each, once per reply. An `events.wait` completion therefore notifies only once admission is closed, for
 the shutdown drain; the guard and the drain use SeqCst on both atomics so the wake cannot be missed (comment in

@@ -10917,6 +10917,7 @@ Acceptance targets: time lower bound and `--since-node` totals match; node and t
 ## Live reasoning activity on events.wait (#275)
 
 - [x] Clock and runtime regressions cover attempt start, elapsed, absent unknown byte count, cumulative UTF-8 reasoning bytes, thread filtering, status transitions, end hint and guard cleanup; live metadata contains no text field.
-- [x] Activity is opt-in with `include_text`, shares the existing 16-attempt bound, and attempt end advances the ordinary Thread change hint.
+- [x] Activity is opt-in with `include_reasoning_activity`, independent of live model text; it shares the existing 16-attempt bound and attempt end advances the ordinary Thread change hint.
+- [x] Paged activity snapshots contain no attempt state whose latest sequence exceeds that page cursor; tests page across attempt start and end.
 - [x] Protocol 4 capability and Agent Guide are synchronized; read-only language audit scanned 417 files (1,376 pending literals, 1,840 localized and 1,671 test/log/serde literals); no source-language inventory change was needed.
 - [ ] Exact-tip focused tests and standard/all-OS CI are green on the pushed tip.

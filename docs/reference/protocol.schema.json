@@ -1757,6 +1757,9 @@
             "null"
           ]
         },
+        "include_reasoning_activity": {
+          "type": "boolean"
+        },
         "include_text": {
           "type": "boolean"
         },

@@ -22,15 +22,22 @@ async fn convert(args: &[&str]) -> Command {
         .unwrap()
 }
 #[tokio::test]
-async fn events_wait_asks_for_text_only_with_the_flag() {
-    for (args, wanted) in [
-        (&["events", "wait"][..], false),
-        (&["events", "wait", "--text"][..], true),
+async fn events_wait_text_and_reasoning_activity_are_independent_opt_ins() {
+    for (args, text, activity) in [
+        (&["events", "wait"][..], false, false),
+        (&["events", "wait", "--text"][..], true, false),
+        (&["events", "wait", "--reasoning-activity"][..], false, true),
+        (
+            &["events", "wait", "--text", "--reasoning-activity"][..],
+            true,
+            true,
+        ),
     ] {
         let Command::EventsWait(parsed) = convert(args).await else {
             panic!("expected events.wait");
         };
-        assert_eq!(parsed.include_text, wanted);
+        assert_eq!(parsed.include_text, text);
+        assert_eq!(parsed.include_reasoning_activity, activity);
     }
 }
 #[test]

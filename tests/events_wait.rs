@@ -30,6 +30,7 @@ async fn raw(
                 thread_ids: threads.iter().map(|id| (*id).to_owned()).collect(),
                 timeout_ms,
                 include_text: false,
+                include_reasoning_activity: false,
             }),
         )),
     )
@@ -352,6 +353,7 @@ async fn long_poll_ends_on_disconnect_and_on_owner_shutdown() {
                 thread_ids: vec![],
                 timeout_ms: 600_000,
                 include_text: false,
+                include_reasoning_activity: false,
             }),
         )
     };
