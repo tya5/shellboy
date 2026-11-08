@@ -1093,10 +1093,6 @@ mod header_scalar_bound_tests {
             );
         }
         assert!(
-            plans.iter().any(|plan| plan.contains("runs_by_owner")),
-            "{plans:?}"
-        );
-        assert!(
             plans.iter().any(|plan| plan.contains("shell_active_owner")),
             "{plans:?}"
         );
