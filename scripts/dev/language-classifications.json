@@ -841,8 +841,8 @@
   },
   "src/ui/threads.rs:03e76b90ffcad3a0:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:05bcfbb952d25bf6:1": {
     "category": "a",
@@ -851,13 +851,13 @@
   },
   "src/ui/threads.rs:17d1fbe0d5842062:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:18c648c232fcb2d5:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:1b0a8eb466c03340:1": {
     "category": "a",
@@ -881,8 +881,8 @@
   },
   "src/ui/threads.rs:27ab8252051f3bf8:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:28d01c30883506ac:1": {
     "category": "a",
@@ -896,13 +896,13 @@
   },
   "src/ui/threads.rs:2b02db01fef3e847:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:2cd4fe089c1adeea:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:352a772363007f3c:1": {
     "category": "a",
@@ -926,13 +926,13 @@
   },
   "src/ui/threads.rs:439c41c44b4f1a7d:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:4a9661b8fc037aec:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:4d0ff1fa13abebf0:1": {
     "category": "a",
@@ -961,18 +961,18 @@
   },
   "src/ui/threads.rs:5cf688b1161b693f:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:62daf31a037d9662:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:684da57b5141fec7:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:69f649d0bf711005:1": {
     "category": "a",
@@ -981,18 +981,18 @@
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:2": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:6b6b6a501140a3a9:3": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:6d429bf572bea1fc:1": {
     "category": "a",
@@ -1001,13 +1001,13 @@
   },
   "src/ui/threads.rs:7179959f576d8823:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:73e4e6adaf4d838d:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:7aaf65c3b1b3f3f6:1": {
     "category": "a",
@@ -1016,23 +1016,23 @@
   },
   "src/ui/threads.rs:7bda6297def68be8:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:7d6b83c6b7348603:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:7d838451770f915e:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:7ebc34907e90c4c0:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:8087ef176b4c0d1d:1": {
     "category": "a",
@@ -1046,13 +1046,13 @@
   },
   "src/ui/threads.rs:9676341e507f1036:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:98317bae50982c52:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:9abc66d964ad2f60:1": {
     "category": "a",
@@ -1061,8 +1061,8 @@
   },
   "src/ui/threads.rs:9ca7d8cf8c013360:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:a325ebf1700f8a3e:1": {
     "category": "a",
@@ -1071,8 +1071,8 @@
   },
   "src/ui/threads.rs:a61360828f648330:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:a6c3ef78d56a7a5b:1": {
     "category": "a",
@@ -1086,13 +1086,13 @@
   },
   "src/ui/threads.rs:bb37953c3e148b0b:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:bbc7c0413b562151:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:c5661a5eb0cfca5e:1": {
     "category": "a",
@@ -1106,28 +1106,28 @@
   },
   "src/ui/threads.rs:c7518c08bc44cbf4:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:c9a2f1d38bef31a1:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:2": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:ccbdbf8cf35b10f7:3": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:cd5737cf4caf2d35:1": {
     "category": "a",
@@ -1151,13 +1151,13 @@
   },
   "src/ui/threads.rs:da88d03c0cd7c307:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:e41f81eb06954ce0:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:e52a5a0b453130a7:1": {
     "category": "a",
@@ -1166,8 +1166,8 @@
   },
   "src/ui/threads.rs:ff7dd36ce1b2f0eb:1": {
     "category": "a",
-    "reason": "Reviewed BrowserMessage::render: this is inside the UiLanguage::Ja arm of a typed variant with a separate UiLanguage::En arm. Interpolated source values and glyph selection remain unchanged.",
-    "source_tokens_sha256": "d3f16de45652d48cb329a3de29c1c0ef62a3ee90b3bb1540763cddf4c7bc4e53"
+    "reason": "Re-reviewed BrowserMessage::render after #262 added exact/saturated human-reply counts to Detail rendering. This literal remains in an explicit UiLanguage::Ja arm paired with the corresponding En arm; user/source values are preserved and glyph selection remains unchanged.",
+    "source_tokens_sha256": "718d6962eaec78edf6ecc29f92084e2c844b019b2f970114557e9417b1b84372"
   },
   "src/ui/threads.rs:ff8e747ed6480f71:1": {
     "category": "a",
