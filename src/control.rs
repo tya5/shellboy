@@ -240,7 +240,7 @@ async fn maintenance_loop(
                     .await
                 {
                     Ok(crate::storage::Background::Done(batch)) => {
-                        debug_assert!(batch.examined<=128);
+                        debug_assert!(batch.examined <= 128);
                         reply_cursor = batch.cursor;
                         if reply_cursor.is_none() {
                             reply_active = reply_rescan;
