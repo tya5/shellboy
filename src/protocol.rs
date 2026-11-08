@@ -270,7 +270,6 @@ states!(ErrorCode {
     OperationNotFound,
     InvalidState,
     PreviewStale,
-    WaitCycle,
     CursorExpired,
     CursorEncodingMismatch,
     OutputExpired,
@@ -380,7 +379,7 @@ impl ApiError {
             ErrorCode::OperationExpired | ErrorCode::OperationNotFound => "Inspect saved target state and history; an unavailable receipt does not prove the mutation was never applied",
             ErrorCode::InvalidState => "Inspect the target with its get command; read shellboy docs get --id shellboy/recovery-and-storage before choosing retry or stop",
             ErrorCode::PreviewStale => "Request thread.delete_preview again and explicitly confirm its new target marker; never retry deletion with the stale preview",
-            ErrorCode::WaitCycle => "Inspect Run ownership and wait dependencies; correct the wait direction instead of polling around the cycle",
+
             ErrorCode::CursorExpired => "Restart the same list/read with its original target and filters, without the old cursor; previously returned items or bytes may repeat",
             ErrorCode::CursorEncodingMismatch => "Restart shell read without the old cursor and specify the desired encoding; previously read bytes may be returned again",
             ErrorCode::OutputExpired => "Inspect shell state and retained history; unavailable raw output cannot be reconstructed by retrying read",

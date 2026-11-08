@@ -107,7 +107,6 @@ fn generic_recovery_preserves_specific_hints_and_never_promises_safe_reexecution
         ErrorCode::OperationExpired,
         ErrorCode::IoFailed,
         ErrorCode::InvalidState,
-        ErrorCode::WaitCycle,
         ErrorCode::SaveFailed,
         ErrorCode::OutputExpired,
     ] {

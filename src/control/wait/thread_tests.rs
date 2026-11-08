@@ -88,7 +88,7 @@ async fn registered_thread_wait_retains_its_baseline_when_completion_is_followed
 }
 
 #[tokio::test]
-async fn thread_targets_keep_self_ancestor_and_composed_wait_cycle_protection() {
+async fn thread_targets_accept_self_and_ancestor_observation_without_cycle_policy() {
     crate::test_watchdog::watchdog("Thread wait ownership cycles",async {
         let root=tempfile::tempdir().unwrap();let owner=open(root.path()).await;let control=Control::new(&owner,root.path().into());
         owner.db.call(|db| {
@@ -96,8 +96,8 @@ async fn thread_targets_keep_self_ancestor_and_composed_wait_cycle_protection() 
         }).await.unwrap();
         let origin=Origin {instance_id:owner.instance_id.clone(),thread_id:"c".into(),run_id:"cr".into(),turn_id:"cu".into(),execution_id:"cs".into(),token:"fixture".into()};
         for target in ["c","p"] {
-            let error=observe(control.clone(),format!("cycle-{target}"),args(target,None),Some(origin.clone()),CancellationToken::new()).await.unwrap_err();
-            assert_eq!(error.code,ErrorCode::WaitCycle);
+            let result=observe(control.clone(),format!("cycle-{target}"),args(target,None),Some(origin.clone()),CancellationToken::new()).await.unwrap();
+            assert_eq!(result["status"],"timeout");
         }
         assert!(control.waits.entries.lock().unwrap().is_empty());
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();

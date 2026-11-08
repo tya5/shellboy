@@ -86,7 +86,6 @@ pub(crate) struct Report {
     pub changes: Vec<Value>,
     pub cursor: String,
     pub more: bool,
-    pub targets: Vec<String>,
     pub unavailable: bool,
 }
 
@@ -343,10 +342,6 @@ pub(crate) fn observe(
         changes,
         cursor,
         more,
-        targets: threads
-            .into_iter()
-            .map(|id| format!("thread:{id}"))
-            .collect(),
         unavailable: !unavailable.is_empty(),
     }))
 }

@@ -156,28 +156,6 @@ async fn observe_inner(
     let mut thread_after = args.after.clone();
     let duration = Duration::from_millis(args.timeout_ms);
     let started = tokio::time::Instant::now();
-    if let Some(caller) = &caller {
-        for condition in &args.conditions {
-            let own = match condition {
-                WaitCondition::ReplyReceived { .. } => false,
-                WaitCondition::ThreadSettled { thread_ids, .. } => {
-                    thread_ids.contains(&caller.thread_id)
-                }
-                WaitCondition::TurnCompleted { turn_id } => turn_id == &caller.turn_id,
-                WaitCondition::RunEnded { run_id } => run_id == &caller.run_id,
-                WaitCondition::ShellEnded { execution_id }
-                | WaitCondition::ShellOutput { execution_id, .. } => {
-                    execution_id == &caller.execution_id
-                }
-            };
-            if own {
-                return Err(ApiError::new(
-                    ErrorCode::WaitCycle,
-                    "synchronous wait on the caller's own Run, Turn, or shell is forbidden",
-                ));
-            }
-        }
-    }
     let mut guard = None;
     let mut initial = true;
     let observes_output = args
@@ -799,7 +777,7 @@ mod tests {
         }
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn owner_and_sibling_wait_cycles_reject_but_same_run_other_shell_can_timeout() {
+    async fn self_ancestor_and_composed_waits_are_observations_without_cycle_policy() {
         let (_dir, owner, control) = fixture().await;
         let a = origin("a", "ra", "ta", "sa");
         for condition in [
@@ -821,8 +799,8 @@ mod tests {
                 CancellationToken::new(),
             )
             .await
-            .unwrap_err();
-            assert_eq!(result.code, ErrorCode::WaitCycle);
+            .unwrap();
+            assert_eq!(result["status"],"timeout");
         }
         let other = observe(
             control.clone(),
@@ -865,14 +843,14 @@ mod tests {
                 WaitCondition::ShellEnded {
                     execution_id: "sa".into(),
                 },
-                5000,
+                0,
             ),
             Some(origin("b", "rb", "tb", "sb")),
             CancellationToken::new(),
         )
         .await
-        .unwrap_err();
-        assert_eq!(result.code, ErrorCode::WaitCycle);
+        .unwrap();
+        assert_eq!(result["status"],"timeout");
         cancel.cancel();
         assert_eq!(first.await.unwrap().unwrap()["status"], "interrupted");
         assert!(control.waits.entries.lock().unwrap().is_empty());

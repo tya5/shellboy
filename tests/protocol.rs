@@ -367,7 +367,6 @@ fn fixed_error_codes_and_persisted_state_values_are_closed() {
         "operation_expired",
         "operation_not_found",
         "invalid_state",
-        "wait_cycle",
         "cursor_expired",
         "cursor_encoding_mismatch",
         "output_expired",
