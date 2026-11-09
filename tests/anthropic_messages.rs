@@ -304,9 +304,12 @@ fn saved_opaque_blocks_return_unchanged_to_the_same_dialect_and_are_skipped_else
 fn stop_reasons_complete_stay_incomplete_or_fail_without_guessing() {
     assert!(run(TEXT, 64).unwrap().raw["status"] == "completed");
     assert!(run(TOOL_THINKING, 64).unwrap().raw["status"] == "completed");
-    for reason in ["max_tokens", "model_context_window_exceeded"] {
+    for (reason, expected) in [
+        ("max_tokens", "output_limit"),
+        ("model_context_window_exceeded", "incomplete"),
+    ] {
         let error = run(stop_fixture(reason), 64).unwrap_err();
-        assert_eq!(error.kind, "incomplete", "{reason}: {error:?}");
+        assert_eq!(error.kind, expected, "{reason}: {error:?}");
     }
     for reason in ["refusal", "pause_turn", "novel_reason"] {
         let error = run(stop_fixture(reason), 64).unwrap_err();
