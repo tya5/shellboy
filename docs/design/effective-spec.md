@@ -527,3 +527,11 @@ normal message delivery after the sender Turn ends. Explicit wait conditions rem
 resource/cycle graph. Direct own Run/Turn/shell waits alone return `self_wait`. Thread-get has one recipient-tagged pending reply list. Shell ownership,
 Thread parentage and Run-end unanswered reply reminders remain. Adopted revisions in the control/wait/reply/UI
 specifications supersede earlier Run ownership rules; no legacy compatibility branch is retained.
+
+## Selected request-history inspection (#284)
+
+The adopted [CLI inspection contract](cli.md#selected-request-history-diagnostics-284)
+distinguishes recorded active missing outputs, interrupted history and invalid or
+unresolved associations through existing invalid_state details. It preserves one
+read snapshot, saved-prefix scope and normal strict replay. No private-incident
+cause or automatic repair/retry is established by this change.

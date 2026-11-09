@@ -5,7 +5,7 @@
 //! reported as unknown rather than guessed.
 use crate::{
     config::{Config, LoadedConfig, PathEnvironment},
-    control::replay::{PathWitness, load_uncached},
+    control::replay::{PathWitness, load_for_inspection},
     control::request_parts::{
         ContextLine, context_item, has_attachment_ref, last_saved_context, leading_items,
         strip_local,
@@ -38,14 +38,18 @@ pub struct RequestOptions {
 /// A coded inspection failure; `message` never contains request content.
 #[derive(Debug)]
 pub struct Failure {
-    pub code: &'static str,
+    pub code: String,
     pub message: String,
+    pub hint: Option<String>,
+    pub details: Option<Value>,
 }
 pub type Result<T> = std::result::Result<T, Failure>;
 fn fail(code: &'static str, message: impl Into<String>) -> Failure {
     Failure {
-        code,
+        code: code.to_owned(),
         message: message.into(),
+        hint: None,
+        details: None,
     }
 }
 impl From<rusqlite::Error> for Failure {
@@ -55,12 +59,24 @@ impl From<rusqlite::Error> for Failure {
 }
 impl From<crate::storage::StorageError> for Failure {
     fn from(error: crate::storage::StorageError) -> Self {
-        fail("storage_failed", error.to_string())
+        match error {
+            crate::storage::StorageError::Operation(error) => (*error).into(),
+            error => fail("storage_failed", error.to_string()),
+        }
     }
 }
 impl From<crate::protocol::ApiError> for Failure {
     fn from(error: crate::protocol::ApiError) -> Self {
-        fail("invalid_state", error.message.to_string())
+        Self {
+            code: serde_json::to_value(error.code)
+                .expect("error code serializes")
+                .as_str()
+                .expect("error code is a string")
+                .to_owned(),
+            message: error.message,
+            hint: error.hint,
+            details: error.details,
+        }
     }
 }
 
@@ -89,7 +105,14 @@ pub async fn execute(
             json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":true,"result":result})
         }
         Err(error) => {
-            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":{"code":error.code,"message":error.message}})
+            let mut body = json!({"code":error.code,"message":error.message});
+            if let Some(hint) = error.hint {
+                body["hint"] = json!(hint);
+            }
+            if let Some(details) = error.details {
+                body["details"] = details;
+            }
+            json!({"protocol_version":crate::protocol::PROTOCOL_VERSION,"ok":false,"error":body})
         }
     }
 }
@@ -362,10 +385,9 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
         }
     }
     let lease = match &plan.history {
-        History::Current => Some(load_uncached(tx, &plan.thread, None, plan.epoch)?),
+        History::Current => load_for_inspection(tx, &plan.thread, None, plan.epoch)?,
         History::Prefix(witness) => {
-            let lease = load_uncached(tx, &plan.thread, Some(witness.nodes), plan.epoch)?;
-            (lease.witness() == witness).then_some(lease)
+            load_for_inspection(tx, &plan.thread, Some(witness), plan.epoch)?
         }
         History::Unknown(_) => None,
     };
@@ -703,3 +725,6 @@ mod cache_lookup_gate_tests {
         assert!(next_plan(&db, "t", &config).is_err());
     }
 }
+
+#[cfg(test)]
+mod failure_tests;

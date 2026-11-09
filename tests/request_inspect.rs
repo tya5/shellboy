@@ -287,3 +287,6 @@ async fn rebuilt_attempts_match_sent_bytes_and_consecutive_requests_share_the_co
     owner.shutdown().await.unwrap();
     server.abort();
 }
+
+#[path = "request_inspect/history_faults.rs"]
+mod history_faults;

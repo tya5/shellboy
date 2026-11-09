@@ -11228,3 +11228,30 @@ executed locally. Studio source `ba265c4771c824bb2b65c5f76dca912320cf4f10`
 was searched for shell EOF/write and `Closed` success dependencies; none were
 found in its tracked source/tests/scripts. Local `rg` was unavailable, so this
 search used `git grep`. Cross-OS CI remains an integration gate.
+## #284 selected request-history diagnostics (WIP)
+
+Synthetic-only implementation; no private owner, history, or database was read.
+Initial diagnostic matrix and existing strict-validator evidence are inherited
+from the diagnosis author, not rerun as a private-incident reproduction. Local
+new-contract red failed because the old failure had no structured details;
+initial compile/path errors are retained separately and are not semantic red.
+Fresh macOS aarch64 rust-slot checks: cargo check --tests passes. The 20-case
+synthetic history matrix passes (one test, 2.31 s), including CLI details/hints,
+SQLite distinction, byte-identical DB, independent compare prefixes and stale
+prefix uncertainty. Existing strict ordering/replay negatives pass 2/2; new
+unrelated-domain/SQLite error-boundary tests pass 2/2. Initial SQLite-failure
+fixture construction hit a foreign-key constraint; deleting its synthetic calls
+before dropping the synthetic table fixes the fixture, not product acceptance.
+Layout/watchdog and diff checks pass. Language inventory exactly matches the
+public base (including 1376 existing pending entries); --check therefore remains
+nonzero and is not reported as a new language regression or a zero-pending pass.
+No classifications, protocol schema, migration, model provider or runtime owner
+are changed. Final format/check and strict Clippy (--locked --lib --tests --
+-D warnings) pass on the author source. Independent review of product commit
+13c7b0923cb407badc347e8d7d031b73be5a73fb approves the component with no new
+P1/P2/privacy blocker: the reviewer independently ran the 20-case matrix (one
+integration test), strict ordering tests 2/2 and error-boundary tests 2/2. Its
+initial nonexistent test-target invocation failed before running product tests;
+that failure is retained separately, not counted as green. Full suite/OS and
+latest-base integration remain untested. This component does not contain the
+later #286 normalization fix. No push or workflow dispatch is performed here.

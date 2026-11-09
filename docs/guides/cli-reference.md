@@ -1111,3 +1111,26 @@ A Run owns shells only. For child work, create/select a Thread, `message send --
 and end your Turn when only its result remains. The explicit reply is delivered normally; no child lifecycle notice
 or parent background Run is synthesized. Explicit Run/Turn/Thread/shell/reply waits remain observations with direct `self_wait` rejection, but without
 ancestor/sibling cycle rejection. A cycle can time out; do not poll around the observation deadline.
+
+### Saved Request History Diagnostics
+
+`thread request` uses a single read snapshot and only the selected path (or each
+saved attempt's selected prefix). It does not fetch missing tool results from
+another branch, repair history, or synthesize a partial exact request.
+
+When selected tool history cannot be assembled, the standalone JSON error keeps
+`code: invalid_state`, a recovery `hint`, and `details.reason`:
+
+- `request_history_busy`: only missing outputs, with the selected group and its
+  matching attempt/Turn/Run generation recorded active. This is not proof that a
+  driver is alive. Retry inspection after that group settles, not automatically.
+- `request_history_incomplete`: missing outputs in a recorded stopped, failed, or
+  recovery state. Do not assume retrying inspection will repair the saved state.
+- `request_history_invalid`: structural contradictions, settled missing outputs,
+  or unresolved associations. This can express uncertainty; it is not by itself
+  a diagnosis of database corruption.
+
+Structural faults take precedence over missing-only activity. Unrelated active
+Runs do not make a complete selected request busy. `--attempt` and each side of
+`--compare-attempt` keep their own selected-prefix scope. SQLite failures remain
+`storage_failed`; these diagnostics do not relax normal model replay validation.

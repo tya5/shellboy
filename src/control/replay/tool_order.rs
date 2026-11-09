@@ -3,7 +3,17 @@ use super::*;
 use crate::protocol::{ApiError, ErrorCode};
 use std::collections::HashSet;
 
-fn invalid() -> StorageError {
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ToolGroupFault;
+impl From<ToolGroupFault> for StorageError {
+    fn from(_: ToolGroupFault) -> Self {
+        strict_invalid()
+    }
+}
+fn invalid() -> ToolGroupFault {
+    ToolGroupFault
+}
+fn strict_invalid() -> StorageError {
     ApiError::new(ErrorCode::InvalidState, "History contains an incomplete or inconsistent tool group")
         .hint("Inspect saved history; fork at a complete node before the incomplete tool group, or delete the affected Thread. See shellboy docs get --id shellboy/recovery-and-storage.")
         .into()
@@ -11,7 +21,7 @@ fn invalid() -> StorageError {
 fn kind(item: &Value) -> &str {
     item.get("type").and_then(Value::as_str).unwrap_or("")
 }
-fn call_id(item: &Value) -> Result<&str, StorageError> {
+fn call_id(item: &Value) -> Result<&str, ToolGroupFault> {
     item.get("call_id")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
@@ -20,7 +30,7 @@ fn call_id(item: &Value) -> Result<&str, StorageError> {
 
 // A spill stores one complete tool group and interleaved context in one node.
 // Move converted Values once before caching; do not clone or rewrite its source.
-pub(super) fn inline_spill(items: Vec<Value>) -> Result<Vec<Value>, StorageError> {
+pub(super) fn inline_spill_checked(items: Vec<Value>) -> Result<Vec<Value>, ToolGroupFault> {
     let Some(last_call) = items.iter().rposition(|item| kind(item) == "function_call") else {
         return Ok(items);
     };
@@ -57,6 +67,9 @@ pub(super) fn inline_spill(items: Vec<Value>) -> Result<Vec<Value>, StorageError
 }
 
 pub(super) fn ordered(frames: Vec<Arc<Frame>>) -> Result<Vec<Arc<Frame>>, StorageError> {
+    ordered_checked(frames).map_err(StorageError::from)
+}
+pub(super) fn ordered_checked(frames: Vec<Arc<Frame>>) -> Result<Vec<Arc<Frame>>, ToolGroupFault> {
     let mut anchors = HashSet::new();
     for frame in &frames {
         if frame.items.iter().any(|item| kind(item) == "function_call")
