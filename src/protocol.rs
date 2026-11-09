@@ -1963,7 +1963,13 @@ where
     Option::<T>::deserialize(deserializer).map(Some)
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct StatusReply {
+#[serde(untagged)]
+pub enum StatusReply {
+    Object(StatusReplyObject),
+    Raw(Value),
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StatusReplyObject {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

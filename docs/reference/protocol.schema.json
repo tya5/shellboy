@@ -6576,6 +6576,15 @@
     },
     "StatusReply": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StatusReplyObject"
+        },
+        true
+      ],
+      "title": "StatusReply"
+    },
+    "StatusReplyObject": {
       "additionalProperties": true,
       "properties": {
         "accepted": {
@@ -6634,7 +6643,6 @@
           ]
         }
       },
-      "title": "StatusReply",
       "type": "object"
     },
     "StatusResult": {
