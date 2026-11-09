@@ -118,20 +118,11 @@ impl Connection {
                 "requires prompt_caching; omit prompt_cache_key when prompt_caching = false",
             ));
         }
-        match self.max_tokens {
-            Some(_) if self.api != Api::AnthropicMessages => {
-                return Err(invalid(
-                    format!("connections.{name}.max_tokens"),
-                    "only valid with api = \"anthropic_messages\"",
-                ));
-            }
-            Some(0) => {
-                return Err(invalid(
-                    format!("connections.{name}.max_tokens"),
-                    "must be a positive integer",
-                ));
-            }
-            _ => {}
+        if let Some(0) = self.max_tokens {
+            return Err(invalid(
+                format!("connections.{name}.max_tokens"),
+                "must be a positive integer",
+            ));
         }
         if self
             .segment_chars

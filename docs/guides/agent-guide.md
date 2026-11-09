@@ -849,3 +849,14 @@ CLI and unknown/malformed senders do not acquire a model Thread identity line.
 Use the full ID with `thread get` if current Thread details are needed. Renaming
 or deleting a Thread does not rewrite the saved sender ID. Clients use structured
 `provenance.sender`, not parsed notice text; current title resolution is UI-only.
+
+
+### Output Limits By API
+
+Use the saved connection's optional positive `max_tokens` setting for an output
+limit. Responses sends it as `max_output_tokens`, Chat Completions as
+`max_completion_tokens`, and Anthropic Messages as `max_tokens`. An unset value
+sends no output-limit field for the first two APIs; Messages retains its existing
+32768 default. Do not confuse an output limit with the context window or assume
+that a proxy/model accepts an arbitrary value. Do not change a user's saved
+connection unless asked. Other request fields and authentication are unaffected.

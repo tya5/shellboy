@@ -173,7 +173,7 @@ pub struct Connection {
     pub api_key_header: Option<String>,
     pub default_effort: Option<String>,
     pub context_role: ContextRole,
-    /// Required by `anthropic_messages` only; `None` selects the default.
+    /// Output limit in each API's native field; only Messages defaults when unset.
     pub max_tokens: Option<u64>,
     pub headers: BTreeMap<String, String>,
     /// Provider-specific optional request fields, merged into conversation

@@ -1019,3 +1019,67 @@ mod unit_normalization_tests {
         assert!(rank(big_near, far.iter().map(|v| v * 0.01).collect()));
     }
 }
+
+#[cfg(test)]
+mod configured_output_limit_tests {
+    use super::*;
+    use crate::config::Api;
+    #[test]
+    fn actual_request_producer_maps_configured_limits_without_changing_other_fields() {
+        let request = serde_json::json!({"model":"synthetic-model","input":[{"role":"user","content":[{"type":"input_text","text":"synthetic"}]}],"tools":[]});
+        for (api, key) in [
+            (Api::Responses, "max_output_tokens"),
+            (Api::ChatCompletions, "max_completion_tokens"),
+            (Api::AnthropicMessages, "max_tokens"),
+        ] {
+            let make = |limit| {
+                {
+                    let mut client = HttpModelClient::new(Connection {
+                        api,
+                        base_url: "https://synthetic.invalid/v1".into(),
+                        ..Connection::default()
+                    })
+                    .unwrap();
+                    // Isolate serialization from the parser's independent validation test.
+                    client.connection.max_tokens = limit;
+                    client
+                }
+                .wire_request(request.clone(), None)
+                .unwrap()
+                .0
+            };
+            let unset = make(None);
+            if api == Api::AnthropicMessages {
+                assert_eq!(unset[key], 32768);
+            } else {
+                assert!(unset.get(key).is_none());
+            }
+            let mut configured = make(Some(1234));
+            assert_eq!(configured[key], 1234, "{api:?}");
+            if api == Api::AnthropicMessages {
+                configured[key] = serde_json::json!(32768);
+            } else {
+                configured.as_object_mut().unwrap().remove(key);
+            }
+            assert_eq!(
+                configured, unset,
+                "only the configured output-limit field may differ for {api:?}"
+            );
+        }
+    }
+    #[test]
+    fn config_parser_accepts_positive_limits_for_each_api_and_keeps_unset_optional() {
+        for api in ["responses", "chat_completions", "anthropic_messages"] {
+            for value in [None, Some(1), Some(1234)] {
+                let mut source = format!(
+                    "[connections.synthetic]\napi='{api}'\nbase_url='https://synthetic.invalid/v1'\n"
+                );
+                if let Some(value) = value {
+                    source.push_str(&format!("max_tokens={value}\n"));
+                }
+                let config = crate::config::Config::parse(&source).unwrap();
+                assert_eq!(config.connections["synthetic"].max_tokens, value);
+            }
+        }
+    }
+}

@@ -519,3 +519,11 @@ not category interpretation. Full bounded verdicts remain in details. Facts for
 the generated recovery guide are projected before generic safe-detail string
 expansion so provider strings that look like JSON remain strings. Existing raw
 safe-detail/copy behavior is otherwise unchanged.
+
+
+The optional connection `max_tokens` value is also mapped to Responses
+`max_output_tokens` and Chat Completions `max_completion_tokens`; those fields
+are omitted when unset. Messages keeps its existing 32768 default. The wire
+adapter receives the optional value so it does not invent a default for either
+of the other APIs. Legacy Messages-only adapter entry points retain their
+existing behavior for non-Messages callers.

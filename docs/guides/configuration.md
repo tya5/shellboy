@@ -373,7 +373,7 @@ synthetic fixtures are not evidence of a real provider cache hit.
   one of them with HTTP 400. Check the provider's documentation for the model.
   Newer models reject some
   parameters (for example `temperature`) with HTTP 400; Shellboy never sends them.
-- `max_tokens` (positive integer, only valid with this dialect) defaults to 32768,
+- `max_tokens` (positive integer) defaults to 32768 for this dialect,
   below the 128K output cap documented for current models. Raise it for very long
   answers; a turn that reaches it is reported as incomplete, not as a success.
 - Authentication: prefer `api_key_env = "ANTHROPIC_API_KEY"` with
@@ -995,3 +995,15 @@ where required) or submit a new human Turn, then inspect `thread get`/`thread re
 saving a snapshot will observe the repaired list; a Turn that already saved its snapshot intentionally keeps it.
 This fail-closed policy is retained after review: silently omitting an explicit instruction file would hide a change
 to the user's chosen guidance. Registration, repair and inspection do not require the blocked model to run.
+
+
+### Output Token Limit
+
+The optional connection setting `max_tokens` uses the existing positive-integer
+configuration field for all three APIs. It maps to `max_output_tokens` for
+Responses, `max_completion_tokens` for Chat Completions, and `max_tokens` for
+Anthropic Messages. Responses and Chat Completions omit this field when unset;
+Messages retains its existing default of 32768. An explicit value replaces only
+that output limit, not the context window, reasoning effort, or other payload
+settings. This is API selection, not proxy-specific behavior. Setting a large
+value does not prove that the selected provider/model supports it.

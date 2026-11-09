@@ -8,6 +8,8 @@ A browser UI is available as [Shellboy Studio](https://github.com/tya5/shellboy-
 
 A lightweight terminal AI agent environment written in Rust. Models have one tool: shell. Through the `shellboy` CLI, they can search and fork their own history and recursively delegate work to child agents. Shellboy runs as a single executable, stores data in SQLite, and connects using Responses (default) or an explicitly selected OpenAI-compatible Chat Completions endpoint.
 
+The optional connection `max_tokens` setting maps to each API's native output-limit field. Unset values omit that limit for Responses and Chat Completions; Anthropic Messages retains its existing 32768 default.
+
 ## Features
 
 - **One executable** for Windows x64, macOS Apple Silicon, and Linux x64. Conversations and indexes live in local SQLite databases; no separate service or database server is required.

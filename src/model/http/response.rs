@@ -375,9 +375,7 @@ impl HttpModelClient {
         let (mut request, labels) = dialect::encode_tagged(
             self.connection.api,
             request,
-            self.connection
-                .max_tokens
-                .unwrap_or(crate::config::DEFAULT_MESSAGES_MAX_TOKENS),
+            self.connection.max_tokens,
             cache,
             tags,
         )?;

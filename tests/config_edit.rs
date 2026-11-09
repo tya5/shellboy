@@ -1316,3 +1316,51 @@ async fn the_cli_reads_and_changes_a_headless_owner_end_to_end() {
     .await
     .unwrap();
 }
+
+#[test]
+fn three_api_output_limit_is_saved_and_read_back_without_other_setting_changes() {
+    for api in ["responses", "chat_completions", "anthropic_messages"] {
+        let text = format!(
+            "# preserve comment\n[connections.synthetic]\napi='{api}'\nbase_url='https://synthetic.invalid/v1'\nextra_body={{future_field={{nested='value'}}}}\n"
+        );
+        let (_temp, path, hash) = fixture(&text);
+        let original = loaded(&path).connections["synthetic"].clone();
+        apply(
+            &path,
+            &hash,
+            &[change("connections.synthetic.max_tokens", json!(1234))],
+        )
+        .unwrap();
+        let current = loaded(&path);
+        let saved = &current.connections["synthetic"];
+        assert_eq!(saved.max_tokens, Some(1234));
+        assert_eq!(saved.api, original.api);
+        assert_eq!(saved.base_url, original.base_url);
+        assert_eq!(saved.extra_body, original.extra_body);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("# preserve comment")
+        );
+        assert_eq!(
+            read(&current).unwrap()["file"]["values"]["connections"]["synthetic"]["max_tokens"],
+            1234
+        );
+        for invalid in [json!(0), json!(-1), json!("1234")] {
+            let before = std::fs::read(&path).unwrap();
+            let hash = hash_of(&path);
+            assert!(
+                apply(
+                    &path,
+                    &hash,
+                    &[change("connections.synthetic.max_tokens", invalid)]
+                )
+                .is_err()
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+        let hash = hash_of(&path);
+        apply(&path, &hash, &[removal("connections.synthetic.max_tokens")]).unwrap();
+        assert_eq!(loaded(&path).connections["synthetic"].max_tokens, None);
+    }
+}

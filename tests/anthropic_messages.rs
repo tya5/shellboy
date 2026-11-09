@@ -505,12 +505,16 @@ fn configuration_validates_max_tokens_and_the_messages_api() {
     assert!(ok("max_tokens=0").is_err());
     assert!(ok("max_tokens=-1").is_err());
     assert!(ok("prompt_cache_key=true").is_err());
-    // max_tokens belongs to this dialect only.
+    // The same optional setting maps to each API's native output-limit field.
     for api in ["responses", "chat_completions"] {
         let source = format!(
             "[connections.c]\nbase_url='https://api.example/v1'\napi='{api}'\nmax_tokens=10"
         );
-        assert!(Config::parse(&source).is_err(), "{api}");
+        assert_eq!(
+            Config::parse(&source).unwrap().connections["c"].max_tokens,
+            Some(10),
+            "{api}"
+        );
     }
     // Reserved fields cannot be set through extra_body; anything else can.
     for key in [
