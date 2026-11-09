@@ -1194,25 +1194,47 @@ fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matche
         panic!("activity shape misclassified")
     };
     assert_eq!(snapshot.items[0].additional_properties["stdin_open"], true);
-    let Some(StatusReply::Object(reply)) = snapshot.items[0].reply.as_ref() else {
+    let Some(Some(StatusReply::Object(reply))) = snapshot.items[0].reply.as_ref() else {
         panic!("structured reply shape misclassified");
     };
     assert_eq!(reply.delivered, Some(None));
     assert_eq!(reply.accepted, Some(Some(false)));
     assert_eq!(reply.additional_properties["future_reply_field"], 1);
+    assert_eq!(
+        serde_json::to_value(StatusResult::Activity(snapshot.clone())).unwrap(),
+        activity
+    );
     let raw_reply: StatusReply = serde_json::from_value(json!(["legacy", 1])).unwrap();
     assert_eq!(
         serde_json::to_value(raw_reply).unwrap(),
         json!(["legacy", 1])
     );
+    let mut explicit_null = activity.clone();
+    explicit_null["items"][0]["reply"] = Value::Null;
+    let decoded: StatusResult = serde_json::from_value(explicit_null.clone()).unwrap();
+    let StatusResult::Activity(snapshot) = decoded else {
+        panic!("activity shape misclassified")
+    };
+    assert_eq!(snapshot.items[0].reply, Some(None));
+    assert_eq!(
+        serde_json::to_value(StatusResult::Activity(snapshot)).unwrap(),
+        explicit_null
+    );
+    let mut missing = activity.clone();
+    missing["items"][0].as_object_mut().unwrap().remove("reply");
+    let decoded: StatusResult = serde_json::from_value(missing).unwrap();
+    let StatusResult::Activity(snapshot) = decoded else {
+        panic!("activity shape misclassified")
+    };
+    assert_eq!(snapshot.items[0].reply, None);
+    assert!(
+        serde_json::to_value(StatusResult::Activity(snapshot.clone())).unwrap()["items"][0]
+            .get("reply")
+            .is_none()
+    );
     assert_eq!(
         snapshot.filters.additional_properties["future_filter"],
         json!({"x":1})
-    );
-    let encoded = serde_json::to_value(StatusResult::Activity(snapshot)).unwrap();
-    assert_eq!(
-        encoded, activity,
-        "activity wire shape, explicit nulls and future fields roundtrip"
     );
 
     let memory: Value = serde_json::from_str(r###"{

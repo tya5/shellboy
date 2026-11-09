@@ -1953,7 +1953,7 @@ impl<'de> Deserialize<'de> for StatusResult {
         }
     }
 }
-fn deserialize_present_nullable<'de, D, T>(
+pub(crate) fn deserialize_present_nullable<'de, D, T>(
     deserializer: D,
 ) -> std::result::Result<Option<Option<T>>, D::Error>
 where

@@ -110,7 +110,10 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     assert_eq!(held.run_id, None);
     assert_eq!(held.message_id.as_deref(), Some("held-node"));
     assert!(held.reply.is_none());
-    assert!(serde_json::to_value(held).unwrap().get("reply").is_none(), "unavailable reply remains omitted, not null");
+    assert!(
+        serde_json::to_value(held).unwrap().get("reply").is_none(),
+        "unavailable reply remains omitted, not null"
+    );
     let shell = status.items.iter().find(|i| i.kind == "shell").unwrap();
     assert_eq!(shell.owner_run_id.as_deref(), Some("root"));
     assert_eq!(shell.targets[0].command, "shell.get");

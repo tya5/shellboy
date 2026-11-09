@@ -32,8 +32,12 @@ pub struct WorkItem {
     pub response_nodes_truncated: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expect_reply: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reply: Option<crate::protocol::StatusReply>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::protocol::deserialize_present_nullable"
+    )]
+    pub reply: Option<Option<crate::protocol::StatusReply>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
     pub created_at: Option<String>,
@@ -481,7 +485,9 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
             item.expect_reply = metadata["expect_reply"] == true || metadata["expect_reply"] == 1;
             item.reply = metadata
                 .get("reply")
-                .and_then(crate::protocol::StatusReply::from_value);
+                .filter(|value| !value.is_null())
+                .and_then(crate::protocol::StatusReply::from_value)
+                .map(Some);
             item.reply_to = metadata["reply_to"].as_str().map(str::to_owned);
         }
     }

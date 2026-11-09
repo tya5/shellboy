@@ -535,7 +535,9 @@ fn canonical_item(
         item.expect_reply = metadata["expect_reply"] == true || metadata["expect_reply"] == 1;
         item.reply = metadata
             .get("reply")
-            .and_then(crate::protocol::StatusReply::from_value);
+            .filter(|value| !value.is_null())
+            .and_then(crate::protocol::StatusReply::from_value)
+            .map(Some);
         item.reply_to = metadata["reply_to"].as_str().map(str::to_owned);
     }
     item.targets = super::links(kind, &item)?
