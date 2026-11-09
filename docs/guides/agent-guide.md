@@ -860,3 +860,10 @@ sends no output-limit field for the first two APIs; Messages retains its existin
 32768 default. Do not confuse an output limit with the context window or assume
 that a proxy/model accepts an arbitrary value. Do not change a user's saved
 connection unless asked. Other request fields and authentication are unaffected.
+
+When `max_tokens` is unset for Responses or Chat Completions, an existing
+`extra_body` value for that API's native output-limit key still passes through.
+When `max_tokens` is set, also supplying the same native key in `extra_body` is
+an explicit configuration/send error, even for an equal value or null. Other
+API keys are not newly reserved. Existing Messages reserved-field rules remain
+unchanged; this does not add aliases or silently choose between duplicate limits.

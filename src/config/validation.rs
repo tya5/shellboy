@@ -98,6 +98,15 @@ impl Config {
     }
 }
 impl Connection {
+    pub(crate) fn output_limit_collision_key(&self) -> Option<&'static str> {
+        self.max_tokens?;
+        let key = match self.api {
+            Api::Responses => "max_output_tokens",
+            Api::ChatCompletions => "max_completion_tokens",
+            Api::AnthropicMessages => return None,
+        };
+        self.extra_body.contains_key(key).then_some(key)
+    }
     fn validate(&self, name: &str) -> Result<(), ConfigError> {
         nonempty(&format!("connections.{name}"), name)?;
         if self.prompt_cache_diagnostics && (self.api != Api::Responses || !self.prompt_caching) {
@@ -295,6 +304,12 @@ impl Connection {
     /// size and collisions with fields Shellboy itself owns are checked.
     fn validate_extra(&self, name: &str) -> Result<(), ConfigError> {
         let body_key = format!("connections.{name}.extra_body");
+        if let Some(key) = self.output_limit_collision_key() {
+            return Err(invalid(
+                format!("connections.{name}.extra_body.{key}"),
+                "duplicates configured max_tokens; remove one of the two settings",
+            ));
+        }
         for key in self.extra_body.keys() {
             if self.api.reserved_body_fields().contains(&key.as_str()) {
                 return Err(invalid(

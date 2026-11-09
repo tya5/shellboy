@@ -354,6 +354,14 @@ impl HttpModelClient {
         thread: Option<&str>,
         tags: Option<&[crate::model::wire_bytes::ItemTag]>,
     ) -> Result<(Value, Option<HeaderValue>, crate::model::wire_bytes::Labels), ModelError> {
+        if let Some(key) = self.connection.output_limit_collision_key() {
+            return Err(ModelError::new(
+                "invalid_config",
+                format!(
+                    "extra_body.{key} duplicates configured max_tokens; remove one of the two settings"
+                ),
+            ));
+        }
         let session_header = self.prepare_session(thread, &mut request)?;
         let Some(object) = request.as_object_mut() else {
             return Err(ModelError::new(

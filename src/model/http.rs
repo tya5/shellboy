@@ -1082,4 +1082,75 @@ mod configured_output_limit_tests {
             }
         }
     }
+    #[test]
+    fn mapped_output_limit_collision_is_rejected_without_reserving_other_keys() {
+        let request = serde_json::json!({"model":"synthetic","input":[],"tools":[]});
+        for (api, name, key, other) in [
+            (
+                Api::Responses,
+                "responses",
+                "max_output_tokens",
+                "max_completion_tokens",
+            ),
+            (
+                Api::ChatCompletions,
+                "chat_completions",
+                "max_completion_tokens",
+                "max_output_tokens",
+            ),
+        ] {
+            for value in [
+                serde_json::json!(1234),
+                serde_json::json!(5678),
+                serde_json::Value::Null,
+            ] {
+                let extra = serde_json::json!({key:value.clone()});
+                let config = serde_json::json!({"connections":{"synthetic":{"api":name,"base_url":"https://synthetic.invalid/v1","max_tokens":1234,"extra_body":extra}}});
+                assert!(
+                    serde_json::from_value::<crate::config::Config>(config)
+                        .unwrap()
+                        .validate()
+                        .is_err(),
+                    "configured + existing {key} must reject even equal/null"
+                );
+                let mut client = HttpModelClient::new(Connection {
+                    api,
+                    base_url: "https://synthetic.invalid/v1".into(),
+                    ..Connection::default()
+                })
+                .unwrap();
+                client.connection.max_tokens = Some(1234);
+                client.connection.extra_body =
+                    extra.as_object().unwrap().clone().into_iter().collect();
+                assert!(
+                    client.wire_request(request.clone(), None).is_err(),
+                    "send guard must reject bypassed invalid config"
+                );
+                client.connection.max_tokens = None;
+                let mut valid = crate::config::Config::default();
+                valid
+                    .connections
+                    .insert("synthetic".into(), client.connection.clone());
+                valid.validate().unwrap();
+                let wire = client.wire_request(request.clone(), None).unwrap().0;
+                assert_eq!(wire[key], value);
+                client.connection.max_tokens = Some(1234);
+                client.connection.extra_body =
+                    serde_json::json!({other:value.clone(),"future":true})
+                        .as_object()
+                        .unwrap()
+                        .clone()
+                        .into_iter()
+                        .collect();
+                let wire = client.wire_request(request.clone(), None).unwrap().0;
+                assert_eq!(wire[key], 1234);
+                assert_eq!(wire[other], value);
+                assert_eq!(wire["future"], true);
+                valid
+                    .connections
+                    .insert("synthetic".into(), client.connection.clone());
+                valid.validate().unwrap();
+            }
+        }
+    }
 }

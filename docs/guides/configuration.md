@@ -1007,3 +1007,10 @@ Messages retains its existing default of 32768. An explicit value replaces only
 that output limit, not the context window, reasoning effort, or other payload
 settings. This is API selection, not proxy-specific behavior. Setting a large
 value does not prove that the selected provider/model supports it.
+
+When `max_tokens` is unset for Responses or Chat Completions, an existing
+`extra_body` value for that API's native output-limit key still passes through.
+When `max_tokens` is set, also supplying the same native key in `extra_body` is
+an explicit configuration/send error, even for an equal value or null. Other
+API keys are not newly reserved. Existing Messages reserved-field rules remain
+unchanged; this does not add aliases or silently choose between duplicate limits.
