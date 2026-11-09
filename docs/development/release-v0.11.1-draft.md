@@ -52,11 +52,12 @@ versions. Feed the old and new binaries to the existing
 root, old version 0.11.0, start/new schema 39 and expected version 0.11.1. Use only
 that script's loopback mock and synthetic data; never an installed data directory.
 
-At this preparation checkpoint, the script's `PUBLIC_SCHEMA`/`--old-version`
-allowlist ends at 0.10.0: direct `--old-version 0.11.0` is not supported yet.
-The integration/upgrade owner must address this narrow qualification-script gap
-before claiming an upgrade pass; do not substitute 0.10.0 or relabel an older run.
-Script adjustment is not included in this version/notes commit. Record actual
+The helper now accepts public 0.11.0 with schema 39, verified against the published
+v0.11.0 tag `4dc8f66a6c586db57a7a63a3a8be84e25999c95f` and current migration
+list (`0039_independent_runs`). Its historical default old version stays 0.10.0;
+pass 0.11.0 explicitly. Parser/source tests cover that entry and preserve rejection
+of an invalid schema rollback; they are not a public-binary upgrade execution.
+Record actual
 source SHA, native OS, asset checksums, command and observed result outside Git
 rather than making recursive notes-only version commits. Failure stops the train;
 no independent rerun or publication is implied by this plan.

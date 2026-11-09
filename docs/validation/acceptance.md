@@ -11216,6 +11216,7 @@ The four-column [release draft](../development/release-v0.11.1-draft.md) separat
 source implementation from unverified final-SHA execution. Version/lock and local
 Markdown consistency checks are preparation evidence only, not Rust execution.
 Ordinary three-OS CI, exact-main candidate build/checksums and upgrade from public
-v0.11.0 remain pending. The existing upgrade helper does not yet allow old-version
-0.11.0; the qualification owner must resolve that explicit gap before execution.
+v0.11.0 remain pending. The upgrade helper now explicitly accepts old-version 0.11.0/schema 39 while
+retaining its 0.10.0 default. Parser/source acceptance is distinct from the pending
+public-binary execution.
 No installed binary, actual owner/user data or paid provider is touched by this task.
