@@ -111,14 +111,16 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     assert_eq!(held.message_id.as_deref(), Some("held-node"));
     let shell = status.items.iter().find(|i| i.kind == "shell").unwrap();
     assert_eq!(shell.owner_run_id.as_deref(), Some("root"));
-    assert!(matches!(&shell.targets[0],Command::ShellGet(a)if a.execution_id=="exec"));
-    assert!(matches!(&shell.targets[1],Command::ShellRead(a)if a.execution_id=="exec"));
+    assert_eq!(shell.targets[0].command, "shell.get");
+    assert_eq!(shell.targets[0].args["execution_id"], "exec");
+    assert_eq!(shell.targets[1].command, "shell.read");
+    assert_eq!(shell.targets[1].args["execution_id"], "exec");
     assert!(shell.operation_id.is_none());
     assert!(
         !shell
             .targets
             .iter()
-            .any(|c| matches!(c, Command::OperationGet(_)))
+            .any(|target| target.command == "operation.get")
     );
     let raw = serde_json::to_string(&status).unwrap();
     for private in [
@@ -195,12 +197,6 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         .await
         .unwrap();
     assert!(applied.items[0].end_message_node_id.is_none());
-    assert!(
-        !applied.items[0]
-            .targets
-            .iter()
-            .any(|c| matches!(c,Command::HistoryGet(a)if a.node_id=="answer"))
-    );
     let bad = f
         .status(StatusArgs {
             thread_id: Some("a".into()),

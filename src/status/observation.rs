@@ -524,6 +524,7 @@ fn canonical_item(
                 crate::control::revisit::summary(pending == "1", delivered.parse().ok()?)
             }),
         targets: Vec::new(),
+        additional_properties: Default::default(),
     };
 
     if kind == super::WorkKind::Message
@@ -532,10 +533,22 @@ fn canonical_item(
         let metadata: serde_json::Value = serde_json::from_str(&metadata)
             .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid reply metadata"))?;
         item.expect_reply = metadata["expect_reply"] == true || metadata["expect_reply"] == 1;
-        item.reply = metadata.get("reply").filter(|v| !v.is_null()).cloned();
+        item.reply = metadata
+            .get("reply")
+            .and_then(crate::protocol::StatusReply::from_value);
         item.reply_to = metadata["reply_to"].as_str().map(str::to_owned);
     }
-    item.targets = super::links(kind, &item)?;
+    item.targets = super::links(kind, &item)?
+        .into_iter()
+        .filter_map(|command| {
+            let value = serde_json::to_value(command).ok()?;
+            Some(crate::protocol::StatusTarget {
+                command: value.get("command")?.as_str()?.to_owned(),
+                args: value.get("args")?.clone(),
+                additional_properties: Default::default(),
+            })
+        })
+        .collect();
     Ok(item)
 }
 

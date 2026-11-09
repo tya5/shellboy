@@ -34,3 +34,8 @@ The historical status ledger is not reintroduced. Current focused repairs cover
 RAG/conversation schema separation, migration fixtures and eventual GC completion.
 Exact-tip independent review and normal/all-OS CI remain required; failed older
 runs are not success evidence. See acceptance.md for validation scope.
+
+
+## #278 typed operation results (in progress)
+
+Rebuilding isolated `issue-278/typed-results-rebased` from public protocol-v5 `ff18f32640f0b41f042f034f4b1a3936a9abe92d`. Old dirty WT remains untouched; its patch is backed up privately with verified SHA-256 `43d01e6738e506a0e663eeaa27b4649d9f4de177a63556c3c2586e88d4d5951a`. Types only the four current operations status/shell.list/usage.get/config.get; excludes `src/model/http.rs`, #283 future stdin fields, and stale #279 body-separation assertions. Config/provider/group-key-dependent leaves remain open. `status` models its two existing JSON modes via untagged union. Protocol v5 remains unchanged. Focused tests, generated schema, independent review and final CI remain to complete.

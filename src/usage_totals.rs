@@ -46,7 +46,7 @@ pub enum Scope {
     Thread { id: String, children: bool },
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Number {
     pub known_sum: Option<u64>,
     pub unknown_count: u64,

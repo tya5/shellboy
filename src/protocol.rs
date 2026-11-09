@@ -44,14 +44,14 @@ fn operation_result_schemas(
         };
     }
     result!("owner.shutdown", Accepted);
-    result!("status", crate::status::StatusSnapshot);
+    result!("status", StatusResult);
     result!("model.list", ModelListResult);
     result!("thread.list", Page<ThreadSummary>);
     result!("thread.get", ThreadDetails);
     opaque!("thread.branches");
-    opaque!("usage.get");
+    result!("usage.get", UsageGetResult);
     opaque!("compact.list");
-    opaque!("shell.list");
+    result!("shell.list", ShellListResult);
     opaque!("thread.create");
     opaque!("thread.fork");
     opaque!("thread.delete");
@@ -101,7 +101,7 @@ fn operation_result_schemas(
     opaque!("index.remove");
     result!("storage.status", StorageStatus);
     opaque!("storage.collect");
-    opaque!("config.get");
+    result!("config.get", ConfigGetResult);
     opaque!("config.set");
     result!("credentials.set", Accepted);
     result!("credentials.clear", Accepted);
@@ -204,6 +204,41 @@ pub fn schema_json() -> String {
     add_root!("StatusSnapshot", crate::status::StatusSnapshot);
     add_root!("WorkItem", crate::status::WorkItem);
     add_root!("ResponseNodeRef", crate::status::ResponseNodeRef);
+    add_root!("StatusFilters", crate::status::StatusFilters);
+    add_root!("StatusTarget", StatusTarget);
+    add_root!("StatusReply", StatusReply);
+    add_root!("ReceiptBudget", ReceiptBudget);
+    add_root!("StatusResult", StatusResult);
+    add_root!("StatusMemoryResult", StatusMemoryResult);
+    add_root!("StatusMemoryProcess", StatusMemoryProcess);
+    add_root!("StatusMemoryCache", StatusMemoryCache);
+    add_root!("StatusMemoryMetric", StatusMemoryMetric);
+    add_root!("ShellListItem", ShellListItem);
+    add_root!("ShellListResult", ShellListResult);
+    add_root!("TimeWindowResult", TimeWindowResult);
+    add_root!("UsageNumber", UsageNumber);
+    add_root!("UsageAttemptTotals", UsageAttemptTotals);
+    add_root!("UsageAttemptPeriod", UsageAttemptPeriod);
+    add_root!("UsageCoverage", UsageCoverage);
+    add_root!("UsageTiming", UsageTiming);
+    add_root!("UsageActiveAttempt", UsageActiveAttempt);
+    add_root!("UsageActive", UsageActive);
+    add_root!("CompactionUsageResult", CompactionUsageResult);
+    add_root!("UsageAggregateResult", UsageAggregateResult);
+    add_root!("PromptCacheDiagnostics", PromptCacheDiagnostics);
+    add_root!("UsageAttemptPayload", UsageAttemptPayload);
+    add_root!("UsageInputTokenDetails", UsageInputTokenDetails);
+    add_root!("UsageOutputTokenDetails", UsageOutputTokenDetails);
+    add_root!("UsageInputBytes", UsageInputBytes);
+    add_root!("UsageAttemptResult", UsageAttemptResult);
+    add_root!("UsageBreakdownCoverage", UsageBreakdownCoverage);
+    add_root!("UsageBreakdownResult", UsageBreakdownResult);
+    add_root!("UsageGetResult", UsageGetResult);
+    add_root!("ConfigLoadedView", ConfigLoadedView);
+    add_root!("ConfigFileView", ConfigFileView);
+    add_root!("ConfigCredentialsFileView", ConfigCredentialsFileView);
+    add_root!("ConfigRestartView", ConfigRestartView);
+    add_root!("ConfigGetResult", ConfigGetResult);
     let operation_results = operation_result_schemas(&mut generator);
     for (name, schema) in generator.take_definitions(false) {
         definitions.entry(name).or_insert(schema);
@@ -1631,6 +1666,431 @@ args!(
 );
 record!(IndexProbeObservation { connection: String, model: String, requested_dimensions: Option<usize>, dimension: Option<usize>, checked_at: String, success: bool, error: Option<Value> });
 record!(StorageStatus { logical_live_bytes: u64, reclaimable_bytes: u64, db_bytes: u64, wal_bytes: u64, managed_bytes: u64, log_bytes: u64, #[serde(default, skip_serializing_if = "Option::is_none")] filesystem_free_bytes: Option<u64>, warning_bytes: u64, limit_bytes: u64 });
+record!(ShellListItem {
+    execution_id: String,
+    run_id: String,
+    thread_id: String,
+    #[serde(default)] turn_id: Option<String>,
+    started_at: Option<String>,
+    ended_at: Option<String>,
+    state: String,
+    exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] description: Option<String>,
+    command_excerpt: Option<String>,
+    command_characters: u64,
+    command_excerpt_redacted: bool,
+    command_excerpt_truncated: bool,
+    started_at_known: bool,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(TimeWindowResult {
+    since: Option<String>,
+    until: Option<String>,
+    bounds: String,
+    durations: String,
+    unknown_starts: String,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ShellListResult {
+    items: Vec<ShellListItem>,
+    next_cursor: Option<String>,
+    scanned: u64,
+    scan_limit: u64,
+    scan_budget_reached: bool,
+    period: TimeWindowResult,
+    ordering: String,
+    redaction: String,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageNumber {
+    known_sum: Option<u64>,
+    unknown_count: u64,
+    overflow: bool,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageAttemptTotals {
+    count: u64,
+    input_tokens: UsageNumber,
+    cached_tokens: UsageNumber,
+    output_tokens: UsageNumber,
+    reasoning_tokens: UsageNumber,
+    total_tokens: UsageNumber,
+    duration_ms: UsageNumber,
+    first_known_started_at: Option<String>,
+    last_known_started_at: Option<String>,
+    unknown_start_count: u64,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageAttemptPeriod {
+    first_known_started_at: Option<String>,
+    last_known_started_at: Option<String>,
+    unknown_start_count: u64,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageCoverage {
+    scope_complete: bool,
+    descendants: String,
+    summary: String,
+    embedding: String,
+    rag: String,
+    excluded_attempt_states: Vec<String>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageTimingMeasured {
+    count: u64,
+    duration_ms: UsageNumber,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageTimingNotApplicable {
+    duration_ms: Option<UsageNumber>,
+    status: String,
+    reason: String,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum UsageTiming {
+    Measured(UsageTimingMeasured),
+    NotApplicable(UsageTimingNotApplicable),
+}
+record!(UsageActiveAttempt {
+    state: String,
+    count: u64,
+    elapsed_ms: Option<u64>,
+    unknown_elapsed_count: u64,
+    overflow: bool,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageActive {
+    observed_at: Option<String>,
+    model_attempts: Vec<UsageActiveAttempt>,
+    run: UsageTiming,
+    shell: UsageTiming,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(CompactionUsageResult {
+    compactions: u64,
+    malformed_records: u64,
+    requests: u64,
+    map_requests: u64,
+    reduce_requests: u64,
+    oversized_reduce_parts: u64,
+    input_tokens: UsageNumber,
+    cached_tokens: UsageNumber,
+    cache_creation_tokens: UsageNumber,
+    output_tokens: UsageNumber,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageAggregateResult {
+    scope: String,
+    scope_id: String,
+    thread_id: Option<String>,
+    include_children: bool,
+    turn_lifetime_ms: Option<u64>,
+    attempt_period: UsageAttemptPeriod,
+    selected_threads: u64,
+    coverage: UsageCoverage,
+    model_attempts: std::collections::BTreeMap<String, UsageAttemptTotals>,
+    compaction: CompactionUsageResult,
+    model_duration_ms: UsageNumber,
+    run: UsageTiming,
+    shell: UsageTiming,
+    active: UsageActive,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] requested_period: Option<TimeWindowResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] connection_rates: Option<Value>
+});
+record!(PromptCacheDiagnostics {
+    #[serde(rename = "type")] kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] cache_missed_tokens: Option<u64>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageAttemptPayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")] input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] output_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] total_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] input_tokens_details: Option<UsageInputTokenDetails>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] output_tokens_details: Option<UsageOutputTokenDetails>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageInputTokenDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")] cached_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] cache_creation_tokens: Option<u64>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageOutputTokenDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")] reasoning_tokens: Option<u64>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageInputBytes {
+    unit: String,
+    total: u64,
+    categories: std::collections::BTreeMap<String, u64>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageAttemptResult {
+    attempt_id: String,
+    thread_id: String,
+    run_id: String,
+    turn_id: String,
+    state: String,
+    usage: UsageAttemptPayload,
+    prompt_cache_diagnostics: Option<PromptCacheDiagnostics>,
+    input_bytes: Option<UsageInputBytes>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageBreakdownCoverage {
+    unknown_starts: String,
+    summary: String,
+    summary_unknown_time: String,
+    summary_malformed: String,
+    embeddings: String,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(UsageBreakdownResult {
+    thread_id: Option<String>,
+    group_by: String,
+    timezone: String,
+    requested_period: TimeWindowResult,
+    items: Vec<Value>,
+    more: bool,
+    next_cursor: Option<String>,
+    scanned_candidates: u64,
+    matched_attempts: u64,
+    #[serde(default)] scanned_compaction_candidates: Option<u64>,
+    #[serde(default)] scanned_compaction_bytes: Option<u64>,
+    #[serde(default)] compaction_byte_limit: Option<u64>,
+    #[serde(default)] matched_compactions: Option<u64>,
+    #[serde(default)] malformed_compaction_records: Option<u64>,
+    #[serde(default)] unknown_time_compaction_records: Option<u64>,
+    excluded_time_count: u64,
+    outside_period_count: u64,
+    row_limit: u64,
+    group_limit: u32,
+    scan_truncated: bool,
+    scope_complete: bool,
+    statistics_scope: String,
+    coverage: UsageBreakdownCoverage,
+    elapsed_ms: f64,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum UsageGetResult {
+    Aggregate(UsageAggregateResult),
+    Attempt(UsageAttemptResult),
+    Breakdown(UsageBreakdownResult),
+}
+record!(StatusMemoryMetric {
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] bytes: Option<Option<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] unavailable_reason: Option<Option<String>>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(StatusMemoryProcess {
+    pid: u32,
+    platform: String,
+    observed_at: String,
+    metrics: std::collections::BTreeMap<String, StatusMemoryMetric>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(StatusMemoryCache {
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] retained_bytes: Option<Option<u64>>,
+    limit_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] entries: Option<Option<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] entry_unit: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] unavailable_reason: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] live_encoded_bytes: Option<Option<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] pinned_bytes: Option<Option<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "deserialize_present_nullable")] live_bytes: Option<Option<u64>>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(StatusMemoryResult {
+    process: StatusMemoryProcess,
+    caches: std::collections::BTreeMap<String, StatusMemoryCache>,
+    accounting: String,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum StatusResult {
+    Activity(crate::status::StatusSnapshot),
+    Memory(StatusMemoryResult),
+}
+impl<'de> Deserialize<'de> for StatusResult {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let value = Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| D::Error::custom("status result must be an object"))?;
+        let activity = [
+            "instance_id",
+            "observed_at",
+            "scope",
+            "consistency",
+            "fingerprint",
+            "filters",
+            "items",
+            "receipt_budget",
+        ]
+        .iter()
+        .all(|key| object.contains_key(*key));
+        let memory = ["process", "caches", "accounting"]
+            .iter()
+            .all(|key| object.contains_key(*key));
+        match (activity, memory) {
+            (true, false) => serde_json::from_value(value)
+                .map(Self::Activity)
+                .map_err(D::Error::custom),
+            (false, true) => serde_json::from_value(value)
+                .map(Self::Memory)
+                .map_err(D::Error::custom),
+            _ => Err(D::Error::custom("status result is incomplete or ambiguous")),
+        }
+    }
+}
+fn deserialize_present_nullable<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StatusReply {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub delivered: Option<Option<bool>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub accepted: Option<Option<bool>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub delivery_status: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub assignment: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub message_id: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub thread_id: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub run_id: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub turn_id: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub status: Option<Option<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    pub error: Option<Option<Value>>,
+    #[serde(default, flatten)]
+    pub additional_properties: std::collections::BTreeMap<String, Value>,
+}
+impl StatusReply {
+    pub(crate) fn from_value(value: &Value) -> Option<Self> {
+        serde_json::from_value(value.clone()).ok()
+    }
+}
+record!(StatusTarget {
+    command: String,
+    args: Value,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ReceiptBudget {
+    accounted_bytes: u64,
+    limit_bytes: u64,
+    max_outcome_bytes: u64,
+    result_retention_seconds: u64,
+    result_retention: String,
+    expired_replay: String,
+    control_headroom_bytes: u64,
+    control_limit_bytes: u64,
+    control_available_bytes: u64,
+    protected_old_pending_bytes: u64,
+    at_limit: bool,
+    available_bytes: u64,
+    full_result_admission_blocked: bool,
+    recovery: String,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ConfigLoadedView {
+    present: bool,
+    content_hash: Option<String>,
+    values: Value,
+    redacted_fields: Vec<String>,
+    credential_env_set: std::collections::BTreeMap<String, bool>,
+    credential_source: std::collections::BTreeMap<String, String>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ConfigFileView {
+    present: bool,
+    content_hash: Option<String>,
+    valid: bool,
+    error: Option<String>,
+    values: Option<Value>,
+    redacted_fields: Vec<String>,
+    credential_source: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ConfigCredentialsFileView {
+    path: Option<std::path::PathBuf>,
+    present: bool,
+    valid: bool,
+    error: Option<String>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ConfigRestartView { all_fields_require_restart: bool, #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value> });
+record!(ConfigGetResult {
+    config_path: Option<std::path::PathBuf>,
+    loaded: ConfigLoadedView,
+    file: ConfigFileView,
+    credentials_file: ConfigCredentialsFileView,
+    differs: bool,
+    differing_fields: Option<Vec<String>>,
+    restart: ConfigRestartView,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
 record!(Accepted { accepted: bool });
 
 #[cfg(test)]

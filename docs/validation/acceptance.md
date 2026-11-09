@@ -11207,3 +11207,11 @@ the prefix without duplicating outcomes. All 129 terminal transitions are unique
 each has one correct event/delivery insertion, and seven unrelated receipts and
 bodies survive. Both injected partial failures roll back. The original sender
 Run is stopped; the final post-reopen outcome targets a new independent Run.
+
+
+## #278 typed operation results — in progress
+
+- Current base: protocol-v5 `ff18f32640f0b41f042f034f4b1a3936a9abe92d`; branch `issue-278/typed-results-rebased`. Old dirty WT and hash-verified private patch backup are preserved unchanged.
+- Type current `status` (activity + memory modes), `shell.list`, `usage.get`, and `config.get` wire shapes without changing operation order/names, version, runtime, shell.write behavior, `thread.get` or `history.window`. `status` union discriminates by required structural fields and rejects ambiguous shapes instead of lossy untagged trial order.
+- Test both actual status modes roundtrip, null/omitted fields, additive unknown fields, pre-#283 shell results, dynamic config values, provider usage details, and all four typed result operation schemas. Config/provider/group-key-dependent leaves remain open. No #283 stdin fields, #279 readback claims, or #286/release content are included.
+- Pending: schema golden generation/equality, focused test rerun, current Studio decoder compatibility review, S6 independent review, privacy scan, exact fresh-main branch validation and delegated final CI.
