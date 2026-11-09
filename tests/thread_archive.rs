@@ -691,3 +691,211 @@ async fn a_reply_that_starts_a_run_on_an_archived_sender_unarchives_it() {
     );
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn archive_family_real_producer_roundtrips_typed_results_in_both_modes() {
+    #[derive(serde::Deserialize)]
+    struct LegacyArchive {
+        archived: Vec<String>,
+        already: Vec<String>,
+        not_found: Vec<String>,
+        descendants: bool,
+    }
+    #[derive(serde::Deserialize)]
+    struct LegacyUnarchive {
+        unarchived: Vec<String>,
+        already: Vec<String>,
+        not_found: Vec<String>,
+        descendants: bool,
+    }
+    let (_temp, store) = store().await;
+    let root = create(&store, None).await;
+    let child = create(&store, Some(&root)).await;
+    let mut saw_changed = false;
+    let mut saw_already = false;
+    for descendants in [false, true] {
+        for archive_mode in [true, false] {
+            for repeat in [false, true] {
+                let value = if archive_mode {
+                    archive(&store, &[&root, "synthetic-missing"], descendants).await
+                } else {
+                    unarchive(&store, &[&root, "synthetic-missing"], descendants).await
+                }
+                .unwrap();
+                assert_eq!(value["descendants"], descendants);
+                assert_eq!(value["not_found"], json!(["synthetic-missing"]));
+                let changed = if archive_mode {
+                    "archived"
+                } else {
+                    "unarchived"
+                };
+                if repeat {
+                    assert!(value[changed].as_array().unwrap().is_empty());
+                    saw_already |= value["already"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|id| id == &root);
+                } else {
+                    assert!(
+                        value[changed]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|id| id == &root)
+                    );
+                    saw_changed = true;
+                }
+                if descendants && !repeat {
+                    assert!(
+                        value[changed]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|id| id == &child)
+                    );
+                }
+                let mut extended = value.clone();
+                extended["future_null"] = Value::Null;
+                extended["future_object"] = json!({"nested":null,"flag":false});
+                if archive_mode {
+                    assert!(
+                        serde_json::from_value::<Accepted>(value.clone()).is_err(),
+                        "the old registry's Accepted type cannot decode the actual producer"
+                    );
+                    let typed: ThreadArchiveResult = serde_json::from_value(value.clone()).unwrap();
+                    assert_eq!(serde_json::to_value(typed).unwrap(), value);
+                    let typed: ThreadArchiveResult =
+                        serde_json::from_value(extended.clone()).unwrap();
+                    assert_eq!(typed.additional_properties["future_null"], Value::Null);
+                    assert_eq!(serde_json::to_value(typed).unwrap(), extended);
+                    let legacy: LegacyArchive = serde_json::from_value(extended).unwrap();
+                    assert_eq!(
+                        json!({"archived":legacy.archived,"already":legacy.already,"not_found":legacy.not_found,"descendants":legacy.descendants}),
+                        value
+                    );
+                } else {
+                    let typed: ThreadUnarchiveResult =
+                        serde_json::from_value(value.clone()).unwrap();
+                    assert_eq!(serde_json::to_value(typed).unwrap(), value);
+                    let typed: ThreadUnarchiveResult =
+                        serde_json::from_value(extended.clone()).unwrap();
+                    assert_eq!(typed.additional_properties["future_null"], Value::Null);
+                    assert_eq!(serde_json::to_value(typed).unwrap(), extended);
+                    let legacy: LegacyUnarchive = serde_json::from_value(extended).unwrap();
+                    assert_eq!(
+                        json!({"unarchived":legacy.unarchived,"already":legacy.already,"not_found":legacy.not_found,"descendants":legacy.descendants}),
+                        value
+                    );
+                }
+            }
+            let error = if archive_mode {
+                archive(&store, &["synthetic-absent"], descendants).await
+            } else {
+                unarchive(&store, &["synthetic-absent"], descendants).await
+            }
+            .unwrap_err();
+            assert_eq!(error.code, ErrorCode::ThreadNotFound);
+        }
+    }
+    assert!(saw_changed && saw_already);
+    let schema: Value = serde_json::from_str(&schema_json()).unwrap();
+    for (op, field) in [
+        ("thread.archive", "archived"),
+        ("thread.unarchive", "unarchived"),
+    ] {
+        let result = &schema["operation_results"][op];
+        assert_eq!(result["type"], "object");
+        assert_eq!(result["properties"][field]["type"], "array");
+        assert!(result["properties"].get("accepted").is_none());
+        assert!(
+            result["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|v| v == field)
+        );
+        assert!(
+            result
+                .get("additionalProperties")
+                .is_none_or(|v| v != &json!(false))
+        );
+    }
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn archive_family_mixed_deduplicated_order_is_preserved_by_current_types() {
+    let (_temp, store) = store().await;
+    let first = create(&store, None).await;
+    let second = create(&store, None).await;
+    let third = create(&store, None).await;
+    let child = create(&store, Some(&first)).await;
+    for descendants in [false, true] {
+        for archiving in [true, false] {
+            let all = [
+                first.as_str(),
+                second.as_str(),
+                third.as_str(),
+                child.as_str(),
+            ];
+            if archiving {
+                unarchive(&store, &all, false).await.unwrap();
+                archive(&store, &[&second], false).await.unwrap();
+            } else {
+                archive(&store, &all, false).await.unwrap();
+                unarchive(&store, &[&second], false).await.unwrap();
+            }
+            let ids = [
+                third.as_str(),
+                first.as_str(),
+                third.as_str(),
+                "synthetic-missing",
+                second.as_str(),
+                "synthetic-missing",
+            ];
+            let original = if archiving {
+                archive(&store, &ids, descendants).await
+            } else {
+                unarchive(&store, &ids, descendants).await
+            }
+            .unwrap();
+            let field = if archiving { "archived" } else { "unarchived" };
+            let mut changed = vec![third.clone(), first.clone()];
+            if descendants {
+                changed.push(child.clone());
+            }
+            assert_eq!(
+                original,
+                json!({field:changed,"already":[second],"not_found":["synthetic-missing"],"descendants":descendants})
+            );
+            let typed = if archiving {
+                serde_json::to_value(
+                    serde_json::from_value::<ThreadArchiveResult>(original.clone()).unwrap(),
+                )
+                .unwrap()
+            } else {
+                serde_json::to_value(
+                    serde_json::from_value::<ThreadUnarchiveResult>(original.clone()).unwrap(),
+                )
+                .unwrap()
+            };
+            assert_eq!(typed, original);
+            assert!(serde_json::from_value::<Accepted>(original.clone()).is_err());
+            for key in [field, "already", "not_found", "descendants"] {
+                let mut missing = original.clone();
+                missing.as_object_mut().unwrap().remove(key);
+                let mut null = original.clone();
+                null[key] = Value::Null;
+                for invalid in [missing, null] {
+                    if archiving {
+                        assert!(serde_json::from_value::<ThreadArchiveResult>(invalid).is_err());
+                    } else {
+                        assert!(serde_json::from_value::<ThreadUnarchiveResult>(invalid).is_err());
+                    }
+                }
+            }
+        }
+    }
+    store.database.shutdown().await.unwrap();
+}

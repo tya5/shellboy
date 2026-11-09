@@ -58,8 +58,8 @@ fn operation_result_schemas(
     opaque!("thread.delete_preview");
     opaque!("thread.prune");
     opaque!("thread.rewind");
-    result!("thread.archive", Accepted);
-    result!("thread.unarchive", Accepted);
+    result!("thread.archive", ThreadArchiveResult);
+    result!("thread.unarchive", ThreadUnarchiveResult);
     opaque!("thread.tag");
     opaque!("thread.tags");
     opaque!("thread.cwds");
@@ -2104,6 +2104,16 @@ record!(ConfigGetResult {
     differing_fields: Option<Vec<String>>,
     restart: ConfigRestartView,
     #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+// Archive mutations return changed IDs, not an acceptance acknowledgement.
+// Unknown response fields remain open and lossless, including explicit nulls.
+record!(ThreadArchiveResult {
+    archived: Vec<String>, already: Vec<String>, not_found: Vec<String>, descendants: bool,
+    #[serde(flatten)] additional_properties: std::collections::BTreeMap<String, Value>
+});
+record!(ThreadUnarchiveResult {
+    unarchived: Vec<String>, already: Vec<String>, not_found: Vec<String>, descendants: bool,
+    #[serde(flatten)] additional_properties: std::collections::BTreeMap<String, Value>
 });
 record!(Accepted { accepted: bool });
 
