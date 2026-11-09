@@ -2203,14 +2203,30 @@ mod message_acknowledgement_tests {
             );
         }
         assert_eq!(results.len(), 63);
-        assert_ne!(results["status"], serde_json::Value::Bool(true));
-        for name in ["thread.create", "shell.list", "config.get"] {
+        for name in ["thread.create", "config.set", "connection.test"] {
             assert_eq!(
                 results[name],
                 serde_json::Value::Bool(true),
-                "{name} stays opaque"
+                "{name} remains opaque"
             );
         }
+        for name in ["status", "shell.list", "usage.get", "config.get"] {
+            assert_ne!(
+                results[name],
+                serde_json::Value::Bool(true),
+                "{name} has an existing typed result schema"
+            );
+        }
+        assert_eq!(
+            results["shell.list"]["properties"]["items"]["type"],
+            "array"
+        );
+        assert_eq!(
+            results["config.get"]["properties"]["loaded"]["$ref"],
+            "#/$defs/ConfigLoadedView"
+        );
+        assert_eq!(results["status"]["anyOf"].as_array().unwrap().len(), 2);
+        assert_eq!(results["usage.get"]["anyOf"].as_array().unwrap().len(), 3);
     }
 
     #[test]
