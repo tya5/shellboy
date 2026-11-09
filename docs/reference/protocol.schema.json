@@ -5579,6 +5579,20 @@
         "state": {
           "$ref": "#/definitions/ShellState"
         },
+        "stdin_last_write_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdin_open": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "thread_id": {
           "type": [
             "string",
@@ -7226,6 +7240,20 @@
         "state": {
           "type": "string"
         },
+        "stdin_last_write_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdin_open": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "targets": {
           "items": {
             "$ref": "#/definitions/Command"
@@ -8172,6 +8200,20 @@
         },
         "state": {
           "$ref": "#/definitions/ShellState"
+        },
+        "stdin_last_write_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdin_open": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "thread_id": {
           "type": [

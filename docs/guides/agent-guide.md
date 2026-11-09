@@ -733,6 +733,16 @@ before EOF. Set `stdin_open: true` explicitly only for a command that needs late
 interactive input. Initial input remains ordered before subsequent writes or EOF;
 keeping stdin open does not change the initial-input encoding or byte limit.
 
+`shell get`, `shell list`, and shell records in `status` expose saved stdin
+facts: `stdin_open` is the owner's confirmed pipe state, not proof the child is
+reading input. `null` means no observation was saved for an older execution;
+terminal executions are closed. `stdin_last_write_at` is the actual completion
+time of the last nonempty, fully successful write, including initial input.
+Empty writes, EOF, partial/time-out and failed writes leave that value unchanged.
+A closed pipe cannot be reopened; start another execution with `stdin_open: true`
+when interaction is required. Neither field infers waiting or hangs from silence.
+
+
 ### Shell call descriptions
 
 With the default `[shell] describe_calls = true`, generated shell tool definitions

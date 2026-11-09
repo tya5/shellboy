@@ -1111,3 +1111,11 @@ A Run owns shells only. For child work, create/select a Thread, `message send --
 and end your Turn when only its result remains. The explicit reply is delivered normally; no child lifecycle notice
 or parent background Run is synthesized. Explicit Run/Turn/Thread/shell/reply waits remain observations with direct `self_wait` rejection, but without
 ancestor/sibling cycle rejection. A cycle can time out; do not poll around the observation deadline.
+
+
+Shell detail/list and shell status records also expose nullable `stdin_open` and
+`stdin_last_write_at`. These are saved owner pipe facts, not child-reading or
+waiting-state detection. Missing historical live facts remain null. Terminal
+executions report closed; EOF does not update the last successful write time.
+Only a nonempty Complete write, including initial input, records its actual
+completion time. Failed/partial/time-out and empty writes keep the previous time.

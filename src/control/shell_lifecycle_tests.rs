@@ -824,3 +824,108 @@ async fn largest_configured_reply_grace_preserves_library_bounds_and_remains_can
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn initial_stdin_fact_is_committed_before_terminal_and_survives_readback() {
+    let (_root, owner, control, mut requests, server) = fixture().await;
+    start(&control).await;
+    let (_, reply) = incoming(&mut requests).await;
+    reply.send(json!({"id":"stdin-fact","status":"completed","output":[{"type":"function_call","call_id":"stdin-fact-call","name":"shell","arguments":json!({"command":"cat >/dev/null","initial_stdin":"initial saved bytes"}).to_string()}]})).unwrap();
+    let (_, reply) = incoming(&mut requests).await;
+    // A next model turn is evidence the collector published terminal completion.
+    let fact = control
+        .store
+        .database
+        .call(|db| {
+            let (id, state): (String, String) =
+                db.query_row("SELECT id,state FROM shell_execution LIMIT 1", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?;
+            let fact = crate::stdin_facts::read(db, &id)?;
+            Ok((state, fact))
+        })
+        .await
+        .unwrap();
+    assert_eq!(fact.0, "exited");
+    assert_eq!(fact.1.0, Some(false));
+    assert!(
+        fact.1.1.is_some(),
+        "initial successful write must not disappear at completion"
+    );
+    reply.send(answer()).unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stdin_write_reply_and_eof_reply_observe_committed_owner_facts() {
+    let (_root, owner, control, mut requests, server) = fixture().await;
+    start(&control).await;
+    let (_, reply) = incoming(&mut requests).await;
+    reply.send(tool("cat >/dev/null")).unwrap();
+    let execution=crate::test_watchdog::watchdog("wait for initial stdin fact",async {
+        loop {
+            let found=control.store.database.call(|db| {
+                use rusqlite::OptionalExtension;
+                Ok(db.query_row("SELECT id FROM shell_execution WHERE state='running' AND json_extract(shell_json,'$.stdin_open')=1",[],|r|r.get::<_,String>(0)).optional()?)
+            }).await.unwrap();
+            if let Some(id)=found {break id;}
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    rpc(
+        &control,
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: execution.clone(),
+            text: "nonempty actual bytes".into(),
+            encoding: "UTF-8".into(),
+        }),
+    )
+    .await;
+    let id = execution.clone();
+    let written = control
+        .store
+        .database
+        .call(move |db| crate::stdin_facts::read(db, &id).map_err(Into::into))
+        .await
+        .unwrap();
+    assert_eq!(written.0, Some(true));
+    assert!(
+        written.1.is_some(),
+        "write success must not precede the metadata commit"
+    );
+    rpc(
+        &control,
+        Command::ShellWrite(ShellWriteArgs {
+            execution_id: execution.clone(),
+            text: String::new(),
+            encoding: "UTF-8".into(),
+        }),
+    )
+    .await;
+    rpc(
+        &control,
+        Command::ShellEof(ExecutionTarget {
+            execution_id: execution.clone(),
+        }),
+    )
+    .await;
+    let id = execution.clone();
+    let closed = control
+        .store
+        .database
+        .call(move |db| crate::stdin_facts::read(db, &id).map_err(Into::into))
+        .await
+        .unwrap();
+    assert_eq!(closed.0, Some(false));
+    assert_eq!(
+        closed.1, written.1,
+        "empty write and EOF cannot replace successful write time"
+    );
+    let (_, reply) = incoming(&mut requests).await;
+    reply.send(answer()).unwrap();
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}

@@ -73,6 +73,12 @@ impl Drop for OutputChunk {
 #[derive(Debug)]
 pub enum ShellEvent {
     Output(OutputChunk),
+    /// Owner-only persistence barrier; raw supervisor users never receive this.
+    Stdin {
+        open: bool,
+        successful_write_at: Option<String>,
+        saved: Option<tokio::sync::oneshot::Sender<Result<(), ApiError>>>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -106,6 +112,7 @@ pub struct StdinWriteResult {
 }
 
 struct HandleInner {
+    facts: Option<mpsc::WeakSender<ShellEvent>>,
     stdin: Arc<Mutex<Option<ShellStdin>>>,
     stop: CancellationToken,
     finished: CancellationToken,
@@ -146,31 +153,91 @@ impl ShellHandle {
         if stdin.is_none() {
             return Err(stdin_closed_error());
         }
-        Ok(write_bytes(
+        // Reserve before the side effect, so cancellation/backpressure cannot lose
+        // a successful write. Publish in pipe order, then release its lock before
+        // awaiting owner persistence.
+        let fact_slot = self.fact_slot().await?;
+        let result = write_bytes(
             &mut stdin,
             &bytes,
             deadline,
             &self.inner.stop,
             &self.inner.finished,
         )
-        .await)
+        .await;
+        let successful_write_at = (result.status == StdinWriteStatus::Complete
+            && result.bytes_written > 0)
+            .then(|| chrono::Utc::now().to_rfc3339());
+        let saved = Self::publish_fact(fact_slot, result.stdin_open, successful_write_at);
+        drop(stdin);
+        Self::wait_saved(saved).await?;
+        Ok(result)
+    }
+    async fn fact_slot(&self) -> Result<Option<mpsc::OwnedPermit<ShellEvent>>, ApiError> {
+        let Some(sender) = &self.inner.facts else {
+            return Ok(None);
+        };
+        let sender = sender
+            .upgrade()
+            .ok_or_else(|| ApiError::new(ErrorCode::IoFailed, "stdin fact consumer unavailable"))?;
+        sender
+            .reserve_owned()
+            .await
+            .map(Some)
+            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "stdin fact consumer unavailable"))
+    }
+    fn publish_fact(
+        slot: Option<mpsc::OwnedPermit<ShellEvent>>,
+        open: bool,
+        successful_write_at: Option<String>,
+    ) -> Option<tokio::sync::oneshot::Receiver<Result<(), ApiError>>> {
+        slot.map(|slot| {
+            let (saved, received) = tokio::sync::oneshot::channel();
+            slot.send(ShellEvent::Stdin {
+                open,
+                successful_write_at,
+                saved: Some(saved),
+            });
+            received
+        })
+    }
+    async fn wait_saved(
+        saved: Option<tokio::sync::oneshot::Receiver<Result<(), ApiError>>>,
+    ) -> Result<(), ApiError> {
+        if let Some(saved) = saved {
+            saved.await.map_err(|_| {
+                ApiError::new(ErrorCode::IoFailed, "stdin fact was not persisted")
+            })??;
+        }
+        Ok(())
     }
     /// EOF closes an open pipe, in the same serial order as writes.
     pub async fn eof(&self) -> Result<(), ApiError> {
-        self.close_stdin(true).await
+        self.close_stdin(true, true).await
     }
     /// Saved EOF intent can be applied both before and after handle publication.
     pub(crate) async fn reapply_eof(&self) -> Result<(), ApiError> {
-        self.close_stdin(false).await
+        self.close_stdin(false, false).await
     }
-    async fn close_stdin(&self, require_open: bool) -> Result<(), ApiError> {
+    pub(crate) async fn recorded_eof(&self) -> Result<(), ApiError> {
+        self.close_stdin(false, true).await
+    }
+    async fn close_stdin(&self, require_open: bool, wait_saved: bool) -> Result<(), ApiError> {
         let mut stdin = timeout(self.inner.write_timeout, self.inner.stdin.lock())
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "stdin EOF queue deadline exceeded"))?;
-        if stdin.take().is_none() && require_open {
+        if stdin.is_none() && require_open {
             return Err(stdin_closed_error());
         }
-        Ok(())
+        let slot = self.fact_slot().await?;
+        stdin.take();
+        let saved = Self::publish_fact(slot, false, None);
+        drop(stdin);
+        if wait_saved {
+            Self::wait_saved(saved).await
+        } else {
+            Ok(())
+        }
     }
 }
 pub(crate) fn stdin_closed_error() -> ApiError {
@@ -419,6 +486,7 @@ impl ShellSupervisor {
             stderr,
             initial,
             args.stdin_open,
+            gate.is_some(),
             budget_size,
             &self.config,
         );
@@ -869,7 +937,9 @@ mod output_failure_tests {
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
             progress,
         ));
-        let ShellEvent::Output(chunk) = events.recv().await.unwrap();
+        let ShellEvent::Output(chunk) = events.recv().await.unwrap() else {
+            panic!("raw shell emitted owner-only fact")
+        };
         assert_eq!(chunk.bytes, b"abcd");
         drop(chunk);
         assert!(events.recv().await.is_none());
@@ -884,5 +954,155 @@ mod output_failure_tests {
             reason.contains("raw output limit"),
             "truncation must not disappear behind the first failure: {reason}"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod stdin_fact_ack_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stdin_owner_fact_ack_is_lossless_ordered_and_outside_the_pipe_lock() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("cat >/dev/null")
+            .stdin(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (send, mut events) = mpsc::channel(1);
+        let handle = ShellHandle {
+            inner: Arc::new(HandleInner {
+                facts: Some(send.downgrade()),
+                stdin: Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix))),
+                stop: CancellationToken::new(),
+                finished: CancellationToken::new(),
+                stdin_limit: 1024,
+                write_timeout: Duration::from_secs(1),
+            }),
+        };
+        let writer = handle.clone();
+        let writing = tokio::spawn(async move { writer.write("actual", "UTF-8").await });
+        let ShellEvent::Stdin {
+            open,
+            successful_write_at,
+            saved,
+        } = events.recv().await.unwrap()
+        else {
+            panic!("expected fact")
+        };
+        assert!(open);
+        assert!(successful_write_at.is_some());
+        assert!(
+            !writing.is_finished(),
+            "successful writes must wait for persistence acknowledgement"
+        );
+        assert!(
+            handle.inner.stdin.try_lock().is_ok(),
+            "database persistence must never retain the pipe lock"
+        );
+        saved.unwrap().send(Ok(())).unwrap();
+        assert_eq!(
+            writing.await.unwrap().unwrap().status,
+            StdinWriteStatus::Complete
+        );
+        let eof_handle = handle.clone();
+        let closing = tokio::spawn(async move { eof_handle.eof().await });
+        let ShellEvent::Stdin {
+            open,
+            successful_write_at,
+            saved,
+        } = events.recv().await.unwrap()
+        else {
+            panic!("expected EOF fact")
+        };
+        assert!(!open);
+        assert_eq!(successful_write_at, None);
+        assert!(!closing.is_finished());
+        assert!(handle.inner.stdin.try_lock().is_ok());
+        saved.unwrap().send(Ok(())).unwrap();
+        closing.await.unwrap().unwrap();
+        assert_eq!(
+            handle.eof().await.unwrap_err().code,
+            ErrorCode::InvalidState
+        );
+        // Registration reapplication queues a durable fact without waiting for a
+        // collector which has not started yet; it is the only idempotent path.
+        handle.reapply_eof().await.unwrap();
+        let ShellEvent::Stdin { open, saved, .. } = events.recv().await.unwrap() else {
+            panic!("expected reapplied EOF")
+        };
+        assert!(!open);
+        drop(saved);
+        child.wait().await.unwrap();
+    }
+    #[tokio::test]
+    async fn stdin_fact_capacity_is_reserved_before_writing_and_storage_failure_is_not_success() {
+        use tokio::io::AsyncReadExt;
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut output = child.stdout.take().unwrap();
+        let (send, mut events) = mpsc::channel(1);
+        send.send(ShellEvent::Stdin {
+            open: true,
+            successful_write_at: None,
+            saved: None,
+        })
+        .await
+        .unwrap();
+        let handle = ShellHandle {
+            inner: Arc::new(HandleInner {
+                facts: Some(send.downgrade()),
+                stdin: Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix))),
+                stop: CancellationToken::new(),
+                finished: CancellationToken::new(),
+                stdin_limit: 1024,
+                write_timeout: Duration::from_secs(1),
+            }),
+        };
+        let writer = handle.clone();
+        let writing = tokio::spawn(async move { writer.write("X", "UTF-8").await });
+        let mut byte = [0u8];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), output.read_exact(&mut byte))
+                .await
+                .is_err(),
+            "a full fact channel must prevent the write side effect"
+        );
+        assert!(!writing.is_finished());
+        events.recv().await.unwrap();
+        let ShellEvent::Stdin {
+            successful_write_at,
+            saved,
+            ..
+        } = events.recv().await.unwrap()
+        else {
+            panic!("fact missing")
+        };
+        assert!(successful_write_at.is_some());
+        output.read_exact(&mut byte).await.unwrap();
+        assert_eq!(&byte, b"X");
+        saved
+            .unwrap()
+            .send(Err(ApiError::new(
+                ErrorCode::TargetUnavailable,
+                "synthetic persistence failure",
+            )))
+            .unwrap();
+        assert_eq!(
+            writing.await.unwrap().unwrap_err().code,
+            ErrorCode::TargetUnavailable
+        );
+        drop(events);
+        drop(send);
+        drop(handle);
+        child.kill().await.unwrap();
+        child.wait().await.unwrap();
     }
 }

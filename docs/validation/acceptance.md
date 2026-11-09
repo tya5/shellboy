@@ -11228,3 +11228,39 @@ executed locally. Studio source `ba265c4771c824bb2b65c5f76dca912320cf4f10`
 was searched for shell EOF/write and `Closed` success dependencies; none were
 found in its tracked source/tests/scripts. Local `rg` was unavailable, so this
 search used `git grep`. Cross-OS CI remains an integration gate.
+
+### #283: confirmed stdin observations (component, not final train)
+
+The work starts from #282 exact `7299e56784054f8b14404d12b0940ed352eadcbe` (source gate and limited independent
+execution accepted separately). Its public closed-write/repeated-EOF rejection and private registration replay are
+retained. #283 is a separate delta; neither Windows-native execution nor final all-OS validation follows from that
+#282 acceptance. The release/hotfix branch does not include this work.
+
+The owner's existing bounded shell-event channel transports pipe observations in pipe-lock order. A slot is reserved
+before a write/EOF side effect. Facts are published before unlocking, but persistence acknowledgements are awaited
+only after releasing the pipe lock. Normal write/EOF replies wait for commit; private registration reapplication
+queues its fact without awaiting a collector that has not started. Initial input reserves a slot before writing and
+publishes its confirmed result before initial-task completion. The collector retains output permits through the
+mixed batch transaction, acknowledges after commit, drains facts before terminal completion, and records closed in
+the completion transaction. No new worker/table/column is introduced.
+
+Only nonempty Complete writes, including initial input, carry their actual actor completion timestamp. Empty writes,
+EOF, partial/time-out and failed writes do not replace the last successful time. Saved `stdin_state` remains the
+admission reservation; confirmed `shell_json.stdin_open` is distinct. Confirmed false is sticky, terminal rows are
+closed, and old live rows without saved observations remain unknown. Observations never claim the child is reading.
+
+Synthetic focused evidence covers initial-success preservation through terminal completion; real temporary-pipe
+write/EOF acknowledgements, unlocked pipe during database waits, private nonblocking replay and strict public EOF;
+get/status equality and timestamp stability; real frozen old decoder tolerance and new-record missing-field nulls.
+The prior incomplete-output test required a fixture correction: it deliberately blocks the DB, so its write is now
+spawned and awaited only after DB release. Its process-success/incomplete-output and cancellation-of-later-side-effect
+assertions remain unchanged. An initial synchronous-write fixture hung waiting for the new acknowledgement; that
+run was stopped and is not counted as passing evidence. The corrected collector tests pass (9, one existing ignored).
+Additional full-channel/no-side-effect and failed-persistence acknowledgement tests and generated schema checks are
+tracked separately; component results do not substitute for final exact-SHA independent review or all-OS CI.
+
+Latest fact-focused run passes 12 tests, including the full-capacity channel preventing a native write side effect,
+a real write fact surviving backpressure, and a failed persistence acknowledgement returning an error rather than
+success. Locked `cargo check --tests` and format check pass; the task binary was copied in the build slot and used
+to regenerate the protocol schema (only the two nullable observation fields). Language inventory passes with the
+19 existing pending entries unchanged. Platform evidence remains local Unix only.
