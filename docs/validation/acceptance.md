@@ -11294,3 +11294,15 @@ unchanged payload/receipt/path/event facts, without owner startup or tool/model
 execution. CLI help regression checks both read commands and the duplicate-risk
 warning. Exact test counts/fmt/language results accompany the component commit;
 full suite and CI remain integration gates, not claimed local evidence.
+## v0.11.1 version preparation (2026-11-09)
+
+Scope: package/lock 0.11.1 and release records on reviewed #286 source
+`ff18f32640f0b41f042f034f4b1a3936a9abe92d`; no additional product change.
+The four-column [release draft](../development/release-v0.11.1-draft.md) separates
+source implementation from unverified final-SHA execution. Version/lock and local
+Markdown consistency checks are preparation evidence only, not Rust execution.
+Ordinary three-OS CI, exact-main candidate build/checksums and upgrade from public
+v0.11.0 remain pending. The upgrade helper now explicitly accepts old-version 0.11.0/schema 39 while
+retaining its 0.10.0 default. Parser/source acceptance is distinct from the pending
+public-binary execution.
+No installed binary, actual owner/user data or paid provider is touched by this task.

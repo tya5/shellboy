@@ -45,3 +45,12 @@ matrix/strict-replay/error-boundary tests pass, as do final format/check/strict
 Clippy. Independent review approves product commit 13c7b0923c with five focused
 tests independently passing. Full CI and integration with later main fixes
 remain pending; no private incident cause is claimed.
+## v0.11.1 preparation checkpoint (2026-11-09)
+
+The version-only task starts from `ff18f32640f0b41f042f034f4b1a3936a9abe92d`.
+Only #286 outbound assistant replay normalization is in scope; package/lock move
+to 0.11.1 without a protocol/schema change. See the
+[release preparation and upgrade plan](release-v0.11.1-draft.md).
+Exact version-commit native CI, candidate artifacts and public-v0.11.0 upgrade
+remain unverified here. This entry is not publication, installed-binary swap or
+real-provider/affected-Thread recovery evidence. Existing checkpoints remain historical.
