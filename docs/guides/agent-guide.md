@@ -803,3 +803,19 @@ have no dependency graph. Child requests use expected replies and normal deliver
 Use expected replies rather than supervising child Runs: retain each accepted request ID and finish your Turn.
 External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
 `last_end_message` and `last_input` without treating recovery_wait as terminal or automatically replaying an interrupted wait.
+
+
+### Recorded Message Sender
+
+Model-origin messages carry the owner's saved sending Thread identity separately
+from any self-asserted sender label. An admission notice includes `from thread`
+and the complete saved Thread ID, even when no label was supplied. A plain
+identity-only developer message is not a new Shellboy event. Existing reply and
+label event payloads retain their original meaning. Control characters in an ID
+are JSON-string escaped so the identifier cannot insert another notice line.
+The identity is a routing fact, not a role or authority guarantee; a label remains
+self-asserted and is never auto-filled from a Thread title or ID. Human, external
+CLI and unknown/malformed senders do not acquire a model Thread identity line.
+Use the full ID with `thread get` if current Thread details are needed. Renaming
+or deleting a Thread does not rewrite the saved sender ID. Clients use structured
+`provenance.sender`, not parsed notice text; current title resolution is UI-only.
