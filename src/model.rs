@@ -15,6 +15,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashSet};
 
+#[cfg(test)]
+#[path = "model/output_limit_tests.rs"]
+mod output_limit_tests;
+
 pub const MAX_EVENT_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
@@ -344,12 +348,38 @@ fn parse_shell_arguments(raw: &str) -> (Result<ShellToolArgs, String>, Vec<Strin
     (result, unknown)
 }
 
+fn output_limit_error(raw: &Value) -> Option<ModelError> {
+    if raw.get("status").and_then(Value::as_str) != Some("incomplete") {
+        return None;
+    }
+    let api = raw.get("api").and_then(Value::as_str);
+    let limited = match api {
+        Some("anthropic_messages") => {
+            raw.get("stop_reason").and_then(Value::as_str) == Some("max_tokens")
+        }
+        Some("chat_completions") => {
+            raw.get("finish_reason").and_then(Value::as_str) == Some("length")
+        }
+        Some("responses") | None => {
+            raw.pointer("/incomplete_details/reason")
+                .and_then(Value::as_str)
+                == Some("max_output_tokens")
+        }
+        Some(_) => false,
+    };
+    limited.then(|| ModelError::new(
+        "output_limit",
+        "The response was cut off by the output limit. Configure max_tokens for this connection.",
+    ))
+}
+
 impl ModelResponse {
     pub fn completed(mut raw: Value, tools_enabled: bool) -> Result<Self, ModelError> {
         crate::usage::normalize_response(&mut raw);
         cache_diagnostics::normalize_response(&mut raw);
         if raw.get("status").and_then(Value::as_str) != Some("completed") {
-            return Err(ModelError::new("incomplete", "Response was not completed"));
+            return Err(output_limit_error(&raw)
+                .unwrap_or_else(|| ModelError::new("incomplete", "Response was not completed")));
         }
         let output = raw
             .get("output")
@@ -744,10 +774,18 @@ impl ResponseStream {
                 }
                 Some("response.failed" | "response.incomplete") => {
                     let response = event.get("response").unwrap_or(event);
+                    self.failed_response = Some(response.clone());
                     let error = if response.get("error").is_some_and(|v| !v.is_null()) {
                         ModelError::provider(None, response)
                     } else {
-                        ModelError::new("incomplete", "Proxy did not complete response")
+                        if event.get("type").and_then(Value::as_str) == Some("response.incomplete")
+                        {
+                            output_limit_error(response).unwrap_or_else(|| {
+                                ModelError::new("incomplete", "Proxy did not complete response")
+                            })
+                        } else {
+                            ModelError::new("incomplete", "Proxy did not complete response")
+                        }
                     };
                     self.terminal = Some(Err(error));
                 }
