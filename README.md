@@ -4,6 +4,8 @@
 
 Semantic search over history and explicitly configured local documents uses your configured embedding endpoint.
 
+A browser UI is available as [Shellboy Studio](https://github.com/tya5/shellboy-studio): read and drive conversations from a desktop or phone browser.
+
 A lightweight terminal AI agent environment written in Rust. Models have one tool: shell. Through the `shellboy` CLI, they can search and fork their own history and recursively delegate work to child agents. Shellboy runs as a single executable, stores data in SQLite, and connects using Responses (default) or an explicitly selected OpenAI-compatible Chat Completions endpoint.
 
 ## Features
