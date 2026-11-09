@@ -195,6 +195,7 @@ pub fn schema_json() -> String {
     add_root!("RelationItem", RelationItem);
     add_root!("ShellDetails", ShellDetails);
     add_root!("ShellOutput", ShellOutput);
+    add_root!("ShellWriteStatus", ShellWriteStatus);
     add_root!("ShellWriteResult", ShellWriteResult);
     add_root!("AttachmentDetails", AttachmentDetails);
     add_root!("IndexStatus", IndexStatus);
@@ -1589,10 +1590,19 @@ record!(ShellOutput {
     output_complete: bool,
     decode_errors: bool
 });
+states!(ShellWriteStatus {
+    Complete,
+    Timeout,
+    Closed,
+    Stopped,
+    Failed
+});
 record!(ShellWriteResult {
-    execution_id: String,
     bytes_written: u64,
-    state: ShellState
+    status: ShellWriteStatus,
+    stdin_open: bool,
+    reason: Option<String>,
+    #[serde(default, flatten)] additional_properties: std::collections::BTreeMap<String, Value>
 });
 record!(HistoryExecutionLink {
     group_id: String, call_id: String, call_ordinal: u64, call_state: String,
