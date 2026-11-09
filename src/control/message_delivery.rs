@@ -186,6 +186,59 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn saved_message_context_reason_and_original_body_are_public_without_resend() {
+        let db = fixture();
+        input(&db, "saved-held", "unadmitted", "saved-at");
+        db.execute("UPDATE node SET payload_json=?1 WHERE id='saved-held'",[json!({"role":"user","content":[{"type":"input_text","text":"synthetic retained instruction"}]}).to_string()]).unwrap();
+        repair_terminal_tx(&db, "classified-at").unwrap();
+        let before: String = db
+            .query_row(
+                "SELECT payload_json FROM node WHERE id='saved-held'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let details = crate::control::db::message_details(&db, "saved-held").unwrap();
+        assert_eq!(
+            details.delivery_status,
+            crate::protocol::DeliveryStatus::Held
+        );
+        assert_eq!(
+            details.context.hold_reason.as_deref(),
+            Some("terminal_before_path_admission")
+        );
+        let args: crate::protocol::HistoryGetArgs =
+            serde_json::from_value(json!({"node_id":"saved-held"})).unwrap();
+        let body = history::get_node(&db, &args).unwrap();
+        assert!(body.text.contains("synthetic retained instruction"));
+        assert_eq!(
+            db.query_row(
+                "SELECT payload_json FROM node WHERE id='saved-held'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            before
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM receipt", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn terminal_repair_separates_admitted_unadmitted_unknown_and_preserves_first_observation() {
         let db = fixture();
         input(&db, "admitted", "admitted", "0");

@@ -11207,3 +11207,21 @@ the prefix without duplicating outcomes. All 129 terminal transitions are unique
 each has one correct event/delivery insertion, and seven unrelated receipts and
 bodies survive. Both injected partial failures roll back. The original sender
 Run is stopped; the final post-reopen outcome targets a new independent Run.
+
+### #289 Existing Held-Message Inspection Guidance
+
+Base ff18f32640f0b41f042f034f4b1a3936a9abe92d. Help/Guide now point to the
+ALREADY PUBLIC `message get` `context.hold_reason` and `history get --node` body
+reader. The earlier diagnosis checked only top-level fields and incorrectly
+reported the reason unavailable; this correction requires no new DTO field.
+Held reason is not receipt termination, selected-path admission or proof of
+body loss. The actual private incident remains unknown; rewind causality is not
+asserted. Manual fresh resend can duplicate instructions on explicit resume.
+No repair/resend, sender notice, automatic recovery or output-shape change is
+introduced. The original #284/#289 diagnosis worktrees remain untouched.
+
+Synthetic typed regression checks saved nested context and retained public body,
+unchanged payload/receipt/path/event facts, without owner startup or tool/model
+execution. CLI help regression checks both read commands and the duplicate-risk
+warning. Exact test counts/fmt/language results accompany the component commit;
+full suite and CI remain integration gates, not claimed local evidence.

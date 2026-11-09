@@ -422,6 +422,10 @@ pub enum MessageCommand {
     Ask(MessageAskOptions),
     /// Reply once to a received reply-expected message.
     Reply(MessageReplyOptions),
+    /// Inspect saved delivery facts; read the original body separately with history get.
+    #[command(
+        after_help = "  shellboy message get --message MESSAGE_ID\n  shellboy history get --node MESSAGE_ID\n\nInspect delivery_status and existing context.hold_reason. terminal_before_path_admission is a held reason: the assigned Run/Turn ended before path admission, not proof of receipt termination or body loss. Saved context is not live delivery proof; history get reads retained body without resending it. A missing body is unknown/unavailable, not permission to invent it.\nA rewind does not by itself prove these inputs were lost. Explicit human resume can admit eligible old held inputs, so a fresh manual resend can duplicate their instructions. Do not automatically repair, resend or create a new sender notice.\nGuide: shellboy docs get --id shellboy/recovery-and-storage"
+    )]
     Get(MessageOptions),
     /// Cancel explicit queued messages; admitted history cannot be cancelled.
     Cancel(MessageCancelOptions),

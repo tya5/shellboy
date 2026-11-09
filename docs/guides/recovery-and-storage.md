@@ -84,6 +84,44 @@ In the TUI, start via F8 `待機 | 条件を観測` and cancel only observation 
 
 Use `shellboy wait` to wait for execution. `timeout` does not mean the target stopped or failed. `satisfied` need not mean target success: inspect the returned snapshot and state. [Delegation](delegation.md) and [CLI reference](cli-reference.md) show JSON and state-dependent branches.
 
+## Inspect a held message without resending it
+
+A saved `delivery_status: held` does not say the original body was discarded.
+Use the existing message ID to read saved delivery context and then its body:
+
+```sh
+shellboy message get --message MESSAGE_ID
+shellboy history get --node MESSAGE_ID
+```
+
+`message get` already exposes `context.hold_reason`; it is not a new DTO field.
+Inspect that existing field with the saved Run/Turn assignment and timestamps.
+`terminal_before_path_admission` is a **held reason**: the assigned Run or Turn
+ended before the input was admitted to the selected path. It is not a terminal
+receipt state, an answer, proof of consumption or proof that the body was lost.
+Saved context reports recorded facts, not the present OS/process state.
+
+`history get` reads the retained node body and its provenance without submitting
+another instruction. Follow `next_cursor` with `--cursor` for a paged body. An
+unselected input can remain saved and readable without appearing on the current
+recipient path or a rewind backup branch. A missing/unavailable body must be
+reported as such; never reconstruct it from a guess. Message identity, path
+membership and body availability are separate facts.
+
+Stop/startup/drained shutdown can record this hold reason before a rewind.
+Observing it after rewind does not establish rewind caused deletion. The private
+incident's root cause remains unknown; the source and synthetic fixture do not
+prove that its actual four inputs were retained or lost. The recipient TUI queue
+can show held reasons/body excerpts, but this is not a new sender push notice.
+
+An explicit human resume can admit eligible saved unadmitted input before its
+new instruction, in bounded units. Retyping the old input under a fresh message
+ID can therefore duplicate instructions when the original is admitted too.
+Inspect saved facts first. These read commands neither repair nor resend, and
+this guidance creates no automatic recovery, retry, sender event or new Run.
+Do not infer automatic recovery for unrelated independent model sends or for
+already-admitted history removed by rewind.
+
 ## Automatic retries for temporary model communication failures
 
 Temporary communication failures trigger up to eight consecutive additional attempts by default. TUI `一時的なエラーのため再試行中` (retrying a temporary error) is a normal waiting display. Ctrl+C or stopping the Run cancels the wait. Exhausting the budget enters recovery wait with the latest error and count. Successful final-response adoption resets consecutive failures; this is not an eight-retry cap over an entire long conversation/tool loop.
