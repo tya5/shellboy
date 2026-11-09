@@ -404,12 +404,13 @@ impl Fixture {
                     .map(|row| (&row.thread_id, &row.state))
                     .collect::<Vec<_>>();
                 panic!(
-                    "{label}: frontend watchdog; bridge_finished={}; ui_rows={rows:?}; saved={saved:?}; browser_generation={}; pages={}; browser_trace={:?}; current_view_snapshots={:?}\nLAST DRAWN SCREEN:\n{}",
+                    "{label}: frontend watchdog; bridge_finished={}; ui_rows={rows:?}; saved={saved:?}; browser_generation={}; pages={}; browser_trace={:?}; current_view_snapshots={:?}; detail_trace={:?}\nLAST DRAWN SCREEN:\n{}",
                     self.bridge.is_finished(),
                     self.ui.list_generation(),
                     self.browser_pages,
                     self.browser_trace,
                     self.current_view_trace,
+                    self.detail_trace,
                     self.last_screen
                 )
             }
@@ -432,8 +433,8 @@ impl Fixture {
         .await
         .unwrap_or_else(|_| {
             panic!(
-                "{label}: observation watchdog; bridge_finished={}; held_current_views={}; browser_trace={:?}; current_view_snapshots={:?}\nLAST DRAWN SCREEN:\n{}",
-                self.bridge.is_finished(), self.held_initial_views.as_ref().map_or(0, Vec::len), self.browser_trace, self.current_view_trace, self.last_screen
+                "{label}: observation watchdog; bridge_finished={}; held_current_views={}; browser_trace={:?}; current_view_snapshots={:?}; detail_trace={:?}\nLAST DRAWN SCREEN:\n{}",
+                self.bridge.is_finished(), self.held_initial_views.as_ref().map_or(0, Vec::len), self.browser_trace, self.current_view_trace, self.detail_trace, self.last_screen
             )
         })
     }
