@@ -1402,3 +1402,23 @@ fn retry_help_distinguishes_acceptance_from_saved_outcome_without_new_flags() {
         "this change introduces no automatic observer flag"
     );
 }
+
+#[test]
+fn message_get_help_uses_saved_context_and_body_read_without_resending() {
+    let help = Cli::try_parse_from(["shellboy", "message", "get", "--help"]).unwrap_err();
+    assert_eq!(help.kind(), ErrorKind::DisplayHelp);
+    let text = help
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for fact in [
+        "context.hold_reason",
+        "history get --node MESSAGE_ID",
+        "not proof of receipt termination or body loss",
+        "fresh manual resend",
+        "duplicate",
+    ] {
+        assert!(text.contains(fact), "missing held guidance: {fact}");
+    }
+}
