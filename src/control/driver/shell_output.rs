@@ -1,6 +1,6 @@
 //! Raw shell output batching, persistence, and completion publication.
 use super::{Snapshot, invalid, now};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use crate::shell::OutputChunk;
 use crate::{
     app::storage_error,
@@ -43,7 +43,7 @@ async fn event_batch(
     Some(batch)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 async fn output_batch(
     events: &mut tokio::sync::mpsc::Receiver<ShellEvent>,
     pending: &mut Option<OutputChunk>,

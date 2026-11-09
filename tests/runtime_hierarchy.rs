@@ -618,14 +618,10 @@ async fn model_cli_may_write_to_and_stop_an_independent_live_run() {
     let independent = start(&control).await;
     let first = incoming(&mut requests).await;
     let pidfile = directory.path().join("independent.pid");
-    first
-        .reply
-        .send(tool(
-            &format!("printf '%s' $$ > '{}'; exec sleep 60", pidfile.display()),
-            true,
-        ))
-        .ok()
-        .unwrap();
+    // This case tests cross-run permissions, not the default-closed stdin
+    // contract. Keep this one target interactive so the actual write can run.
+    let target_command = format!("printf '%s' $$ > '{}'; exec sleep 60", pidfile.display());
+    first.reply.send(Reply::json(json!({"id":uuid::Uuid::new_v4().to_string(),"status":"completed","output":[{"type":"function_call","id":uuid::Uuid::new_v4().to_string(),"call_id":uuid::Uuid::new_v4().to_string(),"name":"shell","arguments":json!({"command":target_command,"background":true,"stdin_open":true}).to_string()}]}))).ok().unwrap();
     let independent_held = incoming(&mut requests).await;
     let pid = process_started(&pidfile).await;
     let target_run = independent.run_id.clone().unwrap();
@@ -659,7 +655,10 @@ async fn model_cli_may_write_to_and_stop_an_independent_live_run() {
         .collect::<Vec<_>>();
     assert_eq!(responses.len(), 2, "{errors}");
     for response in responses {
-        assert_eq!(response["ok"], true, "no stop authority check (#256)");
+        assert_eq!(
+            response["ok"], true,
+            "no stop authority check (#256): {response}"
+        );
     }
     state(&control, "run", &target_run, "stopped").await;
     continuation
