@@ -34,3 +34,13 @@ The historical status ledger is not reintroduced. Current focused repairs cover
 RAG/conversation schema separation, migration fixtures and eventual GC completion.
 Exact-tip independent review and normal/all-OS CI remain required; failed older
 runs are not success evidence. See acceptance.md for validation scope.
+
+## v0.11.1 preparation checkpoint (2026-11-09)
+
+The version-only task starts from `ff18f32640f0b41f042f034f4b1a3936a9abe92d`.
+Only #286 outbound assistant replay normalization is in scope; package/lock move
+to 0.11.1 without a protocol/schema change. See the
+[release preparation and upgrade plan](release-v0.11.1-draft.md).
+Exact version-commit native CI, candidate artifacts and public-v0.11.0 upgrade
+remain unverified here. This entry is not publication, installed-binary swap or
+real-provider/affected-Thread recovery evidence. Existing checkpoints remain historical.

@@ -11207,3 +11207,15 @@ the prefix without duplicating outcomes. All 129 terminal transitions are unique
 each has one correct event/delivery insertion, and seven unrelated receipts and
 bodies survive. Both injected partial failures roll back. The original sender
 Run is stopped; the final post-reopen outcome targets a new independent Run.
+
+## v0.11.1 version preparation (2026-11-09)
+
+Scope: package/lock 0.11.1 and release records on reviewed #286 source
+`ff18f32640f0b41f042f034f4b1a3936a9abe92d`; no additional product change.
+The four-column [release draft](../development/release-v0.11.1-draft.md) separates
+source implementation from unverified final-SHA execution. Version/lock and local
+Markdown consistency checks are preparation evidence only, not Rust execution.
+Ordinary three-OS CI, exact-main candidate build/checksums and upgrade from public
+v0.11.0 remain pending. The existing upgrade helper does not yet allow old-version
+0.11.0; the qualification owner must resolve that explicit gap before execution.
+No installed binary, actual owner/user data or paid provider is touched by this task.
