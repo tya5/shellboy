@@ -44,6 +44,8 @@ async fn pump_until_stalled(
 }
 
 impl IoSession {
+    // Keep owner-fact gating explicit alongside the existing pipe/session inputs.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn start<R, E>(
         stdin: Arc<Mutex<Option<ShellStdin>>>,
         stdout: R,

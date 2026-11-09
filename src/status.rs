@@ -32,8 +32,12 @@ pub struct WorkItem {
     pub response_nodes_truncated: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expect_reply: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reply: Option<Value>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::protocol::deserialize_present_nullable"
+    )]
+    pub reply: Option<Option<crate::protocol::StatusReply>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<String>,
     pub created_at: Option<String>,
@@ -53,7 +57,9 @@ pub struct WorkItem {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revisit: Option<RevisitSummary>,
-    pub targets: Vec<Command>,
+    pub targets: Vec<crate::protocol::StatusTarget>,
+    #[serde(default, flatten)]
+    pub additional_properties: std::collections::BTreeMap<String, Value>,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ResponseNodeRef {
@@ -64,17 +70,32 @@ pub struct ResponseNodeRef {
     pub node_id: String,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StatusFilters {
+    pub memory: bool,
+    pub thread_id: Option<String>,
+    pub run_id: Option<String>,
+    pub since: Option<String>,
+    pub state: Vec<String>,
+    pub all: bool,
+    pub limit: u32,
+    pub cursor: Option<String>,
+    #[serde(default, flatten)]
+    pub additional_properties: std::collections::BTreeMap<String, Value>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StatusSnapshot {
     pub instance_id: String,
     pub observed_at: String,
     pub scope: String,
     pub consistency: String,
     pub fingerprint: String,
-    pub filters: StatusArgs,
+    pub filters: StatusFilters,
     pub items: Vec<WorkItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
-    pub receipt_budget: Value,
+    pub receipt_budget: crate::protocol::ReceiptBudget,
+    #[serde(default, flatten)]
+    pub additional_properties: std::collections::BTreeMap<String, Value>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -458,6 +479,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         stdin_last_write_at: None,
         revisit: None,
         targets: Vec::new(),
+        additional_properties: Default::default(),
     };
 
     if kind == WorkKind::Message {
@@ -467,11 +489,25 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
                 ApiError::new(ErrorCode::InvalidState, "invalid message reply metadata")
             })?;
             item.expect_reply = metadata["expect_reply"] == true || metadata["expect_reply"] == 1;
-            item.reply = metadata.get("reply").filter(|v| !v.is_null()).cloned();
+            item.reply = metadata
+                .get("reply")
+                .filter(|value| !value.is_null())
+                .and_then(crate::protocol::StatusReply::from_value)
+                .map(Some);
             item.reply_to = metadata["reply_to"].as_str().map(str::to_owned);
         }
     }
-    item.targets = links(kind, &item)?;
+    item.targets = links(kind, &item)?
+        .into_iter()
+        .filter_map(|command| {
+            let value = serde_json::to_value(command).ok()?;
+            Some(crate::protocol::StatusTarget {
+                command: value.get("command")?.as_str()?.to_owned(),
+                args: value.get("args")?.clone(),
+                additional_properties: Default::default(),
+            })
+        })
+        .collect();
     let key = SortKey {
         activity: activity.0,
         kind,
@@ -572,9 +608,17 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     } else {
         None
     };
-    let mut filters = args.clone();
-    filters.cursor = None;
-    filters.state = scope.states;
+    let filters = StatusFilters {
+        memory: args.memory,
+        thread_id: args.thread_id.clone(),
+        run_id: args.run_id.clone(),
+        since: args.since.clone(),
+        state: scope.states.clone(),
+        all: args.all,
+        limit: args.limit,
+        cursor: None,
+        additional_properties: Default::default(),
+    };
     // Enrich only the bounded result page. Dynamic observations never enter
     // the durable fingerprint or cursor sort keys.
     let observed = chrono::Utc::now();
@@ -595,7 +639,8 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         }
     }
     Ok(StatusSnapshot {
-        receipt_budget: crate::control::receipt::summary(db, instance)?,
+        receipt_budget: serde_json::from_value(crate::control::receipt::summary(db, instance)?)
+            .map_err(|_| ApiError::new(ErrorCode::InvalidState, "invalid receipt summary"))?,
         filters,
         instance_id: instance.into(),
         observed_at: observed.to_rfc3339(),
@@ -604,6 +649,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         fingerprint,
         items: selected.into_iter().map(|p| p.item).collect(),
         next_cursor,
+        additional_properties: Default::default(),
     })
 }
 

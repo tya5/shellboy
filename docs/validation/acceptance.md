@@ -11272,3 +11272,29 @@ all three exits, verifies the pipe lock is released, observes no native input by
 Post-write acknowledgement remains a distinct persistence barrier; its pending/error result is never converted to
 successful completion merely because the process has stopped. The new local stdin-focused run passes 13 tests;
 locked test check and format check pass. These results do not clear independent-review or Windows/all-OS gates.
+
+## #278 typed operation results — in progress
+
+- Current base: protocol-v5 `ff18f32640f0b41f042f034f4b1a3936a9abe92d`; branch `issue-278/typed-results-rebased`. Old dirty WT and hash-verified private patch backup are preserved unchanged.
+- Type current `status` (activity + memory modes), `shell.list`, `usage.get`, and `config.get` wire shapes without changing operation order/names, version, runtime, shell.write behavior, `thread.get` or `history.window`. `status` union discriminates by required structural fields and rejects ambiguous shapes instead of lossy untagged trial order.
+- Test both actual status modes roundtrip, null/omitted fields, additive unknown fields, pre-#283 shell results, dynamic config values, provider usage details, and all four typed result operation schemas. Config/provider/group-key-dependent leaves remain open. No #283 stdin fields, #279 readback claims, or #286/release content are included.
+- Post-`ad0ad5a7` compatibility delta: `StatusReply` retains typed structured-object fields plus flattened extras and raw JSON fallback for unusual persisted non-object values. `WorkItem.reply` is presence-aware: absent→omitted, wire null→null, object/raw→value; SQL-null is filtered by the existing projection and stays omitted. The synthetic fixture checks all three cases plus DB projection omission.
+- Validation on nested-Option source: `cargo check --locked --tests` and fmt check passed (shell `17cd1aa4-de31-49f6-b47f-50d2a58d2c03`); raw status union 1/1 and DB projection 1/1 (shell `4f8b0f27-b663-4982-be89-c9c6dd326fc6`). Latest schema regenerated from Rust; protocol suite 41/41 including exact golden plus DB projection 1/1 (shell `b23e89fb-683f-43a5-be70-61346015ce8d`). S6 archive e73 evidence 36 protocol +1 DB belongs only to old e73 and is not transferred to the new null-preserving delta. Remaining gates: S6 review of exact new SHA, current-main rebase/privacy and delegated push/all-OS CI.
+
+### #278/#283 actual typed-field composition
+
+Compose accepted #283 `641ccdd9f4d9fdb34fff7c9e5838a03cf6b45bc1` and accepted #278
+`d43e45e09d5174c981d63cee2a7b09d8c1a00ff2` without rewriting either source ref. Existing ShellDetails and WorkItem
+fields survive the merge; ShellListItem explicitly declares the same default-null `stdin_open` and
+`stdin_last_write_at` instead of leaving them in flattened unknown extras. Saved get/list/status projections and the
+five canonical observation batches remain. The d43 fixtures now assert these known Option fields, while their
+encoded-wire assertions and unknown-extension preservation remain unchanged. Pre-283 missing fields decode to
+None and serialize as null, with both frozen old record decoders and the current typed list tested.
+
+Local focused evidence: locked test check passes; stdin-focused 14 and work-status 15 pass; protocol 36 pass,
+including generated-schema drift, typed status absent/null preservation and wire modes; compatibility 3 pass.
+Schema export uses the copied binary built in the same Rust slot. After external owner replacement interrupted a
+later command, its stopped/group-cleanup state was verified and only unfinished decoder/lint steps were resumed.
+Strict all-target Clippy and format check pass. Limited lint annotations keep the existing unboxed Rust enum API
+and explicit IoSession parameters rather than introducing unrelated runtime or wire changes. Actual main 8a87
+composition, independent cross-review, Windows native and final all-OS CI remain separate gates. No CI is started.

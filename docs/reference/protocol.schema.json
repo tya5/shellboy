@@ -1320,6 +1320,68 @@
       },
       "type": "object"
     },
+    "CompactionUsageResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "cache_creation_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "cached_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "compactions": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "input_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "malformed_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "map_requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "oversized_reduce_parts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reduce_requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requests": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "compactions",
+        "malformed_records",
+        "requests",
+        "map_requests",
+        "reduce_requests",
+        "oversized_reduce_parts",
+        "input_tokens",
+        "cached_tokens",
+        "cache_creation_tokens",
+        "output_tokens"
+      ],
+      "title": "CompactionUsageResult",
+      "type": "object"
+    },
     "ConfigChange": {
       "additionalProperties": false,
       "description": "One named change to the configuration file. `field` is a TOML dotted key;\na missing or null `value` removes the key so its default applies again.",
@@ -1334,8 +1396,187 @@
       ],
       "type": "object"
     },
+    "ConfigCredentialsFileView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "valid": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "present",
+        "valid"
+      ],
+      "title": "ConfigCredentialsFileView",
+      "type": "object"
+    },
+    "ConfigFileView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "content_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credential_source": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "redacted_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "values": true
+      },
+      "required": [
+        "present",
+        "valid",
+        "redacted_fields"
+      ],
+      "title": "ConfigFileView",
+      "type": "object"
+    },
     "ConfigGetArgs": {
       "additionalProperties": false,
+      "type": "object"
+    },
+    "ConfigGetResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "config_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credentials_file": {
+          "$ref": "#/definitions/ConfigCredentialsFileView"
+        },
+        "differing_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "differs": {
+          "type": "boolean"
+        },
+        "file": {
+          "$ref": "#/definitions/ConfigFileView"
+        },
+        "loaded": {
+          "$ref": "#/definitions/ConfigLoadedView"
+        },
+        "restart": {
+          "$ref": "#/definitions/ConfigRestartView"
+        }
+      },
+      "required": [
+        "loaded",
+        "file",
+        "credentials_file",
+        "differs",
+        "restart"
+      ],
+      "title": "ConfigGetResult",
+      "type": "object"
+    },
+    "ConfigLoadedView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "content_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credential_env_set": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "credential_source": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "present": {
+          "type": "boolean"
+        },
+        "redacted_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "values": true
+      },
+      "required": [
+        "present",
+        "values",
+        "redacted_fields",
+        "credential_env_set",
+        "credential_source"
+      ],
+      "title": "ConfigLoadedView",
+      "type": "object"
+    },
+    "ConfigRestartView": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "all_fields_require_restart": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "all_fields_require_restart"
+      ],
+      "title": "ConfigRestartView",
       "type": "object"
     },
     "ConfigSetArgs": {
@@ -3361,6 +3602,118 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "PromptCacheDiagnostics": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "cache_missed_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "PromptCacheDiagnostics",
+      "type": "object"
+    },
+    "ReceiptBudget": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "accounted_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "at_limit": {
+          "type": "boolean"
+        },
+        "available_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "control_available_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "control_headroom_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "control_limit_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expired_replay": {
+          "type": "string"
+        },
+        "full_result_admission_blocked": {
+          "type": "boolean"
+        },
+        "limit_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_outcome_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protected_old_pending_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovery": {
+          "type": "string"
+        },
+        "result_retention": {
+          "type": "string"
+        },
+        "result_retention_seconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "accounted_bytes",
+        "limit_bytes",
+        "max_outcome_bytes",
+        "result_retention_seconds",
+        "result_retention",
+        "expired_replay",
+        "control_headroom_bytes",
+        "control_limit_bytes",
+        "control_available_bytes",
+        "protected_old_pending_bytes",
+        "at_limit",
+        "available_bytes",
+        "full_result_admission_blocked",
+        "recovery"
+      ],
+      "title": "ReceiptBudget",
       "type": "object"
     },
     "RelationItem": {
@@ -5677,6 +6030,153 @@
       },
       "type": "object"
     },
+    "ShellListItem": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "command_characters": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "command_excerpt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command_excerpt_redacted": {
+          "type": "boolean"
+        },
+        "command_excerpt_truncated": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_id": {
+          "type": "string"
+        },
+        "exit_code": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at_known": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "stdin_last_write_at": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stdin_open": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "execution_id",
+        "run_id",
+        "thread_id",
+        "state",
+        "command_characters",
+        "command_excerpt_redacted",
+        "command_excerpt_truncated",
+        "started_at_known"
+      ],
+      "title": "ShellListItem",
+      "type": "object"
+    },
+    "ShellListResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ShellListItem"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ordering": {
+          "type": "string"
+        },
+        "period": {
+          "$ref": "#/definitions/TimeWindowResult"
+        },
+        "redaction": {
+          "type": "string"
+        },
+        "scan_budget_reached": {
+          "type": "boolean"
+        },
+        "scan_limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scanned": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "scanned",
+        "scan_limit",
+        "scan_budget_reached",
+        "period",
+        "ordering",
+        "redaction"
+      ],
+      "title": "ShellListResult",
+      "type": "object"
+    },
     "ShellOutput": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -5901,14 +6401,299 @@
       },
       "type": "object"
     },
+    "StatusFilters": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "all": {
+          "type": "boolean"
+        },
+        "cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memory": {
+          "type": "boolean"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "memory",
+        "state",
+        "all",
+        "limit"
+      ],
+      "title": "StatusFilters",
+      "type": "object"
+    },
+    "StatusMemoryCache": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "entries": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "entry_unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "live_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "live_encoded_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "pinned_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "retained_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "unavailable_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "limit_bytes"
+      ],
+      "title": "StatusMemoryCache",
+      "type": "object"
+    },
+    "StatusMemoryMetric": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "unavailable_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "title": "StatusMemoryMetric",
+      "type": "object"
+    },
+    "StatusMemoryProcess": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "metrics": {
+          "additionalProperties": {
+            "$ref": "#/definitions/StatusMemoryMetric"
+          },
+          "type": "object"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "pid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "platform": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pid",
+        "platform",
+        "observed_at",
+        "metrics"
+      ],
+      "title": "StatusMemoryProcess",
+      "type": "object"
+    },
+    "StatusMemoryResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "accounting": {
+          "type": "string"
+        },
+        "caches": {
+          "additionalProperties": {
+            "$ref": "#/definitions/StatusMemoryCache"
+          },
+          "type": "object"
+        },
+        "process": {
+          "$ref": "#/definitions/StatusMemoryProcess"
+        }
+      },
+      "required": [
+        "process",
+        "caches",
+        "accounting"
+      ],
+      "title": "StatusMemoryResult",
+      "type": "object"
+    },
+    "StatusReply": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StatusReplyObject"
+        },
+        true
+      ],
+      "title": "StatusReply"
+    },
+    "StatusReplyObject": {
+      "additionalProperties": true,
+      "properties": {
+        "accepted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "assignment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delivered": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "delivery_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": true,
+        "message_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "StatusResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StatusSnapshot"
+        },
+        {
+          "$ref": "#/definitions/StatusMemoryResult"
+        }
+      ],
+      "title": "StatusResult"
+    },
     "StatusSnapshot": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
       "properties": {
         "consistency": {
           "type": "string"
         },
         "filters": {
-          "$ref": "#/definitions/StatusArgs"
+          "$ref": "#/definitions/StatusFilters"
         },
         "fingerprint": {
           "type": "string"
@@ -5931,7 +6716,9 @@
         "observed_at": {
           "type": "string"
         },
-        "receipt_budget": true,
+        "receipt_budget": {
+          "$ref": "#/definitions/ReceiptBudget"
+        },
         "scope": {
           "type": "string"
         }
@@ -5947,6 +6734,22 @@
         "receipt_budget"
       ],
       "title": "StatusSnapshot",
+      "type": "object"
+    },
+    "StatusTarget": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "args": true,
+        "command": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "command",
+        "args"
+      ],
+      "title": "StatusTarget",
       "type": "object"
     },
     "StorageArgs": {
@@ -6713,6 +7516,40 @@
       },
       "type": "object"
     },
+    "TimeWindowResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "bounds": {
+          "type": "string"
+        },
+        "durations": {
+          "type": "string"
+        },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unknown_starts": {
+          "type": "string"
+        },
+        "until": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "bounds",
+        "durations",
+        "unknown_starts"
+      ],
+      "title": "TimeWindowResult",
+      "type": "object"
+    },
     "TurnDetails": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -6777,6 +7614,576 @@
       "required": [
         "turn_id"
       ],
+      "type": "object"
+    },
+    "UsageActive": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "model_attempts": {
+          "items": {
+            "$ref": "#/definitions/UsageActiveAttempt"
+          },
+          "type": "array"
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run": {
+          "$ref": "#/definitions/UsageTiming"
+        },
+        "shell": {
+          "$ref": "#/definitions/UsageTiming"
+        }
+      },
+      "required": [
+        "model_attempts",
+        "run",
+        "shell"
+      ],
+      "title": "UsageActive",
+      "type": "object"
+    },
+    "UsageActiveAttempt": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "overflow": {
+          "type": "boolean"
+        },
+        "state": {
+          "type": "string"
+        },
+        "unknown_elapsed_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "state",
+        "count",
+        "unknown_elapsed_count",
+        "overflow"
+      ],
+      "title": "UsageActiveAttempt",
+      "type": "object"
+    },
+    "UsageAggregateResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "active": {
+          "$ref": "#/definitions/UsageActive"
+        },
+        "attempt_period": {
+          "$ref": "#/definitions/UsageAttemptPeriod"
+        },
+        "compaction": {
+          "$ref": "#/definitions/CompactionUsageResult"
+        },
+        "connection_rates": true,
+        "coverage": {
+          "$ref": "#/definitions/UsageCoverage"
+        },
+        "include_children": {
+          "type": "boolean"
+        },
+        "model_attempts": {
+          "additionalProperties": {
+            "$ref": "#/definitions/UsageAttemptTotals"
+          },
+          "type": "object"
+        },
+        "model_duration_ms": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "requested_period": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TimeWindowResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run": {
+          "$ref": "#/definitions/UsageTiming"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "scope_id": {
+          "type": "string"
+        },
+        "selected_threads": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "shell": {
+          "$ref": "#/definitions/UsageTiming"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_lifetime_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "scope_id",
+        "include_children",
+        "attempt_period",
+        "selected_threads",
+        "coverage",
+        "model_attempts",
+        "compaction",
+        "model_duration_ms",
+        "run",
+        "shell",
+        "active"
+      ],
+      "title": "UsageAggregateResult",
+      "type": "object"
+    },
+    "UsageAttemptPayload": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "input_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "input_tokens_details": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageInputTokenDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "output_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "output_tokens_details": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageOutputTokenDetails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "total_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "title": "UsageAttemptPayload",
+      "type": "object"
+    },
+    "UsageAttemptPeriod": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "first_known_started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_known_started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unknown_start_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unknown_start_count"
+      ],
+      "title": "UsageAttemptPeriod",
+      "type": "object"
+    },
+    "UsageAttemptResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "input_bytes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageInputBytes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prompt_cache_diagnostics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PromptCacheDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/definitions/UsageAttemptPayload"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "thread_id",
+        "run_id",
+        "turn_id",
+        "state",
+        "usage"
+      ],
+      "title": "UsageAttemptResult",
+      "type": "object"
+    },
+    "UsageAttemptTotals": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "cached_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ms": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "first_known_started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "last_known_started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "reasoning_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "total_tokens": {
+          "$ref": "#/definitions/UsageNumber"
+        },
+        "unknown_start_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "input_tokens",
+        "cached_tokens",
+        "output_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+        "duration_ms",
+        "unknown_start_count"
+      ],
+      "title": "UsageAttemptTotals",
+      "type": "object"
+    },
+    "UsageBreakdownCoverage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "embeddings": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "summary_malformed": {
+          "type": "string"
+        },
+        "summary_unknown_time": {
+          "type": "string"
+        },
+        "unknown_starts": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "unknown_starts",
+        "summary",
+        "summary_unknown_time",
+        "summary_malformed",
+        "embeddings"
+      ],
+      "title": "UsageBreakdownCoverage",
+      "type": "object"
+    },
+    "UsageBreakdownResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "compaction_byte_limit": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "coverage": {
+          "$ref": "#/definitions/UsageBreakdownCoverage"
+        },
+        "elapsed_ms": {
+          "format": "double",
+          "type": "number"
+        },
+        "excluded_time_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "group_by": {
+          "type": "string"
+        },
+        "group_limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "items": {
+          "items": true,
+          "type": "array"
+        },
+        "malformed_compaction_records": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "matched_attempts": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "matched_compactions": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outside_period_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "requested_period": {
+          "$ref": "#/definitions/TimeWindowResult"
+        },
+        "row_limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scan_truncated": {
+          "type": "boolean"
+        },
+        "scanned_candidates": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scanned_compaction_bytes": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scanned_compaction_candidates": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scope_complete": {
+          "type": "boolean"
+        },
+        "statistics_scope": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "unknown_time_compaction_records": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "group_by",
+        "timezone",
+        "requested_period",
+        "items",
+        "more",
+        "scanned_candidates",
+        "matched_attempts",
+        "excluded_time_count",
+        "outside_period_count",
+        "row_limit",
+        "group_limit",
+        "scan_truncated",
+        "scope_complete",
+        "statistics_scope",
+        "coverage",
+        "elapsed_ms"
+      ],
+      "title": "UsageBreakdownResult",
+      "type": "object"
+    },
+    "UsageCoverage": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "descendants": {
+          "type": "string"
+        },
+        "embedding": {
+          "type": "string"
+        },
+        "excluded_attempt_states": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rag": {
+          "type": "string"
+        },
+        "scope_complete": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope_complete",
+        "descendants",
+        "summary",
+        "embedding",
+        "rag",
+        "excluded_attempt_states"
+      ],
+      "title": "UsageCoverage",
       "type": "object"
     },
     "UsageGetArgs": {
@@ -6866,6 +8273,174 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "UsageGetResult": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UsageAggregateResult"
+        },
+        {
+          "$ref": "#/definitions/UsageAttemptResult"
+        },
+        {
+          "$ref": "#/definitions/UsageBreakdownResult"
+        }
+      ],
+      "title": "UsageGetResult"
+    },
+    "UsageInputBytes": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "categories": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "total": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unit": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "unit",
+        "total",
+        "categories"
+      ],
+      "title": "UsageInputBytes",
+      "type": "object"
+    },
+    "UsageInputTokenDetails": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "cache_creation_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cached_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "title": "UsageInputTokenDetails",
+      "type": "object"
+    },
+    "UsageNumber": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "known_sum": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "overflow": {
+          "type": "boolean"
+        },
+        "unknown_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unknown_count",
+        "overflow"
+      ],
+      "title": "UsageNumber",
+      "type": "object"
+    },
+    "UsageOutputTokenDetails": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "reasoning_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "title": "UsageOutputTokenDetails",
+      "type": "object"
+    },
+    "UsageTiming": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UsageTimingMeasured"
+        },
+        {
+          "$ref": "#/definitions/UsageTimingNotApplicable"
+        }
+      ],
+      "title": "UsageTiming"
+    },
+    "UsageTimingMeasured": {
+      "additionalProperties": true,
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ms": {
+          "$ref": "#/definitions/UsageNumber"
+        }
+      },
+      "required": [
+        "count",
+        "duration_ms"
+      ],
+      "type": "object"
+    },
+    "UsageTimingNotApplicable": {
+      "additionalProperties": true,
+      "properties": {
+        "duration_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageNumber"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reason"
+      ],
       "type": "object"
     },
     "WaitArgs": {
@@ -7093,6 +8668,7 @@
     },
     "WorkItem": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
       "properties": {
         "activity_at": {
           "type": "string"
@@ -7199,7 +8775,16 @@
             "null"
           ]
         },
-        "reply": true,
+        "reply": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/StatusReply"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "reply_to": {
           "type": [
             "string",
@@ -7256,7 +8841,7 @@
         },
         "targets": {
           "items": {
-            "$ref": "#/definitions/Command"
+            "$ref": "#/definitions/StatusTarget"
           },
           "type": "array"
         },
@@ -7383,7 +8968,51 @@
     "compact": true,
     "compact.list": true,
     "compact.preview": true,
-    "config.get": true,
+    "config.get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "config_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credentials_file": {
+          "$ref": "#/definitions/ConfigCredentialsFileView"
+        },
+        "differing_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "differs": {
+          "type": "boolean"
+        },
+        "file": {
+          "$ref": "#/definitions/ConfigFileView"
+        },
+        "loaded": {
+          "$ref": "#/definitions/ConfigLoadedView"
+        },
+        "restart": {
+          "$ref": "#/definitions/ConfigRestartView"
+        }
+      },
+      "required": [
+        "loaded",
+        "file",
+        "credentials_file",
+        "differs",
+        "restart"
+      ],
+      "title": "ConfigGetResult",
+      "type": "object"
+    },
     "config.set": true,
     "connection.test": true,
     "context.edit": true,
@@ -8237,7 +9866,57 @@
       "title": "ShellDetails",
       "type": "object"
     },
-    "shell.list": true,
+    "shell.list": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/definitions/ShellListItem"
+          },
+          "type": "array"
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ordering": {
+          "type": "string"
+        },
+        "period": {
+          "$ref": "#/definitions/TimeWindowResult"
+        },
+        "redaction": {
+          "type": "string"
+        },
+        "scan_budget_reached": {
+          "type": "boolean"
+        },
+        "scan_limit": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "scanned": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "scanned",
+        "scan_limit",
+        "scan_budget_reached",
+        "period",
+        "ordering",
+        "redaction"
+      ],
+      "title": "ShellListResult",
+      "type": "object"
+    },
     "shell.read": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -8315,51 +9994,15 @@
     },
     "status": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "properties": {
-        "consistency": {
-          "type": "string"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StatusSnapshot"
         },
-        "filters": {
-          "$ref": "#/definitions/StatusArgs"
-        },
-        "fingerprint": {
-          "type": "string"
-        },
-        "instance_id": {
-          "type": "string"
-        },
-        "items": {
-          "items": {
-            "$ref": "#/definitions/WorkItem"
-          },
-          "type": "array"
-        },
-        "next_cursor": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "observed_at": {
-          "type": "string"
-        },
-        "receipt_budget": true,
-        "scope": {
-          "type": "string"
+        {
+          "$ref": "#/definitions/StatusMemoryResult"
         }
-      },
-      "required": [
-        "instance_id",
-        "observed_at",
-        "scope",
-        "consistency",
-        "fingerprint",
-        "filters",
-        "items",
-        "receipt_budget"
       ],
-      "title": "StatusSnapshot",
-      "type": "object"
+      "title": "StatusResult"
     },
     "storage.collect": true,
     "storage.status": {
@@ -8861,7 +10504,21 @@
       "title": "TurnDetails",
       "type": "object"
     },
-    "usage.get": true,
+    "usage.get": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UsageAggregateResult"
+        },
+        {
+          "$ref": "#/definitions/UsageAttemptResult"
+        },
+        {
+          "$ref": "#/definitions/UsageBreakdownResult"
+        }
+      ],
+      "title": "UsageGetResult"
+    },
     "wait": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {

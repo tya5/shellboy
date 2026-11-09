@@ -1130,12 +1130,10 @@ fn exported_schema_local_references_resolve() {
 }
 
 #[test]
-fn protocol_v4_handshake_advertises_reasoning_activity_capability_and_tolerates_additive_metadata()
-{
+fn protocol_v5_handshake_and_typed_results_cover_existing_wire_modes() {
     let welcome: Value = serde_json::from_str(
         r#"{"protocol_version":5,"instance_id":"i","capabilities":["events.reasoning_activity"],"future_metadata":true}"#,
-    )
-    .unwrap();
+    ).unwrap();
     let decoded: shellboy::ipc::Welcome = serde_json::from_value(welcome).unwrap();
     assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
     assert_eq!(decoded.capabilities, ["events.reasoning_activity"]);
@@ -1145,21 +1143,199 @@ fn protocol_v4_handshake_advertises_reasoning_activity_capability_and_tolerates_
         schema["capabilities"],
         serde_json::json!(["events.reasoning_activity"])
     );
-    assert_eq!(
-        schema["operation_results"]["events.wait"]["properties"]["reasoning_activity"]["type"],
-        "array"
-    );
     assert_eq!(schema["operation_results"].as_object().unwrap().len(), 63);
-    assert_ne!(schema["operation_results"]["status"], Value::Bool(true));
-    let item = &schema["definitions"]["WorkItem"]["properties"];
-    assert_eq!(item["response_nodes"]["type"], "array");
-    assert_eq!(item["response_nodes_truncated"]["type"], "boolean");
+    for operation in ["status", "shell.list", "usage.get", "config.get"] {
+        assert_ne!(schema["operation_results"][operation], Value::Bool(true));
+    }
+    assert!(schema["operation_results"]["status"]["anyOf"].is_array());
+    assert!(schema["operation_results"]["usage.get"]["anyOf"].is_array());
+    assert_eq!(schema["operation_results"]["shell.list"]["type"], "object");
+    assert_eq!(schema["operation_results"]["config.get"]["type"], "object");
     assert_eq!(
-        item["end_message_node_id"]["type"],
-        serde_json::json!(["string", "null"])
+        schema["definitions"]["ConfigLoadedView"]["properties"]["values"],
+        Value::Bool(true)
+    );
+    assert!(
+        schema["definitions"]["StatusSnapshot"]["properties"]["items"]["items"]["$ref"].is_string()
+    );
+    assert!(
+        schema["definitions"]["StatusMemoryResult"]["properties"]["caches"]["type"] == "object"
     );
     assert_eq!(
-        item["response_nodes"]["items"]["$ref"],
-        "#/definitions/ResponseNodeRef"
+        schema["definitions"]["UsageBreakdownResult"]["properties"]["items"]["items"],
+        Value::Bool(true)
+    );
+    assert_eq!(
+        schema["definitions"]["ShellListItem"]["properties"]["command_characters"]["type"],
+        "integer"
+    );
+}
+
+#[test]
+fn typed_status_preserves_both_existing_modes_and_rejects_ambiguous_union_matches() {
+    let activity: Value = serde_json::from_str(r###"{
+        "instance_id":"i", "observed_at":"now", "scope":"durable_only",
+        "consistency":"single_sqlite_read_transaction", "fingerprint":"f",
+        "filters":{"memory":false,"thread_id":null,"run_id":null,"since":null,"state":[],"all":false,"limit":50,"cursor":null,"future_filter":{"x":1}},
+        "items":[{"kind":"shell","id":"s","state":"running","thread_id":"t","thread_title":"title",
+            "parent_thread_id":null,"current_connection":"c","current_model":"m","run_id":"r","owner_run_id":"r",
+            "turn_id":null,"execution_id":"s","message_id":null,"attempt_id":null,"operation_id":null,
+            "end_message_node_id":null,"response_nodes":[],"response_nodes_truncated":false,
+            "created_at":null,"started_at":"now","ended_at":null,"updated_at":null,
+            "activity_at":"now","elapsed_ms":null,"last_output_at":null,"attempt_connection":null,"attempt_model":null,
+            "reason":null,"targets":[],"reply":{"delivered":null,"accepted":false,"future_reply_field":1},"stdin_open":true,"stdin_last_write_at":null}],
+        "receipt_budget":{"accounted_bytes":1,"limit_bytes":2,"max_outcome_bytes":3,"result_retention_seconds":4,
+            "result_retention":"24h_or_pressure","expired_replay":"operation_expired","control_headroom_bytes":5,
+            "control_limit_bytes":6,"control_available_bytes":5,"protected_old_pending_bytes":0,"at_limit":false,
+            "available_bytes":1,"full_result_admission_blocked":true,"recovery":"replay","future_budget":7},
+        "future_snapshot":{"kept":true}}"###).unwrap();
+    let decoded: StatusResult = serde_json::from_value(activity.clone()).unwrap();
+    let StatusResult::Activity(snapshot) = decoded else {
+        panic!("activity shape misclassified")
+    };
+    assert_eq!(snapshot.items[0].stdin_open, Some(true));
+    let Some(Some(StatusReply::Object(reply))) = snapshot.items[0].reply.as_ref() else {
+        panic!("structured reply shape misclassified");
+    };
+    assert_eq!(reply.delivered, Some(None));
+    assert_eq!(reply.accepted, Some(Some(false)));
+    assert_eq!(reply.additional_properties["future_reply_field"], 1);
+    assert_eq!(
+        serde_json::to_value(StatusResult::Activity(snapshot.clone())).unwrap(),
+        activity
+    );
+    let raw_reply: StatusReply = serde_json::from_value(json!(["legacy", 1])).unwrap();
+    assert_eq!(
+        serde_json::to_value(raw_reply).unwrap(),
+        json!(["legacy", 1])
+    );
+    let mut explicit_null = activity.clone();
+    explicit_null["items"][0]["reply"] = Value::Null;
+    let decoded: StatusResult = serde_json::from_value(explicit_null.clone()).unwrap();
+    let StatusResult::Activity(snapshot) = decoded else {
+        panic!("activity shape misclassified")
+    };
+    assert_eq!(snapshot.items[0].reply, Some(None));
+    assert_eq!(
+        serde_json::to_value(StatusResult::Activity(snapshot)).unwrap(),
+        explicit_null
+    );
+    let mut missing = activity.clone();
+    missing["items"][0].as_object_mut().unwrap().remove("reply");
+    let decoded: StatusResult = serde_json::from_value(missing).unwrap();
+    let StatusResult::Activity(snapshot) = decoded else {
+        panic!("activity shape misclassified")
+    };
+    assert_eq!(snapshot.items[0].reply, None);
+    assert!(
+        serde_json::to_value(StatusResult::Activity(snapshot.clone())).unwrap()["items"][0]
+            .get("reply")
+            .is_none()
+    );
+    assert_eq!(
+        snapshot.filters.additional_properties["future_filter"],
+        json!({"x":1})
+    );
+
+    let memory: Value = serde_json::from_str(r###"{
+        "process":{"pid":9,"platform":"linux","observed_at":"now","metrics":{
+            "rss":{"bytes":null,"unavailable_reason":"not provided","future_metric_flag":true}},"future_process":"kept"},
+        "caches":{"body":{"retained_bytes":null,"limit_bytes":10,"entries":null,"unavailable_reason":"unavailable"},
+            "attachment":{"retained_bytes":4,"limit_bytes":10,"entries":1,"entry_unit":"path","unavailable_reason":null,"live_encoded_bytes":2,"pinned_bytes":1}},
+        "accounting":"budget only", "future_memory_mode":"kept"}"###).unwrap();
+    let decoded: StatusResult = serde_json::from_value(memory.clone()).unwrap();
+    let StatusResult::Memory(observed) = decoded else {
+        panic!("memory shape misclassified")
+    };
+    assert_eq!(
+        observed.process.additional_properties["future_process"],
+        "kept"
+    );
+    let encoded = serde_json::to_value(StatusResult::Memory(observed)).unwrap();
+    assert_eq!(
+        encoded, memory,
+        "memory wire shape and null-vs-omitted fields roundtrip"
+    );
+
+    let ambiguous = json!({"instance_id":"i","observed_at":"now","scope":"s","consistency":"c","fingerprint":"f",
+        "filters":{},"items":[],"receipt_budget":{},"process":{},"caches":{},"accounting":"a"});
+    assert!(
+        serde_json::from_value::<StatusResult>(ambiguous).is_err(),
+        "union must not choose a lossy variant by order"
+    );
+}
+
+#[test]
+fn typed_result_records_tolerate_open_leaves_and_pre_283_missing_fields() {
+    let shell: ShellListResult = serde_json::from_value(json!({
+        "items":[{"execution_id":"e","run_id":"r","thread_id":"t","turn_id":null,
+            "started_at":null,"ended_at":null,"state":"exited","exit_code":0,"command_excerpt":null,
+            "command_characters":0,"command_excerpt_redacted":false,"command_excerpt_truncated":false,
+            "started_at_known":false,"stdin_open":false,"stdin_last_write_at":null}],
+        "next_cursor":null,"scanned":1,"scan_limit":2000,"scan_budget_reached":false,
+        "period":{"since":null,"until":null,"bounds":"[since,until)","durations":"whole","unknown_starts":"excluded"},
+        "ordering":"saved start","redaction":"conservative"
+    })).unwrap();
+    assert_eq!(shell.items[0].stdin_open, Some(false));
+    assert_eq!(shell.items[0].stdin_last_write_at, None);
+    let encoded = serde_json::to_value(shell).unwrap();
+    assert_eq!(encoded["items"][0]["stdin_open"], false);
+
+    let old_shell: ShellListResult = serde_json::from_value(json!({
+        "items":[{"execution_id":"e","run_id":"r","thread_id":"t","started_at":null,"ended_at":null,
+            "state":"exited","exit_code":0,"command_excerpt":null,"command_characters":0,
+            "command_excerpt_redacted":false,"command_excerpt_truncated":false,"started_at_known":false}],
+        "next_cursor":null,"scanned":0,"scan_limit":2000,"scan_budget_reached":false,
+        "period":{"since":null,"until":null,"bounds":"[since,until)","durations":"whole","unknown_starts":"excluded"},
+        "ordering":"saved start","redaction":"conservative"
+    })).unwrap();
+    assert!(
+        old_shell.items[0].additional_properties.is_empty(),
+        "pre-283 result remains decodable"
+    );
+
+    let config: ConfigGetResult = serde_json::from_value(json!({
+        "config_path":null,
+        "loaded":{"present":true,"content_hash":null,"values":{"connections":{"open_leaf":{"future_key":[1,null]}}},
+            "redacted_fields":[],"credential_env_set":{"p":false},"credential_source":{"p":"none"},"future_loaded":1},
+        "file":{"present":false,"content_hash":null,"valid":false,"error":"absent","values":null,
+            "redacted_fields":[],"credential_source":null},
+        "credentials_file":{"path":null,"present":false,"valid":true,"error":null},
+        "differs":false,"differing_fields":null,"restart":{"all_fields_require_restart":false}
+    })).unwrap();
+    assert_eq!(
+        config.loaded.values["connections"]["open_leaf"]["future_key"],
+        json!([1, null])
+    );
+    assert!(config.file.values.is_none());
+}
+
+#[test]
+fn typed_usage_result_preserves_null_omission_and_unknown_provider_usage_leaves() {
+    let attempt = json!({"attempt_id":"a","thread_id":"t","run_id":"r","turn_id":"u","state":"completed",
+        "usage":{"input_tokens":8,"input_tokens_details":{"cached_tokens":3,"provider_extra":"kept"},
+            "provider_usage_extension":{"x":1}},
+        "prompt_cache_diagnostics":{"type":"cache_miss","future_diag":true},
+        "input_bytes":null});
+    let decoded: UsageGetResult = serde_json::from_value(attempt.clone()).unwrap();
+    let UsageGetResult::Attempt(value) = decoded else {
+        panic!("attempt usage shape misclassified")
+    };
+    assert_eq!(
+        value.usage.additional_properties["provider_usage_extension"],
+        json!({"x":1})
+    );
+    assert_eq!(
+        value
+            .usage
+            .input_tokens_details
+            .as_ref()
+            .unwrap()
+            .additional_properties["provider_extra"],
+        "kept"
+    );
+    assert_eq!(
+        serde_json::to_value(UsageGetResult::Attempt(value)).unwrap(),
+        attempt
     );
 }
