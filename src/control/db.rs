@@ -6708,3 +6708,265 @@ mod inspection_isolation_tests {
         writer.shutdown().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod retry_tracking_diagnosis_287 {
+    use super::*;
+
+    // Real retry/recovery/readback on synthetic SQL, without provider execution.
+    // No DataOwner, driver, network, provider or shell is started.
+    #[test]
+    fn diagnosis_287_existing_turn_and_cursor_track_four_retry_outcomes() {
+        for case in [
+            "success",
+            "same_failure",
+            "different_failure",
+            "stopped",
+            "no_attempt_failure",
+        ] {
+            let mut db = Connection::open_in_memory().unwrap();
+            db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('thread','/','','synthetic','synthetic','before'); INSERT INTO run(id,thread_id,state,created_at)VALUES('run','thread','live','before'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn','thread','run','running','before');").unwrap();
+            let old_error = ApiError::new(ErrorCode::InvalidState, "synthetic HTTP400 original");
+            let tx = db.transaction().unwrap();
+            assert!(
+                crate::control::state::recover_turn_tx(&tx, "thread", "run", "turn", 0, &old_error)
+                    .unwrap()
+            );
+            tx.commit().unwrap();
+            let conditions = vec![WaitCondition::ThreadSettled {
+                thread_ids: vec!["thread".into()],
+                states: vec![
+                    "completed".into(),
+                    "recovery_wait".into(),
+                    "failed".into(),
+                    "stopped".into(),
+                ],
+            }];
+            let baseline = crate::thread_observation::observe(&db, &conditions, None, true)
+                .unwrap()
+                .unwrap();
+            assert_eq!(baseline.changes.len(), 1);
+            let tx = db.transaction().unwrap();
+            let accepted = retry_run(&tx, "run", None, "accepted").unwrap().result;
+            tx.commit().unwrap();
+            assert_eq!(accepted["run_id"], "run");
+            assert_eq!(accepted["turn_id"], "turn");
+            assert_eq!(accepted["state"], "live");
+            assert!(accepted.get("recovery_hint").is_none());
+            assert!(accepted.get("attempt_id").is_none());
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0,
+                "acceptance does not create an attempt or prove model execution"
+            );
+            let preparing = serde_json::to_value(turn_details(&db, "turn").unwrap()).unwrap();
+            assert_eq!(preparing["state"], "preparing");
+            assert_eq!(
+                db.query_row("SELECT generation FROM turn WHERE id='turn'", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            assert!(
+                crate::thread_observation::observe(&db, &conditions, Some(&baseline.cursor), false)
+                    .unwrap()
+                    .unwrap()
+                    .changes
+                    .is_empty()
+            );
+            let tx = db.transaction().unwrap();
+            if case != "no_attempt_failure" {
+                tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('retry-attempt','turn',1,0,'synthetic','synthetic',0,'inflight','{}','accepted')", []).unwrap();
+                tx.execute("UPDATE turn SET state='running' WHERE id='turn'", [])
+                    .unwrap();
+            }
+            match case {
+                "success" => {
+                    tx.execute_batch("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES('answer','turn','assistant_response','finished','{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"synthetic answer\"}]}]}'); UPDATE turn SET state='completed',answer_node_id='answer',ended_at='finished' WHERE id='turn'; UPDATE run SET state='completed',ended_at='finished' WHERE id='run'; UPDATE model_attempt SET state='completed',ended_at='finished' WHERE id='retry-attempt';").unwrap();
+                }
+                "same_failure" | "different_failure" | "no_attempt_failure" => {
+                    let error = if case != "different_failure" {
+                        old_error.clone()
+                    } else {
+                        ApiError::new(ErrorCode::InvalidState, "synthetic HTTP503 changed")
+                    };
+                    assert!(
+                        crate::control::state::recover_turn_tx(
+                            &tx, "thread", "run", "turn", 1, &error
+                        )
+                        .unwrap()
+                    );
+                    tx.execute("UPDATE model_attempt SET state='failed',error_json=?1,ended_at='finished' WHERE id='retry-attempt'", [serde_json::to_string(&error).unwrap()]).unwrap();
+                }
+                "stopped" => {
+                    tx.execute_batch("UPDATE turn SET state='stopped',ended_at='finished' WHERE id='turn'; UPDATE run SET state='stopped',stop_reason='explicit_stop',ended_at='finished' WHERE id='run'; UPDATE model_attempt SET state='cancelled',ended_at='finished' WHERE id='retry-attempt';").unwrap();
+                }
+                _ => unreachable!(),
+            }
+            tx.commit().unwrap();
+            let result = serde_json::to_value(turn_details(&db, "turn").unwrap()).unwrap();
+            let expected = match case {
+                "success" => "completed",
+                "stopped" => "stopped",
+                _ => "recovery_wait",
+            };
+            assert_eq!(result["state"], expected);
+            assert_eq!(result["turn_id"], accepted["turn_id"]);
+            if case == "success" {
+                assert_eq!(result["end_message_node_id"], "answer");
+            }
+            if case.ends_with("failure") {
+                let reason = &result["context"]["recovery_reason"];
+                assert_eq!(
+                    reason["message"],
+                    if case != "different_failure" {
+                        "synthetic HTTP400 original"
+                    } else {
+                        "synthetic HTTP503 changed"
+                    }
+                );
+            }
+            if case == "no_attempt_failure" {
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                        .get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+            }
+            // Finish an unrelated independent Run in the same Thread. The
+            // Thread-wide cursor is only a wake hint; exact target IDs decide.
+            db.execute_batch("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('other-run','thread','completed','later','finished');").unwrap();
+            let observed =
+                crate::thread_observation::observe(&db, &conditions, Some(&baseline.cursor), false)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(
+                observed.changes.len(),
+                2,
+                "both target and unrelated changes remain visible"
+            );
+            let target: Vec<_> = observed
+                .changes
+                .iter()
+                .filter(|change| {
+                    change["run_id"] == accepted["run_id"]
+                        && (change.get("turn_id").is_none()
+                            || change["turn_id"] == accepted["turn_id"])
+                })
+                .collect();
+            assert_eq!(
+                target.len(),
+                1,
+                "filter the acknowledgement IDs, never Thread latest"
+            );
+            assert_eq!(target[0]["state"], expected);
+            assert!(
+                crate::thread_observation::observe(&db, &conditions, Some(&observed.cursor), false)
+                    .unwrap()
+                    .unwrap()
+                    .changes
+                    .is_empty(),
+                "cursor consumption does not repeat a transition"
+            );
+            db.execute("DELETE FROM event WHERE id='recovery-turn-0'", [])
+                .unwrap();
+            assert_eq!(
+                crate::thread_observation::observe(&db, &conditions, Some(&baseline.cursor), false)
+                    .err()
+                    .unwrap()
+                    .code,
+                ErrorCode::CursorExpired,
+                "lost baseline cannot silently identify an earlier retry"
+            );
+            eprintln!(
+                "{case}: ack run=run turn=turn attempts=0; saved outcome={expected}; exact target change=1, unrelated=1, consumed=0, expired baseline rejected"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn retry_queue_unit_and_saved_receipt_are_not_execution_outcomes() {
+        let root = tempfile::tempdir().unwrap();
+        let database = DbWorker::open(root.path().join("synthetic.db"))
+            .await
+            .unwrap();
+        database.call(|db| {
+            db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','synthetic','synthetic','before'); INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','before'); INSERT INTO turn(id,thread_id,run_id,state,created_at,recovery_reason_json)VALUES('turn','t','r','recovery_wait','before','{}');")?;
+            for n in 0..129 {
+                let id=format!("held-{n:03}");
+                db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json)VALUES(?1,'turn','user','before','{}')",[&id])?;
+                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,path_admission,created_at)VALUES(?1,?1,'null','t',?1,'r','turn','held','unadmitted','before')",[&id])?;
+                db.execute("UPDATE receipt SET hold_reason='recovery_wait' WHERE id=?1",[&id])?;
+            }
+            Ok(())
+        }).await.unwrap();
+        let config=Config::parse("default_connection='synthetic'\ndefault_model='synthetic'\n[connections.synthetic]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+        let store = Store::new(
+            database.clone(),
+            Arc::new(config),
+            root.path().into(),
+            "fixture".into(),
+        );
+        let command = Command::RunRetry(RunTarget { run_id: "r".into() });
+        let request = Request::new("fixture:retry", command.clone());
+        let accepted = store.execute(request.clone(), None).await.unwrap().result;
+        assert_eq!(accepted["recovery_hint"]["remaining_held"], 1);
+        let replay = store.execute(request.clone(), None).await.unwrap().result;
+        assert_eq!(replay, accepted);
+        database
+            .call(|db| {
+                assert_eq!(
+                    serde_json::to_value(turn_details(db, "turn").unwrap()).unwrap()["state"],
+                    "recovery_wait"
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                        .get::<_, i64>(0))?,
+                    128,
+                    "same-ID receipt replay is not another queue unit"
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let next = store
+            .execute(Request::new("fixture:next-unit", command), None)
+            .await
+            .unwrap()
+            .result;
+        assert!(next.get("recovery_hint").is_none());
+        assert_eq!(
+            store.execute(request, None).await.unwrap().result,
+            accepted,
+            "replayed acceptance does not become the current outcome"
+        );
+        database
+            .call(|db| {
+                assert_eq!(
+                    serde_json::to_value(turn_details(db, "turn").unwrap()).unwrap()["state"],
+                    "preparing"
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                        .get::<_, i64>(0))?,
+                    129
+                );
+                assert_eq!(
+                    db.query_row("SELECT count(*) FROM model_attempt", [], |r| r
+                        .get::<_, i64>(0))?,
+                    0
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
+        eprintln!(
+            "queue: real Store first=128 remaining1, same-ID replay unchanged, new-ID next=1, attempts=0"
+        );
+        drop(store);
+        database.shutdown().await.unwrap();
+    }
+}

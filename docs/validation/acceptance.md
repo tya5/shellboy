@@ -11207,3 +11207,26 @@ the prefix without duplicating outcomes. All 129 terminal transitions are unique
 each has one correct event/delivery insertion, and seven unrelated receipts and
 bodies survive. Both injected partial failures roll back. The original sender
 Run is stopped; the final post-reopen outcome targets a new independent Run.
+
+### #287 Explicit Retry Acceptance And Outcome Guidance
+
+Scope: existing CLI help/Guide and owner-free synthetic acceptance tests only.
+Retry/resume acceptance remains machine JSON with existing Run/Turn IDs, not a
+successful model answer. No response/exit-code/wire/migration change, new wait
+flag, automatic observer, retry, resend or provider call is introduced.
+
+The Guide follows the acknowledgement's exact Turn through `turn_completed`
+snapshot state and `turn get` recovery reason/end message. It documents a
+pre-retry durable cursor for repeated same-reason recovery, exact Run/Turn
+filtering for independent Runs, unknown post-hoc/expired epochs, bounded held
+input progress without an attempt, and saved-operation replay versus a new unit.
+The synthetic fixture calls the real retry/recovery/public readback helpers;
+success/stop facts are synthetic SQL, not end-to-end provider execution. Failure
+is committed before observation, including one recovery with no attempt row.
+An unrelated independent Run and a deleted cursor anchor test non-inference.
+A separate real Store test exercises 129 held inputs, the 128-row admission unit,
+same-operation receipt replay and a new explicit unit, without starting an owner.
+
+Focused test counts, formatter/lint and language results are reported with the
+exact component SHA. Full suite/3-OS CI are left to the final integration gate;
+no real owner, ask, history body, model API or paid operation is used here.

@@ -440,7 +440,7 @@ pub enum RunCommand {
     Get(RunOptions),
     /// Explicitly retry a recovery-wait Turn after inspecting and fixing its cause.
     #[command(
-        after_help = "Inspect first: shellboy run get --run RUN_ID\nGuide: shellboy docs get --id shellboy/recovery-and-storage\nAny caller may retry; act only on Runs you started or were asked to handle. Terminal Runs are not revived; do not repeat an unconfirmed side effect under a new ID."
+        after_help = "Inspect first: shellboy run get --run RUN_ID\nThe response acknowledges acceptance, not execution success. Follow its exact run_id/turn_id, not the Thread's latest Turn:\n  shellboy wait --conditions-json '[{\"type\":\"turn_completed\",\"turn_id\":\"ACK_TURN_ID\"}]' --timeout-ms 30000\n  shellboy turn get --turn ACK_TURN_ID\nInspect snapshot.state, context.recovery_reason and end_message_node_id. satisfied is not necessarily success; recovery_wait requires another explicit decision. Timeout/interrupted observation does not stop the target. No attempt ID exists until model preparation.\nFor repeated same-reason recovery, capture a thread_settled cursor BEFORE retry; filter changes by the acknowledged Run/Turn. Without that baseline, or after cursor expiry, the retry epoch is unknown.\nRemaining held inputs can keep recovery_wait while a bounded 128-input unit progresses without a model call. Replaying the same operation ID returns the saved acknowledgement, not the next unit.\nGuide: shellboy docs get --id shellboy/recovery-and-storage\nAny caller may retry; act only on Runs you started or were asked to handle. Terminal Runs are not revived; do not repeat an unconfirmed side effect under a new ID."
     )]
     Retry(RunOptions),
     /// Request stopping this Run and its owned work; inspect state to confirm termination.
@@ -807,7 +807,7 @@ pub struct TextOptions {
 }
 #[derive(Debug, Clone, Args)]
 pub struct MessageSendOptions {
-    /// Explicitly resume a Run waiting for recovery.
+    /// Explicitly resume recovery; acceptance is not execution success. Track the returned Turn with wait/turn get.
     #[arg(long)]
     pub resume_recovery: bool,
     /// Require a deliberate reply to this message.

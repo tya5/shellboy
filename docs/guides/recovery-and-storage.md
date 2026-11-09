@@ -84,6 +84,74 @@ In the TUI, start via F8 `待機 | 条件を観測` and cancel only observation 
 
 Use `shellboy wait` to wait for execution. `timeout` does not mean the target stopped or failed. `satisfied` need not mean target success: inspect the returned snapshot and state. [Delegation](delegation.md) and [CLI reference](cli-reference.md) show JSON and state-dependent branches.
 
+## Follow an explicit recovery retry
+
+`run retry` and `message send --resume-recovery` acknowledge **acceptance, not
+execution success**. Keep the returned `run_id` and `turn_id`; do not substitute
+the Thread's latest Run/Turn, which can belong to other independent work. Retry
+usually reprepares the same Turn, not a new Turn. A model attempt is allocated
+later, so acceptance does not promise a new attempt ID or even a provider call.
+The CLI response remains machine JSON; no human explanation is mixed into it.
+
+```sh
+shellboy run get --run RUN_ID
+shellboy run retry --run RUN_ID
+# Use only the acknowledgement's turn_id here:
+shellboy wait --conditions-json '[{"type":"turn_completed","turn_id":"ACK_TURN_ID"}]' --timeout-ms 30000
+shellboy turn get --turn ACK_TURN_ID
+# Only if turn get returns end_message_node_id:
+shellboy history get --node END_MESSAGE_NODE_ID
+```
+
+Read the wait snapshot's `state` and then saved Turn facts. `satisfied` can mean
+`completed`, `failed` or `stopped`; only `completed` establishes normal answer
+completion. `recovery_wait` means inspect `context.recovery_reason` (including
+its saved code/message), not that retry succeeded. An observer `timeout` or
+`interrupted` says nothing about target success and does not stop it. A Turn may
+finish while its Run still owns background work; `run_ended` can wait longer
+than the answer. Never infer success from a fixed sleep or an empty live preview.
+
+### Recognize another same-reason failure
+
+A repeated failure can have the same Turn ID, state and reason. For a fresh saved
+transition, **before retrying**, capture a baseline with the existing wait API:
+
+```sh
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["THREAD_ID"],"states":["completed","recovery_wait","failed","stopped"]}]' --timeout-ms 0
+# Save result.cursor, then issue the explicit retry and keep its Run/Turn IDs.
+shellboy run retry --run RUN_ID
+shellboy wait --conditions-json '[{"type":"thread_settled","thread_ids":["THREAD_ID"],"states":["completed","recovery_wait","failed","stopped"]}]' --after BASELINE_CURSOR --timeout-ms 30000
+```
+
+Keep the conditions unchanged when reusing the cursor. Inspect returned changes,
+match their `run_id` and (when present) `turn_id` to the acknowledgement, and read
+that exact Turn. A recovery change is saved for each recovery generation, even
+if the error repeats. Other independent work is only a wake hint; never call its
+answer/failure this retry's result. Continue from the returned cursor when a
+change belongs to another target. A `more` response can require further pages.
+A terminal Run change may omit `turn_id`; inspect the acknowledged Turn instead
+of assuming an answer. This is an observation route, not a new atomic retry
+correlation token: concurrent callers can retry the same Turn again.
+
+Without a pre-retry cursor (or another observed boundary), a post-hoc identical
+state/reason cannot identify a retry epoch. On `cursor_expired`, take a fresh
+snapshot and report that the intervening retry outcome is **unknown**; do not
+silently claim that a new baseline proves an earlier attempt. Read retained
+facts and explicitly decide the next action. Failure timestamps are facts, not
+a reason to sleep or a guaranteed per-retry identity.
+
+### Held input progress is not another model failure
+
+A retry releases at most 128 recoverable held inputs. While more remain, the
+Turn can stay in `recovery_wait`; `run get`/the acceptance `recovery_hint` can
+include `remaining_held`. This can be queue progress **without a new model
+attempt**, not a repeated provider failure. An explicit next operation ID may
+advance the next unit. Replaying the **same operation ID** returns its saved
+acceptance, not a new unit and not the current Turn outcome. Use `operation get`
+to resolve ambiguous receipt delivery, and `turn get`/wait for execution facts.
+Do not automatically retry or resend input. In particular, a new input with
+`--resume-recovery` is still an instruction, not a status query.
+
 ## Automatic retries for temporary model communication failures
 
 Temporary communication failures trigger up to eight consecutive additional attempts by default. TUI `一時的なエラーのため再試行中` (retrying a temporary error) is a normal waiting display. Ctrl+C or stopping the Run cancels the wait. Exhausting the budget enters recovery wait with the latest error and count. Successful final-response adoption resets consecutive failures; this is not an eight-retry cap over an entire long conversation/tool loop.

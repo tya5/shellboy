@@ -1365,3 +1365,40 @@ fn message_ask_is_model_scoped_and_takes_text() {
         })
     ));
 }
+
+#[test]
+fn retry_help_distinguishes_acceptance_from_saved_outcome_without_new_flags() {
+    let retry = Cli::try_parse_from(["shellboy", "run", "retry", "--help"]).unwrap_err();
+    assert_eq!(retry.kind(), ErrorKind::DisplayHelp);
+    let text = retry
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for required in [
+        "not execution success",
+        "ACK_TURN_ID",
+        "snapshot.state",
+        "context.recovery_reason",
+        "BEFORE retry",
+        "epoch is unknown",
+        "128-input",
+        "same operation ID",
+    ] {
+        assert!(
+            text.contains(required),
+            "missing retry guidance: {required}"
+        );
+    }
+    let message = Cli::try_parse_from(["shellboy", "message", "send", "--help"])
+        .unwrap_err()
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(message.contains("acceptance is not execution success"));
+    assert!(
+        !text.contains("--wait"),
+        "this change introduces no automatic observer flag"
+    );
+}

@@ -296,6 +296,11 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned descendants without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
 
+`run retry` returning `ok: true` is acceptance, not execution success. Follow the
+returned Run/Turn through `wait` and `turn get`; do not use Thread latest or invent
+an attempt ID. See [explicit retry outcomes](recovery-and-storage.md#follow-an-explicit-recovery-retry)
+for snapshot states, pre-retry cursor tracking, unknown/expired epochs and held-input progress.
+
 ### Index size
 
 `shellboy index shrink [--dry-run] [--cancel | --revert]` converts the active index to int8 from its saved vectors. No embedding API call, explicit only, and it never deletes. `shellboy index remove --space ID [--dry-run]` is the separate delete. See [Shrinking the index](history-and-search.md#shrinking-the-index-without-api-calls) and [Retained indexes](history-and-search.md#retained-indexes-and-deleting-them).
