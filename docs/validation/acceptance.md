@@ -11255,3 +11255,42 @@ initial nonexistent test-target invocation failed before running product tests;
 that failure is retained separately, not counted as green. Full suite/OS and
 latest-base integration remain untested. This component does not contain the
 later #286 normalization fix. No push or workflow dispatch is performed here.
+### #287 Explicit Retry Acceptance And Outcome Guidance
+
+Scope: existing CLI help/Guide and owner-free synthetic acceptance tests only.
+Retry/resume acceptance remains machine JSON with existing Run/Turn IDs, not a
+successful model answer. No response/exit-code/wire/migration change, new wait
+flag, automatic observer, retry, resend or provider call is introduced.
+
+The Guide follows the acknowledgement's exact Turn through `turn_completed`
+snapshot state and `turn get` recovery reason/end message. It documents a
+pre-retry durable cursor for repeated same-reason recovery, exact Run/Turn
+filtering for independent Runs, unknown post-hoc/expired epochs, bounded held
+input progress without an attempt, and saved-operation replay versus a new unit.
+The synthetic fixture calls the real retry/recovery/public readback helpers;
+success/stop facts are synthetic SQL, not end-to-end provider execution. Failure
+is committed before observation, including one recovery with no attempt row.
+An unrelated independent Run and a deleted cursor anchor test non-inference.
+A separate real Store test exercises 129 held inputs, the 128-row admission unit,
+same-operation receipt replay and a new explicit unit, without starting an owner.
+
+Focused test counts, formatter/lint and language results are reported with the
+exact component SHA. Full suite/3-OS CI are left to the final integration gate;
+no real owner, ask, history body, model API or paid operation is used here.
+### #289 Existing Held-Message Inspection Guidance
+
+Base ff18f32640f0b41f042f034f4b1a3936a9abe92d. Help/Guide now point to the
+ALREADY PUBLIC `message get` `context.hold_reason` and `history get --node` body
+reader. The earlier diagnosis checked only top-level fields and incorrectly
+reported the reason unavailable; this correction requires no new DTO field.
+Held reason is not receipt termination, selected-path admission or proof of
+body loss. The actual private incident remains unknown; rewind causality is not
+asserted. Manual fresh resend can duplicate instructions on explicit resume.
+No repair/resend, sender notice, automatic recovery or output-shape change is
+introduced. The original #284/#289 diagnosis worktrees remain untouched.
+
+Synthetic typed regression checks saved nested context and retained public body,
+unchanged payload/receipt/path/event facts, without owner startup or tool/model
+execution. CLI help regression checks both read commands and the duplicate-risk
+warning. Exact test counts/fmt/language results accompany the component commit;
+full suite and CI remain integration gates, not claimed local evidence.

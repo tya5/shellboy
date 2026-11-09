@@ -74,6 +74,14 @@ For important changes, explicitly retain an ID in the already known same-instanc
 
 `message send` `delivery_status=accepted|held|applied|cancelled` describes acceptance/application. `assignment=new_run|new_turn|existing_turn` includes both run_id and turn_id; saved assignment never changes. `assignment=pending` has neither; query `message get` later for initial assignment. A successful send does not mean the recipient has replied. For reply-expected messages inspect `reply.state` and retrieve `reply.node_id` when replied; acceptance is not a reply. For non-reply completion observations, `end_message_node_id` remains available for source retrieval when present.
 
+### Inspect held input
+
+`message get --message MESSAGE_ID` already includes the saved `context.hold_reason`.
+Use `history get --node MESSAGE_ID` for the retained original body; no resend is
+needed. A terminal-before-admission hold reason is not a terminal receipt or proof
+of body loss. See [held input inspection](recovery-and-storage.md#inspect-a-held-message-without-resending-it)
+for path/body distinctions and the duplicate-instruction risk of manual resend.
+
 ### Saved execution context
 
 `run get`, `turn get`, `message get`, and `history get` require `context`. `thread get` can omit it for a fork. `history get` requires `provenance`; every `history list` item requires `provenance`, `context`, and `selection`. It includes meaningful state, saved created_at/updated_at/ended_at, thread_id/run_id/turn_id/node_id, Thread parent_thread_id versus Run owner_run_id, and structured recovery_reason. Unrecorded started_at and Thread created_at are omitted. Run/Turn `lifetime_ms` is wall-clock creation-to-end time including preparation/waits and is absent before termination. A node's Thread is its origin, not a fork's selected path.
@@ -295,6 +303,11 @@ PowerShell can use `--text '...'` or pipeline `--text-stdin`. Native stdin encod
 | `run retry --run RUN` | Recovery Run/Turn references; release the oldest at most 128 recoverable held receipts per operation, retaining recovery_wait while more remain. Existing recovery_hint includes remaining_held; repeat with a new operation ID for the next unit. Once drained, reprepare the same Turn without blindly rerunning executed shells. Any caller may retry (no authority check); the owner Run still receives the recovery notice. Concurrent retries are safe: one resumes the Turn, the others fail with `invalid_state` |
 | `run stop --run RUN` | Confirmed stopping/Run state; stops the target Run and its owned descendants without affecting independent Runs. Any caller may target any Run (no authority check; check the ID first). Check get/wait for completed resource cleanup |
 | `turn get --turn TURN` | turn_id/run_id/thread_id/state/end_message_node_id/recovery_hint. Background owned work may keep the Run live after answering |
+
+`run retry` returning `ok: true` is acceptance, not execution success. Follow the
+returned Run/Turn through `wait` and `turn get`; do not use Thread latest or invent
+an attempt ID. See [explicit retry outcomes](recovery-and-storage.md#follow-an-explicit-recovery-retry)
+for snapshot states, pre-retry cursor tracking, unknown/expired epochs and held-input progress.
 
 ### Index size
 
