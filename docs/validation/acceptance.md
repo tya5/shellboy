@@ -11396,3 +11396,22 @@ admission transaction tests remain required; a previous incorrectly qualified fi
 The focused matrix previously passed eight tests plus check/fmt, and named sender/history regressions each passed.
 The final fresh source validation and independent exact-SHA review are recorded separately; no full/all-OS result
 is inferred from these local synthetic tests. No real owner or user data is used.
+
+### Short-lived shell registration / saved EOF replay repair
+
+The full-suite failure on 6ed is separate from its successful layout repair. A deterministic synthetic handle with
+an already-closed pipe and an expired weak fact sender reproduced `IoFailed: stdin fact consumer unavailable`.
+The initial attachment fixture passed locally before repair, so that timing-dependent success is not presented as
+a reproduction. The cause is private registration replay reserving a new fact even though EOF is already applied.
+Private replay now returns without another reservation only when the pipe is already closed. Public strict EOF
+continues to reject closed stdin, public recorded EOF still waits for commit, and private replay of an open pipe
+still closes it and publishes a closed fact without waiting for the collector. The weak sender remains weak to
+avoid retaining a sender which would prevent event EOF. Initial/write success facts and terminal commit ordering
+are unchanged. A replay does not fabricate a new successful-write timestamp or suppress a storage error.
+
+Local focused evidence: deterministic red failed once with the exact error; repaired ack tests pass 5, lifecycle
+11 (including spawn-registration stop/EOF), authenticated attachment replay 1, and collector 9 (one existing
+ignored). Test check, format and complete layout/watchdog policy pass. Two mistyped filters matched zero tests and
+are excluded. Separate selected retry and proactive fixtures verify the previously truncated large-output path;
+the independent prefix digest and operation-schema causes remain W8/W9 deltas rather than being claimed fixed
+here. Full suite, final composed exact and all-OS CI remain separate gates; no skips or timeout increases are used.

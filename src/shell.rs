@@ -232,8 +232,16 @@ impl ShellHandle {
         let mut stdin = timeout(self.inner.write_timeout, self.inner.stdin.lock())
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "stdin EOF queue deadline exceeded"))?;
-        if stdin.is_none() && require_open {
-            return Err(stdin_closed_error());
+        if stdin.is_none() {
+            if require_open {
+                return Err(stdin_closed_error());
+            }
+            // Registration only reapplies saved intent. The initial/explicit
+            // close already published its fact; after a short-lived process
+            // finishes there may be no remaining channel sender to reserve.
+            if !wait_saved {
+                return Ok(());
+            }
         }
         let slot = self.fact_slot().await?;
         stdin.take();
@@ -1032,14 +1040,9 @@ mod stdin_fact_ack_tests {
             handle.eof().await.unwrap_err().code,
             ErrorCode::InvalidState
         );
-        // Registration reapplication queues a durable fact without waiting for a
-        // collector which has not started yet; it is the only idempotent path.
+        // A confirmed, already-closed pipe needs no duplicate fact on replay.
         handle.reapply_eof().await.unwrap();
-        let ShellEvent::Stdin { open, saved, .. } = events.recv().await.unwrap() else {
-            panic!("expected reapplied EOF")
-        };
-        assert!(!open);
-        drop(saved);
+        assert!(events.try_recv().is_err());
         child.wait().await.unwrap();
     }
     #[tokio::test]
@@ -1219,5 +1222,76 @@ mod stdin_fact_ack_tests {
             .unwrap()
             .unwrap();
         }
+    }
+    #[tokio::test]
+    async fn private_eof_reapplication_after_closed_pipe_does_not_require_a_live_fact_sender() {
+        let (send, events) = mpsc::channel(1);
+        let weak = send.downgrade();
+        drop(send);
+        let handle = ShellHandle {
+            inner: Arc::new(HandleInner {
+                facts: Some(weak),
+                stdin: Arc::new(Mutex::new(None)),
+                stop: CancellationToken::new(),
+                finished: CancellationToken::new(),
+                stdin_limit: 1024,
+                write_timeout: Duration::from_secs(1),
+            }),
+        };
+        handle.reapply_eof().await.expect(
+            "registration must not turn an already-closed short-lived execution into a spawn error",
+        );
+        assert_eq!(
+            handle.eof().await.unwrap_err().code,
+            ErrorCode::InvalidState
+        );
+        drop(events);
+    }
+    #[tokio::test]
+    async fn private_eof_reapplication_of_open_pipe_still_queues_closed_fact_without_waiting() {
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("cat >/dev/null")
+            .stdin(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let (send, mut events) = mpsc::channel(1);
+        let handle = ShellHandle {
+            inner: Arc::new(HandleInner {
+                facts: Some(send.downgrade()),
+                stdin: Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix))),
+                stop: CancellationToken::new(),
+                finished: CancellationToken::new(),
+                stdin_limit: 1024,
+                write_timeout: Duration::from_secs(1),
+            }),
+        };
+        crate::test_watchdog::watchdog(
+            "private open EOF publishes without a collector acknowledgement",
+            handle.reapply_eof(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let ShellEvent::Stdin {
+            open,
+            successful_write_at,
+            ..
+        } = events.recv().await.unwrap()
+        else {
+            panic!("missing close fact")
+        };
+        assert!(!open);
+        assert_eq!(successful_write_at, None);
+        assert!(handle.inner.stdin.lock().await.is_none());
+        assert_eq!(
+            handle.eof().await.unwrap_err().code,
+            ErrorCode::InvalidState
+        );
+        crate::test_watchdog::watchdog("join private EOF child", child.wait())
+            .await
+            .unwrap()
+            .unwrap();
     }
 }
