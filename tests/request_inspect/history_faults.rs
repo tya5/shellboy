@@ -208,7 +208,7 @@ async fn diagnosis_284_active_incomplete_and_settled_corrupt_groups() {
                     "{}\u{1f}{}\u{1f}{}\u{1e}",
                     r.get::<_, String>(0)?,
                     r.get::<_, i64>(1)?,
-                    r.get::<_, bool>(2)?
+                    u8::from(r.get::<_, bool>(2)?)
                 ))
             })
             .unwrap()

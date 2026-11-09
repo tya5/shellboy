@@ -11415,3 +11415,16 @@ ignored). Test check, format and complete layout/watchdog policy pass. Two misty
 are excluded. Separate selected retry and proactive fixtures verify the previously truncated large-output path;
 the independent prefix digest and operation-schema causes remain W8/W9 deltas rather than being claimed fixed
 here. Full suite, final composed exact and all-OS CI remain separate gates; no skips or timeout increases are used.
+
+### #284 canonical prefix repair after train CI failure
+
+The integrated train CI exposed a product regression: inspection formatted the
+boolean tombstone as false/true while persisted PathWitness uses numeric 0/1.
+The author matrix repeated the same wrong encoding, so its prior green result
+did not establish compatibility with saved nonempty witnesses. Earlier review
+approval is not a waiver of this defect. Both product readers now share the
+existing numeric stamp encoder; the prefix guard is retained. The matrix fixture
+uses independently numeric bytes. A new regression compares persisted witnesses
+against independent expected bytes for both tombstone values, accepts unchanged
+nonempty prefixes, and rejects rewritten revisions. New tests and format/check
+have not been executed for this repair; no slot/full-suite/CI was requested.

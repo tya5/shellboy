@@ -83,14 +83,14 @@ pub struct PathWitness {
     pub sha256: String,
 }
 impl PathWitness {
+    fn append_stamp(framed: &mut String, id: &str, revision: i64, tombstone: bool) {
+        framed.push_str(&format!("{}\u{1f}{}\u{1f}{}\u{1e}", id, revision, u8::from(tombstone)));
+    }
     fn of(frames: &[Arc<Frame>]) -> Self {
         let mut framed = String::new();
         for frame in frames {
             let stamp = &frame.stamp;
-            framed.push_str(&format!(
-                "{}\u{1f}{}\u{1f}{}\u{1e}",
-                stamp.id, stamp.revision, stamp.tombstone as u8
-            ));
+            Self::append_stamp(&mut framed, &stamp.id, stamp.revision, stamp.tombstone);
         }
         Self {
             nodes: frames.len(),
@@ -794,12 +794,12 @@ pub(crate) fn load_for_inspection(
         let mut framed = String::new();
         let mut count = 0;
         while let Some(row) = rows.next()? {
-            framed.push_str(&format!(
-                "{}\u{1f}{}\u{1f}{}\u{1e}",
-                row.get::<_, String>(0)?,
+            PathWitness::append_stamp(
+                &mut framed,
+                &row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
-                row.get::<_, bool>(2)?
-            ));
+                row.get::<_, bool>(2)?,
+            );
             count += 1;
         }
         if count != expected.nodes || crate::digest::sha256_hex(framed) != expected.sha256 {
@@ -1224,3 +1224,6 @@ mod tests {
         worker.shutdown().await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod prefix_tests;
