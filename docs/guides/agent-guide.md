@@ -725,6 +725,14 @@ and use the background shell observation commands for long-running work. An
 invalid call returns its own error without preventing other valid calls in the
 same group; malformed protocol groups are still rejected as a whole.
 
+### Shell stdin lifetime
+
+`stdin_open` defaults to `false`. Without initial input, stdin reaches EOF
+without waiting for a later write. With `initial_stdin`, those bytes are delivered
+before EOF. Set `stdin_open: true` explicitly only for a command that needs later
+interactive input. Initial input remains ordered before subsequent writes or EOF;
+keeping stdin open does not change the initial-input encoding or byte limit.
+
 ### Shell call descriptions
 
 With the default `[shell] describe_calls = true`, generated shell tool definitions
@@ -803,3 +811,16 @@ have no dependency graph. Child requests use expected replies and normal deliver
 Use expected replies rather than supervising child Runs: retain each accepted request ID and finish your Turn.
 External inspection may use `thread_settled` with `--after`. Inspect `result.snapshot.changes`, `result.cursor` and
 `last_end_message` and `last_input` without treating recovery_wait as terminal or automatically replaying an interrupted wait.
+
+### Closed Shell Stdin (#282)
+
+Shell stdin is closed by default. `initial_stdin` is delivered before automatic
+EOF; set `stdin_open: true` at shell creation for later interactive input.
+A new `shell.write` to an already closed stdin and a second or later `shell.eof`
+return `invalid_state`, including for a known terminal execution. The error
+explains the default and how to start a new interactive shell. An unknown ID
+remains `target_unavailable`. Replaying an operation ID preserves its original
+receipt, not a second side effect. This intentionally changes the earlier
+successful closed-write/EOF behavior without adding a wire alias or version.
+Partial writes, timeouts and in-flight failures retain their typed write result;
+`shell.stop` remains idempotent.

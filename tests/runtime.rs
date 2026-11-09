@@ -1630,8 +1630,8 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
     )
     .await;
     assert_eq!(completed["matched"].as_array().unwrap().len(), 2);
-    // EOF is an idempotent close request, including after the process and its
-    // live handle have retired. It never creates a new execution or new bytes.
+    // A fresh EOF against closed stdin is rejected, including after the
+    // live handle retires. Replaying the same operation returns its receipt.
     let repeat = Request::new(
         format!("{}:terminal-eof", control.store.instance_id),
         Command::ShellEof(ExecutionTarget {
@@ -1639,19 +1639,37 @@ async fn stdin_operation_retransmission_writes_once_and_wait_any_observes_comple
         }),
     );
     let first = control.request(repeat.clone()).await;
-    assert!(first.ok, "{:?}", first.error);
-    assert_eq!(first.result.as_ref().unwrap()["state"], "exited");
-    assert_eq!(first.result.as_ref().unwrap()["execution_id"], execution);
+    assert!(!first.ok);
+    assert_eq!(first.error.as_ref().unwrap().code, ErrorCode::InvalidState);
+    assert!(
+        first
+            .error
+            .as_ref()
+            .unwrap()
+            .message
+            .contains("stdin_open: true")
+    );
     assert_eq!(control.request(repeat).await, first);
-    let fresh = command(
-        &control,
-        Command::ShellEof(ExecutionTarget {
-            execution_id: execution.clone(),
-        }),
-    )
-    .await;
-    assert_eq!(fresh["state"], "exited");
-    assert_eq!(fresh["execution_id"], execution);
+    let fresh = control
+        .request(Request::new(
+            format!("{}:fresh-terminal-eof", control.store.instance_id),
+            Command::ShellEof(ExecutionTarget {
+                execution_id: execution.clone(),
+            }),
+        ))
+        .await;
+    assert_eq!(fresh.error.unwrap().code, ErrorCode::InvalidState);
+    let late_write = control
+        .request(Request::new(
+            format!("{}:terminal-write", control.store.instance_id),
+            Command::ShellWrite(ShellWriteArgs {
+                execution_id: execution.clone(),
+                text: "late".into(),
+                encoding: "UTF-8".into(),
+            }),
+        ))
+        .await;
+    assert_eq!(late_write.error.unwrap().code, ErrorCode::InvalidState);
     let missing = control
         .request(Request::new(
             format!("{}:unknown-eof", control.store.instance_id),

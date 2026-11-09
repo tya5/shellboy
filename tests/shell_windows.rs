@@ -1,7 +1,7 @@
 #![cfg(windows)]
 use shellboy::{
     config::{Config, ShellKind},
-    protocol::{ShellState, ShellToolArgs},
+    protocol::{ErrorCode, ShellState, ShellToolArgs},
     shell::*,
 };
 use std::collections::BTreeMap;
@@ -106,10 +106,37 @@ async fn stdin_and_eof_use_pipe_without_consuming_powershell_command_source() {
         StdinWriteStatus::Complete
     );
     execution.handle.eof().await.unwrap();
+    assert_eq!(
+        execution.handle.eof().await.unwrap_err().code,
+        ErrorCode::InvalidState
+    );
+    assert_eq!(
+        execution
+            .handle
+            .write("late", "UTF-8")
+            .await
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidState
+    );
     let (out, _, done) = collect(execution).await;
     assert_eq!(out, "initial:日本語".as_bytes());
     assert!(done.output_complete);
 }
+#[tokio::test]
+async fn default_stdin_delivers_initial_input_then_closes_and_rejects_late_write() {
+    let mut input = args("[Console]::Out.Write([Console]::In.ReadToEnd())");
+    input.initial_stdin = Some("initial".into());
+    let execution = spawn(input).await;
+    let write = execution.handle.write("late", "UTF-8").await;
+    let eof = execution.handle.eof().await;
+    let (out, _, done) = collect(execution).await;
+    assert_eq!(out, b"initial");
+    assert!(done.output_complete);
+    assert_eq!(write.unwrap_err().code, ErrorCode::InvalidState);
+    assert_eq!(eof.unwrap_err().code, ErrorCode::InvalidState);
+}
+
 #[tokio::test]
 async fn natural_shell_exit_and_stop_reclaim_job_descendants() {
     let command = "$p=[Diagnostics.ProcessStartInfo]::new(); $p.FileName='powershell.exe'; $p.Arguments='-NoLogo -NoProfile -NonInteractive -Command Start-Sleep 30'; $p.UseShellExecute=$false; $child=[Diagnostics.Process]::Start($p); [Console]::Out.Write($child.Id); exit 0";

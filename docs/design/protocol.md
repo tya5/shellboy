@@ -915,3 +915,16 @@ typed response records cannot assume older clients tolerate an added field.
 The human inbox uses live Thread-ID cursor v2; old snapshot cursors expire.
 The exact count and oldest-time semantics follow: 17 with `exact=false` is a
 lower bound (17+), and oldest is null when that bound is inexact.
+
+### Closed Shell Stdin (#282)
+
+Shell stdin is closed by default. `initial_stdin` is delivered before automatic
+EOF; set `stdin_open: true` at shell creation for later interactive input.
+A new `shell.write` to an already closed stdin and a second or later `shell.eof`
+return `invalid_state`, including for a known terminal execution. The error
+explains the default and how to start a new interactive shell. An unknown ID
+remains `target_unavailable`. Replaying an operation ID preserves its original
+receipt, not a second side effect. This intentionally changes the earlier
+successful closed-write/EOF behavior without adding a wire alias or version.
+Partial writes, timeouts and in-flight failures retain their typed write result;
+`shell.stop` remains idempotent.

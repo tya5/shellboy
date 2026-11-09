@@ -140,9 +140,12 @@ impl ShellHandle {
         let mut stdin = tokio::select! {
             biased;
             _ = self.inner.stop.cancelled() => return Ok(write_result(0,StdinWriteStatus::Stopped,false,None)),
-            _ = self.inner.finished.cancelled() => return Ok(write_result(0,StdinWriteStatus::Closed,false,None)),
+            _ = self.inner.finished.cancelled() => return Err(stdin_closed_error()),
             result = timeout_at(deadline,self.inner.stdin.lock()) => match result { Ok(guard) => guard, Err(_) => return Ok(write_result(0,StdinWriteStatus::Timeout,true,Some("stdin queue deadline exceeded".into()))) }
         };
+        if stdin.is_none() {
+            return Err(stdin_closed_error());
+        }
         Ok(write_bytes(
             &mut stdin,
             &bytes,
@@ -152,14 +155,29 @@ impl ShellHandle {
         )
         .await)
     }
-    /// EOF closes the pipe once, in the same serial order as writes.
+    /// EOF closes an open pipe, in the same serial order as writes.
     pub async fn eof(&self) -> Result<(), ApiError> {
+        self.close_stdin(true).await
+    }
+    /// Saved EOF intent can be applied both before and after handle publication.
+    pub(crate) async fn reapply_eof(&self) -> Result<(), ApiError> {
+        self.close_stdin(false).await
+    }
+    async fn close_stdin(&self, require_open: bool) -> Result<(), ApiError> {
         let mut stdin = timeout(self.inner.write_timeout, self.inner.stdin.lock())
             .await
             .map_err(|_| ApiError::new(ErrorCode::IoFailed, "stdin EOF queue deadline exceeded"))?;
-        stdin.take();
+        if stdin.take().is_none() && require_open {
+            return Err(stdin_closed_error());
+        }
         Ok(())
     }
+}
+pub(crate) fn stdin_closed_error() -> ApiError {
+    ApiError::new(
+        ErrorCode::InvalidState,
+        "Shell stdin is closed (closed by default); start a new shell with stdin_open: true for interactive input",
+    )
 }
 pub struct ShellExecution {
     pub handle: ShellHandle,
