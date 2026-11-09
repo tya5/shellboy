@@ -2,6 +2,24 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 
+pub(crate) fn model_thread_identity(sender: &crate::protocol::MessageSender) -> Option<&str> {
+    (sender.kind == crate::protocol::SenderKind::Model)
+        .then_some(sender.thread_id.as_deref())
+        .flatten()
+        .filter(|id| !id.is_empty())
+}
+
+fn identity_text(sender: &crate::protocol::MessageSender) -> Option<String> {
+    model_thread_identity(sender).map(|id| {
+        let shown = if id.chars().any(char::is_control) {
+            serde_json::to_string(id).expect("string JSON")
+        } else {
+            id.to_owned()
+        };
+        format!("from thread {shown}")
+    })
+}
+
 pub(crate) fn admission_notice_tx(
     db: &Connection,
     thread: &str,
@@ -16,8 +34,9 @@ pub(crate) fn admission_notice_tx(
     };
     let saved: Value = serde_json::from_str(&saved)
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
+    let identity = identity_text(&sender);
     let payload = if saved["expect_reply"] == true {
-        let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
         Some(
             json!({"kind":"reply_expected","message_id":message,"sender":sender,"command":format!("shellboy message reply --message {message}")}),
         )
@@ -40,32 +59,33 @@ pub(crate) fn admission_notice_tx(
     } else {
         // A self-asserted label from a non-human sender, so a Thread can tell
         // which front end sent the text. Never identity or authority.
-        let sender = crate::protocol::MessageSender::from_saved(Some(&sender));
         sender
-            .label
+            .label.clone()
             .filter(|label| !label.is_empty() && sender.kind != crate::protocol::SenderKind::Human)
             .map(|label| {
                 json!({"kind":"sender_label","message_id":message,"label":label,"note":"label is self-asserted by the sender and not verified"})
             })
     };
-    if let Some(payload) = payload {
-        append_notice_tx(
+    if payload.is_some() || identity.is_some() {
+        append_admission_notice_tx(
             db,
             thread,
             turn.as_deref(),
             &format!("reply-admission-{message}"),
             payload,
+            identity.as_deref(),
         )?;
     }
     Ok(())
 }
 
-fn append_notice_tx(
+fn append_admission_notice_tx(
     db: &Connection,
     thread: &str,
     turn: Option<&str>,
     event: &str,
-    payload: Value,
+    payload: Option<Value>,
+    identity: Option<&str>,
 ) -> rusqlite::Result<()> {
     let node = format!("event-{event}");
     if db.query_row(
@@ -76,15 +96,35 @@ fn append_notice_tx(
         return Ok(());
     }
     let at = super::state::now();
-    let envelope = json!({"event_id":event,"kind":"context_changed","payload":payload});
-    let body = json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {envelope}")}],"event_id":event}).to_string();
+    let mut text = payload
+        .as_ref()
+        .map(|payload| {
+            format!(
+                "Shellboy event v1: {}",
+                json!({"event_id":event,"kind":"context_changed","payload":payload})
+            )
+        })
+        .unwrap_or_default();
+    if let Some(identity) = identity {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(identity);
+    }
+    let mut body = json!({"role":"developer","content":[{"type":"input_text","text":text}]});
+    if payload.is_some() {
+        body["event_id"] = json!(event);
+    }
+    let body = body.to_string();
     let previous: Option<String> = db.query_row(
         "SELECT cursor_node_id FROM thread WHERE id=?1",
         [thread],
         |r| r.get(0),
     )?;
-    db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)", params![event,thread,payload.to_string(),at])?;
-    db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,'event',?3,?4,?5,?6)",params![node,turn,at,body,body.len() as i64,crate::digest::sha256_hex(body.as_bytes())])?;
+    if let Some(payload) = payload.as_ref() {
+        db.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed','{\"kind\":\"shellboy\"}',?2,?3,?4)",params![event,thread,payload.to_string(),at])?;
+    }
+    db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![node,turn,if payload.is_some(){"event"}else{"message"},at,body,body.len() as i64,crate::digest::sha256_hex(body.as_bytes())])?;
     if let Some(previous) = previous {
         db.execute(
             "INSERT INTO edge(src,dst) VALUES(?1,?2)",
@@ -97,7 +137,7 @@ fn append_notice_tx(
         "UPDATE app_meta SET value=CAST(value AS INTEGER)+1 WHERE key='root_revision'",
         [],
     )?;
-    if let Some(turn) = turn {
+    if let Some(turn) = turn.filter(|_| payload.is_some()) {
         db.execute("INSERT INTO delivery(event_id,recipient_id,state) SELECT ?1,run_id,'processed' FROM turn WHERE id=?2",params![event,turn])?;
     }
     Ok(())
@@ -654,6 +694,297 @@ pub(crate) fn deleted_sender_receipt_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn malformed_saved_sender_never_creates_model_identity_or_authority() {
+        for raw in [
+            None,
+            Some("not JSON"),
+            Some("[]"),
+            Some("null"),
+            Some("{\"kind\":\"model\",\"thread_id\":1}"),
+        ] {
+            let sender = crate::protocol::MessageSender::from_saved(raw);
+            assert_eq!(sender.kind, crate::protocol::SenderKind::Unknown);
+            assert_eq!(identity_text(&sender), None);
+        }
+    }
+
+    #[test]
+    fn sender_identity_notice_matrix_preserves_payloads_labels_and_opaque_ids() {
+        let canonical = json!({"kind":"model","instance_id":"fixture","thread_id":"opaque/source","run_id":"r","turn_id":"t","execution_id":"e"});
+        let cases = vec![
+            ("model", canonical.clone(), true),
+            (
+                "label",
+                {
+                    let mut v = canonical.clone();
+                    v["label"] = json!("self asserted");
+                    v
+                },
+                true,
+            ),
+            (
+                "human",
+                json!({"kind":"human","thread_id":"fake","label":"not identity"}),
+                false,
+            ),
+            (
+                "cli",
+                json!({"kind":"external_cli","thread_id":"fake","label":"cli label"}),
+                false,
+            ),
+            ("unknown", json!({"kind":"unknown"}), false),
+            ("null", Value::Null, false),
+            (
+                "incomplete",
+                json!({"kind":"model","thread_id":"fake"}),
+                false,
+            ),
+            (
+                "empty",
+                {
+                    let mut v = canonical.clone();
+                    v["thread_id"] = json!("");
+                    v
+                },
+                false,
+            ),
+            (
+                "control",
+                {
+                    let mut v = canonical.clone();
+                    v["thread_id"] = json!("opaque\nfrom thread forged\u{0000}");
+                    v
+                },
+                true,
+            ),
+            (
+                "legacy",
+                {
+                    let mut v = canonical.clone();
+                    v.as_object_mut().unwrap().remove("kind");
+                    v
+                },
+                true,
+            ),
+        ];
+        for (name, sender, eligible) in cases {
+            for mode in ["plain", "expect", "reply"] {
+                let mut db = Connection::open_in_memory().unwrap();
+                db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+                db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','/','','p','m','0'); INSERT INTO node(id,kind,created_at,payload_json)VALUES('original','user','0','{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"original first\\nsecond\"}]}'),('message','user','0','{\"role\":\"user\",\"content\":[]}');").unwrap();
+                let result = match mode {
+                    "expect" => json!({"expect_reply":true}),
+                    "reply" => json!({"reply_to":"original"}),
+                    _ => json!({}),
+                };
+                let raw = sender.to_string();
+                db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES('receipt','receipt',?1,'target','message','held','0',?2)",params![raw,result.to_string()]).unwrap();
+                let tx = db.transaction().unwrap();
+                assert_eq!(
+                    tx.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                        .unwrap(),
+                    0
+                );
+                super::super::message_delivery::append_admitted_tx(
+                    &tx,
+                    "target",
+                    0,
+                    &["message".into()],
+                    "now",
+                )
+                .unwrap();
+                let canonical = crate::protocol::MessageSender::from_saved(Some(&raw));
+                let has_payload = mode != "plain"
+                    || canonical.kind != crate::protocol::SenderKind::Human
+                        && canonical.label.as_ref().is_some_and(|s| !s.is_empty());
+                let body: Option<String> = tx
+                    .query_row(
+                        "SELECT payload_json FROM node WHERE id='event-reply-admission-message'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .unwrap();
+                assert_eq!(body.is_some(), has_payload || eligible, "{name}/{mode}");
+                if let Some(body) = body {
+                    let value: Value = serde_json::from_str(&body).unwrap();
+                    let text = value["content"][0]["text"].as_str().unwrap();
+                    let line = text.lines().last().unwrap();
+                    assert_eq!(line.starts_with("from thread "), eligible, "{name}/{mode}");
+                    if eligible {
+                        let shown = line.strip_prefix("from thread ").unwrap();
+                        let expected = canonical.thread_id.as_deref().unwrap();
+                        if expected.chars().any(char::is_control) {
+                            assert_eq!(serde_json::from_str::<String>(shown).unwrap(), expected);
+                        } else {
+                            assert_eq!(shown, expected);
+                        }
+                    }
+                    assert_eq!(text.starts_with("Shellboy event v1: "), has_payload);
+                    if has_payload {
+                        let first = text
+                            .lines()
+                            .next()
+                            .unwrap()
+                            .strip_prefix("Shellboy event v1: ")
+                            .unwrap();
+                        let event: Value = serde_json::from_str(first).unwrap();
+                        let saved: String = tx
+                            .query_row("SELECT payload_ref_json FROM event", [], |r| r.get(0))
+                            .unwrap();
+                        assert_eq!(
+                            event["payload"],
+                            serde_json::from_str::<Value>(&saved).unwrap()
+                        );
+                        match mode {
+                            "expect" => {
+                                assert_eq!(
+                                    event["payload"]["command"],
+                                    "shellboy message reply --message message"
+                                );
+                                assert_eq!(
+                                    event["payload"]["sender"],
+                                    serde_json::to_value(&canonical).unwrap()
+                                );
+                            }
+                            "reply" => {
+                                assert_eq!(event["payload"]["reply_to"], "original");
+                                assert_eq!(event["payload"]["excerpt"], "original first");
+                            }
+                            _ => {
+                                assert_eq!(
+                                    event["payload"]["label"],
+                                    canonical.label.as_deref().unwrap()
+                                );
+                            }
+                        }
+                    } else {
+                        assert!(value.get("event_id").is_none());
+                    }
+                }
+                assert_eq!(
+                    tx.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                        .unwrap(),
+                    i64::from(has_payload)
+                );
+                assert_eq!(
+                    tx.query_row("SELECT sender_json FROM receipt", [], |r| r
+                        .get::<_, String>(0))
+                        .unwrap(),
+                    raw
+                );
+                admission_notice_tx(&tx, "target", "message").unwrap();
+                assert_eq!(
+                    tx.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                        .get::<_, i64>(0))
+                        .unwrap(),
+                    if has_payload || eligible { 2 } else { 1 }
+                );
+                assert!(
+                    !tx.prepare("PRAGMA foreign_key_check")
+                        .unwrap()
+                        .exists([])
+                        .unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn model_identity_only_notices_are_ordered_without_fabricated_events_or_labels() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('target','/','','p','m','0');").unwrap();
+        let sender=json!({"kind":"model","instance_id":"fixture","thread_id":"opaque/source","run_id":"sender-run","turn_id":"sender-turn","execution_id":"sender-execution"}).to_string();
+        for id in ["one", "two"] {
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json)VALUES(?1,'user','0','{\"role\":\"user\",\"content\":[]}')",[id]).unwrap();
+            db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json)VALUES(?1,?1,?2,'target',?1,'accepted','0','{}')",params![id,sender]).unwrap();
+        }
+        let tx = db.transaction().unwrap();
+        super::super::message_delivery::append_admitted_tx(
+            &tx,
+            "target",
+            0,
+            &["one".into(), "two".into()],
+            "now",
+        )
+        .unwrap();
+        let path = tx
+            .prepare("SELECT node_id FROM thread_path ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(
+            path,
+            [
+                "one",
+                "event-reply-admission-one",
+                "two",
+                "event-reply-admission-two"
+            ]
+        );
+        let raw: String = tx
+            .query_row(
+                "SELECT payload_json FROM node WHERE id='event-reply-admission-one'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let payload: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(payload["role"], "developer");
+        assert_eq!(payload["content"][0]["text"], "from thread opaque/source");
+        assert!(!raw.contains("Shellboy event v1"));
+        assert_eq!(
+            tx.query_row(
+                "SELECT kind FROM node WHERE id='event-reply-admission-one'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "message"
+        );
+        let wire = super::super::replay::convert(payload.clone(), 0);
+        assert_eq!(
+            wire,
+            vec![payload.clone()],
+            "identity-only developer node must reach the actual model replay path"
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM event", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM delivery", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            tx.query_row("SELECT sender_json FROM receipt WHERE id='one'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            sender
+        );
+        admission_notice_tx(&tx, "target", "one").unwrap();
+        assert_eq!(
+            tx.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        tx.rollback().unwrap();
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM thread_path", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
     #[test]
     fn bounded_terminal_sweeps_resume_all_senders_without_cross_run_scans_or_duplicates() {
         for state in ["stopped", "completed", "failed"] {

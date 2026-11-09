@@ -935,3 +935,20 @@ receipt, not a second side effect. This intentionally changes the earlier
 successful closed-write/EOF behavior without adding a wire alias or version.
 Partial writes, timeouts and in-flight failures retain their typed write result;
 `shell.stop` remains idempotent.
+### Model Admission Sender Identity (#285)
+
+Admission notices display the owner's saved model sender Thread ID separately
+from a self-asserted label. Existing reply/label event payloads, event kinds and
+context-changed envelopes are unchanged; a separate `from thread <id>` text line
+follows their existing event text. Plain unlabeled model input receives an
+identity-only developer message, not a fabricated event or delivery. It has no
+`Shellboy event v1` prefix or event metadata. Both use the existing admission
+node identity and transaction/deduplication rules. Batch message/notice ordering
+is retained. Human, external CLI, unknown and incomplete saved senders do not
+receive a model identity line. Only a nonempty canonical model `thread_id` is
+eligible. IDs are opaque, not UUID-validated or derived from labels/titles. IDs
+containing control characters are JSON-string escaped for lossless single-line
+presentation. Structured sender DTOs remain the client interface; clients must
+not parse this presentation text. Current title lookup belongs to the UI and
+does not rewrite sender facts or labels. No DTO field, event subtype, schema
+migration or protocol version is added.

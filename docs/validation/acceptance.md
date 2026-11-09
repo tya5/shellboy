@@ -11376,3 +11376,23 @@ later command, its stopped/group-cleanup state was verified and only unfinished 
 Strict all-target Clippy and format check pass. Limited lint annotations keep the existing unboxed Rust enum API
 and explicit IoSession parameters rather than introducing unrelated runtime or wire changes. Actual main 8a87
 composition, independent cross-review, Windows native and final all-OS CI remain separate gates. No CI is started.
+### #285 model sender identity: component acceptance
+
+Base public main `ff18f32640f0b41f042f034f4b1a3936a9abe92d`. A synthetic red test first observed only the two
+messages where the required path is message/identity-notice/message/identity-notice. The green implementation uses
+canonical existing saved MessageSender records, leaves label and sender JSON unchanged, and appends a complete ID
+line only for eligible model senders. Optional existing event payloads and identity text are assembled separately.
+Identity-only nodes use the existing message/developer representation without event/delivery rows or event metadata.
+The same canonical eligibility drives batch admission ordering and notice assembly. Invalid saved JSON is handled
+as unknown instead of being SQL-parsed as an identity. No owner authentication, DTO or protocol field is changed.
+
+The matrix covers model with/without label, human, external CLI, unknown, null, incomplete, empty ID, control-character
+ID and valid legacy Origin, across plain/expect-reply/reply paths (30 scenarios). It verifies original commands,
+excerpts, labels and event payloads; identity exclusion; lossless ID escaping; event-row counts; unchanged saved DTOs;
+deduplication and FK consistency. The plain-model batch test verifies adjacent ordering, rollback, no fabricated
+events/deliveries, existing message node kind and exact developer payload through the actual model replay conversion.
+Separate malformed JSON/array/null/non-string cases remain unknown. Existing sender-receipt, human-history and
+admission transaction tests remain required; a previous incorrectly qualified filter ran zero tests and is excluded.
+The focused matrix previously passed eight tests plus check/fmt, and named sender/history regressions each passed.
+The final fresh source validation and independent exact-SHA review are recorded separately; no full/all-OS result
+is inferred from these local synthetic tests. No real owner or user data is used.

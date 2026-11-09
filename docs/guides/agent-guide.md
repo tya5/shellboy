@@ -834,3 +834,18 @@ receipt, not a second side effect. This intentionally changes the earlier
 successful closed-write/EOF behavior without adding a wire alias or version.
 Partial writes, timeouts and in-flight failures retain their typed write result;
 `shell.stop` remains idempotent.
+
+### Recorded Message Sender
+
+Model-origin messages carry the owner's saved sending Thread identity separately
+from any self-asserted sender label. An admission notice includes `from thread`
+and the complete saved Thread ID, even when no label was supplied. A plain
+identity-only developer message is not a new Shellboy event. Existing reply and
+label event payloads retain their original meaning. Control characters in an ID
+are JSON-string escaped so the identifier cannot insert another notice line.
+The identity is a routing fact, not a role or authority guarantee; a label remains
+self-asserted and is never auto-filled from a Thread title or ID. Human, external
+CLI and unknown/malformed senders do not acquire a model Thread identity line.
+Use the full ID with `thread get` if current Thread details are needed. Renaming
+or deleting a Thread does not rewrite the saved sender ID. Clients use structured
+`provenance.sender`, not parsed notice text; current title resolution is UI-only.
