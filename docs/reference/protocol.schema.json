@@ -10249,15 +10249,37 @@
     },
     "thread.archive": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
       "properties": {
-        "accepted": {
+        "already": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "archived": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "descendants": {
           "type": "boolean"
+        },
+        "not_found": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "accepted"
+        "archived",
+        "already",
+        "not_found",
+        "descendants"
       ],
-      "title": "Accepted",
+      "title": "ThreadArchiveResult",
       "type": "object"
     },
     "thread.branches": true,
@@ -10628,15 +10650,37 @@
     "thread.tags": true,
     "thread.unarchive": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
       "properties": {
-        "accepted": {
+        "already": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "descendants": {
           "type": "boolean"
+        },
+        "not_found": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unarchived": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "accepted"
+        "unarchived",
+        "already",
+        "not_found",
+        "descendants"
       ],
-      "title": "Accepted",
+      "title": "ThreadUnarchiveResult",
       "type": "object"
     },
     "turn.get": {
