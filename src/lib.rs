@@ -88,3 +88,8 @@ mod shared_ui_message_tests {
 }
 
 pub mod width_cache;
+
+pub(crate) mod stdin_facts;
+
+#[cfg(test)]
+mod stdin_compat;

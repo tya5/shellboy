@@ -816,3 +816,59 @@ async fn many_shells_keep_last_output_projection_on_the_bounded_status_page() {
     );
     f.close().await;
 }
+
+#[tokio::test]
+async fn shell_stdin_observations_are_saved_facts_not_intent_or_read_time() {
+    use shellboy::control::output::ShellOutputReader;
+    let f = Fixture::new().await;
+    let reader = ShellOutputReader::new(f.db.clone(), "fixture");
+    let historical = reader.get("exec").await.unwrap();
+    assert_eq!(
+        historical.stdin_open, None,
+        "saved start intent is not an actual pipe observation"
+    );
+    assert_eq!(historical.stdin_last_write_at, None);
+    f.db.call(|db| {
+        db.execute("UPDATE shell_execution SET stdin_state='closed',shell_json=json_set(shell_json,'$.stdin_open',json('true'),'$.stdin_last_write_at','2026-10-25T07:05:03Z') WHERE id='exec'",[])?;
+        Ok(())
+    }).await.unwrap();
+    let recorded = reader.get("exec").await.unwrap();
+    let snapshot = f.status(StatusArgs::default()).await.unwrap();
+    let item = snapshot.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(
+        recorded.stdin_open,
+        Some(true),
+        "EOF reservation does not replace the actual saved fact"
+    );
+    assert_eq!(recorded.stdin_open, item.stdin_open);
+    assert_eq!(recorded.stdin_last_write_at, item.stdin_last_write_at);
+    assert_eq!(
+        recorded.stdin_last_write_at.as_deref(),
+        Some("2026-10-25T07:05:03Z")
+    );
+    let again = reader.get("exec").await.unwrap();
+    assert_eq!(again.stdin_last_write_at, recorded.stdin_last_write_at);
+    f.db.call(|db| {
+        db.execute(
+            "UPDATE shell_execution SET state='exited' WHERE id='exec'",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let ended = reader.get("exec").await.unwrap();
+    assert_eq!(ended.stdin_open, Some(false));
+    assert_eq!(ended.stdin_last_write_at, recorded.stdin_last_write_at);
+    let all = f
+        .status(StatusArgs {
+            all: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let item = all.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(item.stdin_open, ended.stdin_open);
+    assert_eq!(item.stdin_last_write_at, ended.stdin_last_write_at);
+    f.close().await;
+}

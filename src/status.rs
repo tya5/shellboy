@@ -44,6 +44,10 @@ pub struct WorkItem {
     /// Read-time duration for live shells; saved duration for terminal shells.
     pub elapsed_ms: Option<u64>,
     pub last_output_at: Option<String>,
+    #[serde(default)]
+    pub stdin_open: Option<bool>,
+    #[serde(default)]
+    pub stdin_last_write_at: Option<String>,
     pub attempt_connection: Option<String>,
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
@@ -450,6 +454,8 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         response_nodes_truncated: false,
         elapsed_ms: None,
         last_output_at: None,
+        stdin_open: None,
+        stdin_last_write_at: None,
         revisit: None,
         targets: Vec::new(),
     };
@@ -582,6 +588,8 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
         if selected.item.kind == "shell" {
             let timing =
                 crate::shell::timing::read(db, &selected.item.id, observed).map_err(sql)?;
+            (selected.item.stdin_open, selected.item.stdin_last_write_at) =
+                crate::stdin_facts::read(db, &selected.item.id).map_err(sql)?;
             selected.item.elapsed_ms = timing.elapsed_ms;
             selected.item.last_output_at = timing.last_output_at;
         }

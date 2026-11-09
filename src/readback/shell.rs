@@ -112,6 +112,10 @@ pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result
             .is_some_and(|n| n > 512);
         let valid = value["sec"].as_i64().is_some_and(|s| s != i64::MIN);
         let description = crate::tool_description::label(value["description"].as_str());
+        let execution = value["execution_id"]
+            .as_str()
+            .ok_or_else(|| invalid("missing shell execution id"))?
+            .to_owned();
         let obj = value.as_object_mut().unwrap();
         if let Some(description) = description {
             obj.insert("description".into(), json!(snippet(&description).0));
@@ -121,6 +125,10 @@ pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result
         obj.remove("raw_command");
         obj.remove("sec");
         obj.remove("nano");
+        let (stdin_open, stdin_last_write_at) =
+            crate::stdin_facts::read(db, &execution).map_err(error)?;
+        obj.insert("stdin_open".into(), json!(stdin_open));
+        obj.insert("stdin_last_write_at".into(), json!(stdin_last_write_at));
         obj.insert("command_excerpt".into(), json!(excerpt));
         obj.insert("command_excerpt_redacted".into(), json!(redacted));
         obj.insert("command_excerpt_truncated".into(), json!(truncated));

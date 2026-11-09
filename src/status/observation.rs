@@ -185,8 +185,13 @@ pub(crate) fn point_sql(kind: Kind) -> String {
     } else {
         ("NULL", "NULL")
     };
+    let stdin = if kind == Kind::Shell {
+        "CASE WHEN r.state IN ('exited','failed','stopped') THEN 'false' WHEN json_type(r.shell_json,'$.stdin_open')='true' THEN 'true' WHEN json_type(r.shell_json,'$.stdin_open')='false' THEN 'false' END,CASE WHEN json_type(r.shell_json,'$.stdin_last_write_at')='text' THEN json_extract(r.shell_json,'$.stdin_last_write_at') END"
+    } else {
+        "NULL,NULL"
+    };
     format!(
-        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
+        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
     )
 }
 
@@ -252,14 +257,14 @@ pub(crate) fn read_status_tx(
                 }
                 continue;
             }
-            if row.get_ref(22)?.as_str_or_null().ok().flatten().is_some() {
+            if row.get_ref(24)?.as_str_or_null().ok().flatten().is_some() {
                 result.limited.push(Limited {
                     id: id.into(),
                     reason: "canonical_metadata_unconfirmed",
                 });
                 continue;
             }
-            let borrowed = (1..22)
+            let borrowed = (1..24)
                 .map(|column| {
                     row.get_ref(column)
                         .map(|v| v.as_str_or_null().ok().flatten())
@@ -510,6 +515,12 @@ fn canonical_item(
         activity_at: activity.1.into(),
         elapsed_ms,
         last_output_at: get(20),
+        stdin_open: get(21).and_then(|v| match v.as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        }),
+        stdin_last_write_at: get(22),
         created_at,
         started_at,
         ended_at,
