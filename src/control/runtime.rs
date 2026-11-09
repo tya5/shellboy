@@ -329,13 +329,13 @@ impl Control {
                 "Cannot encode shell output",
             ),
             Command::ShellWrite(args) => {
-                let shell = self
-                    .live
-                    .clone_shell_handle(&args.execution_id)
-                    .await
-                    .ok_or_else(|| {
-                        ApiError::new(ErrorCode::TargetUnavailable, "Shell is not running")
-                    })?;
+                let shell = match self.live.clone_shell_handle(&args.execution_id).await {
+                    Some(shell) => shell,
+                    None => {
+                        reader.get(&args.execution_id).await?;
+                        return Err(crate::shell::stdin_closed_error());
+                    }
+                };
                 encode_result(
                     shell.write(&args.text, &args.encoding).await?,
                     ErrorCode::IoFailed,
@@ -683,7 +683,7 @@ impl Control {
         let target = self.store.database.call(move |db| {
             let tx = db.transaction()?;
             let changed = if is_eof {
-                tx.execute("UPDATE shell_execution SET stdin_state='closed' WHERE id=?1 AND state IN ('starting','running','stopping')",[&execution])?
+                tx.execute("UPDATE shell_execution SET stdin_state='closed' WHERE id=?1 AND stdin_state='open' AND state IN ('starting','running','stopping')",[&execution])?
             } else {
                 tx.execute("UPDATE shell_execution SET state='stopping' WHERE id=?1 AND state IN ('starting','running','stopping')",[&execution])?
             };
@@ -698,7 +698,7 @@ impl Control {
             let shell = self.live.clone_shell_handle(&execution_id).await;
             if let Some(shell) = shell {
                 if is_eof {
-                    shell.eof().await?;
+                    shell.reapply_eof().await?;
                 } else if !caller
                     .as_ref()
                     .is_some_and(|origin| origin.execution_id == execution_id)
@@ -708,8 +708,17 @@ impl Control {
             }
             Ok(json!({"accepted":true}))
         } else {
-            // Repeating EOF/stop against a known terminal execution is a
-            // state query; an unknown ID remains an operation error.
+            // Preserve unknown-ID lookup errors, but a known closed stdin
+            // rejects EOF instead of treating it as a terminal state query.
+            if is_eof {
+                output::ShellOutputReader::new(
+                    self.store.database.clone(),
+                    self.store.instance_id.clone(),
+                )
+                .get(&execution_id)
+                .await?;
+                return Err(crate::shell::stdin_closed_error());
+            }
             encode_result(
                 output::ShellOutputReader::new(
                     self.store.database.clone(),
@@ -806,7 +815,7 @@ impl Control {
             }
             handle.stop();
         } else if eof {
-            handle.eof().await?;
+            handle.reapply_eof().await?;
         }
         Ok(())
     }

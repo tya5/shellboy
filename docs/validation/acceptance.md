@@ -11207,3 +11207,24 @@ the prefix without duplicating outcomes. All 129 terminal transitions are unique
 each has one correct event/delivery insertion, and seven unrelated receipts and
 bodies survive. Both injected partial failures roll back. The original sender
 Run is stopped; the final post-reopen outcome targets a new independent Run.
+
+## #282 Explicit Interactive Stdin
+
+The pre-change synthetic regression
+`default_closed_stdin_rejects_write_without_reopening_the_pipe` failed because
+closed stdin returned an `Ok` write result with zero bytes and `status: closed`.
+The new admission behavior returns `invalid_state` for closed writes and repeated
+EOF, with default-closed/explicit-interactive guidance. Internal saved EOF intent
+reapplication remains idempotent across handle registration; stop and partial
+write outcomes retain their existing behavior. No protocol version or schema
+change is introduced. This is an intentional pre-1.0 success-semantics change.
+
+Local macOS validation: `cargo check --tests --locked`, shell integration suite
+19 passed / 1 existing ignored, retransmission/terminal EOF integration 1 passed,
+and shell lifecycle unit tests 9 passed. These are synthetic subprocess/mock
+provider fixtures, not user stores or real-provider tests. Windows-specific
+initial-input/default-EOF and repeated-EOF rejection tests were added but not
+executed locally. Studio source `ba265c4771c824bb2b65c5f76dca912320cf4f10`
+was searched for shell EOF/write and `Closed` success dependencies; none were
+found in its tracked source/tests/scripts. Local `rg` was unavailable, so this
+search used `git grep`. Cross-OS CI remains an integration gate.
