@@ -1072,27 +1072,42 @@ mod stdin_fact_ack_tests {
                 write_timeout: Duration::from_secs(1),
             }),
         };
-        let writer = handle.clone();
-        let writing = tokio::spawn(async move { writer.write("X", "UTF-8").await });
+        use futures_util::FutureExt;
+        let mut writing = Box::pin(handle.write("X", "UTF-8"));
+        // Poll the real write into the full reservation queue deterministically.
+        assert!(writing.as_mut().now_or_never().is_none());
+        assert!(
+            handle.inner.stdin.try_lock().is_err(),
+            "writer is waiting inside capacity reservation"
+        );
         let mut byte = [0u8];
         assert!(
-            tokio::time::timeout(Duration::from_millis(30), output.read_exact(&mut byte))
-                .await
-                .is_err(),
+            output.read_exact(&mut byte).now_or_never().is_none(),
             "a full fact channel must prevent the write side effect"
         );
-        assert!(!writing.is_finished());
         events.recv().await.unwrap();
+        let fact=crate::test_watchdog::watchdog("reserved write publishes its fact",async {
+            tokio::select! {
+                fact=events.recv()=>fact.unwrap(),
+                result=&mut writing=>panic!("write returned before persistence acknowledgement: {result:?}"),
+            }
+        }).await.unwrap();
         let ShellEvent::Stdin {
             successful_write_at,
             saved,
             ..
-        } = events.recv().await.unwrap()
+        } = fact
         else {
             panic!("fact missing")
         };
         assert!(successful_write_at.is_some());
-        output.read_exact(&mut byte).await.unwrap();
+        crate::test_watchdog::watchdog(
+            "successful reserved write reaches the native child",
+            output.read_exact(&mut byte),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         assert_eq!(&byte, b"X");
         saved
             .unwrap()
@@ -1102,14 +1117,25 @@ mod stdin_fact_ack_tests {
             )))
             .unwrap();
         assert_eq!(
-            writing.await.unwrap().unwrap_err().code,
+            crate::test_watchdog::watchdog("storage failure reaches the writer", writing.as_mut())
+                .await
+                .unwrap()
+                .unwrap_err()
+                .code,
             ErrorCode::TargetUnavailable
         );
+        drop(writing);
         drop(events);
         drop(send);
         drop(handle);
-        child.kill().await.unwrap();
-        child.wait().await.unwrap();
+        crate::test_watchdog::watchdog("terminate synthetic pipe child", child.kill())
+            .await
+            .unwrap()
+            .unwrap();
+        crate::test_watchdog::watchdog("join synthetic pipe child", child.wait())
+            .await
+            .unwrap()
+            .unwrap();
     }
     #[tokio::test]
     async fn stdin_full_fact_channel_deadline_stop_and_finish_release_without_side_effects() {
@@ -1151,11 +1177,14 @@ mod stdin_fact_ack_tests {
                 "finished" => handle.inner.finished.cancel(),
                 _ => {}
             }
-            let error = tokio::time::timeout(Duration::from_secs(1), writing)
-                .await
-                .unwrap()
-                .unwrap()
-                .unwrap_err();
+            let error = crate::test_watchdog::watchdog(
+                "fact capacity cancellation releases the writer",
+                writing,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
             assert_eq!(
                 error.code,
                 if mode == "deadline" {
@@ -1165,19 +1194,30 @@ mod stdin_fact_ack_tests {
                 }
             );
             assert!(handle.inner.stdin.try_lock().is_ok());
-            let mut byte = [0u8];
-            assert!(
-                tokio::time::timeout(Duration::from_millis(20), output.read_exact(&mut byte))
-                    .await
-                    .is_err()
-            );
+            // Close our still-open pipe and drain the child to EOF. This proves
+            // zero bytes, rather than inferring it from a short quiet interval.
+            drop(handle.inner.stdin.lock().await.take());
+            let mut bytes = Vec::new();
+            crate::test_watchdog::watchdog(
+                "cancelled pre-write pipe drains without input",
+                output.read_to_end(&mut bytes),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert!(bytes.is_empty());
             events.recv().await.unwrap();
             assert!(
                 events.try_recv().is_err(),
                 "no failed/pre-write fact may be fabricated"
             );
-            child.kill().await.unwrap();
-            child.wait().await.unwrap();
+            crate::test_watchdog::watchdog(
+                "cancelled pre-write child exits after EOF",
+                child.wait(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
         }
     }
 }

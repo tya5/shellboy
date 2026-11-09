@@ -1190,5 +1190,13 @@
     "function": "successful_connection_probe_releases_queued_threads_without_serializing_requests",
     "count": 1,
     "reason": "Synthetic multi-Thread probe test: a 100ms negative observation verifies no second request precedes the first probe result; the subsequent concurrency check uses the fixture watchdog."
+  },
+  {
+    "file": "src/control/driver/shell_output.rs",
+    "rule": "wall-deadline",
+    "fingerprint": "2b287e453970380d7d4721c903ceffd89e88ccbd647ac88d41a3eeca209ac517",
+    "function": "output_batch",
+    "count": 1,
+    "reason": "cfg(test) batching helper: the monotonic deadline is the flush behavior being tested, not a test safety watchdog. Preserve production-equivalent time semantics; callers use the shared safety watchdog. Production code is unchanged."
   }
 ]
