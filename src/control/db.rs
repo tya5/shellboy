@@ -6913,7 +6913,13 @@ mod retry_tracking_diagnosis_287 {
         let command = Command::RunRetry(RunTarget { run_id: "r".into() });
         let request = Request::new("fixture:retry", command.clone());
         let accepted = store.execute(request.clone(), None).await.unwrap().result;
-        assert_eq!(accepted["recovery_hint"]["remaining_held"], 1);
+        let hint: Value = serde_json::from_str(
+            accepted["recovery_hint"]
+                .as_str()
+                .expect("existing serialized recovery hint"),
+        )
+        .unwrap();
+        assert_eq!(hint["remaining_held"], 1);
         let replay = store.execute(request.clone(), None).await.unwrap().result;
         assert_eq!(replay, accepted);
         database

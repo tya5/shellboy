@@ -144,7 +144,8 @@ a reason to sleep or a guaranteed per-retry identity.
 
 A retry releases at most 128 recoverable held inputs. While more remain, the
 Turn can stay in `recovery_wait`; `run get`/the acceptance `recovery_hint` can
-include `remaining_held`. This can be queue progress **without a new model
+include `remaining_held` inside its existing JSON-encoded string (parse that
+string; it is not a new nested response object). This can be queue progress **without a new model
 attempt**, not a repeated provider failure. An explicit next operation ID may
 advance the next unit. Replaying the **same operation ID** returns its saved
 acceptance, not a new unit and not the current Turn outcome. Use `operation get`
