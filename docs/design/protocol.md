@@ -28,6 +28,13 @@ A wire change that a supported peer cannot safely ignore requires a protocol ver
 
 `protocol schema` exports the handshake, envelope, per-operation args/results, capabilities, and version from Rust types to `docs/reference/protocol.schema.json`. Results still represented by `serde_json::Value` are explicitly opaque. The committed document is exact-compared with generated output in the existing test suite; it is a client aid, not a replacement for these behavioral rules.
 
+#### Typed operation results (#278)
+
+Type the four existing wire projections from the current Rust read paths: `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get`. Keep operation names/order and protocol version unchanged. `status` is an untagged schema union for the existing activity snapshot and memory JSON shapes; it adds no discriminator, wrapper, or runtime behavior. Preserve open unknown response fields and nullable-versus-omitted behavior. `status.reply` exposes known object fields plus additive fields, with a raw-value fallback for unusual legacy shapes; absent/null replies remain omitted by the existing projection. Config settings and redaction values remain open JSON leaves; provider-specific usage details and group-key-dependent rows remain open only at their existing dynamic leaves. Shell commands are the post-redaction excerpt projection, never raw command text. Do not apply `deny_unknown_fields` to response records or invent defaults.
+
+This types current protocol-v5 fields only. Future `stdin_open` and `stdin_last_write_at` belong to #283, not this change. It makes no new #279 claim that `response_nodes` plus node-level history readback can separate mixed message/commentary bodies.
+
+
 ## P1 fixture 対応
 
 `tests/protocol.rs` の匿名fixtureが入力/出力契約を固定する。

@@ -1,16 +1,49 @@
 //! Raw shell output batching, persistence, and completion publication.
 use super::{Snapshot, invalid, now};
+#[cfg(test)]
+use crate::shell::OutputChunk;
 use crate::{
     app::storage_error,
     control::Control,
     protocol::{ApiError, ErrorCode, ShellState},
-    shell::{OutputChunk, OutputStream, ShellCompletion, ShellEvent},
+    shell::{OutputStream, ShellCompletion, ShellEvent},
 };
 use rusqlite::{OptionalExtension, params};
 use serde_json::{Value, json};
 
 /// Keep original chunks/sequences and their permits; only the transaction
 /// boundary changes. A carry chunk prevents overshooting the byte bound.
+async fn event_batch(
+    events: &mut tokio::sync::mpsc::Receiver<ShellEvent>,
+    pending: &mut Option<ShellEvent>,
+    max_bytes: u64,
+    max_delay: std::time::Duration,
+) -> Option<Vec<ShellEvent>> {
+    let first = match pending.take() {
+        Some(event) => event,
+        None => events.recv().await?,
+    };
+    let bytes_of = |event: &ShellEvent| match event {
+        ShellEvent::Output(chunk) => chunk.bytes.len() as u64,
+        ShellEvent::Stdin { .. } => 0,
+    };
+    let mut bytes = bytes_of(&first);
+    let mut batch = vec![first];
+    let deadline = tokio::time::Instant::now() + max_delay;
+    // Count also bounds fact-only batches independently of output byte budgets.
+    while bytes < max_bytes && batch.len() < 64 {
+        tokio::select! {biased;
+            _=tokio::time::sleep_until(deadline)=>break,
+            event=events.recv()=>match event {
+                None=>break,
+                Some(event)=>{let size=bytes_of(&event);if bytes+size>max_bytes {*pending=Some(event);break;} bytes+=size;batch.push(event);}
+            }
+        }
+    }
+    Some(batch)
+}
+
+#[cfg(test)]
 async fn output_batch(
     events: &mut tokio::sync::mpsc::Receiver<ShellEvent>,
     pending: &mut Option<OutputChunk>,
@@ -21,6 +54,7 @@ async fn output_batch(
         Some(chunk) => chunk,
         None => match events.recv().await? {
             ShellEvent::Output(chunk) => chunk,
+            ShellEvent::Stdin { .. } => panic!("raw shell emitted owner-only fact"),
         },
     };
     let deadline = tokio::time::Instant::now() + max_delay;
@@ -32,6 +66,7 @@ async fn output_batch(
             _ = tokio::time::sleep_until(deadline) => break,
             event = events.recv() => match event {
                 None => break,
+                Some(ShellEvent::Stdin{..})=>panic!("raw shell emitted owner-only fact"),
                 Some(ShellEvent::Output(chunk)) => {
                     if bytes + chunk.bytes.len() as u64 > max_bytes {
                         *pending = Some(chunk);
@@ -59,7 +94,7 @@ pub(super) async fn collect_shell(
     let batch_bytes = control.store.config.io.output_batch_bytes;
     let batch_delay = std::time::Duration::from_millis(control.store.config.io.output_batch_ms);
     while let Some(batch) =
-        output_batch(&mut shell.events, &mut pending, batch_bytes, batch_delay).await
+        event_batch(&mut shell.events, &mut pending, batch_bytes, batch_delay).await
     {
         if save_failure.is_some() {
             drop(batch);
@@ -74,22 +109,35 @@ pub(super) async fn collect_shell(
         let save_started = std::time::Instant::now();
         let saved = control.store.database.call(move |db| {
             let tx = db.transaction()?;
-            for chunk in &batch {
-                let (stream, offset) = match chunk.stream {
-                    OutputStream::Stdout => ("stdout", &mut next_stdout),
-                    OutputStream::Stderr => ("stderr", &mut next_stderr),
-                };
-                tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES(?1,?2,?3,?4,?5,?6)", params![execution,chunk.sequence as i64,stream,*offset,&chunk.bytes,now()])?;
-                *offset += chunk.bytes.len() as i64;
+            let mut chunks=Vec::new();
+            let mut acknowledgements=Vec::new();
+            let mut saved_sequence=None;
+            let mut had_output=false;
+            for event in batch {
+                match event {
+                    ShellEvent::Output(chunk)=>{
+                        had_output=true;
+                        let (stream,offset)=match chunk.stream {OutputStream::Stdout=>("stdout",&mut next_stdout),OutputStream::Stderr=>("stderr",&mut next_stderr)};
+                        tx.execute("INSERT INTO output_chunk(execution_id,sequence,stream,stream_offset,bytes,received_at)VALUES(?1,?2,?3,?4,?5,?6)",params![execution,chunk.sequence as i64,stream,*offset,&chunk.bytes,now()])?;
+                        *offset+=chunk.bytes.len() as i64;
+                        saved_sequence=Some(chunk.sequence as i64+1);
+                        // Retain byte permits until commit, just like output-only batches.
+                        chunks.push(chunk);
+                    }
+                    ShellEvent::Stdin{open,successful_write_at,saved}=>{
+                        crate::stdin_facts::save(&tx,&execution,&crate::stdin_facts::StdinFact{open,successful_write_at})?;
+                        if let Some(saved)=saved {acknowledgements.push(saved);}
+                    }
+                }
             }
-            let saved_sequence = batch.last().expect("nonempty output batch").sequence as i64 + 1;
-            tx.execute("UPDATE shell_execution SET saved_sequence=?2 WHERE id=?1", params![execution,saved_sequence])?;
+            if let Some(sequence)=saved_sequence {tx.execute("UPDATE shell_execution SET saved_sequence=?2 WHERE id=?1",params![execution,sequence])?;}
             tx.commit()?;
-            drop(batch); // Return the byte budget only after successful commit.
-            Ok((next_stdout, next_stderr))
+            for saved in acknowledgements {let _=saved.send(Ok(()));}
+            drop(chunks);
+            Ok((next_stdout, next_stderr,had_output))
         }).await;
         match saved {
-            Ok((out, err)) => {
+            Ok((out, err, had_output)) => {
                 (stdout, stderr) = (out, err);
                 #[cfg(test)]
                 {
@@ -102,10 +150,12 @@ pub(super) async fn collect_shell(
                         samples.push(save_started.elapsed().as_micros());
                     }
                 }
-                control
-                    .live
-                    .record_output_commit(&marker_execution, std::time::Instant::now())
-                    .await;
+                if had_output {
+                    control
+                        .live
+                        .record_output_commit(&marker_execution, std::time::Instant::now())
+                        .await;
+                }
                 control.shell_output_changed.notify_waiters();
             }
             Err(error) => {
@@ -163,6 +213,7 @@ async fn save_completion(
             if matches!(saved,ShellState::Exited|ShellState::Failed|ShellState::Stopped) {return Ok(());}
             return Err(ApiError::new(ErrorCode::OperationConflict,"Shell completion is no longer current").into());
         }
+        crate::stdin_facts::save(&tx,&execution,&crate::stdin_facts::StdinFact{open:false,successful_write_at:None})?;
         let nodes:Vec<String>=tx.prepare("SELECT r.node_id FROM tool_result r JOIN tool_call c ON c.group_id=r.group_id AND c.call_id=r.call_id WHERE c.operation_id=?1")?.query_map([&execution],|r|r.get(0))?.collect::<Result<_,_>>()?;
         index.authorize_new_tx(&tx,&nodes).map_err(crate::storage::StorageError::from)?;
         let event=format!("shell-ended-{execution}");
@@ -264,7 +315,10 @@ mod output_batch_tests {
             tokio::time::timeout(Duration::from_secs(1), shell.events.recv())
                 .await
                 .unwrap()
-                .unwrap();
+                .unwrap()
+        else {
+            panic!("raw shell emitted owner-only fact")
+        };
         let mut pending = Some(first);
         let delay = Duration::from_millis(30);
         let started = tokio::time::Instant::now();

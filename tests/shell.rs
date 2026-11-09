@@ -232,7 +232,9 @@ async fn stop_is_idempotent_and_independent_of_a_blocked_stdin_writer() {
     )
     .await
     .unwrap()
-    .unwrap();
+    .unwrap() else {
+        panic!("raw shell emitted owner-only fact")
+    };
     assert_eq!(ready.bytes, b"ready");
     drop(ready);
     let writer = execution.handle.clone();
@@ -580,7 +582,9 @@ fn lifeline_owner_fixture() {
             let mut bytes = Vec::new();
             let pid = crate::test_watchdog::watchdog("both native shells are ready", async {
                 loop {
-                    let ShellEvent::Output(chunk) = execution.events.recv().await.unwrap();
+                    let ShellEvent::Output(chunk) = execution.events.recv().await.unwrap() else {
+                        panic!("raw shell emitted owner-only fact")
+                    };
                     bytes.extend_from_slice(&chunk.bytes);
                     if let Some(at) = bytes.iter().position(|b| *b == b'\n') {
                         break std::str::from_utf8(&bytes[..at])

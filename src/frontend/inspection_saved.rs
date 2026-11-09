@@ -353,7 +353,25 @@ pub(super) fn prepare(raw: RawSaved) -> Result<PreparedSaved, ApiError> {
                     raw.limited.push("/elapsed_ms".into());
                 }
             }
+            let stdin_open = if matches!(
+                state,
+                ShellState::Exited | ShellState::Failed | ShellState::Stopped
+            ) {
+                Some(false)
+            } else {
+                shell
+                    .as_ref()
+                    .and_then(|v| v.get("stdin_open"))
+                    .and_then(Value::as_bool)
+            };
+            let stdin_last_write_at = shell
+                .as_ref()
+                .and_then(|v| v.get("stdin_last_write_at"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             let details = ShellDetails {
+                stdin_open,
+                stdin_last_write_at,
                 execution_id: raw.id,
                 run_id: raw.run,
                 state,

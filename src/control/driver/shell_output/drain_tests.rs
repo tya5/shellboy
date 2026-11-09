@@ -50,7 +50,10 @@ async fn successful_incomplete_output_is_saved_and_cancels_unexecuted_calls() {
             .unwrap();
     });
     db_held.await.unwrap();
-    let write = handle.write("GO\n", "UTF-8").await;
+    // Writes now acknowledge durable facts. Keep the database blocked until the
+    // native exit, without blocking the test on the persistence acknowledgement.
+    let writer = handle.clone();
+    let write = tokio::spawn(async move { writer.write("GO\n", "UTF-8").await });
     let ended = crate::test_watchdog::watchdog("src/control/driver/shell_output/drain_tests.rs: successful_incomplete_output_is_saved_and_cancels_unexecuted_calls", async {
         while !handle.is_finished() {
             tokio::task::yield_now().await;
@@ -60,7 +63,7 @@ async fn successful_incomplete_output_is_saved_and_cancels_unexecuted_calls() {
     // Release the actor before assertions so a red result still drains safely.
     release.send(()).unwrap();
     blocking.await.unwrap();
-    let write = write.unwrap();
+    let write = write.await.unwrap().unwrap();
     assert_eq!(write.status, crate::shell::StdinWriteStatus::Complete);
     assert_eq!(write.bytes_written, 3);
     ended.unwrap();

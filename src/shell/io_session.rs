@@ -44,12 +44,15 @@ async fn pump_until_stalled(
 }
 
 impl IoSession {
+    // Keep owner-fact gating explicit alongside the existing pipe/session inputs.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn start<R, E>(
         stdin: Arc<Mutex<Option<ShellStdin>>>,
         stdout: R,
         stderr: E,
         initial: Option<Vec<u8>>,
         keep_open: bool,
+        record_facts: bool,
         budget_size: usize,
         config: &Config,
     ) -> (Self, ShellHandle, mpsc::Receiver<ShellEvent>)
@@ -63,6 +66,7 @@ impl IoSession {
         let (tx, rx) = mpsc::channel(64);
         let handle = ShellHandle {
             inner: Arc::new(HandleInner {
+                facts: record_facts.then(|| tx.downgrade()),
                 stdin: stdin.clone(),
                 stop: stop.clone(),
                 finished: finished.clone(),
@@ -78,8 +82,18 @@ impl IoSession {
         let initial_failure = failure.clone();
         let write_timeout = Duration::from_millis(config.io.shell_write_timeout_ms);
 
+        let initial_sender = record_facts.then(|| tx.clone());
         let initial_task = tokio::spawn(async move {
             let mut guard = initial_guard;
+            let slot = if let Some(sender) = initial_sender {
+                match sender.reserve_owned().await {
+                    Ok(slot) => Some(slot),
+                    Err(_) => return,
+                }
+            } else {
+                None
+            };
+            let mut successful_write_at = None;
             if let Some(bytes) = initial {
                 let result = write_bytes(
                     &mut guard,
@@ -89,6 +103,9 @@ impl IoSession {
                     &initial_finished,
                 )
                 .await;
+                if result.status == StdinWriteStatus::Complete && result.bytes_written > 0 {
+                    successful_write_at = Some(chrono::Utc::now().to_rfc3339());
+                }
                 if result.status != StdinWriteStatus::Complete && !initial_stop.is_cancelled() {
                     record_failure(
                         &initial_failure,
@@ -103,6 +120,13 @@ impl IoSession {
             }
             if !keep_open {
                 guard.take();
+            }
+            if let Some(slot) = slot {
+                slot.send(ShellEvent::Stdin {
+                    open: guard.is_some(),
+                    successful_write_at,
+                    saved: None,
+                });
             }
         });
         // Both pumps share a sink budget and consumer; progress on either stream

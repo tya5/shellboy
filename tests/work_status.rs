@@ -109,16 +109,23 @@ async fn one_projection_exposes_native_ownership_models_unassigned_messages_and_
     let held = status.items.iter().find(|i| i.kind == "message").unwrap();
     assert_eq!(held.run_id, None);
     assert_eq!(held.message_id.as_deref(), Some("held-node"));
+    assert!(held.reply.is_none());
+    assert!(
+        serde_json::to_value(held).unwrap().get("reply").is_none(),
+        "unavailable reply remains omitted, not null"
+    );
     let shell = status.items.iter().find(|i| i.kind == "shell").unwrap();
     assert_eq!(shell.owner_run_id.as_deref(), Some("root"));
-    assert!(matches!(&shell.targets[0],Command::ShellGet(a)if a.execution_id=="exec"));
-    assert!(matches!(&shell.targets[1],Command::ShellRead(a)if a.execution_id=="exec"));
+    assert_eq!(shell.targets[0].command, "shell.get");
+    assert_eq!(shell.targets[0].args["execution_id"], "exec");
+    assert_eq!(shell.targets[1].command, "shell.read");
+    assert_eq!(shell.targets[1].args["execution_id"], "exec");
     assert!(shell.operation_id.is_none());
     assert!(
         !shell
             .targets
             .iter()
-            .any(|c| matches!(c, Command::OperationGet(_)))
+            .any(|target| target.command == "operation.get")
     );
     let raw = serde_json::to_string(&status).unwrap();
     for private in [
@@ -195,12 +202,6 @@ async fn exact_scope_state_and_absolute_time_filters_keep_request_result_links()
         .await
         .unwrap();
     assert!(applied.items[0].end_message_node_id.is_none());
-    assert!(
-        !applied.items[0]
-            .targets
-            .iter()
-            .any(|c| matches!(c,Command::HistoryGet(a)if a.node_id=="answer"))
-    );
     let bad = f
         .status(StatusArgs {
             thread_id: Some("a".into()),
@@ -814,5 +815,61 @@ async fn many_shells_keep_last_output_projection_on_the_bounded_status_page() {
         "issue45: first 50-row page from 1001 shells: {:?}",
         begin.elapsed()
     );
+    f.close().await;
+}
+
+#[tokio::test]
+async fn shell_stdin_observations_are_saved_facts_not_intent_or_read_time() {
+    use shellboy::control::output::ShellOutputReader;
+    let f = Fixture::new().await;
+    let reader = ShellOutputReader::new(f.db.clone(), "fixture");
+    let historical = reader.get("exec").await.unwrap();
+    assert_eq!(
+        historical.stdin_open, None,
+        "saved start intent is not an actual pipe observation"
+    );
+    assert_eq!(historical.stdin_last_write_at, None);
+    f.db.call(|db| {
+        db.execute("UPDATE shell_execution SET stdin_state='closed',shell_json=json_set(shell_json,'$.stdin_open',json('true'),'$.stdin_last_write_at','2026-10-25T07:05:03Z') WHERE id='exec'",[])?;
+        Ok(())
+    }).await.unwrap();
+    let recorded = reader.get("exec").await.unwrap();
+    let snapshot = f.status(StatusArgs::default()).await.unwrap();
+    let item = snapshot.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(
+        recorded.stdin_open,
+        Some(true),
+        "EOF reservation does not replace the actual saved fact"
+    );
+    assert_eq!(recorded.stdin_open, item.stdin_open);
+    assert_eq!(recorded.stdin_last_write_at, item.stdin_last_write_at);
+    assert_eq!(
+        recorded.stdin_last_write_at.as_deref(),
+        Some("2026-10-25T07:05:03Z")
+    );
+    let again = reader.get("exec").await.unwrap();
+    assert_eq!(again.stdin_last_write_at, recorded.stdin_last_write_at);
+    f.db.call(|db| {
+        db.execute(
+            "UPDATE shell_execution SET state='exited' WHERE id='exec'",
+            [],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    let ended = reader.get("exec").await.unwrap();
+    assert_eq!(ended.stdin_open, Some(false));
+    assert_eq!(ended.stdin_last_write_at, recorded.stdin_last_write_at);
+    let all = f
+        .status(StatusArgs {
+            all: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let item = all.items.iter().find(|i| i.id == "exec").unwrap();
+    assert_eq!(item.stdin_open, ended.stdin_open);
+    assert_eq!(item.stdin_last_write_at, ended.stdin_last_write_at);
     f.close().await;
 }

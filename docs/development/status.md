@@ -54,3 +54,7 @@ to 0.11.1 without a protocol/schema change. See the
 Exact version-commit native CI, candidate artifacts and public-v0.11.0 upgrade
 remain unverified here. This entry is not publication, installed-binary swap or
 real-provider/affected-Thread recovery evidence. Existing checkpoints remain historical.
+
+## #278 typed operation results (in progress)
+
+Rebuilding isolated `issue-278/typed-results-rebased` from public protocol-v5 `ff18f32640f0b41f042f034f4b1a3936a9abe92d`. Old dirty WT remains untouched; its patch is backed up privately with verified SHA-256 `43d01e6738e506a0e663eeaa27b4649d9f4de177a63556c3c2586e88d4d5951a`. Types only the four current operations status/shell.list/usage.get/config.get; excludes `src/model/http.rs`, #283 future stdin fields, and stale #279 body-separation assertions. Config/provider/group-key-dependent leaves remain open. `status` models its two existing JSON modes via untagged union. Protocol v5 remains unchanged. Generated schema and initial focused tests passed. A follow-up raw `StatusReply` JSON fallback after `ad0ad5a7` preserves unusual non-object legacy reply values and explicit null-vs-omitted behavior; Exact nested-Option follow-up check/fmt, typed status-union, work_status, schema golden, and full protocol suite pass. S6 old e73 archive count (36 protocol +1 status DB) belongs only to e73, not this null-preserving delta. Current tip is a separate follow-up commit after validation; S6 review and delegated current-main rebase/push/CI remain.

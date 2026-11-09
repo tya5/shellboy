@@ -370,7 +370,7 @@ with `background: true`, and stop persistent owned commands when done.
 
 Compare `command` / `cwd` / `thread_id` / `run_id` / `turn_id` from `shellboy shell get --execution ID` against the same fields in the launching tool result. If `command` is `shellboy message send ...`, acceptance JSON from read is that process's actual stdout. Do not infer another shell's successful launch or ID from acceptance JSON. Retrieve the tool result that executed the intended command; if it was never executed, pass that command directly to the shell tool. Prefer saved commands and tool arguments over your own description that you “ran it directly.”
 
-Use the same current release for the owner and CLI. The local RPC handshake uses protocol 5 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
+Use the same current release for the owner and CLI. The local RPC handshake uses protocol 5 and checks the advertised capabilities; a version mismatch is rejected before the request. To inspect the generated external-client contract without starting an owner, run `shellboy protocol schema`. The schema describes `status` activity and memory modes, `shell.list`, `usage.get`, and `config.get` from their current wire projections; provider/config-specific leaves remain open and nullable-versus-omitted behavior is significant. Do not interpret a version mismatch as a successful operation or retry side effects under a new operation ID.
 
 ## Resolve saved model response items
 
@@ -732,6 +732,16 @@ without waiting for a later write. With `initial_stdin`, those bytes are deliver
 before EOF. Set `stdin_open: true` explicitly only for a command that needs later
 interactive input. Initial input remains ordered before subsequent writes or EOF;
 keeping stdin open does not change the initial-input encoding or byte limit.
+
+`shell get`, `shell list`, and shell records in `status` expose saved stdin
+facts: `stdin_open` is the owner's confirmed pipe state, not proof the child is
+reading input. `null` means no observation was saved for an older execution;
+terminal executions are closed. `stdin_last_write_at` is the actual completion
+time of the last nonempty, fully successful write, including initial input.
+Empty writes, EOF, partial/time-out and failed writes leave that value unchanged.
+A closed pipe cannot be reopened; start another execution with `stdin_open: true`
+when interaction is required. Neither field infers waiting or hangs from silence.
+
 
 ### Shell call descriptions
 

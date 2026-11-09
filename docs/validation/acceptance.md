@@ -11306,3 +11306,73 @@ v0.11.0 remain pending. The upgrade helper now explicitly accepts old-version 0.
 retaining its 0.10.0 default. Parser/source acceptance is distinct from the pending
 public-binary execution.
 No installed binary, actual owner/user data or paid provider is touched by this task.
+
+### #283: confirmed stdin observations (component, not final train)
+
+The work starts from #282 exact `7299e56784054f8b14404d12b0940ed352eadcbe` (source gate and limited independent
+execution accepted separately). Its public closed-write/repeated-EOF rejection and private registration replay are
+retained. #283 is a separate delta; neither Windows-native execution nor final all-OS validation follows from that
+#282 acceptance. The release/hotfix branch does not include this work.
+
+The owner's existing bounded shell-event channel transports pipe observations in pipe-lock order. A slot is reserved
+before a write/EOF side effect. Facts are published before unlocking, but persistence acknowledgements are awaited
+only after releasing the pipe lock. Normal write/EOF replies wait for commit; private registration reapplication
+queues its fact without awaiting a collector that has not started. Initial input reserves a slot before writing and
+publishes its confirmed result before initial-task completion. The collector retains output permits through the
+mixed batch transaction, acknowledges after commit, drains facts before terminal completion, and records closed in
+the completion transaction. No new worker/table/column is introduced.
+
+Only nonempty Complete writes, including initial input, carry their actual actor completion timestamp. Empty writes,
+EOF, partial/time-out and failed writes do not replace the last successful time. Saved `stdin_state` remains the
+admission reservation; confirmed `shell_json.stdin_open` is distinct. Confirmed false is sticky, terminal rows are
+closed, and old live rows without saved observations remain unknown. Observations never claim the child is reading.
+
+Synthetic focused evidence covers initial-success preservation through terminal completion; real temporary-pipe
+write/EOF acknowledgements, unlocked pipe during database waits, private nonblocking replay and strict public EOF;
+get/status equality and timestamp stability; real frozen old decoder tolerance and new-record missing-field nulls.
+The prior incomplete-output test required a fixture correction: it deliberately blocks the DB, so its write is now
+spawned and awaited only after DB release. Its process-success/incomplete-output and cancellation-of-later-side-effect
+assertions remain unchanged. An initial synchronous-write fixture hung waiting for the new acknowledgement; that
+run was stopped and is not counted as passing evidence. The corrected collector tests pass (9, one existing ignored).
+Additional full-channel/no-side-effect and failed-persistence acknowledgement tests and generated schema checks are
+tracked separately; component results do not substitute for final exact-SHA independent review or all-OS CI.
+
+Latest fact-focused run passes 12 tests, including the full-capacity channel preventing a native write side effect,
+a real write fact surviving backpressure, and a failed persistence acknowledgement returning an error rather than
+success. Locked `cargo check --tests` and format check pass; the task binary was copied in the build slot and used
+to regenerate the protocol schema (only the two nullable observation fields). Language inventory passes with the
+19 existing pending entries unchanged. Platform evidence remains local Unix only.
+
+Review correction: the original pre-write channel-capacity reservation had no deadline/cancellation selection.
+A bounded channel alone bounded memory, not waiting time. The corrected handle reservation selects stop/finished
+and the configured write timeout before any pipe side effect. A full-channel synthetic test separately exercises
+all three exits, verifies the pipe lock is released, observes no native input byte and no fabricated write fact.
+Post-write acknowledgement remains a distinct persistence barrier; its pending/error result is never converted to
+successful completion merely because the process has stopped. The new local stdin-focused run passes 13 tests;
+locked test check and format check pass. These results do not clear independent-review or Windows/all-OS gates.
+
+## #278 typed operation results — in progress
+
+- Current base: protocol-v5 `ff18f32640f0b41f042f034f4b1a3936a9abe92d`; branch `issue-278/typed-results-rebased`. Old dirty WT and hash-verified private patch backup are preserved unchanged.
+- Type current `status` (activity + memory modes), `shell.list`, `usage.get`, and `config.get` wire shapes without changing operation order/names, version, runtime, shell.write behavior, `thread.get` or `history.window`. `status` union discriminates by required structural fields and rejects ambiguous shapes instead of lossy untagged trial order.
+- Test both actual status modes roundtrip, null/omitted fields, additive unknown fields, pre-#283 shell results, dynamic config values, provider usage details, and all four typed result operation schemas. Config/provider/group-key-dependent leaves remain open. No #283 stdin fields, #279 readback claims, or #286/release content are included.
+- Post-`ad0ad5a7` compatibility delta: `StatusReply` retains typed structured-object fields plus flattened extras and raw JSON fallback for unusual persisted non-object values. `WorkItem.reply` is presence-aware: absent→omitted, wire null→null, object/raw→value; SQL-null is filtered by the existing projection and stays omitted. The synthetic fixture checks all three cases plus DB projection omission.
+- Validation on nested-Option source: `cargo check --locked --tests` and fmt check passed (shell `17cd1aa4-de31-49f6-b47f-50d2a58d2c03`); raw status union 1/1 and DB projection 1/1 (shell `4f8b0f27-b663-4982-be89-c9c6dd326fc6`). Latest schema regenerated from Rust; protocol suite 41/41 including exact golden plus DB projection 1/1 (shell `b23e89fb-683f-43a5-be70-61346015ce8d`). S6 archive e73 evidence 36 protocol +1 DB belongs only to old e73 and is not transferred to the new null-preserving delta. Remaining gates: S6 review of exact new SHA, current-main rebase/privacy and delegated push/all-OS CI.
+
+### #278/#283 actual typed-field composition
+
+Compose accepted #283 `641ccdd9f4d9fdb34fff7c9e5838a03cf6b45bc1` and accepted #278
+`d43e45e09d5174c981d63cee2a7b09d8c1a00ff2` without rewriting either source ref. Existing ShellDetails and WorkItem
+fields survive the merge; ShellListItem explicitly declares the same default-null `stdin_open` and
+`stdin_last_write_at` instead of leaving them in flattened unknown extras. Saved get/list/status projections and the
+five canonical observation batches remain. The d43 fixtures now assert these known Option fields, while their
+encoded-wire assertions and unknown-extension preservation remain unchanged. Pre-283 missing fields decode to
+None and serialize as null, with both frozen old record decoders and the current typed list tested.
+
+Local focused evidence: locked test check passes; stdin-focused 14 and work-status 15 pass; protocol 36 pass,
+including generated-schema drift, typed status absent/null preservation and wire modes; compatibility 3 pass.
+Schema export uses the copied binary built in the same Rust slot. After external owner replacement interrupted a
+later command, its stopped/group-cleanup state was verified and only unfinished decoder/lint steps were resumed.
+Strict all-target Clippy and format check pass. Limited lint annotations keep the existing unboxed Rust enum API
+and explicit IoSession parameters rather than introducing unrelated runtime or wire changes. Actual main 8a87
+composition, independent cross-review, Windows native and final all-OS CI remain separate gates. No CI is started.

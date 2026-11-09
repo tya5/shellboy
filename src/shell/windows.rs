@@ -539,6 +539,7 @@ impl ShellSupervisor {
             stderr.parent,
             initial,
             args.stdin_open,
+            gate.is_some(),
             budget_size,
             &self.config,
         );

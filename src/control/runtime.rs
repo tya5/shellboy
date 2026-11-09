@@ -698,7 +698,7 @@ impl Control {
             let shell = self.live.clone_shell_handle(&execution_id).await;
             if let Some(shell) = shell {
                 if is_eof {
-                    shell.reapply_eof().await?;
+                    shell.recorded_eof().await?;
                 } else if !caller
                     .as_ref()
                     .is_some_and(|origin| origin.execution_id == execution_id)

@@ -1147,3 +1147,10 @@ Structural faults take precedence over missing-only activity. Unrelated active
 Runs do not make a complete selected request busy. `--attempt` and each side of
 `--compare-attempt` keep their own selected-prefix scope. SQLite failures remain
 `storage_failed`; these diagnostics do not relax normal model replay validation.
+
+Shell detail/list and shell status records also expose nullable `stdin_open` and
+`stdin_last_write_at`. These are saved owner pipe facts, not child-reading or
+waiting-state detection. Missing historical live facts remain null. Terminal
+executions report closed; EOF does not update the last successful write time.
+Only a nonempty Complete write, including initial input, records its actual
+completion time. Failed/partial/time-out and empty writes keep the previous time.
