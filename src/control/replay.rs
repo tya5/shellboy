@@ -615,6 +615,19 @@ pub(crate) fn convert_kept(mut value: Value, epoch: i64, kept: bool) -> Vec<Valu
 // Provider-local item identities are not conversation identities. Normalize only
 // the outbound copy; call_id still pairs calls/results and reasoning is opaque.
 fn outbound_item(mut item: Value) -> Value {
+    // Generic assistant nodes (for example a saved human-approval ask) may
+    // store their text using the user-side input_text content tag. Responses
+    // accepts output_text/refusal for assistant messages; normalize only the
+    // outbound replay copy, never the saved node or user content.
+    if item.get("role").and_then(Value::as_str) == Some("assistant")
+        && let Some(content) = item.get_mut("content").and_then(Value::as_array_mut)
+    {
+        for part in content {
+            if part.get("type").and_then(Value::as_str) == Some("input_text") {
+                part["type"] = Value::String("output_text".into());
+            }
+        }
+    }
     let message_or_call = match item.get("type").and_then(Value::as_str) {
         Some("message" | "function_call") => true,
         None => item.get("role").is_some(),
@@ -1025,6 +1038,43 @@ mod tests {
         let later = convert(saved, 3);
         assert_eq!(later.len(), 1);
         assert_eq!(later[0]["role"], "assistant");
+    }
+
+    #[test]
+    fn replayed_assistant_input_text_is_normalized_for_responses_without_touching_user_text() {
+        use crate::config::Api;
+
+        let assistant = json!({"role":"assistant","content":[
+            {"type":"input_text","text":"approval question"},
+            {"type":"output_text","text":"existing answer"},
+            {"type":"refusal","refusal":"refused"}
+        ]});
+        let user = json!({"role":"user","content":[{"type":"input_text","text":"reply"}]});
+        let assistant_replay = convert(assistant.clone(), 0);
+        let user_replay = convert(user.clone(), 0);
+        let request = crate::model::response_request(
+            "synthetic",
+            [user_replay, assistant_replay].concat(),
+            None,
+            false,
+        );
+        let wire = crate::model::dialect::encode(Api::Responses, request).unwrap();
+
+        assert_eq!(wire["input"][0]["content"][0]["type"], "input_text");
+        assert_eq!(wire["input"][1]["content"][0]["type"], "output_text");
+        assert_eq!(wire["input"][1]["content"][1]["type"], "output_text");
+        assert_eq!(wire["input"][1]["content"][2]["type"], "refusal");
+        for part in wire["input"][1]["content"].as_array().unwrap() {
+            assert!(matches!(
+                part["type"].as_str(),
+                Some("output_text" | "refusal")
+            ));
+        }
+        assert_eq!(
+            assistant["content"][0]["type"], "input_text",
+            "saved history is immutable"
+        );
+        assert_eq!(user["content"][0]["type"], "input_text");
     }
 
     #[tokio::test]

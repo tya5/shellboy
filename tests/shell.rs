@@ -146,15 +146,18 @@ async fn stdin_default_eof_initial_input_and_explicit_write_eof_are_ordered() {
     assert_eq!(result.bytes_written, 6);
     assert_eq!(result.status, StdinWriteStatus::Complete);
     execution.handle.eof().await.unwrap();
-    execution.handle.eof().await.unwrap();
+    assert_eq!(
+        execution.handle.eof().await.unwrap_err().code,
+        ErrorCode::InvalidState
+    );
     assert_eq!(
         execution
             .handle
             .write("late", "UTF-8")
             .await
-            .unwrap()
-            .status,
-        StdinWriteStatus::Closed
+            .unwrap_err()
+            .code,
+        ErrorCode::InvalidState
     );
     let (chunks, done) = collect(execution).await;
     assert_eq!(
@@ -169,6 +172,20 @@ async fn stdin_default_eof_initial_input_and_explicit_write_eof_are_ordered() {
         joined(&chunks, OutputStream::Stdout),
         b"closed-after-initial"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn default_closed_stdin_rejects_write_without_reopening_the_pipe() {
+    let mut input = args("sleep 0.1; cat; printf ':eof'");
+    input.initial_stdin = Some("initial".into());
+    let execution = spawn(&config(), input).await;
+    let result = execution.handle.write("late", "UTF-8").await;
+    // Collect before asserting so a failing regression never leaves a child.
+    let (chunks, done) = collect(execution).await;
+    assert_eq!(joined(&chunks, OutputStream::Stdout), b"initial:eof");
+    assert_eq!(done.state, ShellState::Exited);
+    assert_eq!(result.unwrap_err().code, ErrorCode::InvalidState);
 }
 
 #[cfg(unix)]
