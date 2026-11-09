@@ -84,7 +84,12 @@ pub struct PathWitness {
 }
 impl PathWitness {
     fn append_stamp(framed: &mut String, id: &str, revision: i64, tombstone: bool) {
-        framed.push_str(&format!("{}\u{1f}{}\u{1f}{}\u{1e}", id, revision, u8::from(tombstone)));
+        framed.push_str(&format!(
+            "{}\u{1f}{}\u{1f}{}\u{1e}",
+            id,
+            revision,
+            u8::from(tombstone)
+        ));
     }
     fn of(frames: &[Arc<Frame>]) -> Self {
         let mut framed = String::new();

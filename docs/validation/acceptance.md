@@ -11428,3 +11428,20 @@ uses independently numeric bytes. A new regression compares persisted witnesses
 against independent expected bytes for both tombstone values, accepts unchanged
 nonempty prefixes, and rejects rewritten revisions. New tests and format/check
 have not been executed for this repair; no slot/full-suite/CI was requested.
+
+### Combined 6ed full-suite root repairs
+
+Starting from 6ed, compose the private already-closed EOF replay repair b68, cherry-pick only prefix fix
+40b84d6ce8327e7720c0b694b3cf039daf0126da (not its old ancestors), then merge schema-oracle fix 3b8441b.
+The prefix fixture needed formatting, a local binding retaining the loaded path before borrowing its witness,
+and removal of two redundant borrows. No hash oracle, false/true case, revision-rewrite rejection or nonempty
+path assertion was weakened. Its production stamp encoding is unchanged by these fixture corrections.
+
+On the combined source, exact loader-prefix 1, ack 5, 63-operation schema 1, request-inspect 2, cache diagnostics 3,
+retry 1, proactive large-output 1 and lifecycle 11 pass. The request-inspect set includes the active-incomplete and
+settled-corrupt-group oracle. Both false and true saved tombstones use an independent numeric-stamp hash through
+the actual loader. Test check, strict all-target Clippy, format and complete layout/watchdog policy pass. A binary
+built and copied in the same slot exports a schema byte-identical to the committed golden. The first prefix fixture
+compile failed with a temporary witness borrow; a later strict lint failed on redundant borrows. Those logs remain
+separate from the corrected successful runs. Old 6ed full-suite/all-OS failures remain recorded; these focused local
+results do not establish full-suite or all-OS success. Independent combined-exact review and CI remain separate gates.
