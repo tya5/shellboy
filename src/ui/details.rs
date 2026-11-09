@@ -2496,6 +2496,85 @@ mod tests {
         assert!(details.links(ui.view()).is_empty());
     }
     #[test]
+    fn gc_hint_and_deleted_thread_failure_orderings_discard_inflight_old_links() {
+        for gc_first in [false, true] {
+            for old_reply_before_hint in [false, true] {
+                let mut ui = state();
+                let generation = ui.view().generation;
+                let base = Instant::now();
+                ui.take_deferred_actions();
+                ui.details = Some(Details::for_node(ui.view(), "source-node".into(), true));
+                let request = |ui: &mut UiState, now| {
+                    ui.take_deferred_actions_at(now)
+                        .into_iter()
+                        .find_map(|action| {
+                            if let UiAction::LoadDetailLinks { request_id, .. } = action {
+                                Some(request_id)
+                            } else {
+                                None
+                            }
+                        })
+                        .expect("dirty detail source schedules a bounded read")
+                };
+                let old = request(&mut ui, base);
+                let reply = |request_id, unavailable| super::super::UiUpdate::DetailLinks {
+                    thread_id: "anonymous".into(),
+                    generation,
+                    request_id,
+                    result: Ok(DetailSourceSnapshot {
+                        read_revision: if unavailable { 2 } else { 1 },
+                        observed_at: "synthetic observation".into(),
+                        sources: vec![DetailSourceFacts {
+                            node_id: "source-node".into(),
+                            links: vec![PresentationLink {
+                                url: "https://example.invalid/old".into(),
+                                ..Default::default()
+                            }],
+                            unavailable_reason: unavailable.then(|| "source collected".into()),
+                            ..Default::default()
+                        }],
+                    }),
+                };
+                if old_reply_before_hint {
+                    ui.apply(reply(old, false));
+                }
+                let hint = || super::super::UiUpdate::DetailSourcesChanged {
+                    thread_id: "anonymous".into(),
+                    generation,
+                };
+                let failure = || super::super::UiUpdate::LoadFailed {
+                    thread_id: "anonymous".into(),
+                    generation,
+                    view_revision: None,
+                    message: "Thread not found".into(),
+                };
+                if gc_first {
+                    ui.apply(hint());
+                    ui.apply(failure());
+                } else {
+                    ui.apply(failure());
+                    ui.apply(hint());
+                }
+                if !old_reply_before_hint {
+                    ui.apply(reply(old, false));
+                }
+                // The simulated monotonic clock crosses the existing throttle;
+                // no wall-clock sleep or timeout relaxation drives this test.
+                let fresh = request(&mut ui, base + Duration::from_millis(500));
+                assert_ne!(fresh, old);
+                ui.apply(reply(fresh, true));
+                assert!(
+                    ui.details.as_ref().unwrap().links(ui.view()).is_empty(),
+                    "gc_first={gc_first}, old_reply_before_hint={old_reply_before_hint}"
+                );
+                assert!(
+                    !ui.view().nodes()[0].presentation.links.is_empty(),
+                    "cached history remains; current unavailable facts suppress its links"
+                );
+            }
+        }
+    }
+    #[test]
     fn accepted_thread_changes_refresh_visible_facts_and_gc_overrides_cached_links() {
         let mut ui = state();
         let generation = ui.view().generation;

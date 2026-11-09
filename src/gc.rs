@@ -1373,6 +1373,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn committed_gc_notify_survives_select_registration_and_ready_branch_competition() {
+        use std::{future::Future, task::Poll};
+        for registered_before_commit in [false, true] {
+            for competing_branch_first in [false, true] {
+                let temp = tempfile::tempdir().unwrap();
+                let db = crate::storage::DbWorker::open(temp.path().join("notify.db"))
+                    .await
+                    .unwrap();
+                let config = crate::config::Config::default();
+                let attachments = std::sync::Arc::new(crate::attachments::AttachmentService::new(
+                    db.clone(),
+                    &config,
+                    temp.path().to_owned(),
+                    "fixture".into(),
+                ));
+                let gc = super::GcService::new(
+                    db.clone(),
+                    std::sync::Arc::new(config),
+                    temp.path().to_owned(),
+                    attachments,
+                );
+                db.call(|db| {
+                    db.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes) VALUES('source','text','now','{}',2)", [])?;
+                    db.execute("INSERT INTO gc_job VALUES('job','history',0,NULL,'pending',NULL)", [])?;
+                    Ok(())
+                }).await.unwrap();
+                let job = gc.start_history().await.unwrap().unwrap();
+                let mut waiting = Box::pin(gc.availability_changed());
+                if registered_before_commit {
+                    std::future::poll_fn(|cx| {
+                        assert!(waiting.as_mut().poll(cx).is_pending());
+                        Poll::Ready(())
+                    })
+                    .await;
+                }
+                let mut committed = false;
+                for _ in 0..64 {
+                    let step = gc.history_step(&job).await.unwrap();
+                    if step.nodes_tombstoned > 0 {
+                        committed = true;
+                        break;
+                    }
+                    assert!(!step.complete, "fixture source must actually be collected");
+                }
+                assert!(
+                    committed,
+                    "bounded fixture must reach actual tombstone commit"
+                );
+                let tombstoned = db
+                    .call(|db| {
+                        Ok(db.query_row(
+                            "SELECT payload_json IS NULL FROM node WHERE id='source'",
+                            [],
+                            |row| row.get::<_, bool>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap();
+                assert!(tombstoned);
+                if competing_branch_first {
+                    // Match cancellation of the GC select future when another
+                    // ready bridge branch wins; do not inject or remove hints.
+                    tokio::select! {
+                        biased;
+                        () = std::future::ready(()) => {},
+                        () = waiting.as_mut() => panic!("ready competitor must win"),
+                    }
+                    drop(waiting);
+                    waiting = Box::pin(gc.availability_changed());
+                }
+                let consumed =
+                    std::future::poll_fn(|cx| Poll::Ready(waiting.as_mut().poll(cx).is_ready()))
+                        .await;
+                assert!(
+                    consumed,
+                    "real committed hint retained: registered={registered_before_commit}, competing={competing_branch_first}"
+                );
+                drop(waiting);
+                let mut next = Box::pin(gc.availability_changed());
+                let duplicate =
+                    std::future::poll_fn(|cx| Poll::Ready(next.as_mut().poll(cx).is_ready())).await;
+                assert!(
+                    !duplicate,
+                    "a single actual commit does not manufacture a second hint"
+                );
+                drop(next);
+                println!(
+                    "GC_NOTIFY_BOUNDARY registered_before_commit={registered_before_commit} competing_first={competing_branch_first} committed=true consumed=true duplicate=false"
+                );
+                db.shutdown().await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn history_diagnostics_observe_progress_and_restart_without_db_reads() {
         use std::sync::Arc;
         let temp = tempfile::tempdir().unwrap();
