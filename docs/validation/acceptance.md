@@ -11207,3 +11207,24 @@ the prefix without duplicating outcomes. All 129 terminal transitions are unique
 each has one correct event/delivery insertion, and seven unrelated receipts and
 bodies survive. Both injected partial failures roll back. The original sender
 Run is stopped; the final post-reopen outcome targets a new independent Run.
+
+## #284 selected request-history diagnostics (WIP)
+
+Synthetic-only implementation; no private owner, history, or database was read.
+Initial diagnostic matrix and existing strict-validator evidence are inherited
+from the diagnosis author, not rerun as a private-incident reproduction. Local
+new-contract red failed because the old failure had no structured details;
+initial compile/path errors are retained separately and are not semantic red.
+Fresh macOS aarch64 rust-slot checks: cargo check --tests passes. The 20-case
+synthetic history matrix passes (one test, 2.31 s), including CLI details/hints,
+SQLite distinction, byte-identical DB, independent compare prefixes and stale
+prefix uncertainty. Existing strict ordering/replay negatives pass 2/2; new
+unrelated-domain/SQLite error-boundary tests pass 2/2. Initial SQLite-failure
+fixture construction hit a foreign-key constraint; deleting its synthetic calls
+before dropping the synthetic table fixes the fixture, not product acceptance.
+Layout/watchdog and diff checks pass. Language inventory exactly matches the
+public base (including 1376 existing pending entries); --check therefore remains
+nonzero and is not reported as a new language regression or a zero-pending pass.
+No classifications, protocol schema, migration, model provider or runtime owner
+are changed. Strict Clippy is running; exact-SHA independent review and hosted
+full/OS checks remain pending. No push or workflow dispatch is performed here.

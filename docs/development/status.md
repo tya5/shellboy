@@ -34,3 +34,12 @@ The historical status ledger is not reintroduced. Current focused repairs cover
 RAG/conversation schema separation, migration fixtures and eventual GC completion.
 Exact-tip independent review and normal/all-OS CI remain required; failed older
 runs are not success evidence. See acceptance.md for validation scope.
+
+## #284 request-history diagnostics
+
+Implementation uses an isolated public-main base and synthetic fixtures only.
+Existing invalid_state reasons distinguish selected active missing outputs,
+interrupted missing outputs and invalid/unresolved history. Strict model replay
+and read-only snapshot/prefix boundaries are retained. Fresh check and focused
+matrix/strict-replay/error-boundary tests pass. Independent exact-SHA review and
+full CI are pending; no private incident cause is claimed.

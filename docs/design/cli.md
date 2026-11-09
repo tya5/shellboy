@@ -385,3 +385,32 @@ reply and retain its message ID. The recipient uses `message reply --message M
 for a terminal reply state, not a Turn's end message. `thread get` lists pending
 `awaiting_reply` duties. See the adopted reply design for Run-end and exec
 behavior implemented by subsequent steps.
+
+### Selected request-history diagnostics (#284)
+
+The standalone inspection preserves existing `ApiError` code, hint and details;
+it does not flatten domain failures into `storage_failed`. A local typed
+`ToolGroupFault` crosses only the replay decode/ordering boundary. Normal model
+replay maps that fault to its existing strict failure without relaxing ordering,
+pair completeness or selected-path constraints. No public ErrorCode, migration,
+RPC, repair, worker, retry field or synthetic output is added.
+
+Inspection validates all selected structural facts before missing-only activity.
+Duplicate/orphan/mismatched identifiers and contradictory associations dominate
+missing outputs. An unresolved association is `request_history_invalid` with
+uncertainty, not a claim of physical database corruption. Busy is restricted to a
+selected running group adopted by a completed attempt, a matching running or
+waiting Turn and live Run, and equal attempt/Turn generation. Recorded activity
+does not prove a driver is alive. Older attempt generations with an explicit
+stopped/recovery/failed state are incomplete; future or ambiguous generations
+are invalid. Unrelated active Runs are never a busy signal.
+
+The existing `invalid_state` error uses `details.reason`:
+`request_history_busy`, `request_history_incomplete`, or
+`request_history_invalid`. The hint explains conditional retry for busy and no
+automatic retry otherwise. Optional `details.fault` is a fixed diagnostic token,
+not arguments, output, labels, IDs, paths or payload text. SQLite failures remain
+`storage_failed`. Prefix witness association is checked in the same read snapshot
+before classifying history for `--attempt`; compare sides use separate prefixes.
+A stale prefix remains unknown, not a partial exact body. These reasons describe
+synthetic/source-proven facts and do not diagnose the reported private incident.

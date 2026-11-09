@@ -11,6 +11,7 @@ use std::{
     },
 };
 
+mod inspection;
 mod tool_order;
 
 const ADAPTER_VERSION: u32 = 3;
@@ -653,6 +654,28 @@ fn bounded_json_characters(item: &Value, remaining: &mut usize) -> Option<u64> {
     Some(counter.characters)
 }
 
+enum FrameError {
+    Storage(StorageError),
+    Tool(tool_order::ToolGroupFault),
+}
+impl From<StorageError> for FrameError {
+    fn from(error: StorageError) -> Self {
+        Self::Storage(error)
+    }
+}
+impl From<tool_order::ToolGroupFault> for FrameError {
+    fn from(error: tool_order::ToolGroupFault) -> Self {
+        Self::Tool(error)
+    }
+}
+impl From<FrameError> for StorageError {
+    fn from(error: FrameError) -> Self {
+        match error {
+            FrameError::Storage(error) => error,
+            FrameError::Tool(error) => error.into(),
+        }
+    }
+}
 fn decode_frame(
     ordinal: usize,
     stamp: Stamp,
@@ -661,6 +684,16 @@ fn decode_frame(
     keep: &std::collections::HashSet<String>,
     ledger: &Arc<Ledger>,
 ) -> Result<Frame, StorageError> {
+    decode_frame_checked(ordinal, stamp, body, epoch, keep, ledger).map_err(StorageError::from)
+}
+fn decode_frame_checked(
+    ordinal: usize,
+    stamp: Stamp,
+    body: Option<String>,
+    epoch: i64,
+    keep: &std::collections::HashSet<String>,
+    ledger: &Arc<Ledger>,
+) -> Result<Frame, FrameError> {
     let (group, items, spill_result_item, spill_projection_safe, spill_marker) = match body {
         None => (None, Vec::new(), false, true, false),
         Some(body) => {
@@ -687,7 +720,7 @@ fn decode_frame(
             (
                 group,
                 if spill {
-                    tool_order::inline_spill(items)?
+                    tool_order::inline_spill_checked(items)?
                 } else {
                     items
                 },
@@ -722,11 +755,52 @@ fn decode_frame(
 /// Uncached read of the first `nodes` saved path nodes (all when `None`),
 /// converted for `epoch`. For read-only inspection; it never touches a cache
 /// and reads only the Thread's own selected path.
+#[cfg(test)]
 pub(crate) fn load_uncached(
     db: &Connection,
     thread: &str,
     nodes: Option<usize>,
     epoch: i64,
+) -> Result<ReplayLease, StorageError> {
+    load_uncached_mode(db, thread, nodes, epoch, false)
+}
+pub(crate) fn load_for_inspection(
+    db: &Connection,
+    thread: &str,
+    expected: Option<&PathWitness>,
+    epoch: i64,
+) -> Result<Option<ReplayLease>, StorageError> {
+    if let Some(expected) = expected {
+        // Check association before interpreting a different path as this attempt.
+        // The caller holds the same read transaction for this and the body read.
+        let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
+        let mut rows = statement.query(rusqlite::params![
+            thread,
+            i64::try_from(expected.nodes).unwrap_or(i64::MAX)
+        ])?;
+        let mut framed = String::new();
+        let mut count = 0;
+        while let Some(row) = rows.next()? {
+            framed.push_str(&format!(
+                "{}\u{1f}{}\u{1f}{}\u{1e}",
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, bool>(2)?
+            ));
+            count += 1;
+        }
+        if count != expected.nodes || crate::digest::sha256_hex(framed) != expected.sha256 {
+            return Ok(None);
+        }
+    }
+    load_uncached_mode(db, thread, expected.map(|w| w.nodes), epoch, true).map(Some)
+}
+fn load_uncached_mode(
+    db: &Connection,
+    thread: &str,
+    nodes: Option<usize>,
+    epoch: i64,
+    inspect: bool,
 ) -> Result<ReplayLease, StorageError> {
     let limit = nodes.map_or(-1, |n| i64::try_from(n).unwrap_or(i64::MAX));
     let ledger = Arc::new(Ledger::default());
@@ -734,6 +808,7 @@ pub(crate) fn load_uncached(
     let mut statement = db.prepare("SELECT n.id,n.payload_revision,n.deleted_reason IS NOT NULL OR n.payload_json IS NULL,n.payload_json,n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal LIMIT ?2")?;
     let mut rows = statement.query(rusqlite::params![thread, limit])?;
     let mut frames = Vec::new();
+    let mut decode_fault = false;
     while let Some(row) = rows.next()? {
         let stamp = Stamp {
             id: row.get(0)?,
@@ -742,14 +817,20 @@ pub(crate) fn load_uncached(
             kind: row.get(4)?,
         };
         let body: Option<String> = if stamp.tombstone { None } else { row.get(3)? };
-        frames.push(Arc::new(decode_frame(
-            frames.len(),
-            stamp,
-            body,
-            epoch,
-            &keep,
-            &ledger,
-        )?));
+        match decode_frame_checked(frames.len(), stamp, body, epoch, &keep, &ledger) {
+            Ok(frame) => frames.push(Arc::new(frame)),
+            Err(FrameError::Tool(_)) if inspect => decode_fault = true,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if inspect {
+        // Finish decoding the selected snapshot before reporting a tool fault.
+        if decode_fault {
+            return Err(inspection::unassociated_fault());
+        }
+        inspection::validate(db, thread, &frames)?;
+        tool_order::ordered_checked(frames.clone())
+            .map_err(|_| inspection::unassociated_fault())?;
     }
     ReplayLease::new(frames)
 }
