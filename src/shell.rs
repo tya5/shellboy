@@ -180,11 +180,17 @@ impl ShellHandle {
         let sender = sender
             .upgrade()
             .ok_or_else(|| ApiError::new(ErrorCode::IoFailed, "stdin fact consumer unavailable"))?;
-        sender
-            .reserve_owned()
-            .await
-            .map(Some)
-            .map_err(|_| ApiError::new(ErrorCode::IoFailed, "stdin fact consumer unavailable"))
+        // Capacity is acquired before any pipe side effect. Unlike the later
+        // persistence acknowledgement, this wait is cancellable and bounded.
+        tokio::select! {
+            biased;
+            _ = self.inner.stop.cancelled() => Err(stdin_closed_error()),
+            _ = self.inner.finished.cancelled() => Err(stdin_closed_error()),
+            permit = tokio::time::timeout(self.inner.write_timeout, sender.reserve_owned()) => {
+                permit.map_err(|_| ApiError::new(ErrorCode::IoFailed,"stdin fact capacity wait timed out before writing"))?
+                    .map(Some).map_err(|_| ApiError::new(ErrorCode::IoFailed,"stdin fact consumer unavailable"))
+            }
+        }
     }
     fn publish_fact(
         slot: Option<mpsc::OwnedPermit<ShellEvent>>,
@@ -1104,5 +1110,74 @@ mod stdin_fact_ack_tests {
         drop(handle);
         child.kill().await.unwrap();
         child.wait().await.unwrap();
+    }
+    #[tokio::test]
+    async fn stdin_full_fact_channel_deadline_stop_and_finish_release_without_side_effects() {
+        use tokio::io::AsyncReadExt;
+        for mode in ["deadline", "stop", "finished"] {
+            let mut child = Command::new("sh")
+                .arg("-c")
+                .arg("cat")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            let mut output = child.stdout.take().unwrap();
+            let (send, mut events) = mpsc::channel(1);
+            send.send(ShellEvent::Stdin {
+                open: true,
+                successful_write_at: None,
+                saved: None,
+            })
+            .await
+            .unwrap();
+            let handle = ShellHandle {
+                inner: Arc::new(HandleInner {
+                    facts: Some(send.downgrade()),
+                    stdin: Arc::new(Mutex::new(child.stdin.take().map(ShellStdin::Unix))),
+                    stop: CancellationToken::new(),
+                    finished: CancellationToken::new(),
+                    stdin_limit: 1024,
+                    write_timeout: Duration::from_millis(50),
+                }),
+            };
+            let writer = handle.clone();
+            let writing =
+                tokio::spawn(async move { writer.write("must not write", "UTF-8").await });
+            tokio::task::yield_now().await;
+            match mode {
+                "stop" => handle.stop(),
+                "finished" => handle.inner.finished.cancel(),
+                _ => {}
+            }
+            let error = tokio::time::timeout(Duration::from_secs(1), writing)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                if mode == "deadline" {
+                    ErrorCode::IoFailed
+                } else {
+                    ErrorCode::InvalidState
+                }
+            );
+            assert!(handle.inner.stdin.try_lock().is_ok());
+            let mut byte = [0u8];
+            assert!(
+                tokio::time::timeout(Duration::from_millis(20), output.read_exact(&mut byte))
+                    .await
+                    .is_err()
+            );
+            events.recv().await.unwrap();
+            assert!(
+                events.try_recv().is_err(),
+                "no failed/pre-write fact may be fabricated"
+            );
+            child.kill().await.unwrap();
+            child.wait().await.unwrap();
+        }
     }
 }

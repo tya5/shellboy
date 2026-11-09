@@ -11264,3 +11264,11 @@ a real write fact surviving backpressure, and a failed persistence acknowledgeme
 success. Locked `cargo check --tests` and format check pass; the task binary was copied in the build slot and used
 to regenerate the protocol schema (only the two nullable observation fields). Language inventory passes with the
 19 existing pending entries unchanged. Platform evidence remains local Unix only.
+
+Review correction: the original pre-write channel-capacity reservation had no deadline/cancellation selection.
+A bounded channel alone bounded memory, not waiting time. The corrected handle reservation selects stop/finished
+and the configured write timeout before any pipe side effect. A full-channel synthetic test separately exercises
+all three exits, verifies the pipe lock is released, observes no native input byte and no fabricated write fact.
+Post-write acknowledgement remains a distinct persistence barrier; its pending/error result is never converted to
+successful completion merely because the process has stopped. The new local stdin-focused run passes 13 tests;
+locked test check and format check pass. These results do not clear independent-review or Windows/all-OS gates.
