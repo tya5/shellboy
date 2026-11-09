@@ -41,5 +41,7 @@ Implementation uses an isolated public-main base and synthetic fixtures only.
 Existing invalid_state reasons distinguish selected active missing outputs,
 interrupted missing outputs and invalid/unresolved history. Strict model replay
 and read-only snapshot/prefix boundaries are retained. Fresh check and focused
-matrix/strict-replay/error-boundary tests pass. Independent exact-SHA review and
-full CI are pending; no private incident cause is claimed.
+matrix/strict-replay/error-boundary tests pass, as do final format/check/strict
+Clippy. Independent review approves product commit 13c7b0923c with five focused
+tests independently passing. Full CI and integration with later main fixes
+remain pending; no private incident cause is claimed.
