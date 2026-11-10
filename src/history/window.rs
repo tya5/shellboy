@@ -170,9 +170,10 @@ fn window_with_items(
         return Err(invalid("excerpt-chars must be in 0..=4096"));
     }
 
-    // Keep selection revision, node metadata, source payloads and execution
-    // links on one read snapshot so a rewind cannot mix path and body versions.
-    let snapshot = connection.unchecked_transaction().map_err(sql_error)?;
+    // Reuse the caller's existing read transaction. Public HistoryWindow is
+    // dispatched inside the inspection transaction; a nested BEGIN on the same
+    // SQLite connection fails and would also split the caller's snapshot.
+    let snapshot = connection;
     let (revision, current_cwd): (u64, String) = snapshot
         .query_row(
             "SELECT selection_revision,cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",
@@ -220,7 +221,6 @@ fn window_with_items(
         }
         ordinal
     } else if total == 0 {
-        snapshot.commit().map_err(sql_error)?;
         return Ok(crate::protocol::HistoryWindow {
             thread_id: args.thread_id.clone(),
             revision,
@@ -354,7 +354,6 @@ fn window_with_items(
             link_count,
         )?);
     }
-    snapshot.commit().map_err(sql_error)?;
     Ok(crate::protocol::HistoryWindow {
         thread_id: args.thread_id.clone(),
         revision,
@@ -447,6 +446,23 @@ mod items_source_guard_tests {
             reads.load(Ordering::Relaxed) >= 1,
             "legacy path reads its selected payload"
         );
+    }
+
+    #[test]
+    fn items_true_reuses_the_caller_transaction_without_nested_begin() {
+        let db = fixture("caller transaction".into());
+        let tx = db.unchecked_transaction().unwrap();
+        let result = window(&tx, &args(true)).expect("window must reuse caller-owned transaction");
+        assert_eq!(result.items.len(), 1);
+        assert!(
+            result.items[0]
+                .item_projection
+                .as_ref()
+                .unwrap()
+                .items
+                .is_some()
+        );
+        tx.commit().unwrap();
     }
 
     #[test]
