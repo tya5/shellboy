@@ -1614,7 +1614,7 @@ record!(SpillToolSource {
     #[serde(default, skip_serializing_if = "Option::is_none")] original_node_id: Option<String>
 });
 record!(SpillToolSources { status: String, items: Vec<SpillToolSource>, truncated: bool });
-/// Optional flattened projection: absent for legacy reads, explicit null on response budget.
+// Optional flattened projection: absent for legacy reads, explicit null on response budget.
 record!(HistoryNodeItems {
     items: Option<Vec<HistoryItem>>,
     #[serde(default, skip_serializing_if = "Option::is_none")] items_unavailable_reason: Option<HistoryItemUnavailableReason>
