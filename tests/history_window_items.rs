@@ -5,7 +5,7 @@ use shellboy::{
     history::{
         append_node,
         items::{ITEM_TEXT_BYTES, project},
-        window::window,
+        window,
     },
     protocol::*,
 };
