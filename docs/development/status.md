@@ -58,3 +58,15 @@ real-provider/affected-Thread recovery evidence. Existing checkpoints remain his
 ## #278 typed operation results (in progress)
 
 Rebuilding isolated `issue-278/typed-results-rebased` from public protocol-v5 `ff18f32640f0b41f042f034f4b1a3936a9abe92d`. Old dirty WT remains untouched; its patch is backed up privately with verified SHA-256 `43d01e6738e506a0e663eeaa27b4649d9f4de177a63556c3c2586e88d4d5951a`. Types only the four current operations status/shell.list/usage.get/config.get; excludes `src/model/http.rs`, #283 future stdin fields, and stale #279 body-separation assertions. Config/provider/group-key-dependent leaves remain open. `status` models its two existing JSON modes via untagged union. Protocol v5 remains unchanged. Generated schema and initial focused tests passed. A follow-up raw `StatusReply` JSON fallback after `ad0ad5a7` preserves unusual non-object legacy reply values and explicit null-vs-omitted behavior; Exact nested-Option follow-up check/fmt, typed status-union, work_status, schema golden, and full protocol suite pass. S6 old e73 archive count (36 protocol +1 status DB) belongs only to e73, not this null-preserving delta. Current tip is a separate follow-up commit after validation; S6 review and delegated current-main rebase/push/CI remain.
+
+### #296 Saved Item Projection Candidate
+
+The author candidate adds opt-in ordered saved items to history.window under the
+adopted Claude1528 contract. Default legacy reads are unchanged. Source/byte guard,
+projection, actual producer/schema oracle, privacy and response-budget rewindow
+checks are separate focused gates; see the current effective-spec candidate section.
+Earlier v2 new-executor/cursor/deadline proposals were rejected and are historical
+only. Local red compile failures are not runtime-negative successes. Candidate
+source/tests do not establish release adoption, all-OS CI or actual-owner acceptance.
+Core0.11.2 publication follows independent exact review and hosted CI; owner updates
+are exclusively outside Claude after publication, never author shell operations.

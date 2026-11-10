@@ -535,3 +535,35 @@ distinguishes recorded active missing outputs, interrupted history and invalid o
 unresolved associations through existing invalid_state details. It preserves one
 read snapshot, saved-prefix scope and normal strict replay. No private-incident
 cause or automatic repair/retry is established by this change.
+
+### #296 Candidate: Opt-In Saved History Items
+
+`history.window` accepts optional `items: true`; the default false preserves the
+existing window fields and omits all per-node item projection fields. Existing
+selected-path ordinals, anchors, revision checks and 200-node paging remain the
+rewindow mechanism. There is no new operation, item cursor or reconstruction API.
+
+Opt-in nodes expose `items`, an ordered array of saved typed items, or null with
+`items_unavailable_reason: "response_budget"`. Text items carry opaque canonical
+`item_identity`, authoritative `text` and required `text_complete`. Tool call/result
+items expose verified `execution_ids`, never argument/output JSON as prose. Hidden
+reasoning is a `reasoning_unavailable` marker without text, summary or ciphertext.
+Unknown/pruned/legacy content becomes explicit `unavailable`, not guessed text.
+Empty text is a body/group boundary. Reasoning markers are transparent to grouping;
+unavailable markers partition unknown content. Tool sequences may span nodes until
+body text. Revision is provenance, not part of item identity.
+
+Adopted policy limits (not performance measurements): node source 1 MiB checked
+before Rust payload materialization, each text item's UTF-8 prefix 16 KiB, verified
+execution links 8 per item, response sum of item text 4 MiB. Truncation never splits
+a codepoint; `text_complete: false` does not offer fragments or reassembly. Each
+node array is atomic. First node exceeding response text budget and all later
+ordinary window nodes remain present with null items and response_budget; rewindow
+from that first node's existing ordinal. Missing/untrusted size metadata never falls
+back to raw body retrieval. Response budget is decoded item text, not a new encoded
+JSON budget.
+
+Claude1528 explicitly permits the existing shared DbWorker route for this bounded
+extension. PureRead classification is not independent RO/WAL isolation. No new
+reader/executor/deadline or migration is introduced. Publication/owner-read gates
+remain separate; agent shells never install/signal/restart/rollback owner4140.
