@@ -236,21 +236,39 @@ pub(super) fn history_snippet(
 
 /// Build a history-window snippet from metadata and a payload admitted by the
 /// caller's source-byte guard. This path never fetches the stored payload itself.
+pub(super) struct AdmittedSnippet<'a> {
+    pub thread_id: &'a str,
+    pub current_cwd: &'a str,
+    pub node_id: String,
+    pub kind: String,
+    pub deleted_reason: Option<String>,
+    pub ordinal: u64,
+    pub payload_chars: Option<u64>,
+    pub body: Option<&'a Value>,
+    pub excerpt_chars: u32,
+    pub item_projection: crate::protocol::HistoryNodeItems,
+    pub executions: Vec<HistoryExecutionLink>,
+    pub execution_count: u64,
+}
+
 pub(super) fn history_snippet_with_items(
     connection: &Connection,
-    thread_id: &str,
-    current_cwd: &str,
-    node_id: String,
-    kind: String,
-    deleted_reason: Option<String>,
-    ordinal: u64,
-    payload_chars: Option<u64>,
-    body: Option<&Value>,
-    excerpt_chars: u32,
-    item_projection: crate::protocol::HistoryNodeItems,
-    executions: Vec<HistoryExecutionLink>,
-    execution_count: u64,
+    admitted: AdmittedSnippet<'_>,
 ) -> Result<HistorySnippet, ApiError> {
+    let AdmittedSnippet {
+        thread_id,
+        current_cwd,
+        node_id,
+        kind,
+        deleted_reason,
+        ordinal,
+        payload_chars,
+        body,
+        excerpt_chars,
+        item_projection,
+        executions,
+        execution_count,
+    } = admitted;
     let excerpt = if excerpt_chars == 0 {
         String::new()
     } else if let Some(body) = body {

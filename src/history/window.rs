@@ -284,19 +284,21 @@ fn window_with_items(
                 .map_err(sql_error)?;
             let Some((payload_json, chars)) = loaded else {
                 window_items.push(list::history_snippet_with_items(
-                    &snapshot,
-                    &args.thread_id,
-                    &current_cwd,
-                    row.node_id.clone(),
-                    row.kind.clone(),
-                    row.deleted_reason.clone(),
-                    row.ordinal,
-                    None,
-                    None,
-                    args.excerpt_chars,
-                    unavailable_projection(&row.node_id, Unavailable::Legacy),
-                    Vec::new(),
-                    0,
+                    snapshot,
+                    list::AdmittedSnippet {
+                        thread_id: &args.thread_id,
+                        current_cwd: &current_cwd,
+                        node_id: row.node_id.clone(),
+                        kind: row.kind.clone(),
+                        deleted_reason: row.deleted_reason.clone(),
+                        ordinal: row.ordinal,
+                        payload_chars: None,
+                        body: None,
+                        excerpt_chars: args.excerpt_chars,
+                        item_projection: unavailable_projection(&row.node_id, Unavailable::Legacy),
+                        executions: Vec::new(),
+                        execution_count: 0,
+                    },
                 )?);
                 continue;
             };
@@ -307,7 +309,7 @@ fn window_with_items(
                     "stored history payload is malformed",
                 )
             })?;
-            let (links, link_count) = execution_links(&snapshot, &row.node_id)?;
+            let (links, link_count) = execution_links(snapshot, &row.node_id)?;
             let projected = items::project(&row.node_id, &row.kind, &payload, &links);
             let text_bytes = items::text_bytes(&projected);
             if response_text_bytes.saturating_add(text_bytes) > items::RESPONSE_TEXT_BYTES {
@@ -317,41 +319,45 @@ fn window_with_items(
                 response_text_bytes += text_bytes;
                 body = Some(payload);
                 window_items.push(list::history_snippet_with_items(
-                    &snapshot,
-                    &args.thread_id,
-                    &current_cwd,
-                    row.node_id,
-                    row.kind,
-                    row.deleted_reason,
-                    row.ordinal,
-                    payload_chars,
-                    body.as_ref(),
-                    args.excerpt_chars,
-                    crate::protocol::HistoryNodeItems {
-                        items: Some(projected),
-                        items_unavailable_reason: None,
+                    snapshot,
+                    list::AdmittedSnippet {
+                        thread_id: &args.thread_id,
+                        current_cwd: &current_cwd,
+                        node_id: row.node_id,
+                        kind: row.kind,
+                        deleted_reason: row.deleted_reason,
+                        ordinal: row.ordinal,
+                        payload_chars,
+                        body: body.as_ref(),
+                        excerpt_chars: args.excerpt_chars,
+                        item_projection: crate::protocol::HistoryNodeItems {
+                            items: Some(projected),
+                            items_unavailable_reason: None,
+                        },
+                        executions: links,
+                        execution_count: link_count,
                     },
-                    links,
-                    link_count,
                 )?);
                 continue;
             }
         };
-        let (links, link_count) = execution_links(&snapshot, &row.node_id)?;
+        let (links, link_count) = execution_links(snapshot, &row.node_id)?;
         window_items.push(list::history_snippet_with_items(
-            &snapshot,
-            &args.thread_id,
-            &current_cwd,
-            row.node_id,
-            row.kind,
-            row.deleted_reason,
-            row.ordinal,
-            payload_chars,
-            body.as_ref(),
-            args.excerpt_chars,
-            item_projection,
-            links,
-            link_count,
+            snapshot,
+            list::AdmittedSnippet {
+                thread_id: &args.thread_id,
+                current_cwd: &current_cwd,
+                node_id: row.node_id,
+                kind: row.kind,
+                deleted_reason: row.deleted_reason,
+                ordinal: row.ordinal,
+                payload_chars,
+                body: body.as_ref(),
+                excerpt_chars: args.excerpt_chars,
+                item_projection,
+                executions: links,
+                execution_count: link_count,
+            },
         )?);
     }
     Ok(crate::protocol::HistoryWindow {
