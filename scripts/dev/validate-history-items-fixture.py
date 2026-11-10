@@ -13,7 +13,7 @@ actual = json.loads((root / "actual-window.json").read_text())
 selected = {"$schema": schema["$schema"], "definitions": copy.deepcopy(schema["definitions"]), "allOf": [schema["operation_results"]["history.window"]]}
 validator = jsonschema.validators.validator_for(selected)(selected)
 validator.validate(actual)
-for name in ("legacy-window.json", "response-budget-window.json"):
+for name in ("legacy-window.json", "response-budget-window.json", "unavailable-window.json"):
     value = json.loads((root / name).read_text())
     validator.validate(value)
 budget = json.loads((root / "response-budget-window.json").read_text())
@@ -26,4 +26,13 @@ assert list(validator.iter_errors(mutated)), "schema accepted unknown item kind"
 mutated = copy.deepcopy(actual)
 del mutated["items"][0]["items"][0]["text_complete"]
 assert list(validator.iter_errors(mutated)), "schema accepted missing text extent"
-print("actual window valid; unknown kind and missing text_complete rejected")
+mutated = copy.deepcopy(actual)
+mutated["items"][0]["items_unavailable_reason"] = "response_budget"
+assert list(validator.iter_errors(mutated)), "schema accepted array items plus node reason"
+mutated = copy.deepcopy(budget)
+mutated["items"][128]["items_unavailable_reason"] = "source_budget"
+assert list(validator.iter_errors(mutated)), "schema accepted source_budget as null-node reason"
+mutated = copy.deepcopy(actual)
+del mutated["items"][0]["items"][0]["item_identity"]
+assert list(validator.iter_errors(mutated)), "schema accepted missing stable identity"
+print("actual producer windows valid (typed/legacy/budget/unavailable); six invalid mutations rejected")

@@ -175,6 +175,10 @@ fn actual_window_guard_null_legacy_oversized_and_existing_stale_anchor() {
         assert!(!rendered.contains("SECRET_"));
     }
     assert_eq!(result["items"][2]["items"][0]["reason"], "source_budget");
+    if let Some(dir) = std::env::var_os("CORE296_FIXTURE_DIR") {
+        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("unavailable-window.json"),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+    }
     let mut stale = args();
     stale.expect_node_id = Some("wrong".into());
     assert!(window(&db, &stale).is_err());
@@ -258,4 +262,14 @@ fn actual_projection_bounds_execution_links_and_preserves_source_identity() {
         result,
         project("node", "assistant_response", &payload, &links)
     );
+}
+
+#[test]
+fn actual_window_args_legacy_default_and_skip_false() {
+    let value=json!({"thread_id":"t","before":0,"after":0,"ordinal":0});
+    let legacy:HistoryWindowArgs=serde_json::from_value(value).unwrap();
+    assert!(!legacy.items);
+    assert!(serde_json::to_value(&legacy).unwrap().get("items").is_none());
+    let mut opted=legacy;opted.items=true;
+    assert_eq!(serde_json::to_value(&opted).unwrap()["items"],true);
 }
