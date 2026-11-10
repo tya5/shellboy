@@ -247,3 +247,6 @@ mod db_observation_feature;
 
 #[path = "../support/history_collection.rs"]
 pub(crate) mod history_collection;
+
+#[path = "../history_window_items.rs"]
+mod history_window_items;
