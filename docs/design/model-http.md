@@ -311,9 +311,9 @@ models) read on 2026-11-01; no real provider call has been made.
   opaque block unread. Unknown event types are skipped and counted. A stream is
   complete only after `message_stop`; EOF before it is `incomplete`.
 - `stop_reason`: `end_turn`, `stop_sequence` and `tool_use` complete the response;
-  `max_tokens` and `model_context_window_exceeded` are `incomplete` (the latter
-  classified as a context limit); `pause_turn`, `refusal` and any other value are
-  failures that keep the original response, never guessed around.
+  `max_tokens` is an `output_limit` only when the response status is `incomplete`;
+  `model_context_window_exceeded` remains generic `incomplete` (context limit);
+  `pause_turn`, `refusal` and unknown values retain their existing failure kinds.
 - Usage: `input_tokens` plus `cache_creation_input_tokens` plus
   `cache_read_input_tokens` is the total input; `cached_tokens` is
   `cache_read_input_tokens`; `output_tokens` is taken from the last (cumulative)
@@ -331,6 +331,27 @@ models) read on 2026-11-01; no real provider call has been made.
   existing transient rules; `request_too_large` (413) and `invalid_request_error`
   (400) are not.
 - Summary requests and `input_characters` use the same encoder.
+
+### Cross-API output-limit classification (#293)
+
+The connection's optional `max_tokens` setting maps to the selected API's native
+request key, but an output-limit failure is classified only from an explicit
+provider terminal fact:
+
+- Responses: `status = incomplete` and
+  `incomplete_details.reason = max_output_tokens`.
+- Chat Completions: `finish_reason = length` on the final normalized incomplete
+  response.
+- Anthropic Messages: `status = incomplete` and `stop_reason = max_tokens`.
+
+Only these exact cases use error kind `output_limit` and its connection-setting
+remedy. The response remains incomplete: retain the provider raw response and
+available partial text/items; never convert truncation into success or silently
+retry it. These terminal limit responses are not automatically retried. Other
+incomplete/finish/stop reasons are not guessed as output exhaustion: this
+includes Anthropic `model_context_window_exceeded`, refusals, filter outcomes,
+unknown reasons and transport/EOF failures without the matching terminal fact.
+They retain their existing classification and partial-output handling.
 
 ### Common cache hint (#127)
 

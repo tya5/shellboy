@@ -867,3 +867,14 @@ When `max_tokens` is set, also supplying the same native key in `extra_body` is
 an explicit configuration/send error, even for an equal value or null. Other
 API keys are not newly reserved. Existing Messages reserved-field rules remain
 unchanged; this does not add aliases or silently choose between duplicate limits.
+
+### Output-limit results
+
+`output_limit` means a provider supplied the exact terminal evidence that its
+output cap was reached: Responses `incomplete_details.reason = max_output_tokens`,
+Chat Completions `finish_reason = length`, or Anthropic Messages
+`stop_reason = max_tokens` on an incomplete response. Shellboy keeps the result
+incomplete, retains available partial text and provider details, and does not
+automatically retry it. Do not diagnose context-window limits, filters, other
+incomplete reasons, unknown stop reasons or connection/EOF failures as output
+limits by guesswork.

@@ -1014,3 +1014,15 @@ When `max_tokens` is set, also supplying the same native key in `extra_body` is
 an explicit configuration/send error, even for an equal value or null. Other
 API keys are not newly reserved. Existing Messages reserved-field rules remain
 unchanged; this does not add aliases or silently choose between duplicate limits.
+
+### Provider output-limit completion
+
+When the provider explicitly reports an output cap, Shellboy returns an
+`output_limit` error and recommends adjusting this connection's existing
+`max_tokens` setting. The response remains incomplete: available partial output
+and provider response details are retained, and no automatic retry is made.
+The exact signals are Responses `incomplete_details.reason = max_output_tokens`,
+Chat Completions `finish_reason = length`, and Anthropic Messages
+`stop_reason = max_tokens` on an incomplete response. Other incomplete reasons,
+context-window limits, refusals/filters, missing reasons and transport/EOF
+failures are not inferred to be output-limit errors.
