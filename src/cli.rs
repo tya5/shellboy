@@ -1502,7 +1502,7 @@ impl Cli {
                     since: a.since,
                     state: a.state,
                 }),
-                HistoryCommand::Window(a) => C::HistoryWindow(wire::HistoryWindowArgs {
+                HistoryCommand::Window(a) => C::HistoryWindow(wire::HistoryWindowArgs { items: false,
                     thread_id: a.thread_id,
                     ordinal: a.ordinal,
                     node_id: a.node_id,

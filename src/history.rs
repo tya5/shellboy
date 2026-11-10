@@ -6,6 +6,7 @@ use serde_json::Value;
 
 mod append;
 pub use append::append_existing_nodes;
+pub mod items;
 mod list;
 mod window;
 pub use window::{STATEMENTS_FOR_TESTS as WINDOW_STATEMENTS_FOR_TESTS, window};

@@ -670,7 +670,7 @@ impl HistorySearchArgs {
     }
 }
 
-impl HistoryWindowArgs {
+impl HistoryWindowArgs { items: false,
     fn validate(&self) -> Result<(), ApiError> {
         nonempty(&self.thread_id, "thread_id")?;
         optional_nonempty(self.node_id.as_deref(), "node_id")?;

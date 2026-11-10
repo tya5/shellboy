@@ -976,6 +976,7 @@ fn window_side() -> u32 {
 // `MAX_LIST_LIMIT`. `expect_node_id` pairs with `ordinal` to detect a path
 // that was rewound or compacted since the caller last saw it.
 args!(HistoryWindowArgs { thread_id: String,
+    #[serde(default, skip_serializing_if = "is_false")] items: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")] ordinal: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")] node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")] expect_node_id: Option<String>,
@@ -1613,7 +1614,23 @@ record!(SpillToolSource {
     #[serde(default, skip_serializing_if = "Option::is_none")] original_node_id: Option<String>
 });
 record!(SpillToolSources { status: String, items: Vec<SpillToolSource>, truncated: bool });
+/// Optional flattened projection: absent for legacy reads, explicit null on response budget.
+record!(HistoryNodeItems {
+    items: Option<Vec<HistoryItem>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] items_unavailable_reason: Option<HistoryItemUnavailableReason>
+});
+states!(HistoryItemUnavailableReason { SourceBudget, ResponseBudget, Legacy, Pruned, Opaque, Unsupported });
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HistoryItem {
+    Text { item_identity: String, text: String, text_complete: bool },
+    ToolCall { item_identity: String, execution_ids: Vec<String> },
+    ToolResult { item_identity: String, execution_ids: Vec<String> },
+    ReasoningUnavailable { item_identity: String },
+    Unavailable { item_identity: String, reason: HistoryItemUnavailableReason },
+}
 record!(HistorySnippet {
+    #[serde(flatten, default, skip_serializing_if = "Option::is_none")] item_projection: Option<HistoryNodeItems>,
     #[serde(default, skip_serializing_if = "Option::is_none")] spill_tools: Option<SpillToolSources>,
     #[serde(default)] payload_chars: Option<u64>,
     node_id: String,
