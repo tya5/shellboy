@@ -278,3 +278,32 @@ fn actual_window_args_legacy_default_and_skip_false() {
     let mut opted=legacy;opted.items=true;
     assert_eq!(serde_json::to_value(&opted).unwrap()["items"],true);
 }
+
+#[tokio::test]
+async fn actual_shared_store_history_window_request_reuses_caller_transaction() {
+    use std::sync::Arc;
+    use shellboy::{config::Config, control::db::Store, storage::DbWorker};
+    let root=tempfile::tempdir().unwrap();
+    let database=DbWorker::open(root.path().join("synthetic.db")).await.unwrap();
+    database.call(|db| {
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','fixture','fixture','now')",[])?;
+        let tx=db.transaction()?;
+        append_node(&tx,"t","public-node",None,"user",&json!({"role":"user","content":[{"type":"input_text","text":"synthetic public route"}]}),"now")?;
+        tx.commit()?;
+        Ok(())
+    }).await.unwrap();
+    let config=Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
+    let store=Store::new(database.clone(),Arc::new(config),root.path().into(),"fixture".into());
+    // This goes through Store's real shared DbWorker transact/command dispatch;
+    // a bare history::window(&Connection) call cannot detect nested BEGIN.
+    let result=store.execute(Request::new("fixture:public-window",Command::HistoryWindow(args())),None).await;
+    assert!(result.is_ok(),"public shared-writer request failed: {:?}",result.err());
+    let encoded=result.unwrap().result;
+    assert_eq!(encoded["items"][0]["items"][0]["text"],"synthetic public route");
+    if let Some(dir)=std::env::var_os("CORE296_FIXTURE_DIR") {
+        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("public-route-window.json"),serde_json::to_vec_pretty(&encoded).unwrap()).unwrap();
+    }
+    drop(store);
+    database.shutdown().await.unwrap();
+}
