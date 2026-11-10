@@ -124,3 +124,71 @@ owner restart, browser, or release action. Shared knowledge hybrid search was
 degraded/empty; no reindex or embedding was requested. Current Git is authority.
 
 Source inspection only at this checkpoint; no tests/runtime behavior claimed.
+
+## A1. Actual DTO / Writer Trace And Proposed Signature
+
+Source trace at d64357e0 (no runtime implementation yet):
+
+| Surface | Actual existing behavior | Required additive change |
+| --- | --- | --- |
+| `status::WorkItem` | Public serde/JsonSchema DTO; attempt `reason` is top-level error kind/code only | Add optional `compaction_discard: Option<CompactionDiscard>`; no raw JSON exposure |
+| `status::snapshot` | Bounded page enrichment already reads response refs for attempt rows | Read one allowlisted fact only for bounded attempt result page; same transaction |
+| `status::observation` | Point observation emits the SAME WorkItem with fixed scalar channel | Enrich only qualified observed attempt IDs, same owner read; no unbounded scan |
+| `compaction::attempt` begin/stage/finish SQL | Stores automatic observation under error_json; UUID token CAS; committed-stage merge | Keep discard INSIDE the existing automatic observation, preserve committed stages and existing fields |
+| proactive normal / exception finalization | Finish replaces automatic subtree, merges committed stages | Carry the same bounded discard fact in both finish bodies; no overwrite of top-level error/persistence fields |
+| proactive target verification | json_set target_verification only | Preserve discard untouched |
+| overflow and retry failure writers | Build provider failure body, include automatic_trim_attempt if supplied | Preserve supplied automatic observation including discard; do not replace provider error or counters |
+| state fail/incomplete | Replace error_json with normalized failure | Merge previous qualified automatic observation if new body lacks it; new explicit observation wins, no untrusted raw forwarding |
+| completion | Does not rewrite error_json | Preserve fact |
+| human interruption / startup recovery | Replace error_json for active attempts | Clear prior unfinished observation explicitly; late token must not recreate or overwrite it |
+| run cancellation | Changes state without error_json rewrite | Existing retained completed diagnostic fact may remain, never permits adoption |
+| history GC | Removes partial_text/reasoning/completed_items/raw_response, retains other error metadata | Retain bounded diagnostic fact; no payload extraction |
+
+Persistence is NOT time-expiring: model_attempt has no TTL, the diagnostic fact
+stays with the retained row until an authorized replacing writer or row deletion.
+History payload GC is not attempt deletion and does not clear this metadata.
+Do not promise automatic time-based deletion. Diagnostic files independently
+use existing configured rotation / disabled logger behavior.
+
+Proposed public signature (closed enums with serde snake_case + JsonSchema):
+
+```text
+WorkItem.compaction_discard?: CompactionDiscard
+CompactionDiscard { reason: CompactionDiscardReason,
+                    phase: CompactionDiscardPhase, elapsed_ms: u64 }
+```
+
+Attempt identity is the WorkItem's existing id/attempt_id; do NOT duplicate a
+worker token, payload hash, or guessed ID in the public fact. Diagnostic event
+uses the same three bounded fields plus existing DiagnosticIds. Public decoder
+accepts ONLY these exact fields, recognized enums, and unsigned integer elapsed;
+malformed/unknown/oversized legacy observations yield None, not `other`.
+The stored path is `automatic_trim_attempt.discard`, never an arbitrary raw
+error.details projection. No new error_json namespace containing provider data.
+
+Elapsed starts with one `Instant` immediately before each actual compaction
+stage calls its model, carried to adoption/rejection in memory; saturate millis
+to u64. A model retry inside that stage retains the same Instant; a new stage
+gets a new start. The public number is diagnostic duration, not billing or SLA.
+Existing code has no such monotonic stage timer; do not derive it from wall
+clock timestamps or the preceding original model request. Later finalization
+must copy the measured number without restarting it.
+
+Protocol surface changes: WorkItem schema gains one optional closed fact type;
+update its generated/checked schema and protocol documentation through existing
+schema tooling. This is an additive wire schema change, NOT migration 40 or a
+new database column/version. No schema 41 is needed for this contract. Coordinate
+with #299 before shared DTO/schema edits; foreign worktree remains untouched.
+
+Query-safety refinement: for the combined thread qualification SELECT, keep one
+statement in the original transaction and existing thread existence precedence.
+Project booleans for revision/path qualification, profile, epoch in that same
+statement and inspect them in current guard order; do not add SELECT/lock-order
+changes. SQL NULL must cause the same invalid qualification as before, not a
+new reason inferred from absent state. Run and Turn queries/check order remain
+unchanged. Any inability to preserve equivalence blocks that branch's split;
+leave it unclassified rather than relax a guard.
+
+Scope of first implementation remains visibility only. All original adoption
+conditions and #300 append witness/CAS behavior stay unchanged. A1 requires S6
+signature review before runtime edits. B remains separately held.
