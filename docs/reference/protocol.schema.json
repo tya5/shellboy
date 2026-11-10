@@ -2391,6 +2391,30 @@
         },
         {
           "properties": {
+            "item_identity": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "reasoning_text",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "text_complete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "item_identity",
+            "text",
+            "text_complete"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "execution_ids": {
               "items": {
                 "type": "string"
