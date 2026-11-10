@@ -13,6 +13,13 @@ actual = json.loads((root / "actual-window.json").read_text())
 selected = {"$schema": schema["$schema"], "definitions": copy.deepcopy(schema["definitions"]), "allOf": [schema["operation_results"]["history.window"]]}
 validator = jsonschema.validators.validator_for(selected)(selected)
 validator.validate(actual)
+for name in ("legacy-window.json", "response-budget-window.json"):
+    value = json.loads((root / name).read_text())
+    validator.validate(value)
+budget = json.loads((root / "response-budget-window.json").read_text())
+mutated_pair = copy.deepcopy(budget)
+del mutated_pair["items"][128]["items_unavailable_reason"]
+assert list(validator.iter_errors(mutated_pair)), "schema accepted null items without its unavailable reason"
 mutated = copy.deepcopy(actual)
 mutated["items"][0]["items"][0]["kind"] = "invented_kind"
 assert list(validator.iter_errors(mutated)), "schema accepted unknown item kind"

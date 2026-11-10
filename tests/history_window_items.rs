@@ -122,6 +122,12 @@ fn actual_window_opt_in_and_encoding_fixture() {
     let mut legacy = args();
     legacy.items = false;
     let legacy = serde_json::to_value(window(&db, &legacy).unwrap()).unwrap();
+    let decoded: HistoryWindow = serde_json::from_value(legacy.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap(),
+        legacy,
+        "legacy absent flattened fields survive decode/encode"
+    );
     for node in legacy["items"].as_array().unwrap() {
         assert!(node.get("items").is_none());
         assert!(node.get("items_unavailable_reason").is_none());
@@ -130,6 +136,11 @@ fn actual_window_opt_in_and_encoding_fixture() {
         let dir = std::path::PathBuf::from(dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("schema.json"), schema_json()).unwrap();
+        std::fs::write(
+            dir.join("legacy-window.json"),
+            serde_json::to_vec_pretty(&legacy).unwrap(),
+        )
+        .unwrap();
         std::fs::write(
             dir.join("actual-window.json"),
             serde_json::to_vec_pretty(&encoded).unwrap(),
@@ -190,10 +201,61 @@ fn actual_window_response_budget_keeps_all_later_ordinary_nodes() {
         assert_eq!(node["items_unavailable_reason"], "response_budget");
         assert!(node.get("node_id").is_some());
     }
+    let decoded: HistoryWindow = serde_json::from_value(result.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap(),
+        result,
+        "nullable projection must survive actual decode/encode"
+    );
+    if let Some(dir) = std::env::var_os("CORE296_FIXTURE_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("response-budget-window.json"),
+            serde_json::to_vec_pretty(&result).unwrap(),
+        )
+        .unwrap();
+    }
     let mut retry = args();
     retry.ordinal = Some(128);
     retry.after = 3;
     let retry = serde_json::to_value(window(&db, &retry).unwrap()).unwrap();
     assert_eq!(retry["items"].as_array().unwrap().len(), 4);
     assert!(retry["items"][0]["items"].is_array());
+}
+
+#[test]
+fn actual_projection_bounds_execution_links_and_preserves_source_identity() {
+    let links: Vec<HistoryExecutionLink> = (0..12)
+        .map(|n| {
+            serde_json::from_value(json!({
+            "group_id":"g", "call_id":"a", "call_ordinal":0, "call_state":"completed",
+            "execution_id":format!("e{n}"), "state":"exited", "cwd":"/synthetic",
+            "command_excerpt":"SECRET_COMMAND", "command_truncated":false,
+            "description":"SECRET_DESCRIPTION", "request_node_id":"node", "result_node_id":"result"
+        })).unwrap()
+        })
+        .collect();
+    let payload = json!({"output":[
+        {"type":"function_call","call_id":"a","arguments":"SECRET_ARGUMENT"},
+        {"type":"message","content":[{"type":"output_text","text":"same"},{"type":"output_text","text":"same"}]}
+    ]});
+    let result = project("node", "assistant_response", &payload, &links);
+    assert_eq!(result.len(), 3);
+    let encoded = serde_json::to_value(&result).unwrap();
+    let ids = encoded[0]["execution_ids"].as_array().unwrap();
+    assert!(ids.len() <= 8);
+    assert!(
+        !ids.is_empty(),
+        "authoritative matching links must not be discarded"
+    );
+    assert_ne!(
+        encoded[1]["item_identity"], encoded[2]["item_identity"],
+        "equal text at different coordinates is not one item"
+    );
+    assert!(!serde_json::to_string(&result).unwrap().contains("SECRET_"));
+    assert_eq!(
+        result,
+        project("node", "assistant_response", &payload, &links)
+    );
 }
