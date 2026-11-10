@@ -66,7 +66,7 @@ pub(crate) fn decode(text: &str) -> Option<CompactionDiscard> {
 /// Export only the small subtree; malformed/oversized legacy rows remain absent.
 pub(crate) fn status_sql(alias: &str) -> String {
     format!(
-        "CASE WHEN length(CAST({alias}.error_json AS BLOB))<=262144 THEN CASE WHEN json_valid({alias}.error_json) THEN CASE WHEN length(CAST(json_extract({alias}.error_json,'$.automatic_trim_attempt.discard') AS BLOB))<=1024 THEN json_extract({alias}.error_json,'$.automatic_trim_attempt.discard') END END END"
+        "CASE WHEN length(CAST({alias}.error_json AS BLOB))<=262144 THEN CASE WHEN json_valid({alias}.error_json) THEN CASE WHEN json_type({alias}.error_json,'$.automatic_trim_attempt.discard')='object' AND length(CAST(json_extract({alias}.error_json,'$.automatic_trim_attempt.discard') AS BLOB))<=1024 THEN json_extract({alias}.error_json,'$.automatic_trim_attempt.discard') END END END"
     )
 }
 
