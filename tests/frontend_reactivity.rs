@@ -924,6 +924,54 @@ async fn real_history_gc_f7_last_hint_precedes_deleted_thread_failure() {
     history_gc_f7_ordering(true).await;
 }
 
+// Failure-only metadata: never print saved bodies, error strings, paths or random IDs.
+fn f7_barrier_failure(fixture: &Fixture, child: &str, hint_first: bool, baseline: usize) {
+    let alias = |id: Option<&str>| match id {
+        Some(id) if id == child => "fixture-child",
+        Some("f7-parent") => "fixture-parent",
+        Some("reactive") => "fixture-initial",
+        Some(_) => "other",
+        None => "none",
+    };
+    let detail = fixture
+        .detail_trace
+        .iter()
+        .take(128)
+        .map(|entry| {
+            json!({
+                "event": entry.get("event"),
+                "thread": alias(entry.get("thread").and_then(Value::as_str)),
+                "generation": entry.get("generation"),
+                "request_id": entry.get("request_id"),
+                "revision": entry.get("revision"),
+                "held": entry.get("held"),
+            })
+        })
+        .collect::<Vec<_>>();
+    let views = fixture
+        .current_view_trace
+        .iter()
+        .take(8)
+        .map(|entry| {
+            json!({"thread":alias(entry.get("thread").and_then(Value::as_str)),
+            "generation":entry.get("generation"),"read_revision":entry.get("read_revision"),
+            "selection_revision":entry.get("selection_revision")})
+        })
+        .collect::<Vec<_>>();
+    eprintln!(
+        "F7_BARRIER_FAILURE {}",
+        json!({
+            "hint_first":hint_first,"load_failures_before":baseline,
+            "load_failures_current":fixture.load_failures,
+            "held_detail_hints":fixture.held_detail_hints.as_ref().map(Vec::len),
+            "held_load_failures":fixture.held_load_failures.as_ref().map(Vec::len),
+            "current_thread":alias(fixture.ui.view().thread_id.as_deref()),
+            "current_generation":fixture.ui.view().generation,
+            "detail_trace":detail,"current_view_trace":views,
+        })
+    );
+}
+
 async fn history_gc_f7_ordering(hint_first: bool) {
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     let mut fixture = Fixture::build_in(
@@ -1072,7 +1120,7 @@ async fn history_gc_f7_ordering(hint_first: bool) {
         .await;
     assert_eq!(collected["ok"], true, "{collected}");
     if hint_first {
-        watchdog("last GC hint before deleted Thread failure", async {
+        let barrier = watchdog("last GC hint before deleted Thread failure", async {
             loop {
                 fixture.pump().await;
                 let collected = fixture.source_snapshots.last().is_some_and(|snapshot| {
@@ -1092,13 +1140,16 @@ async fn history_gc_f7_ordering(hint_first: bool) {
                 fixture.wait_update_or_action().await;
             }
         })
-        .await
-        .unwrap();
+        .await;
+        if barrier.is_err() {
+            f7_barrier_failure(&fixture, &child, hint_first, failures_before_delete);
+        }
+        barrier.unwrap();
         for failure in fixture.held_load_failures.take().unwrap() {
             fixture.accept_update(failure);
         }
     } else {
-        watchdog("GC hint and deleted Thread failure barrier", async {
+        let barrier = watchdog("GC hint and deleted Thread failure barrier", async {
             loop {
                 fixture.pump().await;
                 if fixture.load_failures > failures_before_delete
@@ -1112,8 +1163,11 @@ async fn history_gc_f7_ordering(hint_first: bool) {
                 fixture.wait_update_or_action().await;
             }
         })
-        .await
-        .unwrap();
+        .await;
+        if barrier.is_err() {
+            f7_barrier_failure(&fixture, &child, hint_first, failures_before_delete);
+        }
+        barrier.unwrap();
         for hint in fixture.held_detail_hints.take().unwrap() {
             fixture.accept_update(hint);
         }
