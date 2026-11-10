@@ -1,6 +1,6 @@
 # Issue 299: Readable Reasoning Qualification Plan
 
-Status: proposed; payload authority changes require independent S6 plan review.
+Status: S6 conditional design review accepted (a82416d2); implementation baseline below.
 Base: 45e91c6c5b677e73c1ff079203fa0259c52a0fb1. No schema migration.
 
 ## Verified Sources
@@ -21,21 +21,23 @@ Base: 45e91c6c5b677e73c1ff079203fa0259c52a0fb1. No schema migration.
 
 | Case | Exact stored qualification | Public result | Named control |
 | --- | --- | --- | --- |
-| Responses summary | assistant_response/output reasoning, summary array part type summary_text with nonempty text string | ReasoningText at exact leaf pointer | responses_readable_summary |
-| Responses content | same parent, content array part type reasoning_text with nonempty text string | ReasoningText at exact leaf pointer | responses_readable_content |
+| Responses summary | assistant_response/output reasoning, summary array part type summary_text with non-whitespace text string | ReasoningText at exact leaf pointer | responses_readable_summary |
+| Responses content | same parent, content array part type reasoning_text with non-whitespace text string | ReasoningText at exact leaf pointer | responses_readable_content |
 | Mixed ciphertext/readable | qualified leaves plus encrypted_content sibling | qualified leaves only; ciphertext never copied | mixed_readable_ciphertext_never_serialized |
 | Encrypted-only | reasoning with no qualified readable leaf | ReasoningUnavailable at original reasoning pointer | encrypted_only_marker |
-| Empty or malformed readable | empty strings, wrong types, missing part type or wrong container | ReasoningUnavailable, no guessed text | empty_malformed_reasoning_marker |
+| Empty or malformed readable | empty/whitespace-only strings, wrong types, missing part type or wrong container | ReasoningUnavailable, no guessed text | empty_malformed_reasoning_marker |
 | Unknown nested fields | arbitrary text/summary object or unlisted part tag | unavailable reasoning marker, never recursively inspect extras | unknown_reasoning_fields_not_authority |
 | Opaque provider envelope | provider_opaque, including thinking-looking block | ReasoningUnavailable; no public extraction by default | opaque_provider_never_interpreted |
 | Redacted thinking | redacted_thinking or opaque data | ReasoningUnavailable, no decode | redacted_reasoning_marker |
 | Unknown ordinary item | existing unrecognized item | existing Unavailable opaque unchanged | ordinary_unknown_unchanged |
 
-Anthropic public thinking is a pending qualification decision, not silently accepted:
-its current stored representation is an explicitly opaque envelope. Review whether
-299's "public thinking block" authorizes a narrowly qualified exact leaf in this
-representation, or whether this first increment must exclude all provider_opaque.
-No provider rewrite or alternate inferred representation will be added by this task.
+Decision: first increment excludes ALL provider_opaque. No envelope contents are
+inspected, even thinking-looking ones. Anthropic publication needs a separate
+explicit authority decision. Whitespace-only strings are unavailable; accepted
+strings are copied unchanged. Traverse summary before content (fixed canonical
+field order), each array in stored order; multiple qualified leaves replace the
+single parent marker without duplicating it. Malformed/unknown siblings do not
+qualify and cannot inject text. If no qualified leaf exists, emit the parent marker.
 
 ## Bounded Extension And Validation
 

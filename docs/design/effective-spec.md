@@ -546,8 +546,19 @@ rewindow mechanism. There is no new operation, item cursor or reconstruction API
 Opt-in nodes expose `items`, an ordered array of saved typed items, or null with
 `items_unavailable_reason: "response_budget"`. Text items carry opaque canonical
 `item_identity`, authoritative `text` and required `text_complete`. Tool call/result
-items expose verified `execution_ids`, never argument/output JSON as prose. Hidden
-reasoning is a `reasoning_unavailable` marker without text, summary or ciphertext.
+items expose verified `execution_ids`, never argument/output JSON as prose. Readable reasoning (#299) uses `reasoning_text { item_identity, text,
+text_complete }` only for non-whitespace strings in exact saved
+`assistant_response.output[].type = reasoning` leaves: `summary[]` parts tagged
+`summary_text`, then `content[]` parts tagged `reasoning_text`, preserving order
+within each array. Each qualified leaf appears once under its exact JSON pointer;
+there is no duplicate parent marker. Text is copied unchanged (no trimming), with
+the same UTF-8 prefix and response-byte accounting as ordinary text. Whitespace-only,
+empty, encrypted-only or unsupported reasoning remains `reasoning_unavailable`.
+All `provider_opaque` envelopes, including Anthropic thinking, remain unavailable
+reasoning without inspecting their block. Internal compaction extraction does not
+confer public history authority. Ciphertext, signature, arbitrary extra fields and
+redacted data are never serialized as reasoning. Readable reasoning is Work,
+explicit-open/default closed, and excluded from tool counts/status.
 Unknown/pruned/legacy content becomes explicit `unavailable`, not guessed text.
 Empty text is a body/group boundary. Reasoning markers are transparent to grouping;
 unavailable markers partition unknown content. Tool sequences may span nodes until
