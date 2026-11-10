@@ -1659,7 +1659,9 @@ impl JsonSchema for HistoryNodeItems {
     }
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
         let array = generator.subschema_for::<Vec<HistoryItem>>();
+        // Flattened Option absence must be a distinct branch from an explicit null projection.
         serde_json::json!({"oneOf":[
+            {"type":"object","not":{"anyOf":[{"required":["items"]},{"required":["items_unavailable_reason"]}]}},
             {"type":"object","required":["items"],"properties":{"items":array},"not":{"required":["items_unavailable_reason"]}},
             {"type":"object","required":["items","items_unavailable_reason"],"properties":{"items":{"type":"null"},"items_unavailable_reason":{"const":"response_budget"}}}
         ]}).try_into().expect("static item projection schema")
