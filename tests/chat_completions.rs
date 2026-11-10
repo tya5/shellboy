@@ -157,9 +157,10 @@ fn incomplete_length_disconnect_explicit_errors_and_terminal_junk_do_not_invent_
     stream.push(LENGTH.as_bytes()).unwrap();
     assert!(stream.is_terminal());
     let error = stream.finish(true).unwrap_err();
-    assert_eq!(error.kind, "incomplete");
+    assert_eq!(error.kind, "output_limit");
     assert!(!error.is_context_limit());
     assert!(error.message.contains("length"));
+    assert!(error.message.contains("max_tokens"));
     let mut stream = Stream::new(Api::ChatCompletions);
     stream.push(CONTEXT.as_bytes()).unwrap();
     assert!(stream.finish(true).unwrap_err().is_context_limit());
