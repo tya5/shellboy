@@ -226,6 +226,11 @@ fn actual_window_response_budget_keeps_all_later_ordinary_nodes() {
     let retry = serde_json::to_value(window(&db, &retry).unwrap()).unwrap();
     assert_eq!(retry["items"].as_array().unwrap().len(), 4);
     assert!(retry["items"][0]["items"].is_array());
+    if let Some(dir)=std::env::var_os("CORE296_FIXTURE_DIR") {
+        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("rewindow-window.json"),serde_json::to_vec_pretty(&retry).unwrap()).unwrap();
+    }
+
 }
 
 #[test]
