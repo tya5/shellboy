@@ -578,3 +578,9 @@ preview cap stays 16; existing DB/task queue bounds and cancellation apply. No
 per-terminal tombstone collection is introduced. The client must separately fence
 its already queued transport observations before using this producer guarantee.
 
+
+When live admission is denied or its bounded preview is evicted, both transient
+live-buffer deltas and `EngineEvent::Stream` publication are suppressed for that
+guard. This is a live-preview bound, not cancellation of the provider request,
+durable assistant result, receipt or model execution. Normal completion and saved
+result handling continue independently. `status(memory=true)` does not fence.

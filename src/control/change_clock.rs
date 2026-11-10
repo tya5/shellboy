@@ -274,20 +274,13 @@ impl ChangeClock {
             return false;
         }
         let mut inner = self.lock();
-        if let Some(token) = token {
-            if !inner
+        if let Some(token) = token
+            && (!inner
                 .reasoning_activity
                 .get(thread)
                 .is_some_and(|a| a.attempt == attempt && a.token == token)
-                || !inner.text.get(thread).is_some_and(|a| a.attempt == attempt)
-            {
-                return false;
-            }
-        }
-
-        // While full, a newcomer is refused and the attempts holding text keep their previews.
-        // Evicting instead would make every entry lose text once more than the cap streams.
-        if !inner.text.contains_key(thread) && inner.text.len() >= MAX_LIVE_TEXT_ATTEMPTS {
+                || !inner.text.get(thread).is_some_and(|a| a.attempt == attempt))
+        {
             return false;
         }
         inner.seq += 1;
