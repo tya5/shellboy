@@ -33,7 +33,7 @@ production capacity or real-provider performance claims.
 
 | Feature | Designed | Implemented | Validation / limits |
 | --- | --- | --- | --- |
-| #296 ordered saved items | Claude1528 adopted existing-window contract and policy caps | Opt-in producer, typed schema and bounded guard candidate | Initial bare-window six tests and guard two tests passed; actual Store read-lane transaction regression, final exported schema, independent exact review, hosted CI and postpublication owner read remain distinct gates. Bare-connection results do not prove public routing. |
+| #296 ordered saved items | Claude1528 adopted existing-window contract and policy caps | Opt-in producer, typed schema and bounded guard candidate | Actual Store read-lane nested-BEGIN regression reproduced on 87d266 and passed on bdc852. Seven focused tests passed; exported schema validated six real synthetic responses and rejected six mutations. Public golden is byte-identical to that export. Independent final-exact review, hosted CI and postpublication owner read remain distinct gates. |
 
 ## Qualification And Installation Boundaries
 

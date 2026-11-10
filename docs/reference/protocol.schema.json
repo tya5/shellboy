@@ -2363,6 +2363,127 @@
       ],
       "type": "object"
     },
+    "HistoryItem": {
+      "oneOf": [
+        {
+          "properties": {
+            "item_identity": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "text",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "text_complete": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "item_identity",
+            "text",
+            "text_complete"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "execution_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "item_identity": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "tool_call",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "item_identity",
+            "execution_ids"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "execution_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "item_identity": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "tool_result",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "item_identity",
+            "execution_ids"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "item_identity": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "reasoning_unavailable",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "item_identity"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "item_identity": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "unavailable",
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/HistoryItemUnavailableReason"
+            }
+          },
+          "required": [
+            "kind",
+            "item_identity",
+            "reason"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "HistoryItemUnavailableReason": {
+      "enum": [
+        "source_budget",
+        "response_budget",
+        "legacy",
+        "pruned",
+        "opaque",
+        "unsupported"
+      ],
+      "type": "string"
+    },
     "HistoryListArgs": {
       "additionalProperties": false,
       "properties": {
@@ -2520,6 +2641,59 @@
     },
     "HistorySnippet": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "items"
+                ]
+              },
+              {
+                "required": [
+                  "items_unavailable_reason"
+                ]
+              }
+            ]
+          },
+          "type": "object"
+        },
+        {
+          "not": {
+            "required": [
+              "items_unavailable_reason"
+            ]
+          },
+          "properties": {
+            "items": {
+              "items": {
+                "$ref": "#/definitions/HistoryItem"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "items"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "items": {
+              "type": "null"
+            },
+            "items_unavailable_reason": {
+              "const": "response_budget"
+            }
+          },
+          "required": [
+            "items",
+            "items_unavailable_reason"
+          ],
+          "type": "object"
+        }
+      ],
       "properties": {
         "context": {
           "$ref": "#/definitions/ExecutionContext"
@@ -2644,6 +2818,9 @@
             "string",
             "null"
           ]
+        },
+        "items": {
+          "type": "boolean"
         },
         "node_id": {
           "type": [

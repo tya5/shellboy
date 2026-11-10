@@ -78,3 +78,15 @@ isolated two-file guard tree has focused six-producer/two-guard test success and
 check pass. Actual generated schema/fixture export, final artifact freshness,
 independent exact review, hosted same-SHA CI and release/owner acceptance remain
 separate gates. This entry does not replace historical failures or earlier records.
+
+### #296 Actual Producer And Schema Qualification
+
+The existing public Store.execute read-lane request reproduced nested-BEGIN on
+87d266 and passed on corrected bdc852. One pinned single-slot run passed seven
+focused tests and standard Draft 2020-12 validation of six actual synthetic results,
+including legacy omission, response-budget suffix and rewindow/public route; six
+invalid mutations were rejected. The public protocol schema is copied byte-exactly
+from that same producer export. Previous compile failures, bare-connection-only
+success, rejected schema export and source-routing corrections remain recorded;
+they are not silently reclassified as passes. Final exact review, hosted all-OS CI,
+publication and actual installed-owner acceptance are still separate gates.
