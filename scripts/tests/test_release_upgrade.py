@@ -18,7 +18,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
         current = (ROOT / 'src/storage/current.sql').read_text(encoding='utf-8')
         base = current.split('-- Derived readback paths only:')[0]
         # Model the historical schema, then exercise the actual additive migration.
-        witness = " selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0),\n"
+        witness = ", selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0)"
         self.assertEqual(base.count(witness), 1)
         base = base.replace(witness, '')
         # The canonical schema has the version-18 index; model the old index.

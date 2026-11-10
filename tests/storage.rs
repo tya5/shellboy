@@ -1228,7 +1228,7 @@ async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata()
         DROP INDEX wait_recovery_thread;
         CREATE INDEX wait_recovery_thread ON event(json_extract(payload_ref_json,'$.thread_id')) WHERE kind='child_recovery_wait';
         INSERT INTO event(id,target_thread_id,kind,payload_ref_json,source_json,created_at) VALUES('legacy-recovery','child','child_recovery_wait','{\"thread_id\":\"child\",\"saved\":true}','{}','now');
-        DELETE FROM schema_migration WHERE version=39; PRAGMA user_version=38;",
+        DELETE FROM schema_migration WHERE version>=39; PRAGMA user_version=38;",
         )
         .unwrap();
     let plans=legacy.prepare("EXPLAIN QUERY PLAN UPDATE event SET kind='recovery_wait' WHERE kind='child_recovery_wait'").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();

@@ -96,7 +96,7 @@ fn migration_matches_fresh_schema_and_rolls_back_transactionally() {
     let (prefix, _) = CURRENT_SCHEMA
         .split_once("-- A revision writer must never")
         .unwrap();
-    let previous=prefix.replace(" selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0),\n","");
+    let previous=prefix.replace(", selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0)","");
     let mut old = Connection::open_in_memory().unwrap();
     old.execute_batch(&previous).unwrap();
     {

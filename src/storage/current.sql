@@ -10,8 +10,7 @@ CREATE TABLE thread(
  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0), reasoning_epoch INTEGER NOT NULL DEFAULT 0 CHECK(reasoning_epoch>=0),
  cursor_node_id TEXT REFERENCES node(id), deleted_at TEXT, updated_at TEXT NOT NULL,
  selection_revision INTEGER NOT NULL DEFAULT 0 CHECK(selection_revision>=0),
- selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0),
- profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0), segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000), reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16), archived_at TEXT, branch_kind TEXT CHECK(branch_kind IS NULL OR branch_kind IN ('fork','rewind')));
+ profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0), segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000), reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16), archived_at TEXT, branch_kind TEXT CHECK(branch_kind IS NULL OR branch_kind IN ('fork','rewind')), selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0));
 
 CREATE INDEX threads_updated ON thread(deleted_at,updated_at DESC,id);
 CREATE INDEX threads_visible_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL;
