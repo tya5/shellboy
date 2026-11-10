@@ -540,3 +540,41 @@ Protocol 5 adds `ThreadSummary.awaiting_human_count_exact`. It defaults to true
 when absent and is omitted when true; false means `awaiting_human_count` 17 is
 a lower bound of 17 or more. The version boundary accounts for changed existing-field semantics and
 incompatible live cursor behavior, not unknown-field strictness.
+
+### Terminal status / later live baseline fence
+
+A successful durable `status` response fences only the concrete returned `items`
+whose `kind` is `attempt`, whose `state` is `completed`, `failed`, `incomplete` or
+`cancelled`, and whose `id`/`thread_id` identify that exact attempt and Thread. It
+makes no assertion about an omitted attempt, another list operation, pagination,
+persistence, text completeness or model-input consumption. There is no separate
+exact-attempt status RPC or attempt-id request filter.
+
+Within the SAME owner `instance_id`, an `events.wait` request STARTED AFTER receiving
+that status response, with that Thread included in its filter and a fresh baseline
+(no cursor, `include_text=true`; reasoning activity opt-in independently), cannot
+include the fenced attempt in live text or reasoning activity. An already in-flight
+request/queued response is allowed to contain an earlier observation. Completing a
+poll after status does not make its earlier-started observation a fence. Incremental
+deltas/offsets are not a complete baseline; retain the normal baseline/resync rules.
+Owner changes, disconnect/reconnect and changed filters require a new baseline and
+same-owner qualification; never compare opaque cursors as attempt generations.
+
+Implementation linearization: durable status is currently projected by bounded
+inspection work on a separate read connection (`control/db.rs`, Status branch),
+NOT the DB mutation worker. Before returning that response, Control revalidates
+ONLY its bounded returned terminal attempt identities on the ordinary DB worker
+and revokes their live admissions. Stream admission checks exact Thread/attempt
+nonterminal state and registers bounded memory on that SAME worker. DB borrows
+finish before the memory lock; no lock spans external callbacks/IPC/provider work.
+`events.wait` remains receipt-free and memory-only. No new wire fields or tables.
+
+A guard token is reserved before queuing admission. Pending admission is cancelled
+by dropping its owned reservation, including lost responses and shutdown. It must
+not register after its reservation ends. Same-attempt duplicate admission replaces
+the token explicitly; old writes/drop are inert. Deltas only update the exact
+admitted token, never create/recreate an evicted or revoked attempt. The active
+preview cap stays 16; existing DB/task queue bounds and cancellation apply. No
+per-terminal tombstone collection is introduced. The client must separately fence
+its already queued transport observations before using this producer guarantee.
+
