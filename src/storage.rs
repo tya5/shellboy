@@ -58,6 +58,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (37, "0037_thread_branch_kind"),
     (38, "0038_human_reply_pending"),
     (39, "0039_independent_runs"),
+    (40, "0040_selection_nonappend_generation"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -2504,3 +2505,7 @@ mod integrity_policy_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "storage/selection_generation_tests.rs"]
+mod selection_generation_tests;

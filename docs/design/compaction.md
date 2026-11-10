@@ -4,6 +4,26 @@
 
 対象snapshotには選択revision、profile revision、reasoning epoch、経路順node ID・payload revision・実本文hashを固定する。API待機中にDB transactionを保持しない。採用時に固定版を照合し、要約node・replacement・全source参照・選択pathを同一transactionで保存する。原文nodeは変更しない。元の経路を選び直した場合は、完全一致する入力と生成規則の成功片だけを再利用する。
 
+## Append-only summary adoption (#300)
+
+Automatic summary snapshots capture the full selected path and an internal monotonic
+non-append generation. Storage triggers invalidate that generation for path deletion,
+update, interior/conflicting insertion and same-cursor revision changes. True tail
+appends, including multiple separate appends and batches, preserve it. A conflicting
+thread INSERT (including REPLACE/UPSERT) is unsupported and rejected, not allowed to
+reset the witness. Path conflict insertion invalidates BEFORE conflict resolution,
+independent of SQLite recursive delete triggers; ON CONFLICT UPDATE is also covered.
+Counter overflow or invalid numeric type aborts the transaction. Conservative
+invalidation is allowed (including same-cursor appends); this is not an event count.
+
+Adoption requires unchanged generation and the captured full ordered path as a prefix
+of current selection, plus existing profile/epoch/Run/Turn/hash/cancellation guards.
+Replacement and current appended tail commit together against current revision in the
+same transaction. Other compaction edits and virtual expanded preview snapshots keep
+strict revision checks. No public API, payload, queue or journal is added. The counter
+lives with its thread, migration is transactional, and path/counter changes roll back
+together. Focused SQL/transaction and adoption tests qualify these invariants.
+
 ## Owner-scope fences during queued message acceptance (#52)
 
 The compaction snapshot freezes both the presence and identity of its current

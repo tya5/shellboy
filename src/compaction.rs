@@ -106,6 +106,7 @@ struct Snapshot {
     // Additional immutable source facts needed when a selected marker is
     // expanded virtually for summary generation before atomic adoption.
     extra_sources: Vec<Source>,
+    append_witness: Option<(i64, Vec<String>)>,
     protected: HashSet<String>,
     latest_complete_turn: Option<String>,
     current_turn: Option<String>,
@@ -411,6 +412,9 @@ impl Compactor {
     async fn snapshot(&self, thread: &str, for_summary: bool) -> Result<Snapshot, ApiError> {
         let thread = thread.to_owned();
         self.database.call(move |db| {
+            // Capture revision, selected IDs and the mutation witness from one read view.
+            let read = db.transaction()?;
+            let db = &read;
             let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<i64>>(6)?,r.get::<_,Option<i64>>(7)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
             let current_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
@@ -433,6 +437,8 @@ impl Compactor {
                 let attachments=db.prepare("SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id")?.query_map(params![id,thread],|r|Ok(json!({"id":r.get::<_,String>(0)?,"path":r.get::<_,String>(1)?,"kind":r.get::<_,String>(2)?,"state":r.get::<_,String>(3)?,"reason":r.get::<_,Option<String>>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
                 sources.push(Source{id,turn,revision,hash,payload,attachments});
             }
+            let selected=sources.iter().map(|source|source.id.clone()).collect::<Vec<_>>();
+            let generation=db.query_row("SELECT selection_nonappend_generation FROM thread WHERE id=?1",[&thread],|r|r.get::<_,i64>(0))?;
             let groups=source_groups(sources,&completed);
             let mut turn_boundaries=HashMap::new();
             // Spill uses complete-group fences, not the summary prefix. Do not
@@ -444,7 +450,7 @@ impl Compactor {
                     }
                 }
             }
-            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,segment_chars:0,reduce_rounds:0}).map(|snapshot|(snapshot,data.6,data.7))
+            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),append_witness:Some((generation,selected)),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,segment_chars:0,reduce_rounds:0}).map(|snapshot|(snapshot,data.6,data.7))
         }).await.map_err(storage_error).map(|(mut snapshot,segment,rounds)|{
             let config = self.config.current();
             let connection=config.connections.get(&snapshot.profile);
@@ -1686,6 +1692,7 @@ mod tests {
             effort: None,
             groups,
             extra_sources: Vec::new(),
+            append_witness: None,
             protected: HashSet::new(),
             latest_complete_turn: Some("last".into()),
             current_turn: Some("current".into()),

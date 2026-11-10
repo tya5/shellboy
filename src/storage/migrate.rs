@@ -199,6 +199,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0039_independent_runs.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 40,
+        sql: include_str!("../../migrations/0040_selection_nonappend_generation.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(
@@ -223,6 +228,11 @@ pub(super) fn run(
             )?,
             37 => transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_table_info('thread') WHERE name='branch_kind')",
+                [],
+                |r| r.get::<_, bool>(0),
+            )?,
+            40 => transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('thread') WHERE name='selection_nonappend_generation')",
                 [],
                 |r| r.get::<_, bool>(0),
             )?,
@@ -641,8 +651,8 @@ mod activity_migration_tests {
             );
             assert_eq!(
                 crate::storage::SCHEMA_VERSION,
-                39,
-                "schema 39 extends the reviewed #262 schema-38 baseline"
+                40,
+                "schema 40 adds the non-append selection witness"
             );
             assert_eq!(
                 db.query_row(
@@ -692,7 +702,7 @@ mod activity_migration_tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            39
+            crate::storage::SCHEMA_VERSION
         );
         assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE target_thread_id='legacy' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 20);
         assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_human_reply_pending'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
