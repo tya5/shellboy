@@ -346,3 +346,110 @@ async fn actual_store_history_window_existing_read_lane_reuses_caller_transactio
     drop(store);
     database.shutdown().await.unwrap();
 }
+
+#[test]
+fn readable_reasoning_actual_window_schema_roundtrip_order_and_utf8() {
+    let mut db = db();
+    append(
+        &mut db,
+        "readable",
+        "assistant_response",
+        json!({"output":[
+            {"type":"reasoning","summary":[{"type":"summary_text","text":"first"},{"type":"summary_text","text":"界".repeat(6000)}],"encrypted_content":"SECRET_CIPHER"},
+            {"type":"function_call","call_id":"a","arguments":"SECRET_ARGS"},
+            {"type":"message","content":[{"type":"output_text","text":"answer"}]}
+        ]}),
+    );
+    let result = window(&db, &args()).unwrap();
+    let encoded = serde_json::to_value(&result).unwrap();
+    let items = &encoded["items"][0]["items"];
+    assert_eq!(items[0]["kind"], "reasoning_text");
+    assert_eq!(items[0]["text"], "first");
+    assert_eq!(items[0]["text_complete"], true);
+    assert_eq!(items[1]["kind"], "reasoning_text");
+    assert_eq!(items[1]["text_complete"], false);
+    assert_eq!(
+        items[1]["text"].as_str().unwrap().len(),
+        ITEM_TEXT_BYTES - ITEM_TEXT_BYTES % 3
+    );
+    assert_eq!(items[2]["kind"], "tool_call");
+    assert_eq!(items[3]["kind"], "text");
+    assert_eq!(
+        items[0]["item_identity"],
+        r#"["readable","/output/0/summary/0"]"#
+    );
+    assert_ne!(items[0]["item_identity"], items[1]["item_identity"]);
+    assert!(!serde_json::to_string(items).unwrap().contains("SECRET"));
+    let decoded: HistoryWindow = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    assert_eq!(
+        serde_json::to_value(window(&db, &args()).unwrap()).unwrap(),
+        encoded
+    );
+    let schema: Value = serde_json::from_str(&schema_json()).unwrap();
+    let item_schema = schema["$defs"]["HistoryItem"].to_string();
+    assert!(item_schema.contains("reasoning_text"), "{item_schema}");
+    assert!(item_schema.contains("text_complete"));
+}
+
+#[test]
+fn readable_reasoning_actual_window_source_budget_and_opaque_marker() {
+    let mut db = db();
+    append(
+        &mut db,
+        "huge-reason",
+        "assistant_response",
+        json!({"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"x".repeat(1024*1024)}]}]}),
+    );
+    append(
+        &mut db,
+        "opaque-reason",
+        "assistant_response",
+        json!({"output":[{"type":"provider_opaque","dialect":"anthropic_messages","kind":"thinking","block":{"type":"thinking","thinking":"SECRET_THINKING","signature":"SECRET_SIGNATURE"}}]}),
+    );
+    let encoded = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    assert_eq!(encoded["items"][0]["items"][0]["reason"], "source_budget");
+    assert_eq!(
+        encoded["items"][1]["items"][0]["kind"],
+        "reasoning_unavailable"
+    );
+    for node in encoded["items"].as_array().unwrap() {
+        assert!(
+            !serde_json::to_string(&node["items"])
+                .unwrap()
+                .contains("SECRET")
+        );
+    }
+}
+
+#[test]
+fn readable_reasoning_response_budget_counts_text_and_keeps_atomic_suffix() {
+    let mut db = db();
+    let text = "r".repeat(ITEM_TEXT_BYTES);
+    // Mix ordinary and reasoning leaves: both consume the same byte ledger.
+    for n in 0..130 {
+        append(
+            &mut db,
+            &format!("reason{n}"),
+            "assistant_response",
+            json!({"output":[
+                {"type":"reasoning","summary":[{"type":"summary_text","text":text}]},
+                {"type":"message","content":[{"type":"output_text","text":text}]}
+            ]}),
+        );
+    }
+    let encoded = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let nodes = encoded["items"].as_array().unwrap();
+    assert_eq!(nodes.len(), 130);
+    assert_eq!(nodes[127]["items"].as_array().unwrap().len(), 2);
+    for node in &nodes[128..] {
+        assert!(node["items"].is_null());
+        assert_eq!(node["items_unavailable_reason"], "response_budget");
+    }
+    let mut retry = args();
+    retry.ordinal = Some(128);
+    retry.after = 1;
+    let retried = serde_json::to_value(window(&db, &retry).unwrap()).unwrap();
+    assert_eq!(retried["items"][0]["items"][0]["kind"], "reasoning_text");
+    assert_eq!(retried["items"][0]["items"][0]["text_complete"], true);
+}

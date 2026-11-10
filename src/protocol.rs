@@ -1683,6 +1683,11 @@ pub enum HistoryItem {
         text: String,
         text_complete: bool,
     },
+    ReasoningText {
+        item_identity: String,
+        text: String,
+        text_complete: bool,
+    },
     ToolCall {
         item_identity: String,
         execution_ids: Vec<String>,

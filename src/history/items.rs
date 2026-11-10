@@ -119,7 +119,49 @@ pub fn project(
                 });
             }
             Some("reasoning") => {
-                result.push(HistoryItem::ReasoningUnavailable { item_identity: key })
+                let qualified_parent = kind == "assistant_response"
+                    && path.strip_prefix("/output/").is_some_and(|index| {
+                        !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit())
+                    });
+                let before = result.len();
+                if qualified_parent {
+                    // Complete public qualification table; unknown fields are not traversed.
+                    for (field, tag) in [("summary", "summary_text"), ("content", "reasoning_text")]
+                    {
+                        if let Some(parts) = value.get(field).and_then(Value::as_array) {
+                            for (index, part) in parts.iter().enumerate() {
+                                if part.get("type").and_then(Value::as_str) != Some(tag) {
+                                    continue;
+                                }
+                                if let Some(readable) = part
+                                    .get("text")
+                                    .and_then(Value::as_str)
+                                    .filter(|text| !text.trim().is_empty())
+                                {
+                                    let HistoryItem::Text {
+                                        item_identity,
+                                        text,
+                                        text_complete,
+                                    } = text(node, &format!("{path}/{field}/{index}"), readable)
+                                    else {
+                                        unreachable!()
+                                    };
+                                    result.push(HistoryItem::ReasoningText {
+                                        item_identity,
+                                        text,
+                                        text_complete,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                if before == result.len() {
+                    result.push(HistoryItem::ReasoningUnavailable { item_identity: key });
+                }
+            }
+            Some("provider_opaque" | "redacted_thinking") => {
+                result.push(HistoryItem::ReasoningUnavailable { item_identity: key });
             }
             _ => result.push(HistoryItem::Unavailable {
                 item_identity: key,
@@ -134,8 +176,11 @@ pub fn text_bytes(items: &[HistoryItem]) -> usize {
     items
         .iter()
         .map(|item| match item {
-            HistoryItem::Text { text, .. } => text.len(),
-            _ => 0,
+            HistoryItem::Text { text, .. } | HistoryItem::ReasoningText { text, .. } => text.len(),
+            HistoryItem::ToolCall { .. }
+            | HistoryItem::ToolResult { .. }
+            | HistoryItem::ReasoningUnavailable { .. }
+            | HistoryItem::Unavailable { .. } => 0,
         })
         .sum()
 }
@@ -194,5 +239,172 @@ mod tests {
         }
         let empty = serde_json::json!({"output":[{"type":"message","content":[]}]});
         assert!(project("n", "assistant_response", &empty, &[]).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod readable_reasoning_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn responses_readable_summary() {
+        let projected = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":" public summary "}]}]}),
+            &[],
+        );
+        let encoded = serde_json::to_value(&projected).unwrap();
+        assert_eq!(encoded[0]["kind"], "reasoning_text");
+        assert_eq!(encoded[0]["text"], " public summary ");
+        assert_eq!(encoded[0]["text_complete"], true);
+        assert_eq!(
+            encoded[0]["item_identity"],
+            r#"["n","/output/0/summary/0"]"#
+        );
+    }
+
+    #[test]
+    fn responses_readable_content() {
+        let items = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"reasoning","content":[{"type":"reasoning_text","text":"readable content"}]}]}),
+            &[],
+        );
+        let encoded = serde_json::to_value(items).unwrap();
+        assert_eq!(encoded[0]["kind"], "reasoning_text");
+        assert_eq!(encoded[0]["text"], "readable content");
+    }
+
+    #[test]
+    fn mixed_readable_ciphertext_never_serialized() {
+        let items = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"reasoning","encrypted_content":"SECRET_CIPHER","signature":"SECRET_SIGNATURE","summary":[{"type":"summary_text","text":"one"},{"text":"SECRET_UNTYPED"},{"type":"summary_text","text":"two"}],"content":[{"type":"reasoning_text","text":"three"}],"extra":{"text":"SECRET_EXTRA"}}]}),
+            &[],
+        );
+        let encoded = serde_json::to_value(&items).unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(
+            encoded
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["text"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["one", "two", "three"]
+        );
+        assert!(!serde_json::to_string(&items).unwrap().contains("SECRET"));
+    }
+
+    #[test]
+    fn encrypted_only_marker() {
+        let items = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"reasoning","encrypted_content":"SECRET"}]}),
+            &[],
+        );
+        assert!(matches!(
+            &items[..],
+            [HistoryItem::ReasoningUnavailable { .. }]
+        ));
+        assert!(!serde_json::to_string(&items).unwrap().contains("SECRET"));
+    }
+
+    #[test]
+    fn empty_malformed_reasoning_marker() {
+        for summary in [
+            json!([]),
+            json!([{"type":"summary_text","text":""}]),
+            json!([{"type":"summary_text","text":" \n\t"}]),
+            json!([{"type":"summary_text","text":42}]),
+            json!({"type":"summary_text","text":"SECRET"}),
+        ] {
+            let items = project(
+                "n",
+                "assistant_response",
+                &json!({"output":[{"type":"reasoning","summary":summary}]}),
+                &[],
+            );
+            assert!(matches!(
+                &items[..],
+                [HistoryItem::ReasoningUnavailable { .. }]
+            ));
+        }
+    }
+
+    #[test]
+    fn unknown_reasoning_fields_not_authority() {
+        let items = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"reasoning","text":"SECRET_TOP","summary":[{"text":"SECRET_NO_TAG"},{"type":"text","text":"SECRET_WRONG_TAG"}],"content":[{"type":"summary_text","text":"SECRET_WRONG_CONTAINER"}]}]}),
+            &[],
+        );
+        assert!(matches!(
+            &items[..],
+            [HistoryItem::ReasoningUnavailable { .. }]
+        ));
+        assert!(!serde_json::to_string(&items).unwrap().contains("SECRET"));
+    }
+
+    #[test]
+    fn opaque_provider_never_interpreted() {
+        for kind in ["thinking", "unknown"] {
+            let items = project(
+                "n",
+                "assistant_response",
+                &json!({"output":[{"type":"provider_opaque","dialect":"anthropic_messages","kind":kind,"block":{"type":"thinking","thinking":"SECRET_THINKING","signature":"SECRET_SIGNATURE"}}]}),
+                &[],
+            );
+            assert!(matches!(
+                &items[..],
+                [HistoryItem::ReasoningUnavailable { .. }]
+            ));
+            assert!(!serde_json::to_string(&items).unwrap().contains("SECRET"));
+        }
+    }
+
+    #[test]
+    fn redacted_reasoning_marker() {
+        let items = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"redacted_thinking","data":"SECRET_REDACTED"}]}),
+            &[],
+        );
+        assert!(matches!(
+            &items[..],
+            [HistoryItem::ReasoningUnavailable { .. }]
+        ));
+    }
+
+    #[test]
+    fn reasoning_leaf_requires_exact_saved_responses_parent() {
+        let nested = json!({"output":[{"type":"message","content":[{"type":"reasoning","summary":[{"type":"summary_text","text":"SECRET_NESTED"}]}]}]});
+        let user = json!({"role":"user","content":[{"type":"reasoning","summary":[{"type":"summary_text","text":"SECRET_USER"}]}]});
+        for (kind, payload) in [("assistant_response", nested), ("user", user)] {
+            let items = project("n", kind, &payload, &[]);
+            assert!(matches!(
+                &items[..],
+                [HistoryItem::ReasoningUnavailable { .. }]
+            ));
+            assert!(!serde_json::to_string(&items).unwrap().contains("SECRET"));
+        }
+    }
+
+    #[test]
+    fn ordinary_unknown_unchanged() {
+        let items = project(
+            "n",
+            "assistant_response",
+            &json!({"output":[{"type":"future","text":"SECRET"}]}),
+            &[],
+        );
+        assert!(matches!(&items[..], [HistoryItem::Unavailable { .. }]));
     }
 }
