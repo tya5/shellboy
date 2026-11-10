@@ -6,6 +6,7 @@ mod credential_ops;
 mod foreground;
 pub(crate) mod interruption;
 mod live;
+mod live_admission;
 mod memory;
 pub(crate) mod message_delivery;
 mod owner_shutdown;
@@ -142,7 +143,7 @@ pub struct Control {
     events: broadcast::Sender<EngineEvent>,
     ui_events: ui_events::UiEvents,
     changed: Notify,
-    change_clock: change_clock::ChangeClock,
+    change_clock: Arc<change_clock::ChangeClock>,
     /// Wakes only `events.wait` calls that asked for text; everything else sleeps through deltas.
     text_changed: Notify,
     shell_output_changed: Notify,
@@ -384,7 +385,7 @@ impl Control {
             events,
             ui_events: ui_events::UiEvents::new(),
             changed: Notify::new(),
-            change_clock: change_clock::ChangeClock::new(),
+            change_clock: Arc::new(change_clock::ChangeClock::new()),
             text_changed: Notify::new(),
             shell_output_changed: Notify::new(),
             stop: CancellationToken::new(),
@@ -492,6 +493,7 @@ impl Control {
         self.changed.notify_waiters();
     }
     /// One unsaved model delta: memory only, no DB, never waits for a reader.
+    #[cfg(test)]
     fn stream_delta(
         &self,
         thread: &str,
@@ -940,6 +942,7 @@ impl Control {
         let operation = request.operation_id.clone();
         let observation = !request.command.requires_receipt();
         let observation_name = request.command.name();
+        let terminal_fence = matches!(&request.command, Command::Status(args) if !args.memory);
         let result = async {
             request.validate()?;
             if let Command::OwnerShutdown(args) = &request.command {
@@ -1029,6 +1032,15 @@ impl Control {
             }
         }
         .await;
+        let result = match result {
+            Ok(effects) if terminal_fence => {
+                match self.fence_terminal_status(&effects.result).await {
+                    Ok(()) => Ok(effects),
+                    Err(error) => Err(error),
+                }
+            }
+            other => other,
+        };
         // Receipt-free results still obey the exact response-envelope bound,
         // including operation ID and recovery hints, before reaching transport.
         let result = if observation {
