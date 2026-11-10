@@ -2058,7 +2058,8 @@ impl Form {
                     ),
                 ],
                 |form, _cwd| {
-                    Ok(Command::HistoryWindow(HistoryWindowArgs { items: false,
+                    Ok(Command::HistoryWindow(HistoryWindowArgs {
+                        items: false,
                         thread_id: form.owned("thread")?,
                         ordinal: form.optional_number("ordinal")?,
                         node_id: form.optional("node")?,

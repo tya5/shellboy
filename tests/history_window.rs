@@ -43,7 +43,8 @@ fn fill(db: &mut Connection, count: usize) {
 }
 
 fn args() -> HistoryWindowArgs {
-    HistoryWindowArgs { items: false,
+    HistoryWindowArgs {
+        items: false,
         thread_id: "t".into(),
         ordinal: None,
         node_id: None,
@@ -67,7 +68,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(end.items[2].node_id, "n9");
         let middle = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(5),
                 ..args()
             },
@@ -76,7 +78,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(ordinals(&middle), vec![3, 4, 5, 6, 7]);
         let first = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(0),
                 before: 5,
                 ..args()
@@ -86,7 +89,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(ordinals(&first), vec![0, 1, 2]);
         let by_node = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 node_id: Some("n4".into()),
                 before: 0,
                 after: 1,
@@ -97,7 +101,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(ordinals(&by_node), vec![4, 5]);
         let last = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(9),
                 after: 50,
                 ..args()
@@ -107,7 +112,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(ordinals(&last), vec![7, 8, 9]);
         let one = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 before: 0,
                 after: 0,
                 ..args()
@@ -120,7 +126,8 @@ fn end_middle_beginning_and_bounds() {
         // Same item shape as history.list, including the zero-excerpt option.
         let bare = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 excerpt_chars: 0,
                 ..args()
             },
@@ -130,7 +137,8 @@ fn end_middle_beginning_and_bounds() {
 
         let too_wide = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 before: 100,
                 after: 100,
                 ..args()
@@ -141,7 +149,8 @@ fn end_middle_beginning_and_bounds() {
         assert!(
             window(
                 db,
-                &HistoryWindowArgs { items: false,
+                &HistoryWindowArgs {
+                    items: false,
                     before: 100,
                     after: 99,
                     ..args()
@@ -151,12 +160,14 @@ fn end_middle_beginning_and_bounds() {
         );
         assert_eq!(MAX_LIST_LIMIT, 200);
         for bad in [
-            HistoryWindowArgs { items: false,
+            HistoryWindowArgs {
+                items: false,
                 ordinal: Some(1),
                 node_id: Some("n1".into()),
                 ..args()
             },
-            HistoryWindowArgs { items: false,
+            HistoryWindowArgs {
+                items: false,
                 expect_node_id: Some("n1".into()),
                 ..args()
             },
@@ -168,7 +179,8 @@ fn end_middle_beginning_and_bounds() {
         }
         let past = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(10),
                 ..args()
             },
@@ -177,7 +189,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(past.code, ErrorCode::CursorExpired);
         let off = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 node_id: Some("missing".into()),
                 ..args()
             },
@@ -186,7 +199,8 @@ fn end_middle_beginning_and_bounds() {
         assert_eq!(off.code, ErrorCode::CursorExpired);
         let missing = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 thread_id: "x".into(),
                 ..args()
             },
@@ -204,7 +218,8 @@ fn empty_path_has_zero_total_and_no_items() {
         assert_eq!(
             window(
                 db,
-                &HistoryWindowArgs { items: false,
+                &HistoryWindowArgs {
+                    items: false,
                     ordinal: Some(0),
                     ..args()
                 }
@@ -222,7 +237,8 @@ fn append_keeps_every_earlier_position_valid() {
         fill(db, 6);
         let before = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(2),
                 ..args()
             },
@@ -232,7 +248,8 @@ fn append_keeps_every_earlier_position_valid() {
         append(db, "n7");
         let after = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(2),
                 expect_node_id: Some("n2".into()),
                 ..args()
@@ -273,7 +290,8 @@ fn compaction_shifts_positions_and_a_stale_expectation_is_reported() {
         tx.commit().unwrap();
         let result = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(0),
                 ..args()
             },
@@ -285,7 +303,8 @@ fn compaction_shifts_positions_and_a_stale_expectation_is_reported() {
         // The caller last saw n3 at position 3; it moved to 1 and position 3 is now n5.
         let error = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(3),
                 expect_node_id: Some("n3".into()),
                 ..args()
@@ -296,7 +315,8 @@ fn compaction_shifts_positions_and_a_stale_expectation_is_reported() {
         assert_eq!(error.details.as_ref().unwrap()["total"], 4);
         let error = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(5),
                 ..args()
             },
@@ -306,7 +326,8 @@ fn compaction_shifts_positions_and_a_stale_expectation_is_reported() {
         // Node anchors follow the node to its new position.
         let moved = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 node_id: Some("n3".into()),
                 before: 0,
                 after: 0,
@@ -341,7 +362,8 @@ fn rewind_shortens_the_path_and_old_tail_positions_expire() {
         assert!(now.revision > seen.revision);
         let error = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 ordinal: Some(7),
                 expect_node_id: Some("n7".into()),
                 ..args()
@@ -352,7 +374,8 @@ fn rewind_shortens_the_path_and_old_tail_positions_expire() {
         assert_eq!(error.details.as_ref().unwrap()["revision"], now.revision);
         let gone = window(
             db,
-            &HistoryWindowArgs { items: false,
+            &HistoryWindowArgs {
+                items: false,
                 node_id: Some("n7".into()),
                 ..args()
             },
@@ -445,7 +468,8 @@ fn steps(db: &Connection, request: &HistoryWindowArgs) -> u64 {
 fn read_cost_does_not_grow_with_path_length() {
     on_db(|db| {
         let measure = |db: &Connection, count: i64| {
-            let wide = HistoryWindowArgs { items: false,
+            let wide = HistoryWindowArgs {
+                items: false,
                 before: 20,
                 after: 20,
                 ..args()
@@ -454,21 +478,24 @@ fn read_cost_does_not_grow_with_path_length() {
                 steps(db, &wide),
                 steps(
                     db,
-                    &HistoryWindowArgs { items: false,
+                    &HistoryWindowArgs {
+                        items: false,
                         ordinal: Some(count as u64 / 2),
                         ..wide.clone()
                     },
                 ),
                 steps(
                     db,
-                    &HistoryWindowArgs { items: false,
+                    &HistoryWindowArgs {
+                        items: false,
                         node_id: Some(format!("n{}", count / 2)),
                         ..wide.clone()
                     },
                 ),
                 steps(
                     db,
-                    &HistoryWindowArgs { items: false,
+                    &HistoryWindowArgs {
+                        items: false,
                         ordinal: Some(0),
                         ..wide
                     },

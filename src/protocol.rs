@@ -1615,19 +1615,87 @@ record!(SpillToolSource {
 });
 record!(SpillToolSources { status: String, items: Vec<SpillToolSource>, truncated: bool });
 // Optional flattened projection: absent for legacy reads, explicit null on response budget.
-record!(HistoryNodeItems {
-    items: Option<Vec<HistoryItem>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")] items_unavailable_reason: Option<HistoryItemUnavailableReason>
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HistoryNodeItems {
+    pub items: Option<Vec<HistoryItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub items_unavailable_reason: Option<HistoryItemUnavailableReason>,
+}
+impl<'de> Deserialize<'de> for HistoryNodeItems {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        let items = value
+            .get("items")
+            .ok_or_else(|| serde::de::Error::custom("items projection absent"))?;
+        let reason = value.get("items_unavailable_reason");
+        if items.is_null() {
+            if reason != Some(&serde_json::json!("response_budget")) {
+                return Err(serde::de::Error::custom(
+                    "null items requires response_budget",
+                ));
+            }
+            Ok(Self {
+                items: None,
+                items_unavailable_reason: Some(HistoryItemUnavailableReason::ResponseBudget),
+            })
+        } else {
+            if reason.is_some() {
+                return Err(serde::de::Error::custom(
+                    "array items cannot carry a node failure reason",
+                ));
+            }
+            Ok(Self {
+                items: Some(
+                    serde_json::from_value(items.clone()).map_err(serde::de::Error::custom)?,
+                ),
+                items_unavailable_reason: None,
+            })
+        }
+    }
+}
+impl JsonSchema for HistoryNodeItems {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "HistoryNodeItems".into()
+    }
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let array = generator.subschema_for::<Vec<HistoryItem>>();
+        serde_json::json!({"oneOf":[
+            {"type":"object","required":["items"],"properties":{"items":array},"not":{"required":["items_unavailable_reason"]}},
+            {"type":"object","required":["items","items_unavailable_reason"],"properties":{"items":{"type":"null"},"items_unavailable_reason":{"const":"response_budget"}}}
+        ]}).try_into().expect("static item projection schema")
+    }
+}
+states!(HistoryItemUnavailableReason {
+    SourceBudget,
+    ResponseBudget,
+    Legacy,
+    Pruned,
+    Opaque,
+    Unsupported
 });
-states!(HistoryItemUnavailableReason { SourceBudget, ResponseBudget, Legacy, Pruned, Opaque, Unsupported });
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HistoryItem {
-    Text { item_identity: String, text: String, text_complete: bool },
-    ToolCall { item_identity: String, execution_ids: Vec<String> },
-    ToolResult { item_identity: String, execution_ids: Vec<String> },
-    ReasoningUnavailable { item_identity: String },
-    Unavailable { item_identity: String, reason: HistoryItemUnavailableReason },
+    Text {
+        item_identity: String,
+        text: String,
+        text_complete: bool,
+    },
+    ToolCall {
+        item_identity: String,
+        execution_ids: Vec<String>,
+    },
+    ToolResult {
+        item_identity: String,
+        execution_ids: Vec<String>,
+    },
+    ReasoningUnavailable {
+        item_identity: String,
+    },
+    Unavailable {
+        item_identity: String,
+        reason: HistoryItemUnavailableReason,
+    },
 }
 record!(HistorySnippet {
     #[serde(flatten, default, skip_serializing_if = "Option::is_none")] item_projection: Option<HistoryNodeItems>,

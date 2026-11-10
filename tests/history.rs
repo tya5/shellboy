@@ -513,7 +513,8 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
         .call(|db| {
             Ok(shellboy::history::window(
                 db,
-                &shellboy::protocol::HistoryWindowArgs { items: false,
+                &shellboy::protocol::HistoryWindowArgs {
+                    items: false,
                     thread_id: "fork".into(),
                     ordinal: None,
                     node_id: Some("calls".into()),
