@@ -28,9 +28,10 @@ class PublicUpgradeArguments(unittest.TestCase):
         source = (ROOT / 'src/storage.rs').read_text()
         names = source.split('MIGRATION_NAMES', 1)[1].split('];', 1)[0]
         versions = [int(x) for x in re.findall(r'\((\d+),\s*"', names)]
-        self.assertEqual(versions, list(range(1, 40)))
+        self.assertEqual(versions, list(range(1, 41)))
         self.assertIn('(39, "0039_independent_runs")', names)
-        self.assertEqual(upgrade.PUBLIC_SCHEMA['0.11.0'], len(versions))
+        self.assertEqual(upgrade.PUBLIC_SCHEMA['0.11.0'], 39)
+        self.assertIn('(40, "0040_selection_nonappend_generation")', names)
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
 
     def test_schema_rollback_rejected(self):

@@ -17,6 +17,10 @@ class ReleaseUpgradeTests(unittest.TestCase):
         db.execute('PRAGMA foreign_keys=ON')
         current = (ROOT / 'src/storage/current.sql').read_text(encoding='utf-8')
         base = current.split('-- Derived readback paths only:')[0]
+        # Model the historical schema, then exercise the actual additive migration.
+        witness = " selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0),\n"
+        self.assertEqual(base.count(witness), 1)
+        base = base.replace(witness, '')
         # The canonical schema has the version-18 index; model the old index.
         suffix = " OR key LIKE 'summary.usage.%'"
         self.assertEqual(base.count(suffix), 1)
@@ -406,18 +410,31 @@ class ReleaseUpgradeTests(unittest.TestCase):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
         db.executescript((ROOT / 'src/storage/current.sql').read_text())
-        db.executescript("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version IN (38,39); PRAGMA user_version=37;")
+        db.executescript("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version>=38; PRAGMA user_version=37;")
         before, _ = self.upgrade(db, 37, 38)
         self.assertEqual(checks.ledger(db), before + [(38, '0038_human_reply_pending')])
         db.execute('DROP INDEX receipt_human_reply_pending')
         with self.assertRaisesRegex(AssertionError, 'human reply targets'):
             checks.check_migration(db, before, 37, 38)
 
-    def test_arguments_default_to_public_v0100_schema32_and_target39(self):
+    def test_schema39_to40_preserves_originals_and_records_real_witness(self):
+        db = self.fixture(39)
+        before, records = self.upgrade(db, 39, 40)
+        self.assertEqual(checks.ledger(db), before + [(40, '0040_selection_nonappend_generation')])
+        self.assertEqual(db.execute("SELECT selection_nonappend_generation FROM thread WHERE id='parent'").fetchone(), (0,))
+        db.execute("DELETE FROM thread_path WHERE thread_id='parent'")
+        self.assertEqual(db.execute("SELECT selection_nonappend_generation FROM thread WHERE id='parent'").fetchone(), (1,))
+        db.rollback()
+        checks.preserved(db, records)
+        db.execute('DROP TRIGGER selection_path_insert')
+        with self.assertRaisesRegex(AssertionError, 'migration 40 missing'):
+            checks.check_migration(db, before, 39, 40)
+
+    def test_arguments_default_to_public_v0100_schema32_and_target40(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.10.0', 32, checks.CARGO_VERSION, 39))
+                         ('0.10.0', 32, checks.CARGO_VERSION, 40))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
@@ -428,9 +445,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 39))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 40))
         release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 39))
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 40))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])

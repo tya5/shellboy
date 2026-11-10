@@ -33,7 +33,7 @@ def add(db, execution, command='cargo test broken', code=1, thread='thread', tur
         state='exited', reason=None, encoding='UTF-8', node=True):
     with contextlib.closing(db.cursor()) as cursor:
         run, attempt, group = 'run-' + turn, 'attempt-' + turn, 'group-' + turn
-        cursor.execute("INSERT OR IGNORE INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES(?,'/repo','','p','m',?)", (thread, time_at(0)))
+        cursor.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) SELECT ?,'/repo','','p','m',? WHERE NOT EXISTS(SELECT 1 FROM thread WHERE id=?)", (thread, time_at(0), thread))
         cursor.execute("INSERT OR IGNORE INTO run(id,thread_id,state,created_at) VALUES(?,?,'completed',?)", (run, thread, time_at(0)))
         cursor.execute("INSERT OR IGNORE INTO turn(id,thread_id,run_id,state,created_at) VALUES(?,?,?,'completed',?)", (turn, thread, run, time_at(0)))
         cursor.execute("INSERT OR IGNORE INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at) VALUES(?,?,0,0,'p','m',0,'completed','{}',?)", (attempt, turn, time_at(0)))

@@ -197,6 +197,15 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.rows()[0]['error'], 'error: safe complete')
         self.assertTrue(self.rows()[0]['stderr_limited'])
 
+    def test_public_schema39_and_additive40_are_supported_without_broad_version_bypass(self):
+        add(self.db, 'schema-compat')
+        for version in (39, 40):
+            with self.subTest(version=version):
+                catalog.read_rows(self.db, f'PRAGMA user_version={version}')
+                self.db.commit()
+                self.build()
+                self.assertTrue(self.rows())
+
     def test_source_version_fail_closed_and_rebuild_after_option_change(self):
         add(self.db, 'f')
         self.build()
