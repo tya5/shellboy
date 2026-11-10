@@ -466,6 +466,12 @@ impl Inner {
     fn live_text(&self, after: u64, upto: u64, filter: &[String]) -> Vec<EventLiveText> {
         let mut attempts = Vec::new();
         for (thread, entry) in &self.text {
+            // Admission reserves capacity, but is not itself a received text delta.
+            // Retired deltas retain a floor, so their empty/gap entries stay visible.
+            if entry.deltas.is_empty() && entry.floor == 0 {
+                continue;
+            }
+
             if !filter.is_empty() && !filter.iter().any(|wanted| wanted == thread) {
                 continue;
             }
@@ -1188,6 +1194,17 @@ mod tests {
 mod admission_fence_tests {
     use super::*;
     #[test]
+    fn admission_without_text_keeps_text_baseline_empty_but_reasoning_active() {
+        let clock = ChangeClock::new();
+        let notify = Notify::new();
+        let guard = clock.live_text_guard("t", "a", &notify);
+        let before = clock.snapshot(&[], true, true);
+        assert!(before.1.is_empty());
+        assert_eq!(before.2.len(), 1);
+        assert!(guard.record(0, "first", false));
+        assert_eq!(clock.snapshot(&[], true, true).1.len(), 1);
+    }
+    #[test]
     fn admitted_newcomer_at_capacity_has_no_live_publication_authority() {
         let clock = ChangeClock::new();
         let notify = Notify::new();
@@ -1196,6 +1213,9 @@ mod admission_fence_tests {
             .iter()
             .map(|id| clock.live_text_guard(id, id, &notify))
             .collect::<Vec<_>>();
+        for guard in guards.iter().take(16) {
+            assert!(guard.record(0, "received", false));
+        }
         let before = clock.snapshot(&[], true, true);
         assert!(!guards[16].record(0, "denied text", false));
         assert!(!guards[16].record(0, "denied reasoning", true));
