@@ -90,3 +90,14 @@ from that same producer export. Previous compile failures, bare-connection-only
 success, rejected schema export and source-routing corrections remain recorded;
 they are not silently reclassified as passes. Final exact review, hosted all-OS CI,
 publication and actual installed-owner acceptance are still separate gates.
+
+
+## #299 Responses Readable Reasoning Initial Increment
+
+Owner branch issue-299/readable-reasoning; baseline 45e91c6c. Formal spec ff9bbe
+preceded payload implementation. Exposes only exact qualified Responses reasoning
+summary/content leaves; all provider opaque remains marker-only. No schema migration,
+installed binary change, private DB, live provider or paid request. Focused source
+and response-budget/privacy controls are in history/items and history_window_items.
+Independent plan condition S6 a824 accepted; implementation review / exact-SHA
+all-OS CI are still required. See acceptance.md for actual failed and passed runs.

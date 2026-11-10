@@ -387,7 +387,7 @@ fn readable_reasoning_actual_window_schema_roundtrip_order_and_utf8() {
         encoded
     );
     let schema: Value = serde_json::from_str(&schema_json()).unwrap();
-    let item_schema = schema["$defs"]["HistoryItem"].to_string();
+    let item_schema = schema["definitions"]["HistoryItem"].to_string();
     assert!(item_schema.contains("reasoning_text"), "{item_schema}");
     assert!(item_schema.contains("text_complete"));
 }

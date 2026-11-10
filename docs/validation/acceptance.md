@@ -11445,3 +11445,28 @@ built and copied in the same slot exports a schema byte-identical to the committ
 compile failed with a temporary witness borrow; a later strict lint failed on redundant borrows. Those logs remain
 separate from the corrected successful runs. Old 6ed full-suite/all-OS failures remain recorded; these focused local
 results do not establish full-suite or all-OS success. Independent combined-exact review and CI remain separate gates.
+
+
+## Core #299 Bounded Readable Reasoning
+
+Authority: `docs/design/effective-spec.md`, Responses-only initial increment;
+qualification matrix: `docs/development/issue-299-readable-reasoning-plan.md`.
+Public `reasoning_text` has exact leaf identity, UTF-8 bounded text and explicit
+text_complete. All provider_opaque stays marker-only; no Anthropic authority is
+inferred from compaction or provider internals. Database schema 40 is unchanged.
+
+Local fixed-source checkpoint 00868527001be32d06cdedca053eb95d4d94e526:
+cargo check --tests PASS; history::items 13 PASS; history_window_items 9 PASS / 1 FAIL.
+The failure was the newly authored schema assertion using $defs instead of this
+public schema document's definitions field; all runtime/order/UTF-8/privacy and
+response/source-budget assertions preceding it passed. The assertion is corrected
+without weakening variant/text_complete requirements. Original logs are preserved:
+/tmp/core299-fixed-{check,unit,window}.log. Renewed validation and CI follow on the
+next exact commit; this is not a full-suite, live provider, installed or Studio claim.
+
+Earlier ab3/c39 editor scripts failed their exact-pattern assertion before items
+write; their shell continued because set-e was absent. Original stderr/logs are
+retained in .local/private-reports/core299-source-integrity (outside Git). The fmt
+race hypothesis was withdrawn after direct shell stderr/HEAD comparison. Restore
+was limited to owned changes, fmt completed alone, then source committed/hashed
+before checking. Those mutable/failed runs are never counted as green evidence.
