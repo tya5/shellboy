@@ -283,6 +283,10 @@ impl ChangeClock {
         {
             return false;
         }
+        // Both guarded and tokenless updates share the active-thread bound.
+        if !inner.text.contains_key(thread) && inner.text.len() >= MAX_LIVE_TEXT_ATTEMPTS {
+            return false;
+        }
         inner.seq += 1;
         let seq = inner.seq;
         if inner
@@ -1183,6 +1187,22 @@ mod tests {
 #[cfg(test)]
 mod admission_fence_tests {
     use super::*;
+    #[test]
+    fn admitted_newcomer_at_capacity_has_no_live_publication_authority() {
+        let clock = ChangeClock::new();
+        let notify = Notify::new();
+        let ids = (0..17).map(|i| format!("t{i}")).collect::<Vec<_>>();
+        let guards = ids
+            .iter()
+            .map(|id| clock.live_text_guard(id, id, &notify))
+            .collect::<Vec<_>>();
+        let before = clock.snapshot(&[], true, true);
+        assert!(!guards[16].record(0, "denied text", false));
+        assert!(!guards[16].record(0, "denied reasoning", true));
+        assert_eq!(clock.snapshot(&[], true, true).1.len(), 16);
+        assert_eq!(clock.snapshot(&[], true, true).2.len(), before.2.len());
+        assert!(guards[0].record(0, "current", false));
+    }
     #[test]
     fn terminal_revoke_is_update_only_for_text_and_reasoning() {
         let clock = ChangeClock::new();
