@@ -297,7 +297,7 @@ async fn actual_shared_store_history_window_request_reuses_caller_transaction() 
     // This goes through Store's real shared DbWorker transact/command dispatch;
     // a bare history::window(&Connection) call cannot detect nested BEGIN.
     let result=store.execute(Request::new("fixture:public-window",Command::HistoryWindow(args())),None).await;
-    assert!(result.is_ok(),"public shared-writer request failed: {:?}",result.err());
+    assert!(result.is_ok(),"public shared-writer request failed: {:?}",result.as_ref().err());
     let encoded=result.unwrap().result;
     assert_eq!(encoded["items"][0]["items"][0]["text"],"synthetic public route");
     if let Some(dir)=std::env::var_os("CORE296_FIXTURE_DIR") {
