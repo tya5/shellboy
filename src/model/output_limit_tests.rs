@@ -169,3 +169,26 @@ fn unrelated_incomplete_reasons_and_transport_eof_are_not_output_limit() {
         .unwrap();
     assert_eq!(interrupted.finish(false).unwrap_err().kind, "incomplete");
 }
+
+#[test]
+fn json_output_limit_preserves_exact_reason_and_does_not_enable_messages_json() {
+    let raw = dialect::decode_json(
+        Api::ChatCompletions,
+        json!({"choices":[{"index":0,"message":{"role":"assistant","content":"partial"},"finish_reason":"length"}]}),
+    ).unwrap();
+    let error = ModelResponse::completed(raw, false).unwrap_err();
+    assert_eq!(error.kind, "output_limit");
+    assert!(error.message.contains("max_tokens"));
+    let serialized = serde_json::to_value(&error).unwrap();
+    assert_eq!(serialized["kind"], "output_limit");
+    for reason in ["content_filter", "novel_reason"] {
+        let raw = dialect::decode_json(Api::ChatCompletions,
+            json!({"choices":[{"index":0,"message":{"role":"assistant","content":"partial"},"finish_reason":reason}]})).unwrap();
+        assert_ne!(
+            ModelResponse::completed(raw, false).unwrap_err().kind,
+            "output_limit"
+        );
+    }
+    assert_eq!(dialect::decode_json(Api::AnthropicMessages,
+        json!({"type":"message","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]})).unwrap_err().kind, "protocol");
+}

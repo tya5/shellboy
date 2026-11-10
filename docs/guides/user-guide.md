@@ -314,6 +314,22 @@ Replace `CONNECTION` and `MODEL_ID` with configured values. The list comes from 
 
 Changes apply to subsequent requests, without rewriting communication already sent. Changing connection or model also changes the reasoning-send epoch; returning to the original model does not automatically revive old opaque reasoning. Conversation source text remains saved.
 
+### Output limits
+
+A connection's optional positive `max_tokens` setting maps to Responses
+`max_output_tokens`, Chat Completions `max_completion_tokens`, or Messages
+`max_tokens`. Unset values omit the field for the first two APIs; Messages keeps
+its existing 32768 default. This is not the context window. Only set values the
+chosen endpoint/model supports; Shellboy does not query a limit catalogue.
+
+An explicit provider output-limit stop is reported as `output_limit`, with a
+hint to configure this setting, rather than successful completion. Partial
+output remains recovery/audit data, not a completed answer. Other incomplete
+reasons and interrupted transport are not reclassified. Responses/Chat JSON and
+streaming stops are supported; Messages remains stream-only. Avoid setting the
+same native key in `extra_body` when `max_tokens` is configured: the duplicate
+is rejected, not silently overridden. See [configuration](configuration.md).
+
 ## 5. Delegate to a child
 
 Simply saying "use subagents" does not guarantee that the model understands Shellboy's child-Thread operations. Guides are bundled with the executable; the model receives a short entry-point instruction and reads the guides itself when needed, not their full text in every prompt. No checkout or repository path is required. To explicitly request the procedures, name the guide IDs:

@@ -283,10 +283,11 @@ models) read on 2026-11-01; no real provider call has been made.
   Shellboy knows, or (b) it varies per Thread or Turn and Shellboy already holds
   that state. Otherwise it stays in tier 2. Thread effort satisfies (b);
   thinking on/off does not, so it stays in `extra_body`.
-- `max_tokens`: connection setting `max_tokens` (positive integer), default 32768,
-  chosen to be below the documented 128K output cap of current models and large
-  enough that routine coding turns do not stop at `max_tokens`. It is only valid
-  with `api = "anthropic_messages"`.
+- `max_tokens`: the Messages native output-limit field uses the optional positive
+  connection setting `max_tokens`, retaining 32768 when unset. The same saved
+  setting also maps to Responses `max_output_tokens` and Chat Completions
+  `max_completion_tokens`; those APIs omit their limit when unset. This is an
+  output limit, not an assertion about a provider's context or supported limits.
 - Conversation mapping from the Responses-shaped items: system and developer
   items before the first user message become `system`; developer items after it
   (event notices, context lines) are sent as user messages (`context_role` does
