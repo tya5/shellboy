@@ -13,7 +13,7 @@ actual = json.loads((root / "actual-window.json").read_text())
 selected = {"$schema": schema["$schema"], "definitions": copy.deepcopy(schema["definitions"]), "allOf": [schema["operation_results"]["history.window"]]}
 validator = jsonschema.validators.validator_for(selected)(selected)
 validator.validate(actual)
-for name in ("legacy-window.json", "response-budget-window.json", "unavailable-window.json", "rewindow-window.json"):
+for name in ("legacy-window.json", "response-budget-window.json", "unavailable-window.json", "rewindow-window.json", "public-route-window.json"):
     value = json.loads((root / name).read_text())
     validator.validate(value)
 budget = json.loads((root / "response-budget-window.json").read_text())
