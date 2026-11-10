@@ -853,6 +853,14 @@ or deleting a Thread does not rewrite the saved sender ID. Clients use structure
 
 ### Output Limits By API
 
+For Claude, prefer a connection with `api = "anthropic_messages"`, the native
+Messages mode; it retains the existing 32768 output-token default. If using a
+Responses or Chat Completions connection for Claude, explicitly configure that
+connection's `max_tokens` to a value the endpoint/model supports. This is guidance,
+not automatic model detection or a promise of proxy compatibility. Configure it
+in the connection's TOML entry or with `shellboy config connection set
+--connection NAME --max-tokens N`.
+
 Use the saved connection's optional positive `max_tokens` setting for an output
 limit. Responses sends it as `max_output_tokens`, Chat Completions as
 `max_completion_tokens`, and Anthropic Messages as `max_tokens`. An unset value

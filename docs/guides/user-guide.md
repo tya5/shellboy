@@ -316,6 +316,13 @@ Changes apply to subsequent requests, without rewriting communication already se
 
 ### Output limits
 
+For Claude, prefer the native `api = "anthropic_messages"` mode, which keeps the
+existing 32768 output-token default. If using Claude through Responses or Chat
+Completions, explicitly configure the connection's `max_tokens` in its TOML
+entry or with `shellboy config connection set --connection NAME --max-tokens N`.
+Use a value the endpoint/model supports: no automatic detection or proxy
+compatibility is promised.
+
 A connection's optional positive `max_tokens` setting maps to Responses
 `max_output_tokens`, Chat Completions `max_completion_tokens`, or Messages
 `max_tokens`. Unset values omit the field for the first two APIs; Messages keeps

@@ -299,6 +299,12 @@ F1で説明を確認できます。Enterは操作に応じて表示・実行・�
 
 ### 出力上限
 
+Claudeではネイティブの`api = "anthropic_messages"`を推奨します。既存の出力上限
+32768を維持します。ResponsesやChat Completions経由でClaudeを使う場合は、接続の
+TOML項目か`shellboy config connection set --connection NAME --max-tokens N`で
+`max_tokens`を明示設定してください。接続先とモデルが対応する値を指定します。
+自動判別やプロキシ互換性を保証する案内ではありません。
+
 接続の任意の正整数`max_tokens`は、Responsesでは`max_output_tokens`、Chat
 Completionsでは`max_completion_tokens`、Messagesでは`max_tokens`へ送ります。
 未設定なら前二者は上限フィールドを省略し、Messagesは従来の32768を維持します。
