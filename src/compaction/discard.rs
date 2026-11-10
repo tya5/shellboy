@@ -70,9 +70,91 @@ pub(crate) fn status_sql(alias: &str) -> String {
     )
 }
 
+// Both observations and finalization qualify the original token; absence is not
+// permission to recreate an observation after interruption/recovery.
+pub(crate) const STAGE_SQL: &str = "UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.active_stage',?3) WHERE id=?1 AND state IN ('preparing','inflight','failed','completed') AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2";
+pub(crate) const SAVE_SQL: &str = "UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.discard',json(?3)) WHERE id=?1 AND state IN ('preparing','inflight','failed','completed') AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(error_json,'$.automatic_trim_attempt.active_stage')=?4";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completed_discard_requires_original_token_and_stage_and_preserves_success() {
+        use rusqlite::params;
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE model_attempt(id TEXT,state TEXT,error_json TEXT,response_id TEXT,usage_json TEXT); INSERT INTO model_attempt VALUES('a','completed','{}','success','{}');").unwrap();
+        let read = || {
+            db.query_row("SELECT error_json FROM model_attempt", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap()
+        };
+        let fact = r#"{"reason":"run_started","phase":"closed_summary","elapsed_ms":3}"#;
+        assert_eq!(
+            db.execute(STAGE_SQL, params!["a", "token", "closed_summary"])
+                .unwrap(),
+            0
+        );
+        let original = serde_json::json!({"existing_counter":7,"automatic_trim_attempt":{"token":"token","committed_stages":{"closed_spill":{"groups":1}}}});
+        db.execute(
+            "UPDATE model_attempt SET error_json=?1",
+            [original.to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            db.execute(STAGE_SQL, params!["a", "token", "closed_summary"])
+                .unwrap(),
+            1
+        );
+        for (token, phase) in [("old", "closed_summary"), ("token", "active_summary")] {
+            assert_eq!(
+                db.execute(SAVE_SQL, params!["a", token, fact, phase])
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(
+            db.execute(SAVE_SQL, params!["a", "token", fact, "closed_summary"])
+                .unwrap(),
+            1
+        );
+        let saved: serde_json::Value = serde_json::from_str(&read()).unwrap();
+        assert_eq!(saved["existing_counter"], 7);
+        assert_eq!(
+            saved["automatic_trim_attempt"]["committed_stages"],
+            original["automatic_trim_attempt"]["committed_stages"]
+        );
+        assert_eq!(
+            saved["automatic_trim_attempt"]["discard"]["reason"],
+            "run_started"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT state,response_id,usage_json FROM model_attempt",
+                [],
+                |r| Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?
+                ))
+            )
+            .unwrap(),
+            ("completed".into(), "success".into(), "{}".into())
+        );
+        db.execute("UPDATE model_attempt SET error_json='{}'", [])
+            .unwrap();
+        assert_eq!(
+            db.execute(SAVE_SQL, params!["a", "token", fact, "closed_summary"])
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.execute(STAGE_SQL, params!["a", "token", "closed_summary"])
+                .unwrap(),
+            0
+        );
+        assert_eq!(read(), "{}");
+    }
     #[test]
     fn discard_decoder_is_closed_bounded_and_content_free() {
         let fact = CompactionDiscard {

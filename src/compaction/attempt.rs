@@ -17,7 +17,7 @@ pub(crate) struct AutomaticStage {
 }
 
 /// Replaces W2/W4 bodies while keeping the stage facts of the same token.
-pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.discard',json_extract(error_json,'$.automatic_trim_attempt.discard'),'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND state IN ('preparing','inflight','failed') AND json_extract(error_json,'$.automatic_trim_attempt.token')=?3";
+pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.discard',json_extract(error_json,'$.automatic_trim_attempt.discard'),'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND state IN ('preparing','inflight','failed','completed') AND json_extract(error_json,'$.automatic_trim_attempt.token')=?3";
 
 /// Writes the provisional `unknown` record inside the witness transaction.
 pub(crate) fn begin_tx(
@@ -137,6 +137,9 @@ mod tests {
             [json!({"automatic_trim_attempt":{"token":"new"}}).to_string()],
         )
         .unwrap();
-        assert_eq!(finish(&db, "late", "new"), 0);
+        assert_eq!(finish(&db, "qualified_completed", "new"), 1);
+        db.execute("UPDATE model_attempt SET error_json='{}'", [])
+            .unwrap();
+        assert_eq!(finish(&db, "cleared_completed", "new"), 0);
     }
 }

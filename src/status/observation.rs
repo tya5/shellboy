@@ -820,16 +820,47 @@ mod tests {
             );
             assert!(!prepared.to_string().contains("PRIVATE_SENTINEL"));
         }
-        for value in [serde_json::json!(123),serde_json::json!(true),serde_json::json!([]),serde_json::json!("private"),serde_json::Value::Null,serde_json::json!({"reason":"future","phase":"closed_summary","elapsed_ms":1})] {
-            let body=serde_json::json!({"automatic_trim_attempt":{"discard":value}});
-            db.execute("UPDATE model_attempt SET error_json=?1 WHERE id='a'",[body.to_string()]).unwrap();
-            let page=super::super::snapshot(&db,&args,"fixture").unwrap();
-            assert!(page.items.iter().find(|v|v.id=="a").unwrap().compaction_discard.is_none());
-            let point=prepare(read_status_tx(&db,&[Key{kind:Kind::Attempt,id:"a".into()}],&mut TextBudget::default()).unwrap());
-            assert_eq!(point["items"].as_array().unwrap().len(),1);
-            assert!(point["items"][0]["current"].get("compaction_discard").is_none());
+        for value in [
+            serde_json::json!(123),
+            serde_json::json!(true),
+            serde_json::json!([]),
+            serde_json::json!("private"),
+            serde_json::Value::Null,
+            serde_json::json!({"reason":"future","phase":"closed_summary","elapsed_ms":1}),
+        ] {
+            let body = serde_json::json!({"automatic_trim_attempt":{"discard":value}});
+            db.execute(
+                "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
+                [body.to_string()],
+            )
+            .unwrap();
+            let page = super::super::snapshot(&db, &args, "fixture").unwrap();
+            assert!(
+                page.items
+                    .iter()
+                    .find(|v| v.id == "a")
+                    .unwrap()
+                    .compaction_discard
+                    .is_none()
+            );
+            let point = prepare(
+                read_status_tx(
+                    &db,
+                    &[Key {
+                        kind: Kind::Attempt,
+                        id: "a".into(),
+                    }],
+                    &mut TextBudget::default(),
+                )
+                .unwrap(),
+            );
+            assert_eq!(point["items"].as_array().unwrap().len(), 1);
+            assert!(
+                point["items"][0]["current"]
+                    .get("compaction_discard")
+                    .is_none()
+            );
         }
-
     }
     #[test]
     fn saturated_latest_turn_is_unknown_not_a_stale_dto() {

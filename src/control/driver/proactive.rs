@@ -102,10 +102,18 @@ impl Automatic {
         let started = std::time::Instant::now();
         let (attempt, token, phase_key) =
             (self.attempt.clone(), self.token.clone(), phase.to_owned());
-        control.store.database.call(move |db| {
-            db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.active_stage',?3) WHERE id=?1 AND state IN ('preparing','inflight','failed') AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2",params![attempt,token,phase_key])?;
-            Ok(())
-        }).await.map_err(storage_error)?;
+        control
+            .store
+            .database
+            .call(move |db| {
+                db.execute(
+                    crate::compaction::discard::STAGE_SQL,
+                    params![attempt, token, phase_key],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(storage_error)?;
         let result = operation.await;
         if let Err(error) = &result {
             if error.code == ErrorCode::InvalidState {
@@ -123,9 +131,17 @@ impl Automatic {
                 let body = serde_json::to_string(&fact).expect("bounded fact");
                 let (attempt, token, phase_key) =
                     (self.attempt.clone(), self.token.clone(), phase.to_owned());
-                let saved=control.store.database.call(move |db| {
-                    Ok(db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.discard',json(?3)) WHERE id=?1 AND state IN ('preparing','inflight','failed') AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(error_json,'$.automatic_trim_attempt.active_stage')=?4",params![attempt,token,body,phase_key])? == 1)
-                }).await.map_err(storage_error)?;
+                let saved = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(db.execute(
+                            crate::compaction::discard::SAVE_SQL,
+                            params![attempt, token, body, phase_key],
+                        )? == 1)
+                    })
+                    .await
+                    .map_err(storage_error)?;
                 if saved {
                     control.diagnostics.record_compaction_discard(
                         crate::diagnostics::DiagnosticIds {

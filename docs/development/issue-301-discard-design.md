@@ -231,3 +231,22 @@ automatic stage invocation and includes its preparation/cache/model/retry/adopt
 work. It is NOT model-only/billed latency. This is more honest than claiming the
 existing architecture has a model-start timer. Same-stage retries retain that
 Instant; subsequent phases have a new Instant. Later serializers copy the fact.
+
+### Completed Triggering Attempt Qualification Correction
+
+`context_usage::latest_query` selects a COMPLETED attempt. Initial A state
+allowlist incorrectly excluded that legitimate observation parent; this was a
+source-audit defect, not a reason to omit qualification. STAGE_SQL/SAVE_SQL and
+FINISH_SQL now include completed alongside preparing/inflight/failed. They
+still require the pre-existing exact automatic token; SAVE_SQL additionally
+requires the exact active stage. No state/response_id/usage/counters are changed.
+Missing token (including interruption/recovery clear) stays unsupported/no write.
+Stage and finish cannot manufacture it. Shared-SQL control covers completed
+success preservation, wrong token, wrong stage and cleared-record negatives.
+This is visibility qualification only, not a Run/Turn adoption relaxation.
+
+Status page enrichment performs at most one indexed PK read per selected
+attempt on a page (limit <= 200), never per unbounded scanned candidate. Point
+observation adds the bounded scalar to its existing fixed query; no new point
+statement or provider-body serde parse. This page N+1 tradeoff is bounded, not
+claimed to be a constant query count.

@@ -1320,6 +1320,28 @@
       },
       "type": "object"
     },
+    "CompactionDiscard": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsed_ms": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "phase": {
+          "$ref": "#/definitions/DiscardPhase"
+        },
+        "reason": {
+          "$ref": "#/definitions/DiscardReason"
+        }
+      },
+      "required": [
+        "reason",
+        "phase",
+        "elapsed_ms"
+      ],
+      "type": "object"
+    },
     "CompactionUsageResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": true,
@@ -1792,6 +1814,35 @@
         "held",
         "applied",
         "cancelled"
+      ],
+      "type": "string"
+    },
+    "DiscardPhase": {
+      "enum": [
+        "closed_spill",
+        "closed_summary",
+        "active_spill",
+        "active_summary"
+      ],
+      "type": "string"
+    },
+    "DiscardReason": {
+      "enum": [
+        "cancelled",
+        "thread_unavailable",
+        "selection_changed",
+        "profile_changed",
+        "epoch_changed",
+        "run_started",
+        "run_stopped",
+        "turn_started",
+        "turn_changed",
+        "nonappend_generation_changed",
+        "selected_prefix_changed",
+        "current_tail_changed",
+        "source_changed",
+        "source_pruned",
+        "other"
       ],
       "type": "string"
     },
@@ -8890,6 +8941,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "compaction_discard": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CompactionDiscard"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "created_at": {
