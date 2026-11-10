@@ -176,10 +176,17 @@ mod tests {
     #[test]
     fn unknown_role_is_not_prose_and_tool_output_is_not_decoded() {
         let unknown = serde_json::json!({"output":[{"type":"future","role":"assistant","content":[{"type":"output_text","text":"SECRET"}]}]});
-        assert!(matches!(&project("n", "assistant_response", &unknown, &[])[0], HistoryItem::Unavailable { .. }));
+        assert!(matches!(
+            &project("n", "assistant_response", &unknown, &[])[0],
+            HistoryItem::Unavailable { .. }
+        ));
         for wrapped in [false, true] {
             let value = serde_json::json!({"type":"function_call_output","call_id":"call","output":"{\"text\":\"SECRET\"}"});
-            let payload = if wrapped { serde_json::json!({"item":value}) } else { value };
+            let payload = if wrapped {
+                serde_json::json!({"item":value})
+            } else {
+                value
+            };
             let items = project("n", "tool_result", &payload, &[]);
             assert_eq!(items.len(), 1);
             assert!(matches!(&items[0], HistoryItem::ToolResult { .. }));
@@ -188,5 +195,4 @@ mod tests {
         let empty = serde_json::json!({"output":[{"type":"message","content":[]}]});
         assert!(project("n", "assistant_response", &empty, &[]).is_empty());
     }
-
 }

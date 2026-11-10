@@ -176,8 +176,13 @@ fn actual_window_guard_null_legacy_oversized_and_existing_stale_anchor() {
     }
     assert_eq!(result["items"][2]["items"][0]["reason"], "source_budget");
     if let Some(dir) = std::env::var_os("CORE296_FIXTURE_DIR") {
-        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("unavailable-window.json"),serde_json::to_vec_pretty(&result).unwrap()).unwrap();
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("unavailable-window.json"),
+            serde_json::to_vec_pretty(&result).unwrap(),
+        )
+        .unwrap();
     }
     let mut stale = args();
     stale.expect_node_id = Some("wrong".into());
@@ -226,11 +231,15 @@ fn actual_window_response_budget_keeps_all_later_ordinary_nodes() {
     let retry = serde_json::to_value(window(&db, &retry).unwrap()).unwrap();
     assert_eq!(retry["items"].as_array().unwrap().len(), 4);
     assert!(retry["items"][0]["items"].is_array());
-    if let Some(dir)=std::env::var_os("CORE296_FIXTURE_DIR") {
-        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("rewindow-window.json"),serde_json::to_vec_pretty(&retry).unwrap()).unwrap();
+    if let Some(dir) = std::env::var_os("CORE296_FIXTURE_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("rewindow-window.json"),
+            serde_json::to_vec_pretty(&retry).unwrap(),
+        )
+        .unwrap();
     }
-
 }
 
 #[test]
@@ -271,20 +280,28 @@ fn actual_projection_bounds_execution_links_and_preserves_source_identity() {
 
 #[test]
 fn actual_window_args_legacy_default_and_skip_false() {
-    let value=json!({"thread_id":"t","before":0,"after":0,"ordinal":0});
-    let legacy:HistoryWindowArgs=serde_json::from_value(value).unwrap();
+    let value = json!({"thread_id":"t","before":0,"after":0,"ordinal":0});
+    let legacy: HistoryWindowArgs = serde_json::from_value(value).unwrap();
     assert!(!legacy.items);
-    assert!(serde_json::to_value(&legacy).unwrap().get("items").is_none());
-    let mut opted=legacy;opted.items=true;
-    assert_eq!(serde_json::to_value(&opted).unwrap()["items"],true);
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("items")
+            .is_none()
+    );
+    let mut opted = legacy;
+    opted.items = true;
+    assert_eq!(serde_json::to_value(&opted).unwrap()["items"], true);
 }
 
 #[tokio::test]
 async fn actual_store_history_window_existing_read_lane_reuses_caller_transaction() {
-    use std::sync::Arc;
     use shellboy::{config::Config, control::db::Store, storage::DbWorker};
-    let root=tempfile::tempdir().unwrap();
-    let database=DbWorker::open(root.path().join("synthetic.db")).await.unwrap();
+    use std::sync::Arc;
+    let root = tempfile::tempdir().unwrap();
+    let database = DbWorker::open(root.path().join("synthetic.db"))
+        .await
+        .unwrap();
     database.call(|db| {
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','fixture','fixture','now')",[])?;
         let tx=db.transaction()?;
@@ -293,16 +310,38 @@ async fn actual_store_history_window_existing_read_lane_reuses_caller_transactio
         Ok(())
     }).await.unwrap();
     let config=Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
-    let store=Store::new(database.clone(),Arc::new(config),root.path().into(),"fixture".into());
+    let store = Store::new(
+        database.clone(),
+        Arc::new(config),
+        root.path().into(),
+        "fixture".into(),
+    );
     // Store routes this PureRead command through existing inspection RO transaction;
     // a bare history::window(&Connection) call cannot detect nested BEGIN.
-    let result=store.execute(Request::new("fixture:public-window",Command::HistoryWindow(args())),None).await;
-    assert!(result.is_ok(),"public existing read-lane request failed: {:?}",result.as_ref().err());
-    let encoded=result.unwrap().result;
-    assert_eq!(encoded["items"][0]["items"][0]["text"],"synthetic public route");
-    if let Some(dir)=std::env::var_os("CORE296_FIXTURE_DIR") {
-        let dir=std::path::PathBuf::from(dir);std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("public-route-window.json"),serde_json::to_vec_pretty(&encoded).unwrap()).unwrap();
+    let result = store
+        .execute(
+            Request::new("fixture:public-window", Command::HistoryWindow(args())),
+            None,
+        )
+        .await;
+    assert!(
+        result.is_ok(),
+        "public existing read-lane request failed: {:?}",
+        result.as_ref().err()
+    );
+    let encoded = result.unwrap().result;
+    assert_eq!(
+        encoded["items"][0]["items"][0]["text"],
+        "synthetic public route"
+    );
+    if let Some(dir) = std::env::var_os("CORE296_FIXTURE_DIR") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("public-route-window.json"),
+            serde_json::to_vec_pretty(&encoded).unwrap(),
+        )
+        .unwrap();
     }
     drop(store);
     database.shutdown().await.unwrap();
