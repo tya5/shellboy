@@ -280,7 +280,7 @@ fn actual_window_args_legacy_default_and_skip_false() {
 }
 
 #[tokio::test]
-async fn actual_shared_store_history_window_request_reuses_caller_transaction() {
+async fn actual_store_history_window_existing_read_lane_reuses_caller_transaction() {
     use std::sync::Arc;
     use shellboy::{config::Config, control::db::Store, storage::DbWorker};
     let root=tempfile::tempdir().unwrap();
@@ -294,10 +294,10 @@ async fn actual_shared_store_history_window_request_reuses_caller_transaction() 
     }).await.unwrap();
     let config=Config::parse("default_connection='fixture'\ndefault_model='fixture'\n[connections.fixture]\nbase_url='http://127.0.0.1:1/v1'\n").unwrap();
     let store=Store::new(database.clone(),Arc::new(config),root.path().into(),"fixture".into());
-    // This goes through Store's real shared DbWorker transact/command dispatch;
+    // Store routes this PureRead command through existing inspection RO transaction;
     // a bare history::window(&Connection) call cannot detect nested BEGIN.
     let result=store.execute(Request::new("fixture:public-window",Command::HistoryWindow(args())),None).await;
-    assert!(result.is_ok(),"public shared-writer request failed: {:?}",result.as_ref().err());
+    assert!(result.is_ok(),"public existing read-lane request failed: {:?}",result.as_ref().err());
     let encoded=result.unwrap().result;
     assert_eq!(encoded["items"][0]["items"][0]["text"],"synthetic public route");
     if let Some(dir)=std::env::var_os("CORE296_FIXTURE_DIR") {
