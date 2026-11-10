@@ -190,8 +190,13 @@ pub(crate) fn point_sql(kind: Kind) -> String {
     } else {
         "NULL,NULL"
     };
+    let discard = if kind == Kind::Attempt {
+        crate::compaction::discard::status_sql("r")
+    } else {
+        "NULL".into()
+    };
     format!(
-        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
+        "SELECT {id},{fields},{owner},{operation},{answer},{connection},{model},substr(q.title,1,80),q.parent_thread_id,substr(q.profile_id,1,128),substr(q.model_id,1,256),{revisit},{elapsed},{output},{stdin},{discard},{guard} FROM json_each(?1) j CROSS JOIN {table} {joins} LEFT JOIN thread q ON q.id={thread} WHERE {id}=j.value LIMIT 201"
     )
 }
 
@@ -257,14 +262,14 @@ pub(crate) fn read_status_tx(
                 }
                 continue;
             }
-            if row.get_ref(24)?.as_str_or_null().ok().flatten().is_some() {
+            if row.get_ref(25)?.as_str_or_null().ok().flatten().is_some() {
                 result.limited.push(Limited {
                     id: id.into(),
                     reason: "canonical_metadata_unconfirmed",
                 });
                 continue;
             }
-            let borrowed = (1..24)
+            let borrowed = (1..25)
                 .map(|column| {
                     row.get_ref(column)
                         .map(|v| v.as_str_or_null().ok().flatten())
@@ -528,6 +533,9 @@ fn canonical_item(
         attempt_connection: get(12),
         attempt_model: get(13),
         reason: get(8),
+        compaction_discard: get(23)
+            .as_deref()
+            .and_then(crate::compaction::discard::decode),
         revisit: get(18)
             .as_deref()
             .and_then(|facts| facts.split_once(':'))
@@ -768,6 +776,49 @@ mod tests {
                 assert_eq!(actual["current"], serde_json::to_value(expected).unwrap());
             }
             assert!(budget.used <= TEXT_BYTES);
+        }
+    }
+    #[test]
+    fn discard_status_page_and_point_are_identical_and_reject_private_legacy_fields() {
+        let db = canonical_fixture();
+        let args = crate::protocol::StatusArgs {
+            thread_id: Some("scope".into()),
+            all: true,
+            limit: 200,
+            ..Default::default()
+        };
+        let fact =
+            serde_json::json!({"reason":"run_started","phase":"closed_summary","elapsed_ms":45});
+        for extra in [false, true] {
+            let mut body = serde_json::json!({"kind":"original_failure","private":"PRIVATE_SENTINEL","automatic_trim_attempt":{"discard":fact}});
+            if extra {
+                body["automatic_trim_attempt"]["discard"]["secret"] =
+                    serde_json::json!("PRIVATE_SENTINEL");
+            }
+            db.execute(
+                "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
+                [body.to_string()],
+            )
+            .unwrap();
+            let page = super::super::snapshot(&db, &args, "fixture").unwrap();
+            let expected = page.items.into_iter().find(|v| v.id == "a").unwrap();
+            assert_eq!(expected.compaction_discard.is_some(), !extra);
+            let prepared = prepare(
+                read_status_tx(
+                    &db,
+                    &[Key {
+                        kind: Kind::Attempt,
+                        id: "a".into(),
+                    }],
+                    &mut TextBudget::default(),
+                )
+                .unwrap(),
+            );
+            assert_eq!(
+                prepared["items"][0]["current"],
+                serde_json::to_value(expected).unwrap()
+            );
+            assert!(!prepared.to_string().contains("PRIVATE_SENTINEL"));
         }
     }
     #[test]

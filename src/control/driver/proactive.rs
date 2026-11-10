@@ -92,6 +92,55 @@ struct Automatic {
 }
 
 impl Automatic {
+    async fn observed<T>(
+        &self,
+        control: &Arc<Control>,
+        phase: &str,
+        operation: impl std::future::Future<Output = Result<T, ApiError>>,
+    ) -> Result<T, ApiError> {
+        use crate::compaction::discard::{CompactionDiscard, DiscardPhase, DiscardReason};
+        let started = std::time::Instant::now();
+        let (attempt, token, phase_key) =
+            (self.attempt.clone(), self.token.clone(), phase.to_owned());
+        control.store.database.call(move |db| {
+            db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.active_stage',?3) WHERE id=?1 AND state IN ('preparing','inflight','failed') AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2",params![attempt,token,phase_key])?;
+            Ok(())
+        }).await.map_err(storage_error)?;
+        let result = operation.await;
+        if let Err(error) = &result {
+            if error.code == ErrorCode::InvalidState {
+                let reason = error
+                    .details
+                    .as_ref()
+                    .and_then(|v| v.get("compaction_discard_reason"))
+                    .and_then(|v| serde_json::from_value::<DiscardReason>(v.clone()).ok())
+                    .unwrap_or(DiscardReason::Other);
+                let fact = CompactionDiscard {
+                    reason,
+                    phase: DiscardPhase::from_stage(phase).expect("closed stage name"),
+                    elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                };
+                let body = serde_json::to_string(&fact).expect("bounded fact");
+                let (attempt, token, phase_key) =
+                    (self.attempt.clone(), self.token.clone(), phase.to_owned());
+                let saved=control.store.database.call(move |db| {
+                    Ok(db.execute("UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.discard',json(?3)) WHERE id=?1 AND state IN ('preparing','inflight','failed') AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(error_json,'$.automatic_trim_attempt.active_stage')=?4",params![attempt,token,body,phase_key])? == 1)
+                }).await.map_err(storage_error)?;
+                if saved {
+                    control.diagnostics.record_compaction_discard(
+                        crate::diagnostics::DiagnosticIds {
+                            thread_id: Some(self.thread.clone()),
+                            turn_id: Some(self.turn.clone()),
+                            ..Default::default()
+                        },
+                        fact,
+                    );
+                }
+            }
+        }
+        result
+    }
+
     /// The calibrated provisional target uses the scope W4 would give the
     /// stage; `marks` stays null, the documented coverage-limited baseline.
     fn stage(&self, stage: &'static str) -> crate::compaction::AutomaticStage {
@@ -530,9 +579,9 @@ pub(super) async fn maybe_compact(
         Some(compactor.proactive_history_characters(&snapshot.thread).await?)
     } else { None };
     let spill = if let Some(plan) = target_plan {
-        compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
+        automatic.observed(control,"closed_spill",compactor.spill_staged_cancellable(&snapshot.thread, false, plan.remove_characters, slot.stop.clone(), Some(automatic.stage("closed_spill")))).await
     } else if spill_new && !open_loop {
-        compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone(), Some(automatic.stage("closed_spill"))).await
+        automatic.observed(control,"closed_spill",compactor.spill_reducing_cancellable(&snapshot.thread, slot.stop.clone(), Some(automatic.stage("closed_spill")))).await
     } else {
         Ok(crate::compaction::CompactResult { no_target: true, ..Default::default() })
     };
@@ -955,12 +1004,16 @@ async fn active_after_spill(
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let Some(need) = remaining else {
         // #226: the uncalibrated active-Turn summary is a recorded stage too.
-        let summary = compactor
-            .summarize_active_guarded(
-                thread,
-                slot.stop.clone(),
-                Some(&mut *boundary),
-                Some(automatic.stage("active_summary")),
+        let summary = automatic
+            .observed(
+                _control,
+                "active_summary",
+                compactor.summarize_active_guarded(
+                    thread,
+                    slot.stop.clone(),
+                    Some(&mut *boundary),
+                    Some(automatic.stage("active_summary")),
+                ),
             )
             .await;
         if let Ok(summary) = &summary {
@@ -980,13 +1033,17 @@ async fn active_after_spill(
     };
     let before = compactor.proactive_history_characters(thread).await?;
     stages["active_spill"] = json!({"ran":true,"remaining_before":need,"outcome":"started"});
-    let spill = match compactor
-        .spill_staged_cancellable(
-            thread,
-            true,
-            need,
-            slot.stop.clone(),
-            Some(automatic.stage("active_spill")),
+    let spill = match automatic
+        .observed(
+            _control,
+            "active_spill",
+            compactor.spill_staged_cancellable(
+                thread,
+                true,
+                need,
+                slot.stop.clone(),
+                Some(automatic.stage("active_spill")),
+            ),
         )
         .await
     {
@@ -1025,13 +1082,17 @@ async fn active_after_spill(
         return Ok(spill);
     }
     stages["active_summary"] = json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
-    let (mut summary, projected_shortfall) = match compactor
-        .summarize_target_active_guarded(
-            thread,
-            remaining,
-            slot.stop.clone(),
-            Some(&mut *boundary),
-            Some(automatic.stage("active_summary")),
+    let (mut summary, projected_shortfall) = match automatic
+        .observed(
+            _control,
+            "active_summary",
+            compactor.summarize_target_active_guarded(
+                thread,
+                remaining,
+                slot.stop.clone(),
+                Some(&mut *boundary),
+                Some(automatic.stage("active_summary")),
+            ),
         )
         .await
     {
@@ -1102,13 +1163,17 @@ async fn summarize_once(
         stages["closed_summary"] =
             json!({"ran":true,"remaining_before":remaining,"outcome":"started"});
         let prefix = if let Some(target) = remaining {
-            compactor
-                .summarize_target_prefix_guarded(
-                    thread,
-                    target,
-                    slot.stop.clone(),
-                    Some(&mut *boundary),
-                    Some(automatic.stage("closed_summary")),
+            automatic
+                .observed(
+                    control,
+                    "closed_summary",
+                    compactor.summarize_target_prefix_guarded(
+                        thread,
+                        target,
+                        slot.stop.clone(),
+                        Some(&mut *boundary),
+                        Some(automatic.stage("closed_summary")),
+                    ),
                 )
                 .await
                 .map(|(result, missing)| {
@@ -1116,12 +1181,16 @@ async fn summarize_once(
                     result
                 })
         } else {
-            compactor
-                .summarize_prefix_guarded(
-                    thread,
-                    slot.stop.clone(),
-                    Some(&mut *boundary),
-                    Some(automatic.stage("closed_summary")),
+            automatic
+                .observed(
+                    control,
+                    "closed_summary",
+                    compactor.summarize_prefix_guarded(
+                        thread,
+                        slot.stop.clone(),
+                        Some(&mut *boundary),
+                        Some(automatic.stage("closed_summary")),
+                    ),
                 )
                 .await
         };
@@ -1188,13 +1257,17 @@ async fn summarize_once(
         // #226: the late prefix summary is recorded and checkpointed like the
         // first-position one.
         let prefix = if let Some(target) = remaining {
-            compactor
-                .summarize_target_prefix_guarded(
-                    thread,
-                    target,
-                    slot.stop.clone(),
-                    Some(&mut *boundary),
-                    Some(automatic.stage("closed_summary")),
+            automatic
+                .observed(
+                    control,
+                    "closed_summary",
+                    compactor.summarize_target_prefix_guarded(
+                        thread,
+                        target,
+                        slot.stop.clone(),
+                        Some(&mut *boundary),
+                        Some(automatic.stage("closed_summary")),
+                    ),
                 )
                 .await
                 .map(|(result, missing)| {
@@ -1202,12 +1275,16 @@ async fn summarize_once(
                     result
                 })
         } else {
-            compactor
-                .summarize_prefix_guarded(
-                    thread,
-                    slot.stop.clone(),
-                    Some(&mut *boundary),
-                    Some(automatic.stage("closed_summary")),
+            automatic
+                .observed(
+                    control,
+                    "closed_summary",
+                    compactor.summarize_prefix_guarded(
+                        thread,
+                        slot.stop.clone(),
+                        Some(&mut *boundary),
+                        Some(automatic.stage("closed_summary")),
+                    ),
                 )
                 .await
         };

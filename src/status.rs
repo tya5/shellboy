@@ -56,6 +56,8 @@ pub struct WorkItem {
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compaction_discard: Option<crate::compaction::discard::CompactionDiscard>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revisit: Option<RevisitSummary>,
     pub targets: Vec<crate::protocol::StatusTarget>,
     #[serde(default, flatten)]
@@ -460,6 +462,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
             .get::<_, Option<String>>(14)
             .map_err(sql)?
             .map(|s| short(s, 256)),
+        compaction_discard: None,
         reason: row
             .get::<_, Option<String>>(15)
             .map_err(sql)?
@@ -608,6 +611,19 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
     } else {
         None
     };
+    for projected in &mut selected {
+        if projected.item.kind == "attempt" {
+            let query = format!(
+                "SELECT {} FROM model_attempt r WHERE r.id=?1",
+                crate::compaction::discard::status_sql("r")
+            );
+            let text: Option<String> = db
+                .query_row(&query, [&projected.item.id], |r| r.get(0))
+                .map_err(sql)?;
+            projected.item.compaction_discard =
+                text.as_deref().and_then(crate::compaction::discard::decode);
+        }
+    }
     let filters = StatusFilters {
         memory: args.memory,
         thread_id: args.thread_id.clone(),

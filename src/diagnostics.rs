@@ -34,6 +34,7 @@ pub enum DiagnosticEvent {
     AutomaticCompactionForecastLimited,
     AutomaticCompactionRejectedInvalidState,
     AutomaticCompactionRejectedOther,
+    CompactionDiscard,
     /// #182: one resend after a documented thinking-binding rejection, with
     /// the saved reasoning epoch advanced so no stale signed block is sent.
     ThinkingBindingRetry,
@@ -337,6 +338,8 @@ struct Entry {
     #[serde(skip_serializing_if = "Option::is_none")]
     automatic_compaction_counts: Option<AutomaticCompactionCounts>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    compaction_discard: Option<crate::compaction::discard::CompactionDiscard>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     startup_stage: Option<StartupStageTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     shell_unknown_parameter: Option<String>,
@@ -433,6 +436,7 @@ struct Record {
     db_job: Option<DbJobTrace>,
     index_discard: Option<IndexDiscardTrace>,
     automatic_compaction_counts: Option<AutomaticCompactionCounts>,
+    compaction_discard: Option<crate::compaction::discard::CompactionDiscard>,
     startup_stage: Option<StartupStageTrace>,
     shell_unknown_parameter: Option<String>,
     config_fields: Option<Vec<String>>,
@@ -479,6 +483,7 @@ impl Diagnostics {
                     mut db_job,
                     index_discard,
                     automatic_compaction_counts,
+                    compaction_discard,
                     startup_stage,
                     shell_unknown_parameter,
                     config_fields,
@@ -508,6 +513,7 @@ impl Diagnostics {
                         db_job,
                         index_discard,
                         automatic_compaction_counts,
+                        compaction_discard,
                         startup_stage,
                         shell_unknown_parameter,
                         config_fields,
@@ -601,10 +607,38 @@ impl Diagnostics {
             lineage_slow: None,
             db_job: None,
             index_discard: None,
+            compaction_discard: None,
             automatic_compaction_counts: Some(AutomaticCompactionCounts {
                 invalid_state_rejections,
                 other_rejections,
             }),
+            startup_stage: None,
+            shell_unknown_parameter: None,
+            config_fields: None,
+            rate_limit: None,
+        });
+    }
+    /// Log only a bounded parameter name, never its value.
+    pub(crate) fn record_compaction_discard(
+        &self,
+        ids: DiagnosticIds,
+        fact: crate::compaction::discard::CompactionDiscard,
+    ) {
+        self.enqueue_record(Record {
+            event: DiagnosticEvent::CompactionDiscard,
+            ids,
+            failure: None,
+            stream_difference: None,
+            send: None,
+            shutdown: None,
+            tool_repair: None,
+            usage_slow: None,
+            ui_history: None,
+            lineage_slow: None,
+            db_job: None,
+            index_discard: None,
+            compaction_discard: Some(fact),
+            automatic_compaction_counts: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -637,6 +671,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: Some(name),
             config_fields: None,
@@ -666,6 +701,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: Some(fields),
@@ -691,6 +727,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -809,6 +846,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -835,6 +873,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -865,6 +904,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -916,6 +956,7 @@ impl Diagnostics {
             })),
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -954,6 +995,7 @@ impl Diagnostics {
             })),
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -1005,6 +1047,7 @@ impl Diagnostics {
             db_job: Some(trace),
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -1031,6 +1074,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             shell_unknown_parameter: None,
             config_fields: None,
             rate_limit: None,
@@ -1073,6 +1117,7 @@ impl Diagnostics {
             }),
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -1158,6 +1203,7 @@ impl Diagnostics {
             db_job: None,
             index_discard: None,
             automatic_compaction_counts: None,
+            compaction_discard: None,
             startup_stage: None,
             shell_unknown_parameter: None,
             config_fields: None,
@@ -1179,6 +1225,7 @@ impl Diagnostics {
             db_job,
             index_discard,
             automatic_compaction_counts,
+            compaction_discard,
             startup_stage,
             shell_unknown_parameter,
             config_fields,
@@ -1216,6 +1263,7 @@ impl Diagnostics {
                     db_job,
                     index_discard,
                     automatic_compaction_counts,
+                    compaction_discard,
                     startup_stage,
                     shell_unknown_parameter,
                     config_fields,
@@ -1767,6 +1815,29 @@ mod db_job_slow_tests {
 mod automatic_compaction_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn compaction_discard_log_has_only_closed_content_free_fact() {
+        let root = tempfile::tempdir().unwrap();
+        let diagnostics = Diagnostics::start(root.path().into(), Logging::default());
+        diagnostics.record_compaction_discard(
+            DiagnosticIds::default(),
+            crate::compaction::discard::CompactionDiscard {
+                reason: crate::compaction::discard::DiscardReason::RunStarted,
+                phase: crate::compaction::discard::DiscardPhase::ClosedSummary,
+                elapsed_ms: 17,
+            },
+        );
+        diagnostics.shutdown().await;
+        let text = std::fs::read_to_string(root.path().join("shellboy.log")).unwrap();
+        let row: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
+        assert_eq!(row["event"], "compaction_discard");
+        assert_eq!(
+            row["compaction_discard"],
+            serde_json::json!({"reason":"run_started","phase":"closed_summary","elapsed_ms":17})
+        );
+        assert!(row.get("automatic_compaction_counts").is_none());
+        assert!(!text.contains("PRIVATE_SENTINEL"));
+    }
     #[tokio::test]
     async fn skip_and_rejection_diagnostics_have_only_fixed_bounded_counts() {
         crate::test_watchdog::watchdog("automatic compaction diagnostics", async {

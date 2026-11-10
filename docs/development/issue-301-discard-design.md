@@ -192,3 +192,42 @@ leave it unclassified rather than relax a guard.
 Scope of first implementation remains visibility only. All original adoption
 conditions and #300 append witness/CAS behavior stay unchanged. A1 requires S6
 signature review before runtime edits. B remains separately held.
+
+## A2/B Inventory Checkpoint (Not A Guard-Relaxation Decision)
+
+Current anchors are function/branch names, not the historical line hints.
+All measured counts are UNKNOWN until Claude separately activates A and the
+leader observes its actual workload. Reported totals cannot fill any row.
+
+| Family / actual branch | Stage / protected dependency | Typed reason in A | Policy / deterministic control |
+| --- | --- | --- | --- |
+| `validate` thread existence, revision, profile, epoch | Adoption transaction; captured selection and request configuration/reasoning input | thread_unavailable / selection_changed / profile_changed / epoch_changed, in existing order | Retain. Same one SQL statement, nullable comparisons reject as before. Real late-adoption transaction negative. |
+| `snapshot` stopping Run; `validate` Run present/absent fence | Pre-model and adoption; user stop and current driver consumer | run_stopped / run_started | Retain stopping refusal and active consumer fence. B needs baseline and input-acquisition trace first. |
+| `validate` Turn present/absent generation fence | Adoption; generation/state protects active request consumer | turn_changed / turn_started | Retain. Equal visible state does not establish equal generation. |
+| `validate` source revision + canonical body hash, prune protection | Adoption; actual summarized payload and released ancestry | source_changed; prune remains actual unclassified invalid_state -> other until branch instrumentation | Retain; no missing source promoted to a success or a fabricated reason. Source SQL errors remain storage errors. |
+| `SummaryAdoption` nonappend generation, ordered full prefix, cursor=tail | Adoption; #300 append-only proof and ABA exclusion | nonappend_generation_changed / selected_prefix_changed / current_tail_changed | Retain all three in original short-circuit order, fresh revision path CAS unchanged. |
+| Spill pre-adoption cancel; summary request token select; summary pre-adoption token | Result-ready / in-flight / transaction; stop work versus revoke publication | cancelled | Retain ALL checks in A, including in-flight model cancellation. Pre-adoption removal is investigation only, not code permission. |
+| `segments`, source traversal and summary/reduce budget / model validation | Pre-dispatch, processing; indivisible size, finite graph/budget, valid model result | other only when an actual invalid_state stage rejection occurs; non-invalid-state provider/storage failures are not discard facts | Retain every preparation/budget guard. A does not expose private model error strings. More specific reasons require branch-by-branch instrumentation, not guessing. |
+
+Cancellation producer trace (in progress, not an exhaustive claim):
+`control::live` cancels owned DriverSlot on shutdown and on cancelled owned Run;
+`control::turn_interrupt` cancels active binding for an interruption / dropped
+request. `control::compact` cancels the owned compaction task on caller stop.
+These are distinct from test-only cancellation injection. Thread deletion and
+owner disposal need their call chains fully traced before any B decision.
+No producer is classified safe to bypass, and no missing dependency is treated
+as proof of independence. Model in-flight cancellation remains intact.
+
+B must converge on one adoption-validator specification with row/case/branch/
+test correspondence; no scattered permissive guards. Compare three structural
+alternatives only after A baseline: append-tail rebasing (existing #300), proven
+active-input-independent adoption, or deferring adoption until the active input
+consumer releases it. Profile and epoch dependencies must be derived from the
+actual generation request, not assumed irrelevant. Existing A implementation
+only annotates the original validator and does not implement any alternative.
+
+Timing clarification for current A implementation: Instant starts at the
+automatic stage invocation and includes its preparation/cache/model/retry/adopt
+work. It is NOT model-only/billed latency. This is more honest than claiming the
+existing architecture has a model-start timer. Same-stage retries retain that
+Instant; subsequent phases have a new Instant. Later serializers copy the fact.

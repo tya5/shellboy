@@ -1,4 +1,5 @@
 //! Fixed successful-summary adoption, retaining the caller's one transaction.
+use super::discard::{DiscardReason, rejected};
 use super::*;
 pub(super) struct SummaryAdoption {
     pub(super) automatic: Option<AutomaticStage>,
@@ -19,12 +20,16 @@ impl SummaryAdoption {
         cancel: &CancellationToken,
     ) -> Result<CompactResult, StorageError> {
         if cancel.is_cancelled() {
-            return Err(StorageError::from(invalid(
+            return Err(StorageError::from(rejected(
+                DiscardReason::Cancelled,
                 "Compaction cancelled before adoption",
             )));
         }
         if cancel.is_cancelled() {
-            return Err(StorageError::from(invalid("Compaction cancelled")));
+            return Err(StorageError::from(rejected(
+                DiscardReason::Cancelled,
+                "Compaction cancelled",
+            )));
         }
         // Only captured, non-expanded selected paths may adopt a newer append tail.
         // All other snapshot kinds retain strict revision validation.
@@ -37,13 +42,21 @@ impl SummaryAdoption {
                 .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
                 .query_map([&self.snapshot.thread], |r| r.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
-            if current_generation != *generation
-                || !current.starts_with(selected)
-                || current.last() != cursor.as_ref()
-            {
-                return Err(StorageError::from(invalid(
+            let reason = if current_generation != *generation {
+                Some(DiscardReason::NonappendGenerationChanged)
+            } else if !current.starts_with(selected) {
+                Some(DiscardReason::SelectedPrefixChanged)
+            } else if current.last() != cursor.as_ref() {
+                Some(DiscardReason::CurrentTailChanged)
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(rejected(
+                    reason,
                     "Compaction selected path changed; late result discarded",
-                )));
+                )
+                .into());
             }
             let original_path = self
                 .snapshot
@@ -78,7 +91,10 @@ impl SummaryAdoption {
         );
         path.extend(appended);
         if cancel.is_cancelled() {
-            return Err(StorageError::from(invalid("Compaction cancelled")));
+            return Err(StorageError::from(rejected(
+                DiscardReason::Cancelled,
+                "Compaction cancelled",
+            )));
         }
         history::select_path(
             tx,

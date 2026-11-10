@@ -94,7 +94,7 @@ pub(super) fn fail_attempt(
 ) -> Result<AttemptTransition, StorageError> {
     let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='failed',error_json=?2,ended_at=?3,usage_json=COALESCE(?4,usage_json),
+        "UPDATE model_attempt SET state='failed',error_json=json_set(json_remove(?2,'$.automatic_trim_attempt'),'$.automatic_trim_attempt',CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_trim_attempt') END),ended_at=?3,usage_json=COALESCE(?4,usage_json),
          input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?5 ELSE 'null' END))
          WHERE id=?1 AND state IN ('preparing','inflight')
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id
@@ -182,7 +182,7 @@ pub(super) fn incomplete_attempt(
         .filter(|body| failed_context_limit(Some(body)));
     let (error, usage) = normalized_failure(error);
     let changed = db.execute(
-        "UPDATE model_attempt SET state='incomplete',error_json=?2,ended_at=?3,usage_json=COALESCE(?5,usage_json),
+        "UPDATE model_attempt SET state='incomplete',error_json=json_set(json_remove(?2,'$.automatic_trim_attempt'),'$.automatic_trim_attempt',CASE WHEN json_valid(error_json) THEN json_extract(error_json,'$.automatic_trim_attempt') END),ended_at=?3,usage_json=COALESCE(?5,usage_json),
          input_manifest_json=json_set(input_manifest_json,'$.prompt_cache_diagnostics',json(CASE WHEN json_extract(input_manifest_json,'$.prompt_cache.diagnostics_enabled')=1 THEN ?6 ELSE 'null' END))
          WHERE id=?1 AND (state IN ('preparing','inflight') OR (state='failed' AND error_json=?4))
          AND EXISTS(SELECT 1 FROM turn u JOIN run r ON r.id=u.run_id

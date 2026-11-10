@@ -25,6 +25,7 @@ mod parallel_tests;
 mod retry;
 use bounded::SummaryBudget;
 mod attempt;
+pub mod discard;
 pub(crate) use attempt::{
     AutomaticStage, FINISH_SQL as ATTEMPT_FINISH_SQL, begin_tx as attempt_begin_tx,
 };
@@ -420,7 +421,7 @@ impl Compactor {
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
             let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let stopping:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",[&thread],|r|r.get(0))?;
-            if stopping{return Err(StorageError::from(invalid("Compaction cancelled: Run is stopping")));}
+            if stopping{return Err(StorageError::from(discard::rejected(discard::DiscardReason::RunStopped,"Compaction cancelled: Run is stopping")));}
             let latest_complete_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let protected=db.prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')")?.query_map(params![thread],|r|r.get::<_,String>(0))?.collect::<Result<HashSet<_>,_>>()?;
             let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?)))?.collect::<Result<Vec<_>,_>>()?;
@@ -642,7 +643,8 @@ impl Compactor {
             .call(move |db| {
                 let tx = db.transaction()?;
                 if cancel.is_cancelled() {
-                    return Err(StorageError::from(invalid(
+                    return Err(StorageError::from(discard::rejected(
+                        discard::DiscardReason::Cancelled,
                         "Compaction cancelled before adoption",
                     )));
                 }
@@ -916,16 +918,21 @@ impl Compactor {
                     (result, start.elapsed())
                 };
                 let (result, elapsed) = if let Some(boundary) = boundary {
-                    boundary
-                        .pause(cancel, wait)
-                        .await
-                        .map_err(|_| invalid("Summary cancelled; original path retained"))?
+                    boundary.pause(cancel, wait).await.map_err(|_| {
+                        discard::rejected(
+                            discard::DiscardReason::Cancelled,
+                            "Summary cancelled; original path retained",
+                        )
+                    })?
                 } else {
                     wait.await
                 };
                 let lease = client.admission_after_wait(result, None).map_err(|error| {
                     if error.kind == "cancelled" {
-                        invalid("Summary cancelled; original path retained")
+                        discard::rejected(
+                            discard::DiscardReason::Cancelled,
+                            "Summary cancelled; original path retained",
+                        )
                     } else {
                         ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
                             .details(json!({"kind":error.kind}))
@@ -1176,7 +1183,10 @@ impl Compactor {
             )
             .await?;
         if cancel.is_cancelled() {
-            return Err(invalid("Compaction cancelled; original path retained"));
+            return Err(discard::rejected(
+                discard::DiscardReason::Cancelled,
+                "Compaction cancelled; original path retained",
+            ));
         }
         let sources = covered;
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
@@ -1401,11 +1411,29 @@ fn spill_payload(group: &Group) -> Option<Value> {
 }
 
 fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageError> {
-    let matches:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL AND selection_revision=?2 AND profile_revision=?3 AND reasoning_epoch=?4)",params![s.thread,s.revision as i64,s.profile_revision,s.epoch],|r|r.get(0))?;
-    if !matches {
-        return Err(StorageError::from(invalid(
+    use discard::{DiscardReason as R, rejected};
+    let matches: Option<(Option<bool>, Option<bool>, Option<bool>)> = tx.query_row(
+        "SELECT selection_revision=?2,profile_revision=?3,reasoning_epoch=?4 FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        params![s.thread,s.revision as i64,s.profile_revision,s.epoch],
+        |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    ).optional()?;
+    let Some((selection, profile, epoch)) = matches else {
+        return Err(rejected(
+            R::ThreadUnavailable,
             "Compaction snapshot changed; late result discarded",
-        )));
+        )
+        .into());
+    };
+    for (valid, reason) in [
+        (selection, R::SelectionChanged),
+        (profile, R::ProfileChanged),
+        (epoch, R::EpochChanged),
+    ] {
+        if valid != Some(true) {
+            return Err(
+                rejected(reason, "Compaction snapshot changed; late result discarded").into(),
+            );
+        }
     }
     let run_matches = if let Some(run) = &s.run_fence {
         tx.query_row(
@@ -1421,11 +1449,18 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
         )?
     };
     if !run_matches {
-        return Err(StorageError::from(invalid(if s.run_fence.is_some() {
-            "Compaction Run stopped before adoption"
-        } else {
-            "Compaction snapshot changed: a Run started before adoption"
-        })));
+        return Err(StorageError::from(rejected(
+            if s.run_fence.is_some() {
+                R::RunStopped
+            } else {
+                R::RunStarted
+            },
+            if s.run_fence.is_some() {
+                "Compaction Run stopped before adoption"
+            } else {
+                "Compaction snapshot changed: a Run started before adoption"
+            },
+        )));
     }
     let turn_matches = if let Some((turn, generation)) = &s.turn_fence {
         tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE id=?1 AND generation=?2 AND state IN ('preparing','running','waiting','recovery_wait'))",params![turn,generation],|r|r.get::<_,bool>(0))?
@@ -1433,11 +1468,18 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
         !tx.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait'))",[&s.thread],|r|r.get::<_,bool>(0))?
     };
     if !turn_matches {
-        return Err(StorageError::from(invalid(if s.turn_fence.is_some() {
-            "Compaction Turn generation changed before adoption"
-        } else {
-            "Compaction snapshot changed: a Turn started before adoption"
-        })));
+        return Err(StorageError::from(rejected(
+            if s.turn_fence.is_some() {
+                R::TurnChanged
+            } else {
+                R::TurnStarted
+            },
+            if s.turn_fence.is_some() {
+                "Compaction Turn generation changed before adoption"
+            } else {
+                "Compaction snapshot changed: a Turn started before adoption"
+            },
+        )));
     }
 
     for source in s
@@ -1460,7 +1502,8 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
                 .as_deref()
                 != Some(&source.hash)
         {
-            return Err(StorageError::from(invalid(
+            return Err(StorageError::from(rejected(
+                R::SourceChanged,
                 "Compaction source changed; late result discarded",
             )));
         }
@@ -2317,7 +2360,12 @@ mod tests {
                 Ok(())
             })
             .await;
-        assert!(rejected.is_err());
+        let rejected = rejected.unwrap_err().into_api_error();
+        assert_eq!(rejected.code, ErrorCode::InvalidState);
+        assert_eq!(
+            rejected.details.as_ref().unwrap()["compaction_discard_reason"],
+            "selection_changed"
+        );
         let count = db
             .call(|db| Ok(db.query_row("SELECT count(*) FROM node", [], |r| r.get::<_, i64>(0))?))
             .await
