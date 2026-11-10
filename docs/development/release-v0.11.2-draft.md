@@ -29,6 +29,12 @@ Source guard tests measure Rust payload acquisition; they do not prove that SQLi
 never touches source pages internally. These are policy limits, not measured
 production capacity or real-provider performance claims.
 
+## Feature Evidence
+
+| Feature | Designed | Implemented | Validation / limits |
+| --- | --- | --- | --- |
+| #296 ordered saved items | Claude1528 adopted existing-window contract and policy caps | Opt-in producer, typed schema and bounded guard candidate | Initial bare-window six tests and guard two tests passed; actual Store read-lane transaction regression, final exported schema, independent exact review, hosted CI and postpublication owner read remain distinct gates. Bare-connection results do not prove public routing. |
+
 ## Qualification And Installation Boundaries
 
 Focused synthetic producer, schema, guard, privacy and rewindow evidence is recorded
