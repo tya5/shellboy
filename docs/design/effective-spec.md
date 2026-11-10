@@ -563,7 +563,11 @@ from that first node's existing ordinal. Missing/untrusted size metadata never f
 back to raw body retrieval. Response budget is decoded item text, not a new encoded
 JSON budget.
 
-Claude1528 explicitly permits the existing shared DbWorker route for this bounded
-extension. PureRead classification is not independent RO/WAL isolation. No new
+The existing Store::execute read_lane dispatch (control/db.rs:455) sends
+HistoryWindow through inspection_work/open_inspection: an existing read-only,
+query_only connection and caller transaction, not the writer queue. Classification
+and the actual branch must be traced together. Earlier candidate source reports
+claiming this operation used the shared writer were incorrect and are superseded
+by this source correction. Claude1528 permits existing-route reuse; no new
 reader/executor/deadline or migration is introduced. Publication/owner-read gates
 remain separate; agent shells never install/signal/restart/rollback owner4140.

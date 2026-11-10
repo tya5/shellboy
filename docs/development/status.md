@@ -70,3 +70,11 @@ only. Local red compile failures are not runtime-negative successes. Candidate
 source/tests do not establish release adoption, all-OS CI or actual-owner acceptance.
 Core0.11.2 publication follows independent exact review and hosted CI; owner updates
 are exclusively outside Claude after publication, never author shell operations.
+
+### v0.11.2 Qualification Candidate
+
+See [candidate notes](release-v0.11.2-draft.md). The combined #296 producer and
+isolated two-file guard tree has focused six-producer/two-guard test success and a
+check pass. Actual generated schema/fixture export, final artifact freshness,
+independent exact review, hosted same-SHA CI and release/owner acceptance remain
+separate gates. This entry does not replace historical failures or earlier records.
