@@ -233,3 +233,62 @@ pub(super) fn history_snippet(
     };
     Ok((item, ordinal))
 }
+
+/// Build a history-window snippet from metadata and a payload admitted by the
+/// caller's source-byte guard. This path never fetches the stored payload itself.
+pub(super) fn history_snippet_with_items(
+    connection: &Connection,
+    thread_id: &str,
+    current_cwd: &str,
+    node_id: String,
+    kind: String,
+    deleted_reason: Option<String>,
+    ordinal: u64,
+    payload_chars: Option<u64>,
+    body: Option<&Value>,
+    excerpt_chars: u32,
+    item_projection: crate::protocol::HistoryNodeItems,
+    executions: Vec<HistoryExecutionLink>,
+    execution_count: u64,
+) -> Result<HistorySnippet, ApiError> {
+    let excerpt = if excerpt_chars == 0 {
+        String::new()
+    } else if let Some(body) = body {
+        text_of_payload(body)
+            .chars()
+            .take(excerpt_chars as usize)
+            .collect()
+    } else {
+        format!(
+            "[{}]",
+            deleted_reason.as_deref().unwrap_or("body unavailable")
+        )
+        .chars()
+        .take(excerpt_chars as usize)
+        .collect()
+    };
+    let spill_tools = if kind == "spill" {
+        Some(super::spill_tools::load(connection, &node_id)?)
+    } else {
+        None
+    };
+    let executions_truncated = execution_count > executions.len() as u64;
+    Ok(HistorySnippet {
+        item_projection: Some(item_projection),
+        spill_tools,
+        payload_chars,
+        provenance: provenance(connection, &node_id)?,
+        context: crate::context::for_node(connection, &node_id)?,
+        selection: HistorySelection {
+            thread_id: thread_id.into(),
+            ordinal,
+            current_cwd: current_cwd.into(),
+        },
+        executions_truncated,
+        execution_count,
+        executions,
+        node_id,
+        kind,
+        excerpt,
+    })
+}
