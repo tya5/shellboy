@@ -237,3 +237,62 @@ async fn invalid_relation_preserves_independent_sender_and_body_after_reopen() {
     assert_eq!(unknown["text"], original["text"]);
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn notification_marker_survives_delivery_removal_and_all_official_history_reads() {
+    let (_root, store) = fixture().await;
+    store.database.call(|db| {
+        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('nr','recipient','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('nt','recipient','nr','completed','now'); INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,semantic_json,created_at) VALUES('ne','context_changed','{}','recipient','{\"private\":\"SECRET_SENTINEL\"}','{\"kind\":\"turn_started\"}','now');")?;
+        shellboy::history::append_node(db,"recipient","nn",Some("nt"),"event",&serde_json::json!({"role":"developer","content":[{"type":"input_text","text":"synthetic notification body"}]}),"now")?;
+        db.execute("UPDATE node SET notification_event_id='ne' WHERE id='nn'",[])?;
+        db.execute_batch("INSERT INTO delivery(event_id,recipient_id,state) VALUES('ne','nr','pending'); DELETE FROM delivery WHERE event_id='ne';")?;
+        Ok(())
+    }).await.unwrap();
+    for raw in [
+        serde_json::json!({"command":"history.get","args":{"node_id":"nn"}}),
+        serde_json::json!({"command":"history.list","args":{"thread_id":"recipient"}}),
+        serde_json::json!({"command":"history.window","args":{"thread_id":"recipient","items":true}}),
+    ] {
+        let operation = request(serde_json::from_value(raw).unwrap());
+        let first = store.execute(operation.clone(), None).await.unwrap();
+        let replay = store.execute(operation, None).await.unwrap();
+        assert_eq!(first.result, replay.result);
+        let result = first.result;
+        let item = if let Some(items) = result.get("items").and_then(serde_json::Value::as_array) {
+            items.iter().find(|item| item["node_id"] == "nn").unwrap()
+        } else {
+            &result
+        };
+        assert_eq!(
+            item["provenance"]["notification"],
+            serde_json::json!({"kind":"turn_started"})
+        );
+        let encoded = serde_json::to_string(&result).unwrap();
+        assert!(!encoded.contains("SECRET_SENTINEL"));
+    }
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn independently_pinned_schema41_upgrades_through_worker_to42() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("pinned41.sqlite");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    // Exact69bae5 schema, not a prefix reconstructed from the new schema42.
+    db.execute_batch(include_str!("fixtures/notification-schema41.sql"))
+        .unwrap();
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        41
+    );
+    drop(db);
+    let worker = DbWorker::open(&path).await.unwrap();
+    worker.call(|db| {
+        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,42);
+        assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=42 AND name='0042_notification_semantic_descriptor'",[],|r|r.get::<_,i64>(0))?,1);
+        assert_eq!(db.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get::<_,i64>(0))?,0);
+        Ok(())
+    }).await.unwrap();
+    worker.shutdown().await.unwrap();
+}
