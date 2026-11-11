@@ -411,3 +411,35 @@ behavior unmeasured. This is disposable qualification, NOT production dependency
 adoption. No package installation or API binding in production by this doc.
 Byte hashing remains separate from producer coverage authority and consumer FINAL
 ownership. Leader still decides exact dependency and implementation scope.
+
+### Final Candidate Synchronization With Approved TS Primitive
+
+Leader permits D alone to install exact @noble/hashes2.4.0 and implement its bounded
+verifier primitive. This does not authorize Core live wire, storage migration or
+terminal-live-off changes. Use import @noble/hashes/sha2.js, sha256.create(),
+update(Uint8Array), digest(), destroy(); exact lock/integrity and owner-reset cleanup
+are required. Rust remains existing sha2=0.11.1. No independent2.4 audit or real
+browser-runtime qualification is implied.
+
+Private Rust candidate signatures, not implemented/adopted Core runtime yet:
+`Producer::begin(attempt: AttemptIdentity, incarnation: Uuid) -> Producer`;
+`Producer::admit_ordinary(&mut self, part: SourcePartIdentity,
+ scalar_offset: u64, text: &str) -> Result<FragmentMeta, Unknown>`;
+`Producer::freeze(self) -> FrozenAdmission`;
+`reconcile_ordinary(admission: FrozenAdmission, response: &ModelResponse)
+ -> Result<PositiveCoverage, Unknown>`;
+`save_once_tx(tx: &Transaction<'_>, attempt: &str, witness: &PositiveCoverage)
+ -> Result<(), StorageError>`.
+All state/evidence fields are private; SourcePartIdentity is obtained only from
+supported normalized producer provenance, never reconstructed from body text.
+PositiveCoverage owns exact attempt/seal/part witness; save rejects mismatch and
+non-NULL overwrite. Existing once-COMMIT and bounded-lossless constraints apply.
+
+Canonical fixtures are coverage-canonical-vectors.json beside this document:
+empty, ASCII, astral+CRLF+Japanese and same-text/different-segment-boundary. They
+include exact encoded bytes AND SHA256, produced independently with Python's
+hashlib as design fixtures. They are NOT yet Rust or TS executed evidence.
+Both implementations must match bytes and digests, reject split-surrogate input,
+and distinguish same-text/different-boundary vectors. Reasoning is not included;
+ordinary coverage cannot suppress the separate reasoning domain. Tests also need
+counter overflow/invalid decimals/duplicate/gap/post-seal behavior from the table.
