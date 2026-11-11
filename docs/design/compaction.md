@@ -1,5 +1,26 @@
 # 圧縮と採用
 
+## Authoritative Redesign: Core303 / Core301 (Design Only)
+
+The complete numbered specification0-13 at the end of this document supersedes
+conflicting historical proactive/summary policy. Source of truth: USER-confirmed
+SHA256 `492ce66f174a20018830c0c16743813498277c6f1a7444353a9cddf0164e3ba2`
+from `.local/claude/auto-compaction-redesign.md`, read in full against fresh main
+`4e6241a9a3235bb6ceffb03574ae983c5919765b`. The specification text is copied
+verbatim below, including USER/Claude-recommendation/to-confirm distinctions.
+This is DESIGN, not an assertion of implemented behavior. Old Core303 branch
+`427c0aba61ef1c5fd516624a0f66e9339221c0df` is preserved historically and is NOT
+part of this branch. Its migration43, target estimator and implementation are
+not adopted. No new table, column, migration number or code is introduced here.
+
+Rule/branch/test mapping, superseded-section scope, five required source checks,
+public-surface inventory and unresolved decisions:
+`docs/development/compaction-redesign-review.md`.
+No quality/reachability gate is introduced: original reachability explains why
+summary loss is acceptable; it is not a prerequisite to adoption. No evaluation
+of whether the instruction-preservation heading "works" is required.
+
+
 `src/compaction.rs` は通常のRust moduleとして配置する。公開入口は `Compactor::spill` と `summarize`。Controlの `/compact` は受付receiptを保存してからThreadごとの安全境界へ並べ、operation getのdownstreamで後続結果を取得する。Driverの通信・全tool結果確定と同じ境界を用いる。圧縮だけでTurnを作成・再開しない。
 
 対象snapshotには選択revision、profile revision、reasoning epoch、経路順node ID・payload revision・実本文hashを固定する。API待機中にDB transactionを保持しない。採用時に固定版を照合し、要約node・replacement・全source参照・選択pathを同一transactionで保存する。原文nodeは変更しない。元の経路を選び直した場合は、完全一致する入力と生成規則の成功片だけを再利用する。
@@ -1250,3 +1271,188 @@ Run-local stage baseline. Restart may allow one additional attempt; this change 
 stage. Explicit compact is not blocked. This is duplicate-work suppression, not an assertion about real-world
 rejection frequency or summary adoption rates. Empty forecast/no-safe-reduction record deduplication and smaller-range
 summary size policy remain separate concerns.
+
+
+---
+
+<!-- Verbatim USER-confirmed specification follows; historical sections above are subordinate. -->
+
+# 自動圧縮の制御論理（再設計）
+
+- 作成：Claude（利用者との設計議論の結果）、2026-11-12
+- 対象：自動圧縮（proactive threshold compaction）。#125、#153、#180、#182、#209、#215 の該当部分を置き換える。
+- #303 は、この設計で置き換える（旧要件は採用しない）。
+- 根拠にしたソース：main `4e6241a9` の `control/driver/proactive.rs`、`proactive_guard.rs`、`compaction.rs`、`compaction/policy.rs`、`range.rs`、`bounded.rs`、`parallel.rs`、`summary.rs`、`discard.rs`、`docs/design/compaction.md`。読解だけで、実行はしていない。
+
+各項目に、決定の出どころを付ける。
+
+- 【利用者決定】利用者が決めたこと。変えない。
+- 【Claude 推奨】利用者はまだ明示的に決めていない。この推奨で進めてよい。異論が出たら差し替える。
+- 【要確認】実装前の設計レビューで、リーダー側が事実を確かめて報告すること。
+
+## 0. 方針【利用者決定】
+
+1. 見積もりで論理を決めない。判断に使うのは、provider が報告した `input_tokens` と、path の構造の事実だけ。文字数からトークン数への換算はしない。
+2. 実測で論理を決めない。論理だけで穴を塞ぎ、できるだけ単純にする。
+3. 新しい表は追加しない。
+4. Shellboy は原本を辿れる。要約の品質は、原本を辿る回数を減らすための補助でしかない。したがって、要約による情報の薄まりは許容する。要約の品質を守るための関門や検証（「残すべきユーザーの指示」の欄が効くかの確認を含む）は足さない。
+5. 要約のキャッシュ効率は、今回は対象にしない。
+6. 圧縮の頻度、要約の費用、情報の損失はバランスの問題で、重みは利用者の設定（目標）に委ねる。
+
+## 1. 用語
+
+| 用語 | 定義 |
+|---|---|
+| 閾値 | `auto_compact_at`（Thread → 接続 → 既定 200,000、0 で無効）。変更なし。 |
+| 目標 | 閾値 × 割合。割合は Thread ごとの設定で、既定 20%。**#A の判定にだけ使う。削る量の計算には使わない。** |
+| 試行 | 自動圧縮が始まってから終わるまでの 1 回。採用、空振り（何も縮められなかった）、失敗、破棄のどれも試行に数える。 |
+| #A | 直近の圧縮のあと、最初に完了した要求について provider が報告した `input_tokens`。空振りの試行のあとも更新する。該当する記録が無ければ 0。圧縮のあとにモデルまたは接続が変わっていたら 0。 |
+| closed 領域 | 現在の Turn の依頼（`request_boundary`）より前。 |
+| active 領域 | 現在の Turn の依頼より後。 |
+| 安全な group | 完了していて、保護 node（receipt が accepted または held のメッセージ node）を含まない group。既存の定義のまま。 |
+
+- #A の「直近の圧縮」に手動の compact を含める。【Claude 推奨】手動で深く要約した直後に、古い #A で要約が走るのを避けるため。
+
+## 2. 制御の流れ
+
+境界は既存と同じ。Driver の要求ループで次の要求を送る直前、Thread の境界 guard を保持し、tool group が全部完了していて、送信中の要求が無い所。
+
+1. 最新の完了 attempt の `input_tokens`（現在の接続とモデル）を読む。無い、または採用後でまだ新しい報告が無い（stale）なら、何もしない。
+2. `input_tokens` が閾値未満なら、何もしない。**閾値未満で続ける例外（目標未達の継続）は廃止する。**【利用者決定】
+3. この報告値に対して、すでに試行していたら、何もしない（**1 つの報告値につき試行は 1 回**）。【Claude 推奨】空振りの直後に、要求を挟まずに試行を繰り返すのを防ぐ。
+4. 歯止め（6 章）に当たるなら、何もしない。
+5. #A を求める（7 章）。
+6. 分岐する。【利用者決定】
+   - #A ≤ 目標：**spill だけ**（3 章）。
+   - #A > 目標：**spill ＋ 要約**（3 章、4 章）。
+7. 試行の記録を、発動のもとになった attempt に残す（既存の `automatic_trim_attempt` を使う）。
+8. 採用したら、snapshot を読み直す（既存どおり）。
+
+初回（記録なし）は #A = 0 なので、spill だけになる。【利用者決定】
+
+## 3. spill
+
+候補の条件は既存の `spill_ranges` のまま：tool group である、安全である、最新の完了 tool group ではない、spill 済みではない、spill 後の射影文字数が元より小さい。
+
+- **spill だけの枝：** closed 領域の候補を全部 spill する。現在の Turn には触らない。【Claude 推奨、利用者了承】
+- **要約の枝：** 要約する領域（4.1）の候補を全部 spill してから、その領域を要約する。active 領域の spill は、active を要約する段でだけ行う。【Claude 推奨、利用者了承】
+- **tool loop が開いていても実行する。**【Claude 推奨、利用者了承】設計文書の「selective automatic edits は loop が閉じた境界だけ」は、自動圧縮の spill については変更する。守る柵は、最新の完了 tool group、未完了の group、保護 node を含む group。呼び出しと結果の間を編集しないことは、境界の条件が保証する。
+- active 領域の spill が推論の epoch を進める扱いは、既存どおり。
+- 「削る量に届いたら止める」打ち切り（`spill_staged` の target）は廃止する。
+
+## 4. 要約
+
+### 4.1 範囲と順序
+
+1 回の試行で、要約の操作は 1 つ。closed に対象があれば closed、無ければ active。どちらも無ければ `no_target`。
+
+規則は 1 つ：**領域の先頭から、最初の「触れない物」の手前まで。**
+
+- **closed：** path の先頭から `min(normal_boundary, safe_prefix)` まで（既存の `normal_prefix`）。未要約の node が 1 つも無ければ対象なし（要約だけを再要約しない。既存の `unsummarized_prefix`）。【利用者決定：範囲を全部、一括で】
+- **active：**【Claude 推奨、利用者了承】
+  - 現在の Turn の依頼の後の、最初の作業 group（tool group、spill、要約の目印）から、最初の安全でない group の手前まで。
+  - 安全でない group が無ければ、最新の完了 tool group まで含め、最新の round は既存どおり文章として要約に添える（いまの `active_turn_plan` の形）。
+  - 範囲内の、現在の Turn の user メッセージは要約に含める（2026-11-03 の利用者決定 B、「User instructions to keep」）。
+  - 範囲に tool group も spill の目印も無ければ、対象なし（既存の #180 と同じ）。
+  - 範囲が最新の tool group まで届かない場合は、既存の部分要約と同じく推論をすべて落とす。届く場合は epoch を変えない。
+- いまの「部分窓」（最初の user メッセージで止まる `target_active_range`）と「全体」（保護 node が 1 つでもあれば対象なし）の 2 通りは、上の 1 つの規則に統合する。
+- `prefix_adopted` などの順序用のフラグは要らない。closed を要約すると、次の周回では closed に未要約の node が無いので、自然に active へ進む。
+
+### 4.2 1 回の要求で要約する【利用者決定】
+
+- 範囲全体を 1 つの要求で送り、要約を 1 つ受け取る。**map/reduce、segment 分割、part のキャッシュ、reduce の round は廃止する。**
+- モデルと effort は既存どおり（スレッドのモデル）。プロンプトに、出力の上限文字数（4.3）を明示する。
+- **窓超過で拒否されたら、範囲を先頭から半分にして再試行する。**
+  - 半分にするのは、窓超過の拒否のときだけ（既存の文脈上限の判定を使う）。通信、レート制限、サーバーの失敗では半分にしない。要求単位の既存の待機と再試行は、そのまま使う。
+  - 半分の切り方は決定的にする。【Claude 推奨】射影文字数の累計が半分を超えない最大の group 境界（最低 1 group）。
+  - **止める条件は 2 つ。**成功したら終わり。group が 1 つになっても拒否されたら失敗。数値の回数上限は設けない。
+  - 範囲は常に 4.1 の条件（closed は未要約の node、active は tool group か spill の目印を含む）を満たすこと。半分にして満たせなくなったら、それ以上狭められないので失敗とする。【Claude 推奨】
+- **半分で成功したら、そこで終わり。**残りは、次の閾値到達のときに通常の規則で処理する。同じ試行の中で続きは要約しない。【利用者決定】
+- 次に要約するときは、前の要約と新しい分をまとめて、もう一度要約する（薄まりは許容）。
+
+### 4.3 出力の上限【利用者決定】
+
+- 1 回の要約要求の出力の最大文字数を、Thread ごとに設定できるようにする。既定は 20,000。扱いは `auto_compact_at` と同じ（Thread → 接続 → 既定。`thread set` で設定、空文字で既定に戻す、`thread get` に有効値）。
+- 採用の条件は「要約の射影文字数が、元の射影文字数より小さい」（既存の `summary_not_shrinking`）。
+- **上限を超えた出力の扱い：元より小さければ採用し、超過したことを記録に残す。再試行しない。**【Claude 推奨】再試行は範囲全体の再送になり、高くつくため。
+- 「元の 5%」と「下限 2,000」の規則は廃止する。
+
+## 5. 採用と破棄
+
+- 採用は既存の 1 トランザクション。#300 の「末尾への追加だけなら採用できる」は維持する。
+- 1 回の要求が大きくなるので、破棄 1 回の損失が大きくなる。**#301 本体（破棄条件の見直し：依存を示せる条件だけ残す）を、この設計と同時に進める。**
+- 破棄理由の型付き記録（#301A）は維持する。map/reduce 固有の理由は、機能と一緒に廃止する。
+- 1 回の失敗で、その試行が丸ごとやり直しになることは許容する。【Claude 推奨】
+
+## 6. 歯止め
+
+1. **1 つの報告値につき試行は 1 回**（2 章の 3）。
+2. **対象なしの判定はローカルで行い、モデルを呼ばない。**
+3. **確定的な失敗は、同じ範囲では再試行しない。**【Claude 推奨】対象は、要約が元より小さくならない、group が 1 つでも窓超過、モデルの拒否または空の要約。失敗した要約範囲の同一性（範囲の node ID 列のハッシュ）を、既存の `app_meta` に保存する。範囲が変わったら再試行する。
+4. **一時的な失敗は止めない。**【Claude 推奨】対象は、取り消し、Run や Turn の変化による破棄、通信・レート制限・サーバーの失敗。次の報告値で、もう一度試行する（1 により、要求 1 回につき最大 1 回）。
+   - 破棄が続くと、要求のたびに大きな要約要求が走る危険がある。#301 本体で破棄を減らすことが前提。それでも上限が要ると判断した場合は、勝手に足さず、根拠を付けて報告すること。【要確認】
+
+## 7. #A の求め方【利用者決定：表を増やさない】
+
+- 既存の記録から、その都度求める。直近の圧縮（自動の試行の記録、手動 compact の採用記録）より後の、同じ Thread、同じ接続とモデルの、最初の完了 attempt の `input_tokens`。
+- 有界な問い合わせであること（既存の索引を使い、全走査しない）。【要確認】
+- 表や列の追加が必要と分かったら、実装せずに報告すること。
+
+## 8. 設定（Thread ごと）
+
+| 設定 | 意味 | 既定 |
+|---|---|---|
+| `auto_compact_at` | 発動の閾値（トークン） | 200,000（変更なし） |
+| 目標の割合 | #A の判定基準 ＝ 閾値 × 割合 | 20% |
+| 要約の出力上限 | 1 回の要約要求の出力の最大文字数 | 20,000 |
+
+- 名前は、既存の命名に合わせてリーダーが決める。有効な値の範囲も、根拠を付けて決める（推測の数値を入れない）。
+- 保存の変更が要るなら、既存の migration は変えず、新しい番号で足す。
+- 利用者向けの説明では、目標を「トークンでここまで縮める保証」と書かない。「前回の圧縮が十分深かったかを判定する基準」と書く。
+
+## 9. 廃止するもの
+
+- 目標の計画と検証：`target.rs` の `plan` と `verify`（4/5 の直書き）、`remove_characters`、`input_characters` による換算、保留中の目標（`automatic_target`）、`target_verification`、`insufficient_*`、`prior_turn_prefix`、`exhausted_active`。
+- 進捗ガード：候補の記録（marks）、witness、理由の列挙、段ごとのブロック（`Blocks`）、`prefix_adopted`、候補の予測。6 章の歯止めに置き換える。
+- map/reduce：segment 分割、並列ジョブ、`reduce_summary`、part のキャッシュの読み書き。
+- 設定：`segment_chars`、`reduce_rounds`、`summary_map_max_requests`、`summary_reduce_max_requests`、`summary_max_percent`。リリース前の方針どおり、互換のための層は作らない。
+- **保存済みの part のキャッシュは削除しない**（有料の結果。利用者が明示的に消すまで残す）。使わなくなるだけにする。
+
+公開面（protocol schema、`thread get`、`compact list`、status、設定ファイルのキー）の変更は、設計レビューで一覧にすること。利用者の実設定に廃止するキーが含まれていないかは、Claude が差し替えの前に確認する。
+
+## 10. 影響範囲【Claude 推奨】
+
+同じ要約器を、手動の `/compact`、範囲指定の要約、窓超過からの復旧も使っている。
+
+- 要約器は 1 つ（1 回の要求 ＋ 拒否なら半分）に統一する。経路ごとに別の実装を残さない。
+- 窓超過からの復旧の範囲決め（`overflow_prefix`）は `segment_chars` を基準にしている。置き換え方は設計レビューで案を示すこと。推測の数値を新しく作らない。【要確認】
+- 窓超過のときの段取りそのもの（failure-driven reduction の順序、最大限の省略）は、この設計の対象外。
+
+## 11. 既知のトレードオフ（設計文書に明記する）
+
+- spill だけの圧縮は、キャッシュを切るのに縮みが小さい場合がある。
+- 空振りのあと、要約まで要求 1 回ぶん遅れる。
+- 縮められる下限が目標より高いスレッドでは、閾値に達するたびに要約する（利用者了承）。
+- 目標は、トークンでの到達を保証しない。
+- tool loop の途中の編集で、編集位置より後ろの推論が落ちる。
+- 1 回の失敗で、その試行が丸ごとやり直しになる。
+
+## 12. 実装前に確かめること【要確認】
+
+結果は報告すること。合わない事実が出たら、設計を勝手に変えずに報告すること。
+
+1. 1 回の要求が、実際に窓に収まるか（整形とプロンプトの分を含む）。
+2. 窓超過の拒否が、処理の前に返るか（接続ごと）。
+3. 保護 node が path のどこに現れるか（active の範囲がどれだけ切り詰められるか）。
+4. #A が、有界な問い合わせで求まるか。
+5. 1 回の要求の所要時間（記録するだけ。保証値にしない）。
+
+## 13. 進め方
+
+1. この設計を `docs/design/compaction.md` に反映する（設計が先）。既存のどの節を置き換えるかを表にする。
+2. 構造化の規則を守る。圧縮するかの判定関数は 1 つ。この設計の各規則が、コードの分岐と試験に 1 対 1 で対応すること。
+3. 設計と対応表は、実装の前に、別スレッドで独立レビューを受ける。
+4. #303 はこの設計で置き換える。#301 本体と整合させる。
+5. この設計に書いていない判断が必要になったら、実装せずに質問する。
+6. モデルの使い方や利用者の設定に影響する変更は、Agent Guide と利用者向けの文書も更新する。
+7. Core の差し替えと owner の再起動は、利用者の承認のあとに Claude が行う。準備ができたら「Claude への相談：」で知らせる。
