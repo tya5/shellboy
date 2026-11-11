@@ -131,6 +131,7 @@ fn decode(raw: &str) -> Option<Value> {
         }
         _ => {}
     }
+    serde_json::from_value::<crate::protocol::NotificationDescriptor>(value.clone()).ok()?;
     Some(value)
 }
 

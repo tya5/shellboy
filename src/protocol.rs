@@ -1,4 +1,8 @@
 //! Versioned local-operation contracts shared by CLI, Control, and TUI.
+mod notification;
+pub use notification::{
+    InstructionObservation, NotificationDescriptor, NotificationSetting, NotificationTerminal,
+};
 mod sender;
 pub use sender::{MessageSender, SenderKind, validate_sender_label};
 
