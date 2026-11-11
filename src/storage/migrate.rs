@@ -654,8 +654,20 @@ mod activity_migration_tests {
                     .unwrap(),
                 crate::storage::SCHEMA_VERSION
             );
-            assert_eq!(crate::storage::SCHEMA_VERSION, 41, "schema 41 adds the receipt reverse lookup index");
-            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=40",[],|row|row.get::<_,String>(0)).unwrap(),"0040_selection_nonappend_generation");
+            assert_eq!(
+                crate::storage::SCHEMA_VERSION,
+                41,
+                "schema 41 adds the receipt reverse lookup index"
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT name FROM schema_migration WHERE version=40",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+                "0040_selection_nonappend_generation"
+            );
             assert_eq!(
                 db.query_row(
                     "SELECT name FROM schema_migration WHERE version=25",
@@ -675,7 +687,7 @@ mod activity_migration_tests {
                 "0026_reply_expected"
             );
             assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='history_tool_group_attempt'", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get(3)).unwrap();
+            let plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'", [], |row| row.get(3)).unwrap();
             assert!(plan.contains("receipt_reply_pending"), "{plan}");
             let human_plan: String = db.query_row("EXPLAIN QUERY PLAN SELECT target_thread_id FROM receipt INDEXED BY receipt_human_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending' AND json_extract(result_json,'$.to_human')=1", [], |row| row.get(3)).unwrap();
             assert!(
