@@ -196,14 +196,18 @@ mod tests {
             "CREATE TABLE node(id TEXT PRIMARY KEY,kind TEXT,created_at TEXT,payload_revision INTEGER,turn_id TEXT); \
              CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,thread_id TEXT); \
              CREATE TABLE run(id TEXT PRIMARY KEY,thread_id TEXT); \
-             CREATE TABLE receipt(rowid INTEGER PRIMARY KEY,message_node_id TEXT,result_json TEXT,sender_json TEXT,target_thread_id TEXT); \
+             CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(rowid INTEGER PRIMARY KEY,id TEXT,message_node_id TEXT,result_json TEXT,sender_json TEXT,target_thread_id TEXT); \
              INSERT INTO turn VALUES('turn','run','recipient'); \
              INSERT INTO run VALUES('run','recipient'); \
              INSERT INTO node VALUES('reply','user','now',0,'turn'); \
-             INSERT INTO receipt(message_node_id,result_json,sender_json,target_thread_id) VALUES('original','{\"reply\":{\"state\":\"replied\",\"node_id\":\"reply\",\"by\":{\"kind\":\"external_cli\",\"label\":\"reviewer\"}}}',NULL,'recipient');",
+             INSERT INTO receipt(id,message_node_id,result_json,sender_json,target_thread_id) VALUES('receipt','original','{\"reply\":{\"state\":\"replied\",\"node_id\":\"reply\",\"by\":{\"kind\":\"external_cli\",\"label\":\"reviewer\"}}}',NULL,'recipient');",
         )
         .unwrap();
 
+        db.execute_batch(include_str!(
+            "../../migrations/0041_receipt_reply_node_lookup.sql"
+        ))
+        .unwrap();
         let provenance = provenance(&db, "reply").unwrap();
         let sender = provenance.sender.unwrap();
         assert_eq!(sender.kind, crate::protocol::SenderKind::ExternalCli);
