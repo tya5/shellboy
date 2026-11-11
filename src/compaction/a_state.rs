@@ -138,4 +138,24 @@ mod tests {
         let before=s.clone();assert!(s.change_scope("d","m").is_err());assert_eq!(s,before);
         s.boundary_generation=u64::MAX;assert!(s.finish_boundary(s.token(),"x").is_err());
     }
+    #[test]
+    fn populated_old_boundary_is_cleared_and_duplicate_does_not_erase_new_first() {
+        let mut db=rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);").unwrap();
+        let mut state=State::new("c","m").unwrap();let old=state.token();
+        assert!(state.completed(old,"c","m","report1",Some(111)).unwrap());
+        {let tx=db.transaction().unwrap();save(&tx,"t",&state).unwrap();tx.commit().unwrap();}
+        let mut state=read(&db,"t").unwrap().unwrap();
+        assert!(state.finish_boundary(old,"trial2").unwrap());
+        assert_eq!(state.first,None,"reset clears both identity and tokens atomically");
+        let new=state.token();
+        assert!(state.completed(old,"c","m","report2",Some(222)).unwrap(),"pre-boundary start may complete after reset");
+        assert!(!state.finish_boundary(old,"trial2").unwrap());
+        assert!(!state.finish_boundary(new,"trial2").unwrap(),"same origin remains idempotent with fresh token too");
+        {let tx=db.transaction().unwrap();save(&tx,"t",&state).unwrap();tx.commit().unwrap();}
+        let persisted=read(&db,"t").unwrap().unwrap();
+        assert_eq!(persisted.first,Some(Report{attempt:"report2".into(),input_tokens:Some(222)}));
+        assert_eq!(persisted.reading(),Reading::Known(222));
+    }
+
 }
