@@ -138,6 +138,43 @@ fn decode(raw: &str) -> Option<Value> {
 mod tests {
     use super::*;
     #[test]
+    fn actual_schema_upgrade_converges_and_marker_fk_preserves_event() {
+        let schema = include_str!("../storage/current.sql");
+        let predecessor = schema
+            .split("ALTER TABLE event ADD COLUMN semantic_json TEXT;")
+            .next()
+            .unwrap();
+        let fresh = Connection::open_in_memory().unwrap();
+        fresh.execute_batch(schema).unwrap();
+        let upgraded = Connection::open_in_memory().unwrap();
+        upgraded.execute_batch(predecessor).unwrap();
+        upgraded
+            .execute_batch(include_str!(
+                "../../migrations/0042_notification_semantic_descriptor.sql"
+            ))
+            .unwrap();
+        let objects = |db: &Connection| {
+            db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").unwrap().query_map([],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?))).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap()
+        };
+        assert_eq!(objects(&fresh), objects(&upgraded));
+        fresh.execute_batch("PRAGMA foreign_keys=ON; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('creator','/synthetic','/synthetic','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','creator','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('t','creator','r','completed','now'); INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,semantic_json,created_at) VALUES('e','context_changed','{}','creator','{}','{\"kind\":\"turn_started\"}','now'); INSERT INTO node(id,turn_id,kind,created_at,payload_json,notification_event_id) VALUES('n','t','event','now','{}','e'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('e','r','pending');").unwrap();
+        let original = snapshot(&fresh, "n").unwrap().unwrap();
+        fresh.execute("DELETE FROM delivery", []).unwrap();
+        assert_eq!(snapshot(&fresh, "n").unwrap(), Some(original));
+        assert!(fresh.execute("DELETE FROM event WHERE id='e'", []).is_err());
+        let plans=fresh.prepare("EXPLAIN QUERY PLAN SELECT CASE WHEN length(CAST(e.semantic_json AS BLOB))<=2048 THEN e.semantic_json END FROM node n JOIN turn t ON t.id=n.turn_id JOIN event e ON e.id=n.notification_event_id WHERE n.id=?1 AND n.kind='event' AND t.thread_id=e.target_thread_id").unwrap().query_map(["n"],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+        assert!(plans.iter().all(|plan| !plan.contains("SCAN")), "{plans:?}");
+        assert_eq!(
+            fresh
+                .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+            0
+        );
+    }
+    #[test]
     fn duplicate_keys_fail_before_value_normalization_at_every_depth() {
         for raw in [
             r#"{"kind":"future","kind":"turn_started"}"#,
