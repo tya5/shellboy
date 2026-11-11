@@ -1069,7 +1069,7 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     request(
         &control,
         Command::ThreadSet(Box::new(ThreadSetArgs {
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             segment_chars: None,
             reduce_rounds: None,
             agents: None,
@@ -1137,7 +1137,7 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
             request(
                 &control,
                 Command::ThreadSet(Box::new(ThreadSetArgs {
-                    auto_compact_at: None,
+                    auto_compact_at: None,auto_compact_target_percent:None,
                     segment_chars: None,
                     reduce_rounds: None,
                     agents: None,

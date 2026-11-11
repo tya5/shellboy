@@ -231,7 +231,7 @@ async fn stream_input_layout_and_db_fairness() {
                                 model: None,
                                 effort: None,
                                 title: Some(title),
-                                auto_compact_at: None,
+                                auto_compact_at: None,auto_compact_target_percent:None,
                                 segment_chars: None,
                                 reduce_rounds: None,
                                 parent_id: None,

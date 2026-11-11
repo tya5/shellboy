@@ -206,7 +206,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
         execute(
             &store,
             Command::ThreadSet(Box::new(ThreadSetArgs {
-                auto_compact_at: None,
+                auto_compact_at: None,auto_compact_target_percent:None,
                 segment_chars: None,
                 reduce_rounds: None,
                 agents: None,
@@ -1028,7 +1028,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let changed = execute(
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             segment_chars: None,
             reduce_rounds: None,
             agents: None,
@@ -1046,7 +1046,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let changed = execute(
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             segment_chars: None,
             reduce_rounds: None,
             agents: None,
@@ -1064,7 +1064,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let cleared = execute(
         &store,
         Command::ThreadSet(Box::new(ThreadSetArgs {
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             segment_chars: None,
             reduce_rounds: None,
             agents: None,
@@ -2740,4 +2740,29 @@ async fn retry_has_no_authority_check_and_is_safe_when_raced() {
     )
     .await;
     store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn target_percent_thread_clear_effective_and_reopen() {
+    let (root, store)=store().await;
+    let thread=create(&store,None).await;
+    let mut args=ThreadSetArgs::default();
+    args.thread_id=Some(thread.thread_id.clone());
+    args.auto_compact_target_percent=Some("80".into());
+    let set=execute(&store,Command::ThreadSet(args.clone())).await;
+    assert_eq!(set.result["auto_compact_target_percent"],80);
+    assert_eq!(set.result["effective_auto_compact_target_percent"],80);
+    args.auto_compact_at=Some("0".into());
+    args.auto_compact_target_percent=Some(String::new());
+    let cleared=execute(&store,Command::ThreadSet(args)).await;
+    assert!(cleared.result["auto_compact_target_percent"].is_null());
+    assert_eq!(cleared.result["effective_auto_compact_target_percent"],20);
+    assert_eq!(cleared.result["effective_auto_compact_at"],0);
+    let config=store.config.clone();
+    store.database.shutdown().await.unwrap();
+    let reopened=Store::new(DbWorker::open(root.path().join("db")).await.unwrap(),config,root.path().join("project"),"reopen".into());
+    let result=execute(&reopened,Command::ThreadGet(ThreadGetArgs{thread_id:Some(thread.thread_id),..Default::default()})).await;
+    assert!(result.result["auto_compact_target_percent"].is_null());
+    assert_eq!(result.result["effective_auto_compact_target_percent"],20);
+    reopened.database.shutdown().await.unwrap();
 }

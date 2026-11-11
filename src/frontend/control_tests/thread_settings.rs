@@ -35,7 +35,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         model: model.map(str::to_owned),
         cwd,
         effort: None,
-        auto_compact_at: None,
+        auto_compact_at: None,auto_compact_target_percent:None,
         segment_chars: None,
         reduce_rounds: None,
         parent_id: None,

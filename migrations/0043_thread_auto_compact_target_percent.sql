@@ -1,0 +1,1 @@
+ALTER TABLE thread ADD COLUMN auto_compact_target_percent INTEGER CHECK(auto_compact_target_percent IS NULL OR (typeof(auto_compact_target_percent)='integer' AND auto_compact_target_percent BETWEEN 1 AND 100));

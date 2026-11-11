@@ -235,8 +235,11 @@ pub(super) async fn maybe_compact(
     let threshold = config
         .compaction
         .auto_at_tokens_for(thread_override, config.connections.get(&snapshot.profile));
-    // Thread storage wiring follows only after its migration is assigned.
-    let target_percent = crate::config::auto_compact_target_percent_for(None, config.connections.get(&snapshot.profile));
+    let percent_thread=snapshot.thread.clone();
+    let percent_override=control.store.database.call(move |db| {
+        Ok(db.query_row("SELECT auto_compact_target_percent FROM thread WHERE id=?1",[percent_thread],|r|r.get::<_,Option<u8>>(0))?)
+    }).await.map_err(storage_error)?;
+    let target_percent = crate::config::auto_compact_target_percent_for(percent_override, config.connections.get(&snapshot.profile));
     if threshold == 0 {
         if budget.status_context.take().is_some() {
             super::proactive_guard::hide_status(control, &snapshot.thread).await?;
@@ -283,6 +286,16 @@ pub(super) async fn maybe_compact(
             };
             let target_key = crate::compaction::CompactionKeys::new(&thread).automatic_target();
             let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key=?1 AND octet_length(value)<=1048576", [&target_key], |row| row.get(0)).optional()?;
+            // Requalify policy even when the last provider attempt is unchanged.
+            // CAS removes only mutable pending work, never its historical attempt.
+            let pending=if let Some(text)=pending {
+                let parsed=serde_json::from_str::<Value>(&text).ok();
+                let matches=parsed.as_ref().and_then(|v|v["target_tokens"].as_u64().map(|target|target::pending_matches(threshold,target_percent,v["target_percent"].as_u64(),target))).unwrap_or(false);
+                if matches { Some(text) } else {
+                    db.execute("DELETE FROM app_meta WHERE key=?1 AND value=?2",params![target_key,text])?;
+                    None
+                }
+            } else { None };
             let mut insufficient_prefix = false;
             let mut prior_turn_prefix = false;
             let mut insufficient_spill = false;

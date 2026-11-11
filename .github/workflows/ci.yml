@@ -4,6 +4,10 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
+      source_prepare:
+        description: Format and export canonical source/schema artifacts without a provider or owner
+        type: boolean
+        default: false
       shutdown_repeats:
         description: Run only the shutdown PTY test 50 times on native macOS, before and after
         type: boolean
@@ -53,6 +57,31 @@ permissions:
   contents: read
   actions: read
 jobs:
+  source-prepare:
+    if: inputs.source_prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Prepare formatting and canonical schema
+        run: |
+          set -eu
+          mkdir -p source-artifacts
+          git rev-parse HEAD > source-artifacts/source-sha.txt
+          cargo fmt --all
+          git diff --binary > source-artifacts/format.patch
+          cargo check --tests
+          cargo build --bin shellboy
+          target/debug/shellboy protocol schema > source-artifacts/protocol.schema.json
+          cargo test --lib target_percent
+          cargo test --lib policy_target_rounding_identity_and_extremes
+          cargo test --test integration target_percent_thread_clear_effective_and_reopen
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-artifacts
+          path: source-artifacts/
   reuse:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -91,7 +120,7 @@ jobs:
           done
   check:
     needs: reuse
-    if: always() && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
+    if: always() && !inputs.source_prepare && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
     strategy:
       fail-fast: false
       matrix:

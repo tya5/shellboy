@@ -97,3 +97,20 @@ another model_attempt column; old observation absent stays UNKNOWN.
 First source checkpoint intentionally wires connection/default only; Thread
 storage/get/set and public schema remain incomplete pending migration allocation.
 No local compile, formatting build or tests have run under the heavy hold.
+
+## Authorized 0043 And Cloud-Only Preparation
+
+Leader reassigned the unimplemented coverage0043 reservation to Core303 after
+O confirmed its tree clean/no SQL/no persistence wiring. Fresh main4e6241a9 has
+maximum0042. New0043 adds only the nullable checked Thread percentage;40-42 are
+unchanged. Coverage next number is unassigned. Thread read/write, inheritance,
+strict CLI empty clear and effective get are now connected (no None placeholder).
+Pending CAS qualification occurs before the same-attempt branch, so changing the
+effective policy cannot reuse a same-attempt old target; attempt history stays.
+
+Cloud workflow `ci.yml` input `source_prepare=true` runs format/check, produces
+format.patch + protocol.schema.json + source-sha artifact, then focused fixtures.
+Download artifacts, verify source SHA, apply only own source formatting patch,
+and replace generated schema from that artifact. No local Rust/Node execution.
+The generated-content commit must then receive its own normal/all-OS exact-SHA
+CI, independent review and fresh landing guards. Preparation is not final CI.

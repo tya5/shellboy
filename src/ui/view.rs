@@ -357,7 +357,7 @@ impl ThreadView {
                 .as_ref()
                 .and_then(|name| config.connections.get(name))
                 .and_then(|c| c.default_effort.clone()),
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             title: super::i18n::local!(config.ui.language, "新しい会話", "New conversation").into(),
             state: "idle".into(),
             draft: DraftSnapshot::default(),

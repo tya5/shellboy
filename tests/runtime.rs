@@ -2169,7 +2169,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
     command(
         &control,
         Command::ThreadSet(Box::new(ThreadSetArgs {
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             segment_chars: None,
             reduce_rounds: None,
             agents: None,

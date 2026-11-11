@@ -8764,7 +8764,7 @@ mod tool_refresh_tests {
             instruction_sources: None,
             archived_at: None,
             tags: Vec::new(),
-            auto_compact_at: None,
+            auto_compact_at: None,auto_compact_target_percent:None,
             effective_auto_compact_at: None,
             segment_chars: None,
             effective_segment_chars: None,
