@@ -33,6 +33,9 @@ pub(super) fn overflow_prefix(snapshot: &Snapshot) -> Range<usize> {
     0..end
 }
 
+/// Projection here covers selected groups only; extra_sources remain fixed in
+/// the request. This scope and the zero-weight strict-prefix fallback below are
+/// pending USER clarification; neither is wired to the production dispatcher.
 /// Only a classified context refusal calls this. Transient retry stays with
 /// the existing HTTP request retry mechanism, never this range transformation.
 pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option<Range<usize>> {
@@ -43,7 +46,7 @@ pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option
     let half = weights.iter().sum::<u128>() / 2;
     let mut total = 0;
     let mut count = 0;
-    // Strictly shorten even when all groups have zero projection.
+    // PROPOSAL ONLY: zero-total len-1 fallback awaits USER decision.
     for weight in weights.iter().take(weights.len()-1) {
         if total + weight > half { break; }
         total += weight;
