@@ -185,8 +185,8 @@ def stderr_line(db, execution, encoding):
 def facts(source, repo_root=None):
     with contextlib.closing(connect_readonly(source)) as db:
         read_rows(db, 'BEGIN')
-        if read_rows(db, 'PRAGMA user_version')[0][0] not in (39, 40, 41):
-            raise ValueError('Conversation schema39, schema40 or schema41 is required')
+        if read_rows(db, 'PRAGMA user_version')[0][0] not in (39, 40, 41, 42):
+            raise ValueError('Conversation schema39, schema40, schema41 or schema42 is required')
         if read_rows(db, 'SELECT rowid FROM shell_execution ORDER BY rowid LIMIT 1 OFFSET ?', (MAX_EXECUTIONS,)):
             raise ValueError('Source exceeds 10000 execution allowance; no partial catalogue published')
         for name in ('shell_execution', 'run', 'turn', 'thread', 'tool_call', 'tool_group', 'tool_result', 'node', 'output_chunk'):
