@@ -129,7 +129,7 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
         upgraded
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        41
+        shellboy::storage::SCHEMA_VERSION
     );
     assert_eq!(
         upgraded
