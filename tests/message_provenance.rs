@@ -196,7 +196,12 @@ async fn invalid_relation_preserves_independent_sender_and_body_after_reopen() {
         .await
         .unwrap();
     store.database.shutdown().await.unwrap();
-    let store = Store::new(DbWorker::open(root.path().join("reply.db")).await.unwrap());
+    let store = Store::new(
+        DbWorker::open(root.path().join("reply.db")).await.unwrap(),
+        Arc::new(Config::default()),
+        root.path().into(),
+        "recipient".into(),
+    );
     let invalid = store
         .execute(request(command()), None)
         .await
