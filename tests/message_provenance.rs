@@ -110,7 +110,7 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
         .result;
     let node = result["message_id"].as_str().unwrap().to_owned();
     store.database.shutdown().await.unwrap();
-    let path = root.path().join("db");
+    let path = root.path().join("reply.db");
     let db = rusqlite::Connection::open(&path).unwrap();
     let before: String = db
         .query_row(
