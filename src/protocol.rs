@@ -1147,12 +1147,12 @@ record!(EventChange {
 // Unsaved answer text (#243 E3). `offset` counts Unicode scalar values in the attempt's
 // full model stream, including omitted reasoning deltas; it restarts with each attempt.
 record!(EventTextDelta {
-    coverage_v1: None,
+    #[serde(default,skip_serializing_if="Option::is_none")] coverage_v1: Option<CoverageFragmentV1>,
     offset: u64,
     reasoning: bool,
     text: String
 });
-record!(EventLiveText { coverage_v1: None,
+record!(EventLiveText { #[serde(default,skip_serializing_if="Option::is_none")] coverage_v1: Option<CoverageIdentityV1>,
     thread_id: String,
     attempt_id: String,
     gap: bool,
@@ -1165,7 +1165,7 @@ record!(EventReasoningActivity {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     received_bytes: Option<u64>
 });
-record!(EventsWaitResult { coverage_seals_v1: Vec::new(), status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
+record!(EventsWaitResult { #[serde(default,skip_serializing_if="Vec::is_empty")] coverage_seals_v1: Vec<CoverageSealV1>, status: EventsWaitStatus, cursor: String, changes: Vec<EventChange>, more: bool, #[serde(default, skip_serializing_if="Option::is_none")] live_text: Option<Vec<EventLiveText>>, #[serde(default)] reasoning_activity: Vec<EventReasoningActivity> });
 pub const MAX_EVENT_THREAD_FILTER: usize = 64;
 pub const MAX_EVENT_CHANGES: usize = 64;
 /// Opaque cursor: the owner instance that issued it and a position of that instance's change clock.
