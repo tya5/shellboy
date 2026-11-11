@@ -197,6 +197,56 @@ pub(super) fn project(
 mod tests {
     use super::*;
     #[test]
+    fn pending_plan_scope_before_and_after_reverse_index_on_bounded_distribution() {
+        use rusqlite::StatementStatus;
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT); CREATE INDEX receipt_reply_pending ON receipt(target_thread_id) WHERE json_extract(result_json,'$.reply.state')='pending';").unwrap();
+        for i in 0..512 {
+            let thread = if i < 256 { "t" } else { "other" };
+            let state = if i % 128 == 0 { "pending" } else { "replied" };
+            let raw = serde_json::json!({"reply":{"state":state,"node_id":format!("reply{i}")}})
+                .to_string();
+            db.execute(
+                "INSERT INTO receipt VALUES(?1,?2,?3,?4)",
+                rusqlite::params![format!("r{i}"), thread, format!("body{i}"), raw],
+            )
+            .unwrap();
+        }
+        let measure = |query: &str| {
+            let plan = db
+                .query_row(&format!("EXPLAIN QUERY PLAN {query}"), [], |r| {
+                    r.get::<_, String>(3)
+                })
+                .unwrap();
+            let mut stmt = db.prepare(query).unwrap();
+            let values = stmt
+                .query_map([], |r| r.get::<_, i64>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            (plan, stmt.get_status(StatementStatus::VmStep), values)
+        };
+        let query = "SELECT rowid FROM receipt WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'";
+        let before = measure(query);
+        db.execute_batch(include_str!(
+            "../../migrations/0041_receipt_reply_node_lookup.sql"
+        ))
+        .unwrap();
+        let after = measure(query);
+        let forced = measure(
+            "SELECT rowid FROM receipt INDEXED BY receipt_reply_pending WHERE target_thread_id='t' AND json_extract(result_json,'$.reply.state')='pending'",
+        );
+        assert_eq!(before.2, after.2);
+        assert_eq!(before.2, forced.2);
+        eprintln!(
+            "PENDING_SCOPE rows=512 target_rows=256 target_pending=2 before={:?} after={:?} forced={:?}",
+            (before.0, before.1),
+            (after.0, after.1),
+            (forced.0, forced.1)
+        );
+        assert!(before.1 > 0 && after.1 > 0 && forced.1 > 0);
+    }
+    #[test]
     fn strict_states_conflicts_and_depth_are_fail_closed() {
         let accepted = serde_json::json!({"message_id":"body","thread_id":"thread","delivery_status":"accepted","assignment":"pending","expect_reply":true,"reply":{"state":"pending"}});
         assert!(saved_relation(&accepted.to_string(), "body", "thread").is_some());
