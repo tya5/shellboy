@@ -249,3 +249,26 @@ pre-seal exact duplicate, post-seal same duplicate -> Unknown, duplicate/conflic
 seal, unknown irreversibility, and exact ordinal identities with same-node members.
 These are design obligations, not executed results. Wire placement, dependencies,
 new schema number/constructor and live-off behavior still need explicit adoption.
+
+## Five Implementation Scope Proposals (No Code Authority Yet)
+
+| Scope | Concrete file/function assignment and proposal | Bound / unresolved adoption |
+| --- | --- | --- |
+| Optional live placement | Core protocol.rs EventLiveText optional identity V1; EventTextDelta optional V1 sequence/projection-offset metadata, reuse text. change_clock.rs live_text projection at498 preserves producer segment boundaries for V1 instead of current adjacent-text coalescing at488. Add optional terminal-seal lane on EventsWaitResult so a terminal attempt does not require a nonempty live-text entry. Bridge forwards to Studio LiveFrame and live_end seal envelope | Existing cursor/filter and max-thread bounds apply; missing/evicted seal -> Unknown, never replay fabricated from text. Terminal lane bounded by existing changes batch64, per seal2048; no new polling/fetch. Exact field spellings require adoption |
+| Saved lookup placement | status.rs WorkItem optional positive coverage V1 only for exact model-attempt lookup, next to response_nodes/truncated. Reuse response_nodes ordinal/item/node identifiers; no duplicate members list | NULL/overbound/unknown absent; do not attach another attempt's witness to an aggregate Thread item. Pre-materialization2048 and final-response bound required |
+| Producer and save constructors | New private control/driver/coverage.rs: Producer::begin(attempt:&AttemptIdentity)->Producer; Producer::admit_text(&mut self, scalar_offset:u64,text:&str)->Result<FragmentMeta,Unknown>; Producer::freeze(self)->FrozenSeal; private reconcile_ordinary(seal:FrozenSeal,response:&ModelResponse)->Result<PositiveCoverage,Unknown>. adoption.rs accepts optional PositiveCoverage and private save_once_tx(tx:&Transaction, attempt:&str, witness:&PositiveCoverage)->Result<()> within existing Applied/output insertion transaction | Private fields prohibit arbitrary JSON constructor; only normalized ordinary-text request producer can issue seal. PositiveCoverage includes the exact attempt. Rollback leaves NULL. Completion publish consumes committed result, never precommit token. Request scope owns/destroys state on cancel/shutdown |
+| Crypto | Rust reuses existing exact sha2=0.11.1 (Cargo.toml53; Sha256 incremental Digest API), no new Rust dependency. TS currently has no SHA dependency; candidate @noble/hashes=1.8.0, sha256.create().update()/digest() synchronous browser incremental API, not WebCrypto transcript buffering | npm metadata confirms exact1.8.0 exists; this turn has NOT audited package/license/provenance or browser-qualified memory/API. D owns final dependency validation/lockfile. Fixed hash state+previous fingerprint, payload processed incrementally; no custom crypto implementation. New dependency still requires leader approval |
+| Migration and old live-off | Coverage branches from fresh main after302 schema42 lands, then separate next migration (candidate43 only if actual fresh max42); never modify302's unlanded42 or preclaim a number. D sole owner updates live.ts/handoff/conversation adapter: Verifying -> SealedAwaitingCoverage -> VerifiedAwaitingAllFinal -> Replaced; any gap/late/etc -> UnknownHeld; legacy -> LegacyHeld | Current terminal-live-off must NOT simply drop nonempty preview when positive proof is missing. Keep existing bounded owner retention and visible pending/unavailable terminal explanation; on expiry show explicit unavailable disposition, not a claim that saved answer covers it. Exact presentation/expiry behavior and legacy policy require D/leader adoption; Unknown alone does not solve current body-disappearance incidents |
+
+The final seal lane requires producer-owned bounded terminal metadata retention
+under the existing change cursor; if that cannot fit current lifecycle, report a
+specific lifecycle gap rather than silently retain all sealed attempts. Metadata
+may expire and become unavailable, never silently increase preview retention.
+No listener/queue/task is created by this doc. Runtime implementation must name
+its owner, cap and shutdown path before introducing any such state.
+
+Public Q1 projection must return the exact attempt identity and all current-member
+facts as already bounded; proof never bypasses Studio FINAL ownership/path/CAS.
+Ordinary replacement does not retire reasoning-domain content. Legacy/Unknown
+policy is not declared fixed by a Core witness; D current-visible representation
+work remains independently required. No all-USER incident fix claim is made.
