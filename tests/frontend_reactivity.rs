@@ -173,6 +173,29 @@ impl Fixture {
     }
     fn accept_update(&mut self, update: UiUpdate) {
         let trace = match &update {
+            UiUpdate::GcDiagnostics(Some(snapshot)) => {
+                let stage = match snapshot.stage.as_str() {
+                    "reset" => "reset",
+                    "roots" => "roots",
+                    "provenance" => "provenance",
+                    "sweep" => "sweep",
+                    "cleanup" => "cleanup",
+                    "complete" => "complete",
+                    _ => "other",
+                };
+                Some(json!({"event":"gc_diagnostics","stage":stage,
+                    "scanned":snapshot.scanned,"deferrals":snapshot.deferrals,
+                    "restarts":snapshot.restarts,"kept_over_budget":snapshot.kept_over_budget,
+                    "kept_receipts":snapshot.kept_receipts,"kept_marks":snapshot.kept_marks,
+                    "completed":snapshot.completed.is_some()}))
+            }
+            UiUpdate::HistoryInvalidated {
+                thread_id,
+                generation,
+                ..
+            } => Some(
+                json!({"event":"history_invalidated","thread":thread_id,"generation":generation}),
+            ),
             UiUpdate::DetailSourcesChanged {
                 thread_id,
                 generation,
@@ -925,7 +948,14 @@ async fn real_history_gc_f7_last_hint_precedes_deleted_thread_failure() {
 }
 
 // Failure-only metadata: never print saved bodies, error strings, paths or random IDs.
-fn f7_barrier_failure(fixture: &Fixture, child: &str, hint_first: bool, baseline: usize) {
+fn f7_barrier_failure(
+    fixture: &Fixture,
+    child: &str,
+    hint_first: bool,
+    baseline: usize,
+    collected_nodes: Option<u64>,
+    collect_deferred: Option<bool>,
+) {
     let alias = |id: Option<&str>| match id {
         Some(id) if id == child => "fixture-child",
         Some("f7-parent") => "fixture-parent",
@@ -945,6 +975,11 @@ fn f7_barrier_failure(fixture: &Fixture, child: &str, hint_first: bool, baseline
                 "request_id": entry.get("request_id"),
                 "revision": entry.get("revision"),
                 "held": entry.get("held"),
+                "stage": entry.get("stage"),
+                "scanned": entry.get("scanned"), "deferrals": entry.get("deferrals"),
+                "restarts": entry.get("restarts"), "kept_over_budget": entry.get("kept_over_budget"),
+                "kept_receipts": entry.get("kept_receipts"), "kept_marks": entry.get("kept_marks"),
+                "completed": entry.get("completed"),
             })
         })
         .collect::<Vec<_>>();
@@ -963,6 +998,7 @@ fn f7_barrier_failure(fixture: &Fixture, child: &str, hint_first: bool, baseline
         json!({
             "hint_first":hint_first,"load_failures_before":baseline,
             "load_failures_current":fixture.load_failures,
+            "collect_nodes_tombstoned":collected_nodes,"collect_deferred":collect_deferred,
             "held_detail_hints":fixture.held_detail_hints.as_ref().map(Vec::len),
             "held_load_failures":fixture.held_load_failures.as_ref().map(Vec::len),
             "current_thread":alias(fixture.ui.view().thread_id.as_deref()),
@@ -1142,7 +1178,18 @@ async fn history_gc_f7_ordering(hint_first: bool) {
         })
         .await;
         if barrier.is_err() {
-            f7_barrier_failure(&fixture, &child, hint_first, failures_before_delete);
+            f7_barrier_failure(
+                &fixture,
+                &child,
+                hint_first,
+                failures_before_delete,
+                collected
+                    .pointer("/result/nodes_tombstoned")
+                    .and_then(Value::as_u64),
+                collected
+                    .pointer("/result/deferred")
+                    .and_then(Value::as_bool),
+            );
         }
         barrier.unwrap();
         for failure in fixture.held_load_failures.take().unwrap() {
@@ -1165,7 +1212,18 @@ async fn history_gc_f7_ordering(hint_first: bool) {
         })
         .await;
         if barrier.is_err() {
-            f7_barrier_failure(&fixture, &child, hint_first, failures_before_delete);
+            f7_barrier_failure(
+                &fixture,
+                &child,
+                hint_first,
+                failures_before_delete,
+                collected
+                    .pointer("/result/nodes_tombstoned")
+                    .and_then(Value::as_u64),
+                collected
+                    .pointer("/result/deferred")
+                    .and_then(Value::as_bool),
+            );
         }
         barrier.unwrap();
         for hint in fixture.held_detail_hints.take().unwrap() {
