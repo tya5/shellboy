@@ -21,6 +21,7 @@ pub(super) fn saved_relation(raw: &str, body: &str, thread: &str) -> Option<Mess
     let value = Value::deserialize(&mut parser).ok()?;
     parser.end().ok()?;
     let accepted: MessageAccepted = serde_json::from_value(value.clone()).ok()?;
+    accepted.validate().ok()?;
     if accepted.message_id != body || accepted.thread_id != thread {
         return None;
     }
@@ -81,11 +82,16 @@ pub(super) fn unique_reverse(
     let Some(first) = rows.next()? else {
         return Ok(None);
     };
-    let receipt: String = first.get(0)?;
-    // Never materialize an oversized ID or body identity from a corrupt legacy row.
-    if receipt.len() > 256 {
-        return Ok(None);
-    }
+    // Inspect borrowed SQLite bytes before allocating identity strings.
+    let receipt = match first.get_ref(0)? {
+        rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= 256 => {
+            match std::str::from_utf8(bytes) {
+                Ok(id) if !id.trim().is_empty() => id.to_owned(),
+                _ => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
+    };
     let body: Option<String> = match first.get_ref(1)? {
         rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= 256 => {
             std::str::from_utf8(bytes).ok().map(str::to_owned)
@@ -108,7 +114,7 @@ mod tests {
     use super::*;
     #[test]
     fn strict_states_conflicts_and_depth_are_fail_closed() {
-        let accepted = serde_json::json!({"message_id":"body","thread_id":"thread","state":"accepted","expect_reply":true,"reply":{"state":"pending"}});
+        let accepted = serde_json::json!({"message_id":"body","thread_id":"thread","delivery_status":"accepted","assignment":"pending","expect_reply":true,"reply":{"state":"pending"}});
         assert!(saved_relation(&accepted.to_string(), "body", "thread").is_some());
         for reply in [
             serde_json::json!({"state":"unknown"}),
