@@ -64,3 +64,22 @@ empirical efficiency claim or a context-capacity estimate.
 Implementation awaits independent feasibility/design review. Local Rust/Node
 heavy hold stays in effect; later approved validation uses cloud CI, not a
 silent local build. Performance optimization and paid measurement are deferred.
+
+## S6 Conditional Review Clarifications
+
+- 100% and floor-to-zero targets do not grant permission for busy retry, forced
+  range widening, new budget, or adoption relaxation. Existing bounded failure,
+  source witness and defer behavior remain authoritative.
+- Pending identity uses the EFFECTIVE percentage. Clearing an override while
+  inheriting the same value must not force invalidation merely because origin
+  changed. Conversely, different effective percentages invalidate even when
+  rounded target tokens coincide. Bind/reset under the existing transaction/CAS;
+  attempt-start immutable observation is separate from mutable pending state.
+- The default change from implicit80 to20 changes existing unset-user behavior.
+  Leader must explicitly adopt it; document this compatibility change and how
+  explicit80 retains the previous policy. Historical attempts remain UNKNOWN.
+- Connection nullable values and strict numeric Thread strings reuse existing
+  validation conventions. Optional public fields require schema/strict-client
+  compatibility review; no claim that all consumers silently accept additions.
+- 0043 remains coverage-exclusive. No schema implementation until fresh maximum
+  and a distinct migration number/order have independent leader adoption.
