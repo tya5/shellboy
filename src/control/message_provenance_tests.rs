@@ -232,6 +232,9 @@ async fn notification_all_history_handlers_fit_receipt_and_replay_at_exact_frame
                 .await;
             assert!(replayed.ok, "replay error: {:?}", replayed.error);
             assert_eq!(replayed.result.as_ref(), Some(&expected));
+            assert!(
+                serde_json::to_vec(&replayed).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES
+            );
         }
     }
     control.shutdown().await.unwrap();
