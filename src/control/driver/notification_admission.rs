@@ -31,7 +31,7 @@ impl<'a> PendingNotification<'a> {
     }
 }
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Admission {
+pub(super) enum AdmissionOutcome {
     Inserted,
     OldUnlinked,
     SameAdmission,
@@ -45,7 +45,7 @@ pub(super) fn admit_notification_tx(
     event: &str,
     payload: &str,
     at: &str,
-) -> Result<Admission, crate::storage::StorageError> {
+) -> Result<AdmissionOutcome, crate::storage::StorageError> {
     let pending = PendingNotification::validate(tx, thread, run, turn, event)?;
     let (thread, run, turn, event) = (pending.thread, pending.run, pending.turn, pending.event);
     let node = format!("event-{event}");
@@ -59,18 +59,18 @@ pub(super) fn admit_notification_tx(
     // Old unlinked nodes remain unlinked; retries never reassign authority.
     if let Some(link) = existing {
         let Some(link) = link else {
-            return Ok(Admission::OldUnlinked);
+            return Ok(AdmissionOutcome::OldUnlinked);
         };
         if link != event {
-            return Ok(Admission::Conflict);
+            return Ok(AdmissionOutcome::Conflict);
         }
         let same:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn u ON u.id=n.turn_id WHERE n.id=?1 AND n.kind='event' AND u.thread_id=?2 AND u.run_id=?3 AND u.id=?4)",params![node,thread,run,turn],|r|r.get(0))?;
         // A later run may receive the same event. Preserve the original admission
         // without failing unrelated turn work or changing its creator witness.
         return Ok(if same {
-            Admission::SameAdmission
+            AdmissionOutcome::SameAdmission
         } else {
-            Admission::Conflict
+            AdmissionOutcome::Conflict
         });
     }
     crate::history::append_node(
@@ -86,7 +86,7 @@ pub(super) fn admit_notification_tx(
         "UPDATE node SET notification_event_id=?2 WHERE id=?1 AND notification_event_id IS NULL",
         params![node, event],
     )?;
-    Ok(Admission::Inserted)
+    Ok(AdmissionOutcome::Inserted)
 }
 
 #[cfg(test)]
@@ -107,7 +107,7 @@ mod tests {
             assert_eq!(
                 admit_notification_tx(&tx, "thread", "run", "turn", "e", "synthetic", "now")
                     .unwrap(),
-                Admission::Inserted
+                AdmissionOutcome::Inserted
             );
             tx.rollback().unwrap();
         }
@@ -120,7 +120,7 @@ mod tests {
         let tx = db.transaction().unwrap();
         assert_eq!(
             admit_notification_tx(&tx, "thread", "run", "turn", "e", "synthetic", "now").unwrap(),
-            Admission::Inserted
+            AdmissionOutcome::Inserted
         );
         tx.commit().unwrap();
         db.execute(
@@ -131,7 +131,7 @@ mod tests {
         let tx = db.transaction().unwrap();
         assert_eq!(
             admit_notification_tx(&tx, "thread", "retry", "next", "e", "synthetic", "now").unwrap(),
-            Admission::Conflict
+            AdmissionOutcome::Conflict
         );
         tx.commit().unwrap();
         let saved: (String, String) = db
@@ -185,11 +185,11 @@ mod tests {
                 "now"
             )
             .unwrap(),
-            Admission::Conflict
+            AdmissionOutcome::Conflict
         );
         assert_eq!(
             admit_notification_tx(&tx, "thread", "run", "turn", "e", "private", "now").unwrap(),
-            Admission::SameAdmission
+            AdmissionOutcome::SameAdmission
         );
         let original: (String, String) = tx
             .query_row(
@@ -212,7 +212,7 @@ mod tests {
                 "now"
             )
             .unwrap(),
-            Admission::OldUnlinked
+            AdmissionOutcome::OldUnlinked
         );
         assert!(
             tx.query_row("SELECT notification_event_id IS NULL FROM node", [], |r| {
