@@ -81,3 +81,30 @@ pub(super) fn admit_notification_tx(
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn fixture() -> rusqlite::Connection {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE event(id TEXT PRIMARY KEY,target_thread_id TEXT,target_run_id TEXT); CREATE TABLE delivery(event_id TEXT,recipient_id TEXT,state TEXT); CREATE TABLE turn(id TEXT PRIMARY KEY,thread_id TEXT,run_id TEXT); INSERT INTO event VALUES('e','thread',NULL); INSERT INTO delivery VALUES('e','run','pending'); INSERT INTO turn VALUES('turn','thread','run'); INSERT INTO turn VALUES('foreign-turn','foreign','foreign-run');").unwrap();
+        db
+    }
+    #[test]
+    fn pending_constructor_rejects_wrong_creator_and_missing_delivery() {
+        let mut db = fixture();
+        let tx = db.transaction().unwrap();
+        assert!(PendingNotification::validate(&tx, "thread", "run", "turn", "e").is_ok());
+        assert!(PendingNotification::validate(&tx, "thread", "run", "foreign-turn", "e").is_err());
+        tx.execute("DELETE FROM delivery", []).unwrap();
+        assert!(PendingNotification::validate(&tx, "thread", "run", "turn", "e").is_err());
+    }
+    #[test]
+    fn pending_constructor_rejects_other_target_run() {
+        let mut db = fixture();
+        let tx = db.transaction().unwrap();
+        tx.execute("UPDATE event SET target_run_id='other'", [])
+            .unwrap();
+        assert!(PendingNotification::validate(&tx, "thread", "run", "turn", "e").is_err());
+    }
+}
