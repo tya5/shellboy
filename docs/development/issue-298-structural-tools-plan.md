@@ -119,3 +119,34 @@ nine-row tests cover explicit field states, source/response budgets, Unicode IDs
 field-overbudget atomic omission, duplicates/foreign scope and secret exclusions.
 S6 conditional design acceptance is not leader payload-authority approval and
 not runtime adoption. Leader explicitly adopted the saved typed name/call-ID authority; implementation may proceed under this table.
+
+## Implementation Checkpoint And Actual Evidence
+
+The adopted wire/budget table is implemented in history/items + protocol; generated
+schema is produced only by `cargo run -- protocol schema`. Spill projection admits
+only copied exact function_call/function_call_output items; all other spill content
+has no new readable-text authority. #274 association loader/paging is unchanged.
+
+| Planned case | Concrete actual-producer / existing-boundary control |
+| --- | --- |
+| generic_call_zero_exec | history_window_items::generic_call_zero_exec |
+| generic_result_zero_exec | history_window_items::generic_result_zero_exec |
+| shell_backed_preserves_links | history_window_items::execution_association_is_explicit_not_adjacent_and_ids_survive_encoding (new descriptor/detail assertions) |
+| invalid_descriptor_unavailable | history_window_items::invalid_descriptor_unavailable |
+| compacted_call_descriptor | history_window_items::compacted_call_descriptor plus compaction::tests::spill_placeholder_avoids_repeated_arguments_and_reduces_synthetic_growth (actual spill_payload) |
+| pruned_budget_no_hydration | history_window_items::actual_pruned_over_budget_and_oversized_leaf_producers (descriptor-absent assertions) |
+| paged_spill_coverage_not_authority | history_relations::summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_after_tombstone plus unchanged bounded_spill_association_metadata_uses_only_explicit_links |
+| conflicting_calls_not_merged | history_window_items::conflicting_calls_not_merged |
+| descriptor_secret_exclusion | history_window_items::descriptor_secret_exclusion_and_exact_unicode_id_budget |
+
+Additional ledger oracle: descriptor_both_fields_share_text_byte_ledger;
+descriptor_bytes_share_response_budget_atomic_node_suffix proves both fields cost
+512 bytes per tool and keep the existing atomic response-budget deferred suffix.
+Actual response text, reasoning and descriptor fields share one exhaustive match.
+
+First check PASS / unit14 PASS / window15 PASS + 1 FAIL demonstrated the existing
+spill legacy-only gap. Original /tmp/core298-first-*.log retained. Corrected source
+1407616f: check PASS / unit14 PASS / window17 PASS / relations5 PASS / schema golden1
+PASS (b7461c3e). Its compaction filter matched ZERO tests, so no compaction runtime
+claim is made from that invocation; exact named producer test is run separately.
+No suite-wide, paid-provider, private DB, installed or Studio claim is implied.

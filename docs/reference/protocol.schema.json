@@ -2466,6 +2466,12 @@
         },
         {
           "properties": {
+            "descriptor": {
+              "$ref": "#/definitions/ToolDescriptor"
+            },
+            "detail_availability": {
+              "$ref": "#/definitions/ToolDetailAvailability"
+            },
             "execution_ids": {
               "items": {
                 "type": "string"
@@ -2483,12 +2489,20 @@
           "required": [
             "kind",
             "item_identity",
-            "execution_ids"
+            "execution_ids",
+            "descriptor",
+            "detail_availability"
           ],
           "type": "object"
         },
         {
           "properties": {
+            "descriptor": {
+              "$ref": "#/definitions/ToolDescriptor"
+            },
+            "detail_availability": {
+              "$ref": "#/definitions/ToolDetailAvailability"
+            },
             "execution_ids": {
               "items": {
                 "type": "string"
@@ -2506,7 +2520,9 @@
           "required": [
             "kind",
             "item_identity",
-            "execution_ids"
+            "execution_ids",
+            "descriptor",
+            "detail_availability"
           ],
           "type": "object"
         },
@@ -7801,6 +7817,51 @@
       ],
       "title": "TimeWindowResult",
       "type": "object"
+    },
+    "ToolDescriptor": {
+      "properties": {
+        "call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "call_id_state": {
+          "$ref": "#/definitions/ToolFieldAvailability"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name_state": {
+          "$ref": "#/definitions/ToolFieldAvailability"
+        }
+      },
+      "required": [
+        "call_id_state",
+        "name_state"
+      ],
+      "type": "object"
+    },
+    "ToolDetailAvailability": {
+      "enum": [
+        "execution_linked",
+        "unavailable"
+      ],
+      "type": "string"
+    },
+    "ToolFieldAvailability": {
+      "description": "Availability of a single exact structural tool field, never body completeness.",
+      "enum": [
+        "available",
+        "missing",
+        "invalid",
+        "field_budget",
+        "not_applicable"
+      ],
+      "type": "string"
     },
     "TurnDetails": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
