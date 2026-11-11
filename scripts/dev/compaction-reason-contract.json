@@ -8,6 +8,6 @@
     "summary_refused", "summary_empty", "reduce_model_failed", "reduce_client_unavailable"
   ],
   "unknown_policy": "unsupported enum is a counted observation gap, never Other or success",
-  "missing_or_unclassified_rate": "unique attempt-stage Other / all unique attempt-stage discard observations; null when denominator zero",
+  "missing_or_unclassified_rate": "cardinality of union(unique(attempt_id, stage) with Other OR missing OR unsupported reason) / all unique(attempt_id, stage) discard observations in the same scope; null when denominator zero or scopes differ; count each key once",
   "dropped_rotation_policy": "report separately; completeness remains UNKNOWN"
 }
