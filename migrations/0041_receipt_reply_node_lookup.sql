@@ -5,3 +5,5 @@ CREATE INDEX receipt_reply_node_lookup ON receipt(
       THEN json_extract(result_json,'$.reply.node_id') END
   END)
 );
+INSERT INTO schema_migration(version,name) VALUES(41,'0041_receipt_reply_node_lookup');
+PRAGMA user_version=41;

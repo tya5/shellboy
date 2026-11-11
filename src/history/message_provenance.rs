@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn oversized_second_reverse_candidate_remains_ambiguous() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT);").unwrap();
+        db.execute_batch("CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT);").unwrap();
         db.execute_batch(include_str!(
             "../../migrations/0041_receipt_reply_node_lookup.sql"
         ))
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn sqlite_materialization_is_byte_bounded_and_reverse_search_uses_both_keys() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT);").unwrap();
+        db.execute_batch("CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT);").unwrap();
         db.execute("INSERT INTO receipt VALUES('bad','t','b','{broken')", [])
             .unwrap();
         db.execute_batch(include_str!(
