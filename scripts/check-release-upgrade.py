@@ -23,7 +23,7 @@ import time
 CARGO_VERSION = next(line.split('"')[1] for line in (Path(__file__).resolve().parents[1] / 'Cargo.toml').read_text(encoding='utf-8').splitlines() if line.startswith('version = '))
 MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
-           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40)}
+           for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41)}
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29, '0.9.0': 31, '0.10.0': 32, '0.11.0': 39}
 
 
@@ -198,6 +198,8 @@ def check_migration(db, before, start, target):
         for name in ('receipt_human_reply_pending', 'receipt_reply_run_pending'):
             assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()[0] == 1, f'migration 39 missing {name}'
 
+    if target >= 41:
+        assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='index' AND name='receipt_reply_node_lookup'").fetchone()[0] == 1, 'migration 41 reply lookup index missing'
     if target >= 40:
         assert 'selection_nonappend_generation' in {row[1] for row in db.execute('PRAGMA table_info(thread)')}, 'migration 40 witness missing'
         for name in ('selection_generation_combined_write', 'selection_generation_update', 'selection_thread_conflict', 'selection_generation_insert', 'selection_path_insert', 'selection_path_delete', 'selection_path_update', 'selection_revision_same_cursor'):
@@ -224,7 +226,7 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         apply_migration(db, version)
@@ -238,10 +240,10 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40), default=40,
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41), default=40,
                         help='40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
