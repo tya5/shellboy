@@ -155,3 +155,77 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
     };
     assert_eq!(schema(&upgraded), schema(&fresh));
 }
+
+#[tokio::test]
+async fn invalid_relation_preserves_independent_sender_and_body_after_reopen() {
+    let (root, store) = fixture().await;
+    let accepted = store
+        .execute(request(send(true)), None)
+        .await
+        .unwrap()
+        .result;
+    let node = accepted["message_id"].as_str().unwrap().to_owned();
+    let command = || {
+        serde_json::from_value::<Command>(
+            serde_json::json!({"command":"history.get","args":{"node_id":node}}),
+        )
+        .unwrap()
+    };
+    let original = store
+        .execute(request(command()), None)
+        .await
+        .unwrap()
+        .result;
+    let identity = node.clone();
+    store
+        .database
+        .call(move |db| {
+            let raw: String = db.query_row(
+                "SELECT result_json FROM receipt WHERE message_node_id=?1",
+                [&identity],
+                |r| r.get(0),
+            )?;
+            let mut value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            value["reply"] = serde_json::json!({"state":"unknown","node_id":"foreign"});
+            db.execute(
+                "UPDATE receipt SET result_json=?1 WHERE message_node_id=?2",
+                rusqlite::params![value.to_string(), identity],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    store.database.shutdown().await.unwrap();
+    let store = Store::new(DbWorker::open(root.path().join("reply.db")).await.unwrap());
+    let invalid = store
+        .execute(request(command()), None)
+        .await
+        .unwrap()
+        .result;
+    assert!(invalid["provenance"].get("message").is_none());
+    assert_eq!(
+        invalid["provenance"]["sender"],
+        original["provenance"]["sender"]
+    );
+    assert_eq!(invalid["text"], original["text"]);
+    let identity = node.clone();
+    store
+        .database
+        .call(move |db| {
+            db.execute(
+                "UPDATE receipt SET sender_json=NULL WHERE message_node_id=?1",
+                [identity],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let unknown = store
+        .execute(request(command()), None)
+        .await
+        .unwrap()
+        .result;
+    assert_eq!(unknown["provenance"]["sender"]["kind"], "unknown");
+    assert_eq!(unknown["text"], original["text"]);
+    store.database.shutdown().await.unwrap();
+}

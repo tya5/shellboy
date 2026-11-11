@@ -277,3 +277,13 @@ plan/byte/legacy validity controls using the actual build after adoption.
 
 No payload/code/migration/test/build/installed-owner operation is performed by this
 revision. The only executed SQL was explicitly authorized disposable-memory EXPLAIN.
+
+### Implementation Sender Evidence Policy
+
+An existing own receipt row is authoritative even when its saved sender is NULL,
+malformed or exceeds the bounded sender input. Such a sender is `unknown`; it is
+not inferred from another receipt. Only absence of an own receipt permits the
+unique indexed reverse receipt's saved `reply.by` evidence. This intentionally
+removes the previous COALESCE/row-order fallback, not a claim of byte-for-byte
+legacy fallback compatibility. Invalid/ambiguous message relations never remove
+independently valid own sender evidence or saved body text.
