@@ -248,9 +248,9 @@ mod tests {
             assert_eq!(before.2, forced.2);
             eprintln!(
                 "PENDING_SCOPE full_schema={full_schema} rows=512 target_rows=256 target_pending=2 before={:?} after={:?} forced={:?}",
-                (before.0, before.1),
-                (after.0, after.1),
-                (forced.0, forced.1)
+                (&before.0, before.1),
+                (&after.0, after.1),
+                (&forced.0, forced.1)
             );
             assert!(before.1 > 0 && after.1 > 0 && forced.1 > 0);
             assert!(
