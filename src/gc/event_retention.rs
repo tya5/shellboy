@@ -8,7 +8,7 @@ const DELIVERY_BATCH: i64 = 64;
 const EVENT_BATCH: i64 = 32;
 
 // Matching TEXT affinity lets the correlated node lookup seek its expression index.
-const ELIGIBLE_SQL: &str = "SELECT EXISTS(SELECT 1 FROM event e JOIN run r ON r.id=e.target_run_id WHERE e.rowid=?1 AND e.kind='shell_ended' AND r.state IN ('completed','stopped','failed') AND NOT EXISTS(SELECT 1 FROM node n INDEXED BY node_event_retention WHERE n.kind='event' AND json_valid(n.payload_json) AND CAST(json_extract(n.payload_json,'$.event_id') AS TEXT)=e.id) AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state<'dropped') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'dropped' AND d.state<'processed') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'processed')) ";
+const ELIGIBLE_SQL: &str = "SELECT EXISTS(SELECT 1 FROM event e JOIN run r ON r.id=e.target_run_id WHERE e.rowid=?1 AND e.kind='shell_ended' AND r.state IN ('completed','stopped','failed') AND NOT EXISTS(SELECT 1 FROM node n INDEXED BY node_event_retention WHERE n.kind='event' AND json_valid(n.payload_json) AND CAST(json_extract(n.payload_json,'$.event_id') AS TEXT)=e.id) AND NOT EXISTS(SELECT 1 FROM node marker INDEXED BY node_notification_event WHERE marker.notification_event_id=e.id AND marker.notification_event_id IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state<'dropped') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'dropped' AND d.state<'processed') AND NOT EXISTS(SELECT 1 FROM delivery d INDEXED BY delivery_event_state WHERE d.event_id=e.id AND d.state>'processed')) ";
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Cursor {
@@ -453,5 +453,39 @@ mod tests {
             3,
             "{plan:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod notification_marker_tests {
+    use super::*;
+    #[test]
+    fn canonical_marker_protects_event_without_root_payload_or_delivery() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE event(id TEXT PRIMARY KEY,kind TEXT,target_run_id TEXT); CREATE TABLE run(id TEXT PRIMARY KEY,state TEXT); CREATE TABLE delivery(event_id TEXT,state TEXT); CREATE INDEX delivery_event_state ON delivery(event_id,state); CREATE TABLE node(kind TEXT,payload_json TEXT,notification_event_id TEXT); CREATE INDEX node_event_retention ON node(CAST(json_extract(payload_json,'$.event_id') AS TEXT)) WHERE kind='event' AND json_valid(payload_json); CREATE INDEX node_notification_event ON node(notification_event_id) WHERE notification_event_id IS NOT NULL; INSERT INTO run VALUES('r','completed'); INSERT INTO event VALUES('e','shell_ended','r');").unwrap();
+        let eligible = || {
+            db.query_row(ELIGIBLE_SQL, [1i64], |r| r.get::<_, bool>(0))
+                .unwrap()
+        };
+        assert!(eligible());
+        db.execute("INSERT INTO node VALUES('event','{}','e')", [])
+            .unwrap();
+        assert!(!eligible());
+        let plans = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {ELIGIBLE_SQL}"))
+            .unwrap()
+            .query_map([1i64], |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            plans
+                .iter()
+                .any(|p| p.contains("SEARCH marker") && p.contains("node_notification_event")),
+            "{plans:?}"
+        );
+        db.execute("UPDATE node SET notification_event_id=NULL", [])
+            .unwrap();
+        assert!(eligible());
     }
 }
