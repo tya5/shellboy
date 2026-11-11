@@ -98,3 +98,48 @@ async fn human_reply_only_reverse_relation_is_exact_across_unrelated_send() {
     );
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
+    use shellboy::storage::DbWorker;
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("old40.sqlite");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(include_str!("../src/storage/current.sql"))
+        .unwrap();
+    // Index-only migration has no table mutations: reconstruct its exact predecessor.
+    db.execute_batch("DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version=41; PRAGMA user_version=40; INSERT INTO receipt(id,target_thread_id,state,created_at,updated_at,result_json) VALUES('legacy','missing','pending','now','now','{malformed');").unwrap();
+    drop(db);
+    let worker = DbWorker::open(&path).await.unwrap();
+    worker.shutdown().await.unwrap();
+    let upgraded = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(
+        upgraded
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        41
+    );
+    assert_eq!(
+        upgraded
+            .query_row(
+                "SELECT result_json FROM receipt WHERE id='legacy'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "{malformed"
+    );
+    let fresh_path = root.path().join("fresh.sqlite");
+    let fresh = DbWorker::open(&fresh_path).await.unwrap();
+    fresh.shutdown().await.unwrap();
+    let fresh = rusqlite::Connection::open(fresh_path).unwrap();
+    let schema = |db: &rusqlite::Connection| {
+        db.query_row(
+            "SELECT sql FROM sqlite_schema WHERE name='receipt_reply_node_lookup'",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(schema(&upgraded), schema(&fresh));
+}
