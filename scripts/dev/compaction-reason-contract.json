@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "activation": "requires new source installation; never reclassify old Other records",
+  "installed_baseline_version": 1,
+  "added_reasons": [
+    "map_request_budget_exhausted", "reduce_request_budget_exhausted",
+    "reduce_round_limit", "summary_not_shrinking", "oversized_retry_exhausted",
+    "summary_refused", "summary_empty", "reduce_model_failed", "reduce_client_unavailable"
+  ],
+  "unknown_policy": "unsupported enum is a counted observation gap, never Other or success",
+  "missing_or_unclassified_rate": "unique attempt-stage Other / all unique attempt-stage discard observations; null when denominator zero",
+  "dropped_rotation_policy": "report separately; completeness remains UNKNOWN"
+}

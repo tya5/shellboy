@@ -1212,9 +1212,9 @@ impl Compactor {
             payload["summary_scope"] = json!("active_turn");
         }
         if edit::projection_characters(&payload, snapshot.epoch) >= budget.source_characters {
-            return Err(budget.error(
+            return Err(discard::with_reason(budget.error(
                 "Summary does not shrink its original source projection; original path retained",
-            ));
+            ),discard::DiscardReason::SummaryNotShrinking));
         }
         let removed_characters = budget
             .source_characters

@@ -1842,6 +1842,15 @@
         "current_tail_changed",
         "source_changed",
         "source_pruned",
+        "map_request_budget_exhausted",
+        "reduce_request_budget_exhausted",
+        "reduce_round_limit",
+        "summary_not_shrinking",
+        "oversized_retry_exhausted",
+        "summary_refused",
+        "summary_empty",
+        "reduce_model_failed",
+        "reduce_client_unavailable",
         "other"
       ],
       "type": "string"

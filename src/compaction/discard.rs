@@ -20,6 +20,15 @@ pub enum DiscardReason {
     CurrentTailChanged,
     SourceChanged,
     SourcePruned,
+    MapRequestBudgetExhausted,
+    ReduceRequestBudgetExhausted,
+    ReduceRoundLimit,
+    SummaryNotShrinking,
+    OversizedRetryExhausted,
+    SummaryRefused,
+    SummaryEmpty,
+    ReduceModelFailed,
+    ReduceClientUnavailable,
     Other,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -25,7 +25,7 @@ impl SummaryBudget<'_> {
     }
     pub fn ensure_map(&self) -> Result<(), ApiError> {
         if self.map_requests >= self.map_limit {
-            return Err(self.error("Summary map request budget exhausted during context splitting; original path retained"));
+            return Err(discard::with_reason(self.error("Summary map request budget exhausted during context splitting; original path retained"),discard::DiscardReason::MapRequestBudgetExhausted));
         }
         Ok(())
     }
@@ -37,9 +37,10 @@ impl SummaryBudget<'_> {
     }
     pub fn ensure_reduce(&self) -> Result<(), ApiError> {
         if self.reduce_requests >= self.reduce_limit {
-            return Err(
-                self.error("Summary reduce request budget exhausted; original path retained")
-            );
+            return Err(discard::with_reason(
+                self.error("Summary reduce request budget exhausted; original path retained"),
+                discard::DiscardReason::ReduceRequestBudgetExhausted,
+            ));
         }
         Ok(())
     }
@@ -91,17 +92,23 @@ impl Compactor {
                 "Summary connection is not configured",
             )
         })?;
-        let client = clients
-            .get(&snapshot.profile)
-            .map_err(|e| budget.error(&e.to_string()))?;
+        let client = clients.get(&snapshot.profile).map_err(|e| {
+            discard::with_reason(
+                budget.error(&e.to_string()),
+                discard::DiscardReason::ReduceClientUnavailable,
+            )
+        })?;
         for round in 0..=budget.reduce_rounds {
             budget.summary_characters = texts.iter().map(|t| t.chars().count() as u64).sum();
             if texts.len() == 1 && budget.summary_characters <= budget.limit {
                 return Ok((texts.remove(0), reduce_keys));
             }
             if round == budget.reduce_rounds {
-                return Err(budget.error(
-                    "Summary still exceeds its limit after reduction; original path retained",
+                return Err(discard::with_reason(
+                    budget.error(
+                        "Summary still exceeds its limit after reduction; original path retained",
+                    ),
+                    discard::DiscardReason::ReduceRoundLimit,
                 ));
             }
             let (batches, oversized) = reduce_groups(&texts, budget.segment_chars);

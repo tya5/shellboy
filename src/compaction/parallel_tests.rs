@@ -638,3 +638,167 @@ async fn parallel_cancel_reason_survives_map_and_reduce_usage() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closed_reason_explicit_budget_result_branches_and_precedence() {
+    guarded("closed reason branches",async {
+        let mut fake=Fake::start().await;
+        let rig=rig(&fake.url).await;
+        let mut ledger=usage::UsageLedger::new(&rig.snapshot);
+        let mut limits=budget(&mut ledger,0,0);
+        let reason=|e:ApiError| {assert_eq!(e.code,ErrorCode::InvalidState);e.details.unwrap()["compaction_discard_reason"].as_str().unwrap().to_owned()};
+        assert_eq!(reason(limits.ensure_map().unwrap_err()),"map_request_budget_exhausted");
+        assert_eq!(reason(limits.ensure_reduce().unwrap_err()),"reduce_request_budget_exhausted");
+        // Existing cancellation beats admission budget; no request is launched.
+        let stopped=CancellationToken::new();stopped.cancel();
+        let cancelled=run(&rig,Kind::Reduce,jobs(1),&mut limits,&stopped).await.err().unwrap();
+        assert_eq!(reason(cancelled),"cancelled");
+        limits.reduce_rounds=0;
+        let parts=vec![CachedPart{text:"x".repeat(8000),sources:vec![],cache_key:None,raw_response:None,stage:None,round:None}];
+        let mut configured=rig.snapshot.clone();configured.profile="fixture".into();
+        assert_eq!(reason(rig.compactor.reduce_summary(&configured,&parts,&mut limits,&CancellationToken::new(),None).await.unwrap_err()),"reduce_round_limit");
+        let mut missing=rig.snapshot.clone();missing.profile="nonexistent".into();
+        let error=rig.compactor.reduce_summary(&missing,&parts,&mut limits,&CancellationToken::new(),None).await.unwrap_err();
+        assert_eq!(error.code,ErrorCode::ConfigInvalid,"missing connection remains a distinct earlier guard, not client failure");
+        for kind in [Kind::Map,Kind::Reduce] {
+            for refused in [true,false] {
+                let mut limits=budget(&mut ledger,8,8);
+                let drive=async {
+                    let mut content=vec![];
+                    if refused {content.push(json!({"type":"refusal","refusal":"PRIVATE_SENTINEL"}));}
+                    fake.take("SEG0").await.status(200,json!({"id":"r","status":"completed","output":[{"type":"message","role":"assistant","content":content}]}));
+                };
+                let token=CancellationToken::new();
+                let (result,())=tokio::join!(run(&rig,kind,jobs(1),&mut limits,&token),drive);
+                assert_eq!(reason(result.err().unwrap()),if refused {"summary_refused"}else{"summary_empty"});
+            }
+        }
+        let mut limits=budget(&mut ledger,1,1);
+        let drive=async {fake.take("SEG0").await.status(400,json!({"error":{"message":"PRIVATE_SENTINEL"}}));};
+        let token=CancellationToken::new();
+        let (result,())=tokio::join!(run(&rig,Kind::Reduce,jobs(1),&mut limits,&token),drive);
+        assert_eq!(reason(result.err().unwrap()),"reduce_model_failed");
+        rig.db.shutdown().await.unwrap();
+    }).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closed_reason_oversize_client_and_nonshrinking_branches() {
+    guarded("remaining closed reason branches", async {
+        let mut fake = Fake::start().await;
+        let rig = rig(&fake.url).await;
+        let reason = |e: ApiError| {
+            assert_eq!(e.code, ErrorCode::InvalidState);
+            e.details.unwrap()["compaction_discard_reason"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        let mut ledger = usage::UsageLedger::new(&rig.snapshot);
+        let mut limits = budget(&mut ledger, 8, 8);
+        let oversized = jobs(1).remove(0).cached_max_chars(1);
+        let key = CompactionKeys::summary_part("parallel-test-0");
+        let cached = CachedPart {
+            text: "cached".into(),
+            sources: vec!["n0".into()],
+            cache_key: Some(key.clone()),
+            raw_response: Some(completed("cached")),
+            stage: Some("reduce".into()),
+            round: Some(1),
+        };
+        cached.save(&rig.db, key.clone()).await.unwrap();
+        rig.db
+            .call(move |db| {
+                db.execute(
+                    "INSERT INTO app_meta(key,value)VALUES(?1,'{}')",
+                    [format!("{key}.oversize-retry.1")],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            reason(
+                run(
+                    &rig,
+                    Kind::Reduce,
+                    vec![oversized],
+                    &mut limits,
+                    &CancellationToken::new()
+                )
+                .await
+                .err()
+                .unwrap()
+            ),
+            "oversized_retry_exhausted"
+        );
+        // An invalid header constructs an unavailable client without credentials,
+        // external network, or changing the earlier missing-connection guard.
+        let mut broken = (*config(&fake.url)).clone();
+        broken
+            .connections
+            .get_mut("fixture")
+            .unwrap()
+            .headers
+            .insert("bad\nheader".into(), "x".into());
+        let broken_compactor = Compactor::new(rig.db.clone(), Arc::new(broken));
+        let mut snapshot = rig.snapshot.clone();
+        snapshot.profile = "fixture".into();
+        let parts = vec![CachedPart {
+            text: "x".repeat(8000),
+            sources: vec![],
+            cache_key: None,
+            raw_response: None,
+            stage: None,
+            round: None,
+        }];
+        assert_eq!(
+            reason(
+                broken_compactor
+                    .reduce_summary(
+                        &snapshot,
+                        &parts,
+                        &mut limits,
+                        &CancellationToken::new(),
+                        None
+                    )
+                    .await
+                    .unwrap_err()
+            ),
+            "reduce_client_unavailable"
+        );
+        let (_small_root, small_db) = database().await;
+        small_db
+            .call(|db| {
+                let tx = db.transaction()?;
+                tx.execute(
+                    "UPDATE thread SET profile_id='fixture',model_id='fixture' WHERE id='t'",
+                    [],
+                )?;
+                history::append_node(
+                    &tx,
+                    "t",
+                    "short-source",
+                    None,
+                    "message",
+                    &json!({"role":"user","content":"short source"}),
+                    "now",
+                )?;
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let small_compactor = Compactor::new(small_db.clone(), config(&fake.url));
+        let token = CancellationToken::new();
+        let drive = async {
+            fake.take("other").await.ok(&"L".repeat(1000));
+        };
+        let work = small_compactor.summarize("t", false, token);
+        let (result, ()) = tokio::join!(work, drive);
+        assert_eq!(reason(result.unwrap_err()), "summary_not_shrinking");
+        small_db.shutdown().await.unwrap();
+        rig.db.shutdown().await.unwrap();
+    })
+    .await;
+}

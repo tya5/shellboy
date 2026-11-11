@@ -108,12 +108,15 @@ impl JobContext<'_> {
     fn failed(&self, budget: &SummaryBudget<'_>, failure: &AttemptFailure, note: &str) -> ApiError {
         match self.kind {
             Kind::Map => ApiError::new(ErrorCode::IoFailed, failure.error.to_string()).hint(note),
-            Kind::Reduce => budget
-                .error(&format!(
-                    "Summary reduction failed: {}; original path retained",
-                    failure.error
-                ))
-                .hint(note),
+            Kind::Reduce => discard::with_reason(
+                budget
+                    .error(&format!(
+                        "Summary reduction failed: {}; original path retained",
+                        failure.error
+                    ))
+                    .hint(note),
+                discard::DiscardReason::ReduceModelFailed,
+            ),
         }
     }
 }
@@ -237,7 +240,7 @@ impl Compactor {
                         .await
                         .map_err(storage_error)?;
                     if !reserved {
-                        return Err(budget.error("Oversized summary retry already used for this selection; original path retained"));
+                        return Err(discard::with_reason(budget.error("Oversized summary retry already used for this selection; original path retained"),discard::DiscardReason::OversizedRetryExhausted));
                     }
                 } else {
                     return Ok(Some((job.path, part)));
@@ -379,19 +382,25 @@ impl Compactor {
             return Ok(());
         }
         if refused || empty {
-            return Err(match ctx.kind {
-                Kind::Reduce => {
-                    budget.error("Summary reduction was refused or empty; original path retained")
-                }
-                Kind::Map if refused => {
-                    invalid("Summary response contained a refusal; original history retained")
-                        .details(json!({"summary_part_key":part.cache_key}))
-                }
-                Kind::Map => {
-                    invalid("Summary returned no assistant text; original history retained")
-                        .details(json!({"summary_part_key":part.cache_key}))
-                }
-            });
+            return Err(discard::with_reason(
+                match ctx.kind {
+                    Kind::Reduce => budget
+                        .error("Summary reduction was refused or empty; original path retained"),
+                    Kind::Map if refused => {
+                        invalid("Summary response contained a refusal; original history retained")
+                            .details(json!({"summary_part_key":part.cache_key}))
+                    }
+                    Kind::Map => {
+                        invalid("Summary returned no assistant text; original history retained")
+                            .details(json!({"summary_part_key":part.cache_key}))
+                    }
+                },
+                if refused {
+                    discard::DiscardReason::SummaryRefused
+                } else {
+                    discard::DiscardReason::SummaryEmpty
+                },
+            ));
         }
         if ctx.kind == Kind::Map {
             budget.summary_characters = budget
