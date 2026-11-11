@@ -109,6 +109,31 @@ pub(super) fn failure_identity(thread: &str, snapshot: &Snapshot, original: Rang
     ])).expect("identity serializes"))))
 }
 
+/// Pure execution cursor: original failure identity cannot drift while halving.
+/// Dispatch, source adoption and #A transactions remain external/unconnected.
+pub(super) struct Trial {
+    pub(super) identity: FailureIdentity,
+    selected: Range<usize>,
+    terminal: bool,
+}
+impl Trial {
+    pub(super) fn new(thread: &str, snapshot: &Snapshot, original: Range<usize>, limit: OutputLimit) -> Option<Self> {
+        Some(Self { identity: failure_identity(thread,snapshot,original.clone(),limit)?, selected: original, terminal:false })
+    }
+    pub(super) fn selected(&self) -> Option<Range<usize>> {
+        (!self.terminal).then(||self.selected.clone())
+    }
+    pub(super) fn finish_request(&mut self, snapshot: &Snapshot, result: Result<(),&model::ModelError>, eligible:impl FnOnce(Range<usize>)->bool) -> Next {
+        if self.terminal { return Next::Done; }
+        let next=after_result(snapshot,self.selected.clone(),result,eligible);
+        match &next {
+            Next::RetryPrefix(prefix)=> self.selected=prefix.clone(),
+            Next::Done|Next::Failed=>self.terminal=true,
+        }
+        next
+    }
+}
+
 pub(super) fn remember_failure(tx: &rusqlite::Transaction<'_>, thread: &str, region: Region, identity: &FailureIdentity) -> Result<(), StorageError> {
     tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         params![region.key(thread),identity.0])?;
@@ -237,4 +262,23 @@ mod tests {
         assert!(same_failed_range(&db,"t",Region::Active,&smaller).unwrap());
         assert_eq!(db.query_row("SELECT count(*) FROM app_meta",[],|r|r.get::<_,i64>(0)).unwrap(),2);
     }
+    #[test]
+    fn trial_keeps_original_identity_across_half_then_success_or_failure() {
+        let snapshot=fixture(&[40,40,40,40]);
+        let mut trial=Trial::new("t",&snapshot,0..4,OutputLimit(20000)).unwrap();
+        let original=trial.identity.0.clone();
+        let mut error=model::ModelError::new("provider","synthetic context refusal");
+        error.provider_code=Some("context_length_exceeded".into());
+        assert_eq!(trial.finish_request(&snapshot,Err(&error),|_|true),Next::RetryPrefix(0..2));
+        assert_eq!(trial.identity.0,original);
+        assert_eq!(trial.selected(),Some(0..2));
+        assert_eq!(trial.finish_request(&snapshot,Ok(()),|_|panic!("success is terminal")),Next::Done);
+        assert_eq!(trial.selected(),None);
+        assert_eq!(trial.finish_request(&snapshot,Err(&error),|_|panic!("no remainder retry")),Next::Done);
+        let mut failed=Trial::new("t",&snapshot,0..4,OutputLimit(20000)).unwrap();
+        while matches!(failed.finish_request(&snapshot,Err(&error),|_|true),Next::RetryPrefix(_)) {}
+        assert_eq!(failed.selected(),None);
+        assert_eq!(failed.identity.0,original,"terminal one-group failure belongs to original request range");
+    }
+
 }
