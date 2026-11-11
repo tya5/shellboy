@@ -149,6 +149,21 @@ No private DB/config read or paid/model measurement is authorized or performed.
 
 This addendum supersedes the earlier pending-USER annotations for these two
 branches only. #A writer remains unapproved. Failure-witness helper is not yet
-wired into dispatcher; whole policy is incomplete. The current single latest
-per-Thread hash witness has not proven suppression after multiple distinct
-failed ranges; retention semantics require review before production wiring.
+wired into dispatcher; whole policy is incomplete. The former single Thread-slot/ordered-IDs witness is superseded by the bounded
+closed/active recommendation below.
+
+
+## Adopted Claude Recommendation (Not USER Decision)
+
+| Decision | Code | Source fixture (not run) |
+| --- | --- | --- |
+| Original endpoints+Thread+connection/model+outputcap, capture before halving | failure_identity -> FailureIdentity | smaller prefix differs but failure records original captured identity |
+| Latest closed / latest active, maximum2 keys per Thread | Region::key / remember_failure / same_failed_range | reopen, closedA-activeB-closedA blocked, each kind independent |
+| Same-kind replacement, no permanent history guarantee | UPSERT per region | closedB overwrites closedA; laterA eligible; total key count2 |
+| Different request settings/range eligible | failure_identity | outputcap/model/connection/endpoints differ, other Thread not matched |
+| Successful smaller request adds no failure | after_result Done, caller does not remember_failure | success leaves prior failure evidence unchanged |
+
+Leader explicitly adopted this Claude recommendation. No revision/epoch/whole-
+path hash, TTL or unbounded per-range set is inferred. Existing atomic adoption
+source checks still apply independently. All helpers remain unconnected; no
+claim of real dispatcher retry suppression, compilation or tests succeeding.

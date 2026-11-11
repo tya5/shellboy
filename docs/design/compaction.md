@@ -1464,11 +1464,27 @@ summary size policy remain separate concerns.
 USER explicitly confirms after b822: halving must always remove at least one
 trailing whole group, retaining the leading prefix, even when measured body
 size would otherwise keep the same range. A rejected single group terminates.
-Persist the deterministic failed ordered-range hash in existing app_meta and
-suppress retry of that same range. This is permission for THIS failure witness,
+Persist the deterministic failed-range identity in existing app_meta under
+the bounded two-slot Claude recommendation adopted below. This is permission for THIS failure witness,
 not permission for a new #A state writer. No table/column/migration is authorized.
 Measure only saved selected-group projection characters through the existing
 projection API (serialized projected items plus their existing separators), not
 estimated tokens. Fixed instructions/extra_sources are excluded. If fixed
 context alone exceeds the window, reducing to one group still ends on refusal.
 No original-reachability or summary-quality gate is added.
+
+
+## Claude Recommendation Adopted By Leader: Failure Scope
+
+This is a Claude-recommended implementation decision, NOT a USER-authored rule.
+It supersedes the ordered-all-IDs/single-Thread-slot proposal and qualifies the
+meaning of same-range suppression. Identity is Thread + ORIGINAL triggering
+range's first/last node IDs + connection/model + resolved output character cap.
+Capture it before halving; intermediate prefixes never create separate records.
+Existing app_meta holds latest closed and latest active failures, at most2 keys
+per Thread. ClosedA -> activeB -> closedA remains blocked. Same-kind failureB
+replaces failureA; laterA has NO permanent suppression guarantee. There is no
+unbounded per-range history, capacity-exhaustion stop, or restored marks/witness.
+Range endpoints/settings changes allow another request. Internal revisions/epoch
+are deliberately NOT extra identity authority here. This witness does not
+replace atomic source/adoption validation. #A state storage remains unapproved.

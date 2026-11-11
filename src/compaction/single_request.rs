@@ -88,22 +88,36 @@ pub(super) fn adoption_size(original: u64, summary: u64, limit: OutputLimit) -> 
     (summary < original).then_some(AdoptionSize { exceeded_output_limit: summary > limit.0 })
 }
 
-/// Canonical ordered IDs only: no body/provider data is persisted in the key.
-pub(super) fn range_hash(snapshot: &Snapshot, selected: Range<usize>) -> String {
-    let ids: Vec<&str> = snapshot.groups[selected].iter()
-        .flat_map(|group| group.sources.iter().map(|source| source.id.as_str())).collect();
-    digest(&serde_json::to_vec(&ids).expect("string IDs serialize"))
+/// Claude recommendation adopted by leader: two latest slots, not a history.
+#[derive(Clone, Copy)]
+pub(super) enum Region { Closed, Active }
+impl Region {
+    fn key(self, thread: &str) -> String {
+        let kind=match self {Self::Closed=>"closed",Self::Active=>"active"};
+        format!("compact.deterministic_range_failure.{kind}.{thread}")
+    }
+}
+/// Capture ONCE before halving: original endpoints and request settings.
+#[derive(Clone)]
+pub(super) struct FailureIdentity(String);
+pub(super) fn failure_identity(thread: &str, snapshot: &Snapshot, original: Range<usize>, limit: OutputLimit) -> Option<FailureIdentity> {
+    let groups=snapshot.groups.get(original)?;
+    let first=groups.iter().flat_map(|g|g.sources.iter()).next()?;
+    let last=groups.iter().rev().flat_map(|g|g.sources.iter().rev()).next()?;
+    Some(FailureIdentity(digest(&serde_json::to_vec(&json!([
+        thread,first.id,last.id,snapshot.profile,snapshot.model,limit.0
+    ])).expect("identity serializes"))))
 }
 
-pub(super) fn remember_failure(tx: &rusqlite::Transaction<'_>, thread: &str, hash: &str) -> Result<(), StorageError> {
+pub(super) fn remember_failure(tx: &rusqlite::Transaction<'_>, thread: &str, region: Region, identity: &FailureIdentity) -> Result<(), StorageError> {
     tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        params![format!("compact.deterministic_range_failure.{thread}"),hash])?;
+        params![region.key(thread),identity.0])?;
     Ok(())
 }
-pub(super) fn same_failed_range(db: &rusqlite::Connection, thread: &str, hash: &str) -> Result<bool, StorageError> {
+pub(super) fn same_failed_range(db: &rusqlite::Connection, thread: &str, region: Region, identity: &FailureIdentity) -> Result<bool, StorageError> {
     let saved:Option<String>=db.query_row("SELECT value FROM app_meta WHERE key=?1",
-        [format!("compact.deterministic_range_failure.{thread}")],|r|r.get(0)).optional()?;
-    Ok(saved.as_deref()==Some(hash))
+        [region.key(thread)],|r|r.get(0)).optional()?;
+    Ok(saved.as_deref()==Some(identity.0.as_str()))
 }
 
 #[cfg(test)]
@@ -190,20 +204,37 @@ mod tests {
         assert_eq!(after_result(&snapshot,0..1,Err(&overflow),|_|true),Next::Failed);
     }
     #[test]
-    fn failed_range_hash_reopens_and_blocks_only_identical_ordered_sources() {
+    fn original_failure_identity_two_slots_reopen_settings_and_overwrite() {
         let root=tempfile::tempdir().unwrap();let path=root.path().join("failure.sqlite");
-        let snapshot=fixture(&[1,2,3]);let hash=range_hash(&snapshot,0..2);
+        let snapshot=fixture(&[1,2,3]);let limit=OutputLimit(20000);
+        let original=failure_identity("t",&snapshot,0..3,limit).unwrap();
+        let smaller=failure_identity("t",&snapshot,0..1,limit).unwrap();
+        assert_ne!(original.0,smaller.0);
         {
             let mut db=rusqlite::Connection::open(&path).unwrap();
             db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);").unwrap();
-            let tx=db.transaction().unwrap();remember_failure(&tx,"t",&hash).unwrap();tx.commit().unwrap();
+            let tx=db.transaction().unwrap();
+            // A failed reduced request records the captured ORIGINAL identity.
+            remember_failure(&tx,"t",Region::Closed,&original).unwrap();
+            remember_failure(&tx,"t",Region::Active,&smaller).unwrap();
+            tx.commit().unwrap();
         }
-        let db=rusqlite::Connection::open(path).unwrap();
-        assert!(same_failed_range(&db,"t",&hash).unwrap());
-        assert!(!same_failed_range(&db,"t",&range_hash(&snapshot,0..3)).unwrap());
-        assert!(!same_failed_range(&db,"other",&hash).unwrap());
-        let mut reversed=fixture(&[1,2,3]);reversed.groups.swap(0,1);
-        assert_ne!(range_hash(&reversed,0..2),hash);
+        let mut db=rusqlite::Connection::open(path).unwrap();
+        assert!(same_failed_range(&db,"t",Region::Closed,&original).unwrap());
+        assert!(same_failed_range(&db,"t",Region::Active,&smaller).unwrap());
+        assert!(!same_failed_range(&db,"t",Region::Closed,&smaller).unwrap());
+        assert!(!same_failed_range(&db,"other",Region::Closed,&original).unwrap());
+        let changed_limit=failure_identity("t",&snapshot,0..3,OutputLimit(10000)).unwrap();
+        assert!(!same_failed_range(&db,"t",Region::Closed,&changed_limit).unwrap());
+        let mut changed=snapshot.clone();changed.model="different-model".into();
+        assert!(!same_failed_range(&db,"t",Region::Closed,&failure_identity("t",&changed,0..3,limit).unwrap()).unwrap());
+        changed=snapshot.clone();changed.profile="different-connection".into();
+        assert!(!same_failed_range(&db,"t",Region::Closed,&failure_identity("t",&changed,0..3,limit).unwrap()).unwrap());
+        assert_eq!(after_result(&snapshot,0..1,Ok(()),|_|false),Next::Done);
+        assert!(same_failed_range(&db,"t",Region::Closed,&original).unwrap(),"success does not invent a failure or overwrite prior evidence");
+        let tx=db.transaction().unwrap();remember_failure(&tx,"t",Region::Closed,&smaller).unwrap();tx.commit().unwrap();
+        assert!(!same_failed_range(&db,"t",Region::Closed,&original).unwrap(),"same-kind overwrite deliberately has no permanent-history guarantee");
+        assert!(same_failed_range(&db,"t",Region::Active,&smaller).unwrap());
+        assert_eq!(db.query_row("SELECT count(*) FROM app_meta",[],|r|r.get::<_,i64>(0)).unwrap(),2);
     }
-
 }
