@@ -410,6 +410,7 @@ pub(super) async fn drive(
                     for difference in &observation.differences {
                         control.diagnostics.record_model_stream_difference(
                             crate::diagnostics::DiagnosticIds {
+                                attempt_id: None,
                                 thread_id: Some(snapshot.thread.clone()),
                                 run_id: Some(snapshot.run.clone()),
                                 turn_id: Some(snapshot.turn.clone()),
@@ -422,6 +423,7 @@ pub(super) async fn drive(
                     for field in &observation.delta_differences {
                         control.diagnostics.record_model_stream_delta_difference(
                             crate::diagnostics::DiagnosticIds {
+                                attempt_id: None,
                                 thread_id: Some(snapshot.thread.clone()),
                                 run_id: Some(snapshot.run.clone()),
                                 turn_id: Some(snapshot.turn.clone()),
@@ -437,6 +439,7 @@ pub(super) async fn drive(
             Err(failure) => {
                 control.diagnostics.record_model_failure(
                     crate::diagnostics::DiagnosticIds {
+                        attempt_id: None,
                         thread_id: Some(snapshot.thread.clone()),
                         run_id: Some(snapshot.run.clone()),
                         turn_id: Some(snapshot.turn.clone()),
@@ -707,6 +710,7 @@ async fn recover_preparation(
         control
             .diagnostics
             .record_preparation_failure(crate::diagnostics::DiagnosticIds {
+                attempt_id: None,
                 thread_id: Some(target_thread.clone()),
                 run_id: Some(target_run.clone()),
                 turn_id: Some(turn),
@@ -758,6 +762,7 @@ async fn recover(
         control.diagnostics.record(
             crate::diagnostics::DiagnosticEvent::ModelFailure,
             crate::diagnostics::DiagnosticIds {
+                attempt_id: None,
                 thread_id: Some(snapshot.thread.clone()),
                 run_id: Some(snapshot.run.clone()),
                 turn_id: Some(snapshot.turn.clone()),

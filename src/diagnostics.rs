@@ -203,6 +203,8 @@ struct AutomaticCompactionCounts {
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct DiagnosticIds {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -1233,6 +1235,7 @@ impl Diagnostics {
         } = record;
         // IDs come from owned records, but keep even accidental callers bounded.
         for id in [
+            &mut ids.attempt_id,
             &mut ids.thread_id,
             &mut ids.run_id,
             &mut ids.turn_id,

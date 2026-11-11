@@ -115,43 +115,44 @@ impl Automatic {
             .await
             .map_err(storage_error)?;
         let result = operation.await;
-        if let Err(error) = &result {
-            if error.code == ErrorCode::InvalidState {
-                let reason = error
-                    .details
-                    .as_ref()
-                    .and_then(|v| v.get("compaction_discard_reason"))
-                    .and_then(|v| serde_json::from_value::<DiscardReason>(v.clone()).ok())
-                    .unwrap_or(DiscardReason::Other);
-                let fact = CompactionDiscard {
-                    reason,
-                    phase: DiscardPhase::from_stage(phase).expect("closed stage name"),
-                    elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                };
-                let body = serde_json::to_string(&fact).expect("bounded fact");
-                let (attempt, token, phase_key) =
-                    (self.attempt.clone(), self.token.clone(), phase.to_owned());
-                let saved = control
-                    .store
-                    .database
-                    .call(move |db| {
-                        Ok(db.execute(
-                            crate::compaction::discard::SAVE_SQL,
-                            params![attempt, token, body, phase_key],
-                        )? == 1)
-                    })
-                    .await
-                    .map_err(storage_error)?;
-                if saved {
-                    control.diagnostics.record_compaction_discard(
-                        crate::diagnostics::DiagnosticIds {
-                            thread_id: Some(self.thread.clone()),
-                            turn_id: Some(self.turn.clone()),
-                            ..Default::default()
-                        },
-                        fact,
-                    );
-                }
+        if let Err(error) = &result
+            && error.code == ErrorCode::InvalidState
+        {
+            let reason = error
+                .details
+                .as_ref()
+                .and_then(|v| v.get("compaction_discard_reason"))
+                .and_then(|v| serde_json::from_value::<DiscardReason>(v.clone()).ok())
+                .unwrap_or(DiscardReason::Other);
+            let fact = CompactionDiscard {
+                reason,
+                phase: DiscardPhase::from_stage(phase).expect("closed stage name"),
+                elapsed_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            };
+            let body = serde_json::to_string(&fact).expect("bounded fact");
+            let (attempt, token, phase_key) =
+                (self.attempt.clone(), self.token.clone(), phase.to_owned());
+            let saved = control
+                .store
+                .database
+                .call(move |db| {
+                    Ok(db.execute(
+                        crate::compaction::discard::SAVE_SQL,
+                        params![attempt, token, body, phase_key],
+                    )? == 1)
+                })
+                .await
+                .map_err(storage_error)?;
+            if saved {
+                control.diagnostics.record_compaction_discard(
+                    crate::diagnostics::DiagnosticIds {
+                        attempt_id: Some(self.attempt.clone()),
+                        thread_id: Some(self.thread.clone()),
+                        turn_id: Some(self.turn.clone()),
+                        ..Default::default()
+                    },
+                    fact,
+                );
             }
         }
         result

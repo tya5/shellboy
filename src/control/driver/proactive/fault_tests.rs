@@ -884,7 +884,7 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
             }
         }).await.unwrap();
         let scope=target.clone();let id=attempt.clone();
-        control.store.database.call(move |db| {
+        let status_fact=control.store.database.call(move |db| {
             let page=crate::status::snapshot(db,&StatusArgs{thread_id:Some(scope),all:true,limit:200,..Default::default()},"fixture").unwrap();
             let current=page.items.iter().find(|row|row.id==id).unwrap();
             let fact=current.compaction_discard.unwrap();
@@ -895,7 +895,8 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
             assert!(!point.to_string().contains("PRIVATE_SENTINEL"));
             let saved=db.query_row("SELECT state,usage_json,response_id FROM model_attempt WHERE id=?1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
             assert_eq!(saved,("completed".into(),usage,response));
-            Ok(())
+            assert!(!serde_json::to_string(&page).unwrap().contains("PRIVATE_SENTINEL"));
+            Ok(fact)
         }).await.unwrap();
         control.shutdown().await.unwrap();
         drop(control);owner.shutdown().await.unwrap();server.abort();
@@ -903,6 +904,8 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
         let facts=text.lines().map(|line|serde_json::from_str::<Value>(line).unwrap()).filter(|row|row["event"]=="compaction_discard").collect::<Vec<_>>();
         assert_eq!(facts.len(),1);
         assert_eq!(facts[0]["compaction_discard"]["reason"],"profile_changed");
+        assert_eq!(facts[0]["ids"]["attempt_id"],attempt);
+        assert_eq!(facts[0]["compaction_discard"],serde_json::to_value(status_fact).unwrap());
         assert!(!facts[0].to_string().contains("PRIVATE_SENTINEL"));
     }).await.unwrap();
 }

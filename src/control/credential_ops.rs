@@ -14,6 +14,7 @@ use std::path::Path;
 fn caller_ids(caller: Option<&Origin>) -> crate::diagnostics::DiagnosticIds {
     caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
         crate::diagnostics::DiagnosticIds {
+            attempt_id: None,
             thread_id: Some(origin.thread_id.clone()),
             run_id: Some(origin.run_id.clone()),
             turn_id: Some(origin.turn_id.clone()),

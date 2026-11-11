@@ -184,6 +184,7 @@ pub(super) async fn collect_shell(
         control.diagnostics.record(
             crate::diagnostics::DiagnosticEvent::ShellFailure,
             crate::diagnostics::DiagnosticIds {
+                attempt_id: None,
                 thread_id: Some(snapshot.thread.clone()),
                 run_id: Some(snapshot.run.clone()),
                 turn_id: Some(snapshot.turn.clone()),

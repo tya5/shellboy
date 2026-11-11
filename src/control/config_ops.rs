@@ -97,6 +97,7 @@ impl Control {
         if applied.written {
             let ids = caller.map_or_else(crate::diagnostics::DiagnosticIds::default, |origin| {
                 crate::diagnostics::DiagnosticIds {
+                    attempt_id: None,
                     thread_id: Some(origin.thread_id.clone()),
                     run_id: Some(origin.run_id.clone()),
                     turn_id: Some(origin.turn_id.clone()),
