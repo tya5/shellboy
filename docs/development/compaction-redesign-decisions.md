@@ -75,3 +75,37 @@ Same-kind replacement intentionally allows older range later. No epoch or source
 revision extends identity authority. Atomic adoption remains independent.
 Original identity is captured once in the new pure Trial object, not recomputed
 from a halved prefix; success is terminal and never schedules its remainder.
+
+## D1 Review Conditions Resolved (Leader Recommendation Under Delegation)
+
+Use max4096 UTF-8 JSON bytes, identifiers1..256 UTF-8 bytes, version1,
+u64 counters with checked_add; overflow/corrupt/oversize returns InvalidState,
+not0. Add bounded last_reset_origin (one ID, no historical set). Terminal writer
+must own the existing durable attempt-row terminal CAS (or one manual adoption
+row transition); reset also requires expected scope+boundary generation. Matching
+last origin makes immediate duplicate idempotent. A delayed old origin with a
+stale generation cannot reset any newer unrelated boundary. Manual automatic
+origin must be explicitly shared/skipped, not deduplicated by a timestamp.
+Trial-noop uses its existing qualified automatic attempt-row finalization, not a
+new unbounded operation ledger. Production integration must make reset and that
+terminal CAS one transaction and rollback both if either storage step fails.
+
+A request started before a boundary but Applied-completed AFTER the boundary is
+eligible as the new boundary's first report. Completion carries scope token only;
+NEVER reject it solely for old boundary generation. Scope ABA invalidates the
+old scope token even if names return. A first completion with absent input usage
+records identity with tokensUnknown; later completions cannot replace it. The
+selector must propagate Unknown to the existing bounded read-refusal/defer path,
+never0 or an additional automatic request. No-completion and legacy absence are
+0 by the adopted rule, with explicit evidence kinds rather than measured0.
+
+Thread deletion must delete the one #A key and closed/active failure keys in the
+same Thread-delete transaction. No periodic scan/TTL/new cleanup daemon. An
+inflight retired Thread cannot recreate keys: transaction writers must check
+nondeleted Thread and their existing owner transition before save. Initial
+helper source is unconnected; lifecycle/writer-ownership checks are mandatory
+at integration, not assumed from pure fixture success.
+
+D2 summary character cap accepted range is1..i64::MAX; public u64 parsing rejects
+larger values instead of casting/wrapping. Thread percentage remains1..100.
+No migration number is selected by this clarification.
