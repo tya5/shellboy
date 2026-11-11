@@ -27,6 +27,7 @@ pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<boo
 }
 pub(crate) mod message_budget;
 mod message_provenance;
+mod notification;
 mod relations;
 mod thread;
 pub(crate) use raw_witness::{RawWitness, RetainedExecutionFacts, RetainedExecutionRequest};
