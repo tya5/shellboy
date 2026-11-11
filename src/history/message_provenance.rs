@@ -118,16 +118,27 @@ pub(super) fn project(
     use rusqlite::OptionalExtension;
     let own: Option<String> = db
         .query_row(
-            "SELECT id FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2",
+            "SELECT CASE WHEN length(CAST(id AS BLOB))<=256 THEN id END FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2",
             [node, thread],
-            |r| r.get(0),
+            |r| r.get::<_,Option<String>>(0),
         )
-        .optional()?;
+        .optional()?.flatten();
     let own_relation = if let Some(receipt) = own {
         bounded_receipt(db, &receipt)?.and_then(|raw| saved_relation(&raw, node, thread))
     } else {
         None
     };
+    if let Some(relation) = own_relation.as_ref()
+        && let Some(target) = relation
+            .reply_to
+            .as_deref()
+            .or(relation.reply_node_id.as_deref())
+    {
+        let exists:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn t ON t.id=n.turn_id WHERE n.id=?1 AND t.thread_id=?2)",[target,thread],|r|r.get(0))?;
+        if !exists {
+            return Ok(None);
+        }
+    }
     // Count two candidates before reading their JSON; corrupt/oversized rows remain ambiguous.
     let mut statement = db.prepare(REVERSE_LOOKUP)?;
     let mut rows = statement.query([thread, node])?;

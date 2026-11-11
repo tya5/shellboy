@@ -1075,19 +1075,19 @@ impl Control {
         match result {
             Ok(effects) => {
                 let mut response = Response::success(operation, effects.result.clone());
-                if let Some(slots) = message_slots {
-                    if crate::history::message_budget::fit(&mut response, slots).is_err() {
-                        return (
-                            Response::failure(
-                                response.operation_id,
-                                ApiError::new(
-                                    ErrorCode::InvalidState,
-                                    "History provenance response budget failed",
-                                ),
+                if let Some(slots) = message_slots
+                    && crate::history::message_budget::fit(&mut response, slots).is_err()
+                {
+                    return (
+                        Response::failure(
+                            response.operation_id,
+                            ApiError::new(
+                                ErrorCode::InvalidState,
+                                "History provenance response budget failed",
                             ),
-                            None,
-                        );
-                    }
+                        ),
+                        None,
+                    );
                 }
                 (response, Some(effects))
             }
