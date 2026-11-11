@@ -19,7 +19,7 @@ The operation registry already names ShellWriteResult; its DTO must match produc
 | obsolete declaration only | execution_id/bytes_written/state without real required fields | typed success DTO rejects; do not invent execution ID |
 | successful Failed status | successful result data, not ApiError | Response::success -> generic envelope/typed result exact |
 | operation error | existing ApiError envelope; no success-result coercion | error validates independently, cannot decode as success DTO |
-| required fields | bytes_written/status/stdin_open absent/null/wrong type | finite negative matrix, no schema-driven producer change |
+| required fields | bytes_written/status/stdin_open absent/null/wrong type | finite negative matrix including signed negative / float / u64 overflow, no schema-driven producer change |
 | legacy consumer | generic Value successful result still reads unchanged | encode actual producer -> Response<Value> roundtrip |
 | exported schema | status/root/result match actual producer; reason nullable/optional | regular Rust generator + existing committed golden, not sole wire proof |
 
