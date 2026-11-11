@@ -230,15 +230,17 @@ This section supersedes conflicting candidate wording above; no sixth record.
    a consistency check only, not identity/coverage. No new member list is saved;
    reuse existing bounded attempt/output_item linkage and all-FINAL/CAS guards.
 
-No-adoption states (rollback, stale turn, cancelled/failed attempt or declined
-Applied transition) leave witness NULL; no negative witness is separately saved
-outside adoption. A successful adoption may save Unknown/Unrepresented when
-reconciliation cannot attest coverage; the same NULL-to-once rule applies. NULL
-never means covered empty. Covered-positive, including empty, can only be saved
-with the successful output/cohort adoption transaction and exact frozen seal.
-Negative/Unknown witnesses are not later upgraded or rewritten; a retry uses a
-new attempt/incarnation. This distinction does not claim every historical NULL
-can be classified retrospectively.
+No-adoption, Unknown and Unrepresented states leave witness NULL. This includes
+successful adoption without exhaustive supported reconciliation. No negative
+witness is saved; no later upgrade/rewrite of a saved witness. Only covered-positive
+(nonempty or explained empty) is saved NULL-to-once with the successful adoption
+COMMIT and exact frozen seal. NULL never means covered empty and cannot be
+retrospectively classified. Retry uses a new attempt/incarnation.
+
+Ordinary V1 covers only public ordinary answer text for all three adapters. It
+must never suppress a whole preview that also contains reasoning under #299's
+separate domain. Reasoning retains its independent visibility/retention contract;
+ordinary coverage is not authority over it. Unknown unsupported remains NULL.
 
 Finite tests must cover projection-vs-mixed-offset divergence with reasoning,
 scalar/byte differences for astral text, each checked overflow, wrong first offset,
