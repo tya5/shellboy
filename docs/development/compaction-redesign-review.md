@@ -138,3 +138,17 @@ No private DB/config read or paid/model measurement is authorized or performed.
 - Protected group data retention/reachability remains existing safety structure;
   do not turn it into summary quality assessment. No benchmarks, quality score,
   provider-window-size guess, cache optimization or extra retry cap is proposed.
+
+## Subsequent USER-Confirmed Branch/Test Addendum
+
+| Confirmed rule | Source branch | Planned fixture (not executed) |
+| --- | --- | --- |
+| Remove at least1 trailing group on every half | single_request::half_prefix len-1 ceiling/min1 | allzero chain4->3->2->1; nonzero followed by zeros remains strict prefix |
+| Saved projected chars only, fixed context excluded | half_prefix projection_characters; request keeps extras | unchanged half after huge fixed extra; single group overflow fails |
+| Single-group refusal deterministic range failure | after_result Failed + remember_failure/same_failed_range | hash saved/reopened; identical order suppressed, changed range/order/Thread not matched |
+
+This addendum supersedes the earlier pending-USER annotations for these two
+branches only. #A writer remains unapproved. Failure-witness helper is not yet
+wired into dispatcher; whole policy is incomplete. The current single latest
+per-Thread hash witness has not proven suppression after multiple distinct
+failed ranges; retention semantics require review before production wiring.

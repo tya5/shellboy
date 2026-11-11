@@ -33,9 +33,8 @@ pub(super) fn overflow_prefix(snapshot: &Snapshot) -> Range<usize> {
     0..end
 }
 
-/// Projection here covers selected groups only; extra_sources remain fixed in
-/// the request. This scope and the zero-weight strict-prefix fallback below are
-/// pending USER clarification; neither is wired to the production dispatcher.
+/// USER-confirmed: measure saved selected-group projection characters only;
+/// fixed instructions and extra_sources never participate in halving weights.
 /// Only a classified context refusal calls this. Transient retry stays with
 /// the existing HTTP request retry mechanism, never this range transformation.
 pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option<Range<usize>> {
@@ -46,7 +45,7 @@ pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option
     let half = weights.iter().sum::<u128>() / 2;
     let mut total = 0;
     let mut count = 0;
-    // PROPOSAL ONLY: zero-total len-1 fallback awaits USER decision.
+    // USER-confirmed: remove at least one trailing group even for zero weight.
     for weight in weights.iter().take(weights.len()-1) {
         if total + weight > half { break; }
         total += weight;
@@ -87,6 +86,24 @@ pub(super) struct AdoptionSize {
 /// Output cap is a request instruction, not a resend/quality gate.
 pub(super) fn adoption_size(original: u64, summary: u64, limit: OutputLimit) -> Option<AdoptionSize> {
     (summary < original).then_some(AdoptionSize { exceeded_output_limit: summary > limit.0 })
+}
+
+/// Canonical ordered IDs only: no body/provider data is persisted in the key.
+pub(super) fn range_hash(snapshot: &Snapshot, selected: Range<usize>) -> String {
+    let ids: Vec<&str> = snapshot.groups[selected].iter()
+        .flat_map(|group| group.sources.iter().map(|source| source.id.as_str())).collect();
+    digest(&serde_json::to_vec(&ids).expect("string IDs serialize"))
+}
+
+pub(super) fn remember_failure(tx: &rusqlite::Transaction<'_>, thread: &str, hash: &str) -> Result<(), StorageError> {
+    tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![format!("compact.deterministic_range_failure.{thread}"),hash])?;
+    Ok(())
+}
+pub(super) fn same_failed_range(db: &rusqlite::Connection, thread: &str, hash: &str) -> Result<bool, StorageError> {
+    let saved:Option<String>=db.query_row("SELECT value FROM app_meta WHERE key=?1",
+        [format!("compact.deterministic_range_failure.{thread}")],|r|r.get(0)).optional()?;
+    Ok(saved.as_deref()==Some(hash))
 }
 
 #[cfg(test)]
@@ -153,6 +170,40 @@ mod tests {
             let error=model::ModelError::new(kind,"synthetic non-context failure");
             assert_eq!(after_result(&snapshot,0..4,Err(&error),|_|panic!("transient failure must not select a shorter prefix")),Next::Failed);
         }
+    }
+
+    #[test]
+    fn zero_weights_and_fixed_context_still_terminate_at_one_group() {
+        let mut snapshot=fixture(&[0,0,0,0]);
+        // Empty projections are measured by the same existing replay API.
+        for group in &mut snapshot.groups { for source in &mut group.sources {source.payload=Value::Null;} }
+        assert_eq!(half_prefix(&snapshot,0..4),Some(0..3));
+        assert_eq!(half_prefix(&snapshot,0..3),Some(0..2));
+        assert_eq!(half_prefix(&snapshot,0..2),Some(0..1));
+        assert_eq!(half_prefix(&snapshot,0..1),None);
+        snapshot.groups[0].sources[0].payload=json!({"type":"message","role":"user","content":"actual"});
+        let without=half_prefix(&snapshot,0..4);
+        snapshot.extra_sources.push(super::super::tests::source("fixed",None,json!({"type":"message","role":"user","content":"x".repeat(100000)})));
+        assert_eq!(half_prefix(&snapshot,0..4),without,"fixed context must not alter weights");
+        let mut overflow=model::ModelError::new("provider","fixture");
+        overflow.provider_code=Some("context_length_exceeded".into());
+        assert_eq!(after_result(&snapshot,0..1,Err(&overflow),|_|true),Next::Failed);
+    }
+    #[test]
+    fn failed_range_hash_reopens_and_blocks_only_identical_ordered_sources() {
+        let root=tempfile::tempdir().unwrap();let path=root.path().join("failure.sqlite");
+        let snapshot=fixture(&[1,2,3]);let hash=range_hash(&snapshot,0..2);
+        {
+            let mut db=rusqlite::Connection::open(&path).unwrap();
+            db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);").unwrap();
+            let tx=db.transaction().unwrap();remember_failure(&tx,"t",&hash).unwrap();tx.commit().unwrap();
+        }
+        let db=rusqlite::Connection::open(path).unwrap();
+        assert!(same_failed_range(&db,"t",&hash).unwrap());
+        assert!(!same_failed_range(&db,"t",&range_hash(&snapshot,0..3)).unwrap());
+        assert!(!same_failed_range(&db,"other",&hash).unwrap());
+        let mut reversed=fixture(&[1,2,3]);reversed.groups.swap(0,1);
+        assert_ne!(range_hash(&reversed,0..2),hash);
     }
 
 }

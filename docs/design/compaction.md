@@ -1458,3 +1458,17 @@ summary size policy remain separate concerns.
 5. この設計に書いていない判断が必要になったら、実装せずに質問する。
 6. モデルの使い方や利用者の設定に影響する変更は、Agent Guide と利用者向けの文書も更新する。
 7. Core の差し替えと owner の再起動は、利用者の承認のあとに Claude が行う。準備ができたら「Claude への相談：」で知らせる。
+
+## Subsequent USER Clarification: Prefix Termination And Fixed Context
+
+USER explicitly confirms after b822: halving must always remove at least one
+trailing whole group, retaining the leading prefix, even when measured body
+size would otherwise keep the same range. A rejected single group terminates.
+Persist the deterministic failed ordered-range hash in existing app_meta and
+suppress retry of that same range. This is permission for THIS failure witness,
+not permission for a new #A state writer. No table/column/migration is authorized.
+Measure only saved selected-group projection characters through the existing
+projection API (serialized projected items plus their existing separators), not
+estimated tokens. Fixed instructions/extra_sources are excluded. If fixed
+context alone exceeds the window, reducing to one group still ends on refusal.
+No original-reachability or summary-quality gate is added.
