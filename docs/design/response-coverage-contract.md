@@ -395,3 +395,19 @@ D is authorized to investigate exact2.4.0 disposably only. Production installati
 API binding and lockfile changes await those actual results and explicit adoption.
 Rust continues to reuse existing sha2; no custom browser crypto or unsupported
 package is a fallback. This correction does not block independent302 work.
+
+### Exact2.4.0 Disposable Qualification Receipt
+
+D reports @noble/hashes=2.4.0, import sha2.js, synchronous create/update/digest/
+destroy type check PASS; 24 known UTF-8 chunk vectors PASS; 4MiB processed in
+1KiB chunks with fixed block identity; existing Vite client build PASS; copied
+lockfile existing entries unchanged. Canonical transcript cross-Rust/TS contract
+vectors are still a separate gate, not these generic byte vectors.
+
+Evidence: private artifact d-crypto-qualification/report.md. Support policy>=2.4
+is not an independent audit: README's audit is1.0.0 January2022, not a2.4 assurance.
+Advisory empty result is not a safety guarantee. Actual browser runtime/heap/GC
+behavior unmeasured. This is disposable qualification, NOT production dependency
+adoption. No package installation or API binding in production by this doc.
+Byte hashing remains separate from producer coverage authority and consumer FINAL
+ownership. Leader still decides exact dependency and implementation scope.
