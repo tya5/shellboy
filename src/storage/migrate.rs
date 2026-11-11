@@ -646,7 +646,7 @@ mod activity_migration_tests {
             if upgrade {
                 db.execute_batch("DROP INDEX receipt_human_reply_pending;")
                     .unwrap();
-                db.execute_batch(" DROP INDEX receipt_reply_pending; DROP INDEX jobs_running_recovery; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DELETE FROM schema_migration WHERE version>=26; PRAGMA user_version=25;").unwrap();
+                db.execute_batch(" DROP INDEX receipt_reply_pending; DROP INDEX jobs_running_recovery; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=26; PRAGMA user_version=25;").unwrap();
                 run(&mut db, 25, &|_, _| {}, &|| {}).unwrap();
             }
             assert_eq!(
@@ -702,7 +702,7 @@ mod activity_migration_tests {
             .unwrap();
             db.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES(?1,?1,'{}','legacy',?2,'applied','old','{\"reply\":{\"state\":\"pending\"},\"to_human\":true}')", params![format!("legacy-receipt-{index}"), node]).unwrap();
         }
-        db.execute_batch("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version>=38; PRAGMA user_version=37;").unwrap();
+        db.execute_batch("DROP INDEX receipt_human_reply_pending; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=38; PRAGMA user_version=37;").unwrap();
         run(&mut db, 37, &|_, _| {}, &|| {}).unwrap();
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
