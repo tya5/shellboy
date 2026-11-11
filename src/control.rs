@@ -1915,3 +1915,6 @@ impl Control {
         Ok(self.live.output_markers(executions).await)
     }
 }
+
+#[cfg(test)]
+mod message_provenance_tests;
