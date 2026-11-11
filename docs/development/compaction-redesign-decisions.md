@@ -109,3 +109,24 @@ at integration, not assumed from pure fixture success.
 D2 summary character cap accepted range is1..i64::MAX; public u64 parsing rejects
 larger values instead of casting/wrapping. Thread percentage remains1..100.
 No migration number is selected by this clarification.
+
+## D2 Adopted Leader Storage Scope / DDL Delta For Review
+
+Leader adopts reusing the OLD UNAPPLIED43 slot only after fresh max confirmation;
+new SQL is authored independently, not copied from historical427c branch.
+
+| Item | Historical unlanded43 | New reviewed design proposal |
+| --- | --- | --- |
+| Thread target percent | nullableINTEGER typeof integer1..100 | same nullableCHECK, but percentage only compares #A, no removal estimate |
+| Thread summary_max_chars | absent | add nullableINTEGER CHECK NULL or typeof integer AND1..9223372036854775807 |
+| Existing rows | NULL/inherit | NULL/inherit20/20000, no attempt backfill |
+| Bound rationale | percent1..100 | outputcap upper=i64MAX storage exactness/publicu64 subset; not a quality/performance-derived ceiling |
+| Existing40-42 | immutable | immutable;43 registry/FRESH only after source review/fresh guard |
+
+DraftDDL: ALTER TABLE thread ADD COLUMN auto_compact_target_percent INTEGER
+CHECK(auto_compact_target_percent IS NULL OR (typeof(auto_compact_target_percent)
+='integer' AND auto_compact_target_percent BETWEEN1AND100)); second ALTER adds
+summary_max_chars INTEGER CHECK(summary_max_chars IS NULL OR
+(typeof(summary_max_chars)='integer' AND summary_max_chars BETWEEN1AND9223372036854775807)).
+This paragraph is notation, not executable SQL (actual statements must use
+separate BETWEEN numeric tokens). No SQL/registry change in this checkpoint.
