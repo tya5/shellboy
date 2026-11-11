@@ -1675,6 +1675,20 @@ states!(HistoryItemUnavailableReason {
     Opaque,
     Unsupported
 });
+/// Availability of a single exact structural tool field, never body completeness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolFieldAvailability { Available, Missing, Invalid, FieldBudget, NotApplicable }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolDetailAvailability { ExecutionLinked, Unavailable }
+record!(ToolDescriptor {
+    #[serde(default, skip_serializing_if = "Option::is_none")] call_id: Option<String>,
+    call_id_state: ToolFieldAvailability,
+    #[serde(default, skip_serializing_if = "Option::is_none")] name: Option<String>,
+    name_state: ToolFieldAvailability
+});
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HistoryItem {
@@ -1691,10 +1705,14 @@ pub enum HistoryItem {
     ToolCall {
         item_identity: String,
         execution_ids: Vec<String>,
+        descriptor: ToolDescriptor,
+        detail_availability: ToolDetailAvailability,
     },
     ToolResult {
         item_identity: String,
         execution_ids: Vec<String>,
+        descriptor: ToolDescriptor,
+        detail_availability: ToolDetailAvailability,
     },
     ReasoningUnavailable {
         item_identity: String,

@@ -106,15 +106,25 @@ pub fn project(
                         }
                     }
                 }
+                let descriptor = tool_descriptor(value, tag == Some("function_call"));
+                let detail_availability = if execution_ids.is_empty() {
+                    crate::protocol::ToolDetailAvailability::Unavailable
+                } else {
+                    crate::protocol::ToolDetailAvailability::ExecutionLinked
+                };
                 result.push(if tag == Some("function_call") {
                     HistoryItem::ToolCall {
                         item_identity: key,
                         execution_ids,
+                        descriptor,
+                        detail_availability,
                     }
                 } else {
                     HistoryItem::ToolResult {
                         item_identity: key,
                         execution_ids,
+                        descriptor,
+                        detail_availability,
                     }
                 });
             }
@@ -172,14 +182,32 @@ pub fn project(
     result
 }
 
+/// Only the two adopted saved structural fields qualify; no body traversal.
+fn tool_descriptor(value: &Value, call: bool) -> crate::protocol::ToolDescriptor {
+    use crate::protocol::{ToolDescriptor, ToolFieldAvailability as State};
+    fn field(value: Option<&Value>, name: bool) -> (Option<String>, State) {
+        let Some(value) = value.filter(|value| !value.is_null()) else { return (None, State::Missing) };
+        let Some(text) = value.as_str() else { return (None, State::Invalid) };
+        if text.len() > 256 { return (None, State::FieldBudget); }
+        if text.is_empty() || (name && (!text.is_ascii() || text.bytes().any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control()))) {
+            return (None, State::Invalid);
+        }
+        (Some(text.to_owned()), State::Available)
+    }
+    let (call_id, call_id_state) = field(value.get("call_id"), false);
+    let (name, name_state) = if call { field(value.get("name"), true) } else { (None, State::NotApplicable) };
+    ToolDescriptor { call_id, call_id_state, name, name_state }
+}
+
 pub fn text_bytes(items: &[HistoryItem]) -> usize {
     items
         .iter()
         .map(|item| match item {
             HistoryItem::Text { text, .. } | HistoryItem::ReasoningText { text, .. } => text.len(),
-            HistoryItem::ToolCall { .. }
-            | HistoryItem::ToolResult { .. }
-            | HistoryItem::ReasoningUnavailable { .. }
+            HistoryItem::ToolCall { descriptor, .. } | HistoryItem::ToolResult { descriptor, .. } =>
+                descriptor.call_id.as_ref().map_or(0, String::len)
+                    + descriptor.name.as_ref().map_or(0, String::len),
+            HistoryItem::ReasoningUnavailable { .. }
             | HistoryItem::Unavailable { .. } => 0,
         })
         .sum()
@@ -406,5 +434,16 @@ mod readable_reasoning_tests {
             &[],
         );
         assert!(matches!(&items[..], [HistoryItem::Unavailable { .. }]));
+    }
+}
+
+#[cfg(test)]
+mod structural_tool_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn descriptor_both_fields_share_text_byte_ledger() {
+        let items = project("node", "assistant_response", &json!({"output":[{"type":"function_call","name":"lookup","call_id":"界".repeat(85)}]}), &[]);
+        assert_eq!(text_bytes(&items), 255 + 6);
     }
 }

@@ -453,3 +453,87 @@ fn readable_reasoning_response_budget_counts_text_and_keeps_atomic_suffix() {
     assert_eq!(retried["items"][0]["items"][0]["kind"], "reasoning_text");
     assert_eq!(retried["items"][0]["items"][0]["text_complete"], true);
 }
+
+#[test]
+fn generic_call_zero_exec() {
+    let mut db = db();
+    append(&mut db, "generic", "assistant_response", json!({"output":[{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"SECRET_ARGS","extra":"SECRET_EXTRA"}]}));
+    let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let item = &result["items"][0]["items"][0];
+    assert_eq!(item["execution_ids"], json!([]));
+    assert_eq!(item["descriptor"], json!({"name":"lookup","name_state":"available","call_id":"call-1","call_id_state":"available"}));
+    assert_eq!(item["detail_availability"], "unavailable");
+    assert!(!item.to_string().contains("SECRET"));
+}
+
+#[test]
+fn generic_result_zero_exec() {
+    let mut db = db();
+    append(&mut db, "generic-result", "tool_result", json!({"item":{"type":"function_call_output","call_id":"call-1","name":"SECRET_RESULT_NAME","output":"SECRET_RESULT"}}));
+    let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let item = &result["items"][0]["items"][0];
+    assert_eq!(item["descriptor"], json!({"name_state":"not_applicable","call_id":"call-1","call_id_state":"available"}));
+    assert_eq!(item["detail_availability"], "unavailable");
+    assert!(!item.to_string().contains("SECRET"));
+}
+
+#[test]
+fn invalid_descriptor_unavailable() {
+    let mut db = db();
+    let fields = [(json!(null), "missing"), (json!(42), "invalid"), (json!(""), "invalid"), (json!("x".repeat(257)), "field_budget")];
+    for (i, (value, _)) in fields.iter().enumerate() {
+        append(&mut db, &format!("invalid{i}"), "assistant_response", json!({"output":[{"type":"function_call","name":value,"call_id":value}]}));
+    }
+    let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    for (i, (_, expected)) in fields.iter().enumerate() {
+        let descriptor = &result["items"][i]["items"][0]["descriptor"];
+        assert_eq!(descriptor["name_state"], *expected);
+        assert_eq!(descriptor["call_id_state"], *expected);
+        assert!(descriptor.get("name").is_none());
+        assert!(descriptor.get("call_id").is_none());
+    }
+}
+
+#[test]
+fn compacted_call_descriptor() {
+    let mut db = db();
+    append(&mut db, "spill-generic", "spill", json!({"output":[{"type":"function_call","name":"lookup","call_id":"call","arguments":"SECRET_ARGS"},{"type":"function_call_output","call_id":"call","output":"SECRET_OMITTED_METADATA"}]}));
+    let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let items = &result["items"][0]["items"];
+    assert_eq!(items[0]["descriptor"]["name"], "lookup");
+    assert_eq!(items[1]["descriptor"]["name_state"], "not_applicable");
+    assert!(!items.to_string().contains("SECRET"));
+}
+
+#[test]
+fn conflicting_calls_not_merged() {
+    let mut db = db();
+    for (node, name) in [("first-call", "one"), ("second-call", "two")] {
+        append(&mut db, node, "assistant_response", json!({"output":[{"type":"function_call","name":name,"call_id":"duplicate"}]}));
+    }
+    append(&mut db, "orphan-result", "tool_result", json!({"item":{"type":"function_call_output","call_id":"duplicate","output":"SECRET"}}));
+    let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let first = &result["items"][0]["items"][0];
+    let second = &result["items"][1]["items"][0];
+    assert_ne!(first["item_identity"], second["item_identity"]);
+    assert_eq!(first["descriptor"]["name"], "one");
+    assert_eq!(second["descriptor"]["name"], "two");
+    assert_eq!(result["items"][2]["items"][0]["descriptor"]["name_state"], "not_applicable");
+}
+
+#[test]
+fn descriptor_secret_exclusion_and_exact_unicode_id_budget() {
+    let mut db = db();
+    append(&mut db, "safe-fields", "assistant_response", json!({"output":[
+        {"type":"function_call","name":"lookup","call_id":"界".repeat(85),"arguments":"SECRET_ARGS","extra":{"name":"SECRET_EXTRA"}},
+        {"type":"function_call","name":"bad name","call_id":"界".repeat(86)},
+        {"type":"provider_opaque","name":"SECRET_OPAQUE","call_id":"SECRET_OPAQUE_ID"}
+    ]}));
+    let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let items = &result["items"][0]["items"];
+    assert_eq!(items[0]["descriptor"]["call_id"], "界".repeat(85));
+    assert_eq!(items[1]["descriptor"]["call_id_state"], "field_budget");
+    assert_eq!(items[1]["descriptor"]["name_state"], "invalid");
+    assert!(!items.to_string().contains("SECRET"));
+    let _: Vec<HistoryItem> = serde_json::from_value(items.clone()).unwrap();
+}
