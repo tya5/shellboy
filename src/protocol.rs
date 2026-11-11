@@ -1030,7 +1030,14 @@ states!(HistoryRelation {
     Previous => "previous", Next => "next", Sources => "sources", Replacements => "replacements"
 });
 args!(HistoryRelationsArgs { node_id: String, relation: HistoryRelation, #[serde(default = "list_limit")] limit: u32, #[serde(default, skip_serializing_if = "Option::is_none")] cursor: Option<String> });
-record!(NodeProvenance { #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>, kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
+states!(MessageReplyState { Pending => "pending", Replied => "replied", Ignored => "ignored", Cancelled => "cancelled" });
+record!(MessageProvenance {
+    expect_reply: bool,
+    #[serde(default, skip_serializing_if="Option::is_none")] reply_to: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")] reply_state: Option<MessageReplyState>,
+    #[serde(default, skip_serializing_if="Option::is_none")] reply_node_id: Option<String>
+});
+record!(NodeProvenance { #[serde(default, skip_serializing_if="Option::is_none")] message: Option<MessageProvenance>, #[serde(default, skip_serializing_if = "Option::is_none")] sender: Option<MessageSender>, kind: String, created_at: String, source_revision: i64, #[serde(default, skip_serializing_if = "Option::is_none")] turn_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] run_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] origin_thread_id: Option<String> });
 record!(RelationItem { node_id: String, provenance: NodeProvenance, #[serde(default, skip_serializing_if = "Option::is_none")] replacement_id: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] source_revision: Option<i64>, #[serde(default, skip_serializing_if = "Option::is_none")] source_hash: Option<String> });
 args!(ShellReadArgs { execution_id: String, #[serde(default)] cursor: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] encoding: Option<String>, #[serde(default = "body_limit")] limit_bytes: u32 });
 args!(ShellWriteArgs {

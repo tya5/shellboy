@@ -204,6 +204,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0040_selection_nonappend_generation.sql"),
         foreign_keys: Some(Impact::IndexOnly),
     },
+    Migration {
+        version: 41,
+        sql: include_str!("../../migrations/0041_receipt_reply_node_lookup.sql"),
+        foreign_keys: Some(Impact::IndexOnly),
+    },
 ];
 
 pub(super) fn run(
