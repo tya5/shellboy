@@ -137,4 +137,19 @@ mod tests {
         assert!(adoption_size(25000,25001,OutputLimit(20000)).is_none());
         assert_eq!(adoption_size(100,50,OutputLimit(20000)),Some(AdoptionSize{exceeded_output_limit:false}));
     }
+    #[test]
+    fn only_context_refusal_halves_and_ineligible_or_single_group_stops() {
+        let snapshot=fixture(&[40,40,40,40]);
+        let mut context=model::ModelError::new("provider","synthetic overflow");
+        context.provider_code=Some("context_length_exceeded".into());
+        assert!(context.is_context_limit());
+        assert_eq!(after_result(&snapshot,0..4,Err(&context),|prefix|prefix== (0..2)),Next::RetryPrefix(0..2));
+        assert_eq!(after_result(&snapshot,0..4,Err(&context),|_|false),Next::Failed);
+        assert_eq!(after_result(&snapshot,0..1,Err(&context),|_|true),Next::Failed);
+        for kind in ["network","http","provider"] {
+            let error=model::ModelError::new(kind,"synthetic non-context failure");
+            assert_eq!(after_result(&snapshot,0..4,Err(&error),|_|panic!("transient failure must not select a shorter prefix")),Next::Failed);
+        }
+    }
+
 }
