@@ -1390,25 +1390,42 @@ fn shell_write_result_matches_encoded_runtime_result_for_all_statuses() {
     assert!(write_schema["properties"].get("state").is_none());
 }
 
-
 #[test]
 fn shell_write_result_required_fields_and_numeric_bounds_reject_malformed_values() {
     let good = json!({"bytes_written":0,"status":"complete","stdin_open":true,"reason":null});
     for field in ["bytes_written", "status", "stdin_open"] {
         let mut absent = good.clone();
         absent.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<ShellWriteResult>(absent).is_err(), "missing {field}");
+        assert!(
+            serde_json::from_value::<ShellWriteResult>(absent).is_err(),
+            "missing {field}"
+        );
         let mut null = good.clone();
         null[field] = Value::Null;
-        assert!(serde_json::from_value::<ShellWriteResult>(null).is_err(), "null {field}");
+        assert!(
+            serde_json::from_value::<ShellWriteResult>(null).is_err(),
+            "null {field}"
+        );
     }
-    for bad in [json!(-1), json!(1.5), json!("0"), json!(true), serde_json::from_str::<Value>("18446744073709551616").unwrap()] {
+    for bad in [
+        json!(-1),
+        json!(1.5),
+        json!("0"),
+        json!(true),
+        serde_json::from_str::<Value>("18446744073709551616").unwrap(),
+    ] {
         let mut value = good.clone();
         value["bytes_written"] = bad;
         assert!(serde_json::from_value::<ShellWriteResult>(value).is_err());
     }
-    for (field, bad) in [("status", json!("unknown")), ("status", json!(1)), ("stdin_open", json!("true")), ("reason", json!(42))] {
-        let mut value = good.clone(); value[field] = bad;
+    for (field, bad) in [
+        ("status", json!("unknown")),
+        ("status", json!(1)),
+        ("stdin_open", json!("true")),
+        ("reason", json!(42)),
+    ] {
+        let mut value = good.clone();
+        value[field] = bad;
         assert!(serde_json::from_value::<ShellWriteResult>(value).is_err());
     }
     let mut maximum = good;
@@ -1422,7 +1439,8 @@ fn shell_write_result_absent_reason_normalizes_separately_from_actual_null_wire(
     let absent = json!({"bytes_written":0,"status":"complete","stdin_open":true});
     let typed: ShellWriteResult = serde_json::from_value(absent.clone()).unwrap();
     assert!(typed.reason.is_none());
-    let mut normalized = absent; normalized["reason"] = Value::Null;
+    let mut normalized = absent;
+    normalized["reason"] = Value::Null;
     assert_eq!(serde_json::to_value(typed).unwrap(), normalized);
     let additive = json!({"bytes_written":0,"status":"complete","stdin_open":true,"reason":null,"future_null":null,"future_object":{"nested":true}});
     let typed: ShellWriteResult = serde_json::from_value(additive.clone()).unwrap();
@@ -1434,7 +1452,12 @@ fn shell_write_result_absent_reason_normalizes_separately_from_actual_null_wire(
 #[test]
 fn shell_write_failed_status_is_result_not_operation_error_and_legacy_value_survives() {
     use shellboy::shell::{StdinWriteResult, StdinWriteStatus};
-    let producer = StdinWriteResult { bytes_written:1, status:StdinWriteStatus::Failed, stdin_open:false, reason:Some("synthetic failure".into()) };
+    let producer = StdinWriteResult {
+        bytes_written: 1,
+        status: StdinWriteStatus::Failed,
+        stdin_open: false,
+        reason: Some("synthetic failure".into()),
+    };
     let wire = serde_json::to_value(producer).unwrap();
     let success = Response::success("op", wire.clone());
     let encoded = serde_json::to_value(&success).unwrap();
@@ -1444,7 +1467,10 @@ fn shell_write_failed_status_is_result_not_operation_error_and_legacy_value_surv
     let typed: Response<ShellWriteResult> = serde_json::from_value(encoded.clone()).unwrap();
     typed.validate().unwrap();
     assert_eq!(serde_json::to_value(typed).unwrap(), encoded);
-    let error: Response<Value> = Response::failure("op", ApiError::new(ErrorCode::TargetUnavailable, "synthetic missing execution"));
+    let error: Response<Value> = Response::failure(
+        "op",
+        ApiError::new(ErrorCode::TargetUnavailable, "synthetic missing execution"),
+    );
     error.validate().unwrap();
     let encoded_error = serde_json::to_value(error).unwrap();
     assert!(serde_json::from_value::<ShellWriteResult>(encoded_error.clone()).is_err());
@@ -1454,5 +1480,8 @@ fn shell_write_failed_status_is_result_not_operation_error_and_legacy_value_surv
 #[test]
 fn shell_write_status_exported_enum_is_exact() {
     let schema: Value = serde_json::from_str(&schema_json()).unwrap();
-    assert_eq!(schema["definitions"]["ShellWriteStatus"]["enum"], json!(["complete","timeout","closed","stopped","failed"]));
+    assert_eq!(
+        schema["definitions"]["ShellWriteStatus"]["enum"],
+        json!(["complete", "timeout", "closed", "stopped", "failed"])
+    );
 }
