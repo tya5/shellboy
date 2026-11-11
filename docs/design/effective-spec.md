@@ -582,3 +582,27 @@ claiming this operation used the shared writer were incorrect and are superseded
 by this source correction. Claude1528 permits existing-route reuse; no new
 reader/executor/deadline or migration is introduced. Publication/owner-read gates
 remain separate; agent shells never install/signal/restart/rollback owner4140.
+
+
+### #298 Bounded Structural Tool Descriptors
+
+The approved initial increment extends existing ToolCall/ToolResult, without a
+reader or schema migration. Canonical node/leaf identity and verified execution
+links are unchanged. The sole qualification/availability/budget table is in
+`docs/development/issue-298-structural-tools-plan.md`, Fixed Proposed Wire And
+Budget Table (adopted). Current saved typed call name/call_id, and result call_id,
+are explicitly public structural authority. No result name is inferred. Arguments,
+output, extras and provider_opaque never qualify names, IDs or descriptions.
+
+Descriptor per-field closed availability is available/missing/invalid/field_budget/
+not_applicable; invalid and overbudget strings are omitted atomically, never
+truncated. Exact names use <=256 ASCII nonwhitespace/control bytes; call IDs use
+<=256 UTF-8 nonempty bytes. This syntax validator is not a secret detector.
+Descriptor availability differs from detail_availability: execution_linked means
+only actual existing verified IDs route to the execution resource, not that output
+is retained; zero-exec items report unavailable and remain visible.
+
+Both available descriptor strings are counted in the existing shared 4 MiB
+text/reasoning response ledger. Existing 1 MiB source and atomic node/deferred
+suffix policy remain. #274 spill links/pages/truncation stay unchanged; there is no
+call-ID global join, adjacency/prose association, generic reader or body recovery.

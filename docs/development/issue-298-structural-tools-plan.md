@@ -71,7 +71,7 @@ No Rust/heavy job, implementation test or runtime success is claimed here.
 
 ## Fixed Proposed Wire And Budget Table (S6 60c68ede)
 
-Pending the leader's explicit public-authority adoption; no payload code yet.
+Adopted by leader after S6 60c68ede conditions; no payload code at this checkpoint.
 These fields extend existing ToolCall / ToolResult only. Canonical identities and
 verified execution_ids retain their existing qualifications. No result name join.
 
@@ -118,4 +118,4 @@ extend exhaustive response accounting and generated schema/golden. Actual-produc
 nine-row tests cover explicit field states, source/response budgets, Unicode IDs,
 field-overbudget atomic omission, duplicates/foreign scope and secret exclusions.
 S6 conditional design acceptance is not leader payload-authority approval and
-not runtime adoption. Public extension remains blocked on that explicit decision.
+not runtime adoption. Leader explicitly adopted the saved typed name/call-ID authority; implementation may proceed under this table.
