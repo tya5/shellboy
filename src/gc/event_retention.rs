@@ -460,6 +460,47 @@ mod tests {
 mod notification_marker_tests {
     use super::*;
     #[test]
+    fn real_schema_retention_collects_unmarked_but_preserves_canonical_reference() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../storage/current.sql"))
+            .unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at) VALUES('kept','shell_ended','{}','t','r','{}','now'),('removed','shell_ended','{}','t','r','{}','now'); INSERT INTO node(id,turn_id,kind,created_at,payload_json,notification_event_id) VALUES('n','u','event','now','{}','kept'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('kept','r','pending'),('removed','r','pending');").unwrap();
+        let mut cursor = RunCursor::Deliveries;
+        for _ in 0..4 {
+            cursor = collect_run(&mut db, "r", cursor).unwrap();
+            if matches!(cursor, RunCursor::Done) {
+                break;
+            }
+        }
+        assert!(matches!(cursor, RunCursor::Done));
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM delivery", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let remaining: String = db
+            .query_row("SELECT id FROM event", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, "kept");
+        assert_eq!(
+            db.query_row(
+                "SELECT notification_event_id FROM node WHERE id='n'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "kept"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
+        );
+    }
+    #[test]
     fn canonical_marker_protects_event_without_root_payload_or_delivery() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE event(id TEXT PRIMARY KEY,kind TEXT,target_run_id TEXT); CREATE TABLE run(id TEXT PRIMARY KEY,state TEXT); CREATE TABLE delivery(event_id TEXT,state TEXT); CREATE INDEX delivery_event_state ON delivery(event_id,state); CREATE TABLE node(kind TEXT,payload_json TEXT,notification_event_id TEXT); CREATE INDEX node_event_retention ON node(CAST(json_extract(payload_json,'$.event_id') AS TEXT)) WHERE kind='event' AND json_valid(payload_json); CREATE INDEX node_notification_event ON node(notification_event_id) WHERE notification_event_id IS NOT NULL; INSERT INTO run VALUES('r','completed'); INSERT INTO event VALUES('e','shell_ended','r');").unwrap();
