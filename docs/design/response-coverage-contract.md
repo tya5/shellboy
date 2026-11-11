@@ -327,3 +327,35 @@ the semantic distinction is mandatory. No new expiry timer or lifetime is adopte
 reuse existing owner eviction and current-view state. If that state itself is
 no longer owned, no orphaned disposition/cache is retained. This does not claim
 the current live-off disappearance defect is fixed without D's implementation.
+
+### Supported Lossless Producer Evidence (Narrow Initial V1)
+
+For initial positive issuance, the producer must track ONE explicit normalized
+ordinary source message/content-part identity and bind it to ONE exact saved
+assistant message / ordinary output_text member. Each admitted fragment must be
+attributed to that same identity in contiguous order. A missing source-item
+identity, second ordinary part, rewritten/replaced terminal part, appended saved
+ordinary text, refusal, truncation, tool/opaque substitution or unsupported mapping
+sets an irreversible Unknown flag. Existing adapter normalization must demonstrate
+this identity attribution; if it drops it, that adapter gets no positive until the
+producer boundary preserves it. Merely receiving Responses-shaped deltas is not
+that demonstration. This supports a narrow common contract, not all output shapes.
+
+FrozenAdmission includes closed source-part identity, admitted count, checked
+counters and producer observed no-transform/no-replacement flags in addition to
+the separate equality digest. Saved response must have exactly the supported
+single ordinary member attributed to that same part and no disallowed replacement.
+The digest check is only the byte-integrity check AFTER this provenance and
+lossless-shape proof, never its substitute. model/reconcile.rs mismatch is currently
+DIAGNOSTIC ONLY, so absence of a diagnostic is not adopted as this witness. New
+private constructor must explicitly collect/check the required producer facts.
+Unknown if these facts are not available from a particular adapter.
+
+Actual existing Core caps: change_clock.rs MAX_LIVE_TEXT_ATTEMPTS=16 and
+MAX_ATTEMPT_TEXT_BYTES=64*1024, including per-delta record size. V1 identities,
+fragment metadata, private equality state and terminal seal are charged within
+these same per-owner budgets, never added on top. Existing registry admission
+refuses more retained attempts; teardown/clear removes its seal too. Preserving
+more fragments may therefore reach the SAME cap sooner and turn coverage Unknown.
+No new independent map, larger cap or terminal TTL is selected. Delivery batch64
+is independent. Studio's existing preview bound is not increased either.
