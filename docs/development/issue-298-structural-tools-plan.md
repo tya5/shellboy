@@ -131,11 +131,11 @@ has no new readable-text authority. #274 association loader/paging is unchanged.
 | --- | --- |
 | generic_call_zero_exec | history_window_items::generic_call_zero_exec |
 | generic_result_zero_exec | history_window_items::generic_result_zero_exec |
-| shell_backed_preserves_links | history_window_items::execution_association_is_explicit_not_adjacent_and_ids_survive_encoding (new descriptor/detail assertions) |
+| shell_backed_preserves_links | history_window_items::actual_projection_bounds_execution_links_and_preserves_source_identity (new descriptor/detail assertions) |
 | invalid_descriptor_unavailable | history_window_items::invalid_descriptor_unavailable |
 | compacted_call_descriptor | history_window_items::compacted_call_descriptor plus compaction::tests::spill_placeholder_avoids_repeated_arguments_and_reduces_synthetic_growth (actual spill_payload) |
 | pruned_budget_no_hydration | history_window_items::actual_pruned_over_budget_and_oversized_leaf_producers (descriptor-absent assertions) |
-| paged_spill_coverage_not_authority | history_relations::summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_after_tombstone plus unchanged bounded_spill_association_metadata_uses_only_explicit_links |
+| paged_spill_coverage_not_authority | history_relations::summary_and_spill_source_pages_preserve_ordinals_and_recorded_witness_after_tombstone plus unchanged history::spill_tools::tests::spill_tool_sources_bound_output_and_keep_missing_execution_unknown |
 | conflicting_calls_not_merged | history_window_items::conflicting_calls_not_merged |
 | descriptor_secret_exclusion | history_window_items::descriptor_secret_exclusion_and_exact_unicode_id_budget |
 
@@ -150,3 +150,11 @@ spill legacy-only gap. Original /tmp/core298-first-*.log retained. Corrected sou
 PASS (b7461c3e). Its compaction filter matched ZERO tests, so no compaction runtime
 claim is made from that invocation; exact named producer test is run separately.
 No suite-wide, paid-provider, private DB, installed or Studio claim is implied.
+
+
+Exact producer follow-up: actual compaction named control passed 1 test in
+/tmp/core298-exact-compaction.log. The additional spill filter matched zero in
+both integration and lib because the proposed test name did not exist; neither
+zero-test run is counted. The actual existing spill_tools bounded-source control
+is identified directly from source and run by its exact name. No test assertion,
+production boundary or source qualification was weakened to obtain this result.
