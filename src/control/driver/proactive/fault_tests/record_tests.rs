@@ -503,6 +503,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     let automatic = Automatic {
         attempt: attempt.clone(),
         token: "site-token".into(),
+        target_percent: 20,
         thread: thread_id.clone(),
         turn,
         target_tokens: None,
