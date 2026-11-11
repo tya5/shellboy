@@ -443,3 +443,15 @@ Both implementations must match bytes and digests, reject split-surrogate input,
 and distinguish same-text/different-boundary vectors. Reasoning is not included;
 ordinary coverage cannot suppress the separate reasoning domain. Tests also need
 counter overflow/invalid decimals/duplicate/gap/post-seal behavior from the table.
+
+## Leader Full Source Scope Adopted
+
+Leader dispatch65919722 explicitly adopts Core live/lookup placements, private
+producer/reconcile/save signatures, existing Rust sha2 and exact TS2.4, and gated
+V1 FINAL/CAS replacement semantics. O is Core sole writer; D is TS sole writer.
+Storage is one nullable bounded positive-only attempt witness; migration number
+is NOT assigned until302 schema42 lands and leader confirms fresh max+1. No42
+rewrite, provisional43 or storage migration application now. Legacy behavior stays
+isolated from unqualified V1; no reasoning-domain suppression or retention growth.
+Independent source/focused/exact-SHA CI/main gates and no installed operations
+remain. This authorizes source implementation, not claims of runtime qualification.
