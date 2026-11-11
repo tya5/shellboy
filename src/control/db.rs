@@ -6989,11 +6989,17 @@ mod retry_tracking_diagnosis_287 {
     }
 }
 
-fn budget_history(
+fn budget_history<T: serde::Serialize>(
     operation: &str,
-    result: Value,
+    result: T,
     slots: crate::history::message_budget::Slots,
 ) -> Result<MutationResult> {
+    let result = serde_json::to_value(result).map_err(|_| {
+        error(
+            ErrorCode::InvalidState,
+            "History result serialization failed",
+        )
+    })?;
     let mut response = crate::protocol::Response::success(operation, result);
     crate::history::message_budget::fit(&mut response, slots)
         .map_err(|_| error(ErrorCode::InvalidState, "History provenance budget failed"))?;
