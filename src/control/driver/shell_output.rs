@@ -218,7 +218,11 @@ async fn save_completion(
         let nodes:Vec<String>=tx.prepare("SELECT r.node_id FROM tool_result r JOIN tool_call c ON c.group_id=r.group_id AND c.call_id=r.call_id WHERE c.operation_id=?1")?.query_map([&execution],|r|r.get(0))?.collect::<Result<_,_>>()?;
         index.authorize_new_tx(&tx,&nodes).map_err(crate::storage::StorageError::from)?;
         let event=format!("shell-ended-{execution}");
+        use super::super::notification::{Fact,Terminal};
+        let terminal=match completed.state { ShellState::Exited=>Terminal::Exited,ShellState::Failed=>Terminal::Failed,ShellState::Stopped=>Terminal::Stopped,_=>return Err(ApiError::new(ErrorCode::InvalidState,"Nonterminal shell notification").into()) };
+        let semantic=Fact::ShellEnded{execution_id:execution.clone(),state:terminal,exit_code:completed.exit_code}.encoded();
         tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,target_run_id,payload_ref_json,created_at)VALUES(?1,'shell_ended',?2,?3,?4,?5,?6)",params![event,json!({"execution_id":execution}).to_string(),current.thread,current.run,json!({"execution_id":execution,"state":completed.state,"exit_code":completed.exit_code,"forced":completed.forced,"exit_signal":completed.exit_signal,"group_cleanup_confirmed":completed.group_cleanup_confirmed,"elapsed_ms":completed.elapsed_ms,"output_complete":completed.output_complete}).to_string(),now()])?;
+        tx.execute("UPDATE event SET semantic_json=?2 WHERE id=?1",params![event,semantic])?;
         tx.execute("INSERT INTO delivery(event_id,recipient_id,state)VALUES(?1,?2,'pending')",params![event,current.run])?;
         tx.commit()?;Ok(())}).await.map_err(storage_error)?;
     control.index.wake();

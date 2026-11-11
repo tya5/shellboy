@@ -2,6 +2,34 @@
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::json;
 
+struct PendingNotification<'a> {
+    thread: &'a str,
+    run: &'a str,
+    turn: &'a str,
+    event: &'a str,
+}
+impl<'a> PendingNotification<'a> {
+    fn validate(
+        tx: &Transaction<'_>,
+        thread: &'a str,
+        run: &'a str,
+        turn: &'a str,
+        event: &'a str,
+    ) -> Result<Self, crate::storage::StorageError> {
+        let valid:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM event e JOIN delivery d ON d.event_id=e.id JOIN turn u ON u.id=?4 WHERE e.id=?1 AND e.target_thread_id=?2 AND u.thread_id=?2 AND u.run_id=?3 AND d.recipient_id=?3 AND d.state='pending' AND (e.target_run_id IS NULL OR e.target_run_id=?3))",params![event,thread,run,turn],|r|r.get(0))?;
+        if !valid {
+            return Err(crate::storage::StorageError::Schema(
+                "notification admission context mismatch".into(),
+            ));
+        }
+        Ok(Self {
+            thread,
+            run,
+            turn,
+            event,
+        })
+    }
+}
 pub(super) fn admit_notification_tx(
     tx: &Transaction<'_>,
     thread: &str,
@@ -11,6 +39,8 @@ pub(super) fn admit_notification_tx(
     payload: &str,
     at: &str,
 ) -> Result<(), crate::storage::StorageError> {
+    let pending = PendingNotification::validate(tx, thread, run, turn, event)?;
+    let (thread, run, turn, event) = (pending.thread, pending.run, pending.turn, pending.event);
     let node = format!("event-{event}");
     let existing: Option<Option<String>> = tx
         .query_row(
@@ -26,16 +56,15 @@ pub(super) fn admit_notification_tx(
                 "notification admission conflict".into(),
             ));
         }
+        if link.is_some() {
+            let same:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn u ON u.id=n.turn_id WHERE n.id=?1 AND n.kind='event' AND u.thread_id=?2 AND u.run_id=?3 AND u.id=?4)",params![node,thread,run,turn],|r|r.get(0))?;
+            if !same {
+                return Err(crate::storage::StorageError::Schema(
+                    "notification creator reuse conflict".into(),
+                ));
+            }
+        }
         return Ok(());
-    }
-    let valid: bool = tx.query_row(
-        "SELECT EXISTS(SELECT 1 FROM event e JOIN delivery d ON d.event_id=e.id JOIN turn u ON u.id=?4 WHERE e.id=?1 AND e.target_thread_id=?2 AND u.thread_id=?2 AND u.run_id=?3 AND d.recipient_id=?3 AND d.state='pending' AND (e.target_run_id IS NULL OR e.target_run_id=?3))",
-        params![event,thread,run,turn],|r|r.get(0)
-    )?;
-    if !valid {
-        return Err(crate::storage::StorageError::Schema(
-            "notification admission context mismatch".into(),
-        ));
     }
     crate::history::append_node(
         tx,

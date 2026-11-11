@@ -1847,7 +1847,21 @@ impl Store {
             || current.model != after.model
             || current.effort != after.effort
         {
-            super::context::record(tx,&id,"thread_settings",actor(caller),json!({"before":{"cwd":current.cwd,"connection":current.connection,"model":current.model,"effort":current.effort},"after":{"cwd":after.cwd,"connection":after.connection,"model":after.model,"effort":after.effort}}),now).map_err(sql_error)?;
+            use super::notification::{Fact, Setting};
+            let mut changed_fields = Vec::with_capacity(4);
+            if current.cwd != after.cwd {
+                changed_fields.push(Setting::Cwd);
+            }
+            if current.connection != after.connection {
+                changed_fields.push(Setting::Connection);
+            }
+            if current.model != after.model {
+                changed_fields.push(Setting::Model);
+            }
+            if current.effort != after.effort {
+                changed_fields.push(Setting::Effort);
+            }
+            super::context::record_fact(tx,&id,"thread_settings",actor(caller),json!({"before":{"cwd":current.cwd,"connection":current.connection,"model":current.model,"effort":current.effort},"after":{"cwd":after.cwd,"connection":after.connection,"model":after.model,"effort":after.effort}}),now,Fact::ThreadSettingsChanged{changed_fields}).map_err(sql_error)?;
         }
         let mut result = MutationResult::value(after)?;
         result.changed_threads.push(id.clone());
