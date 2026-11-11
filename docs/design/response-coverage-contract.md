@@ -191,3 +191,58 @@ old consumers/old NULL witness, and all-FINAL visibility separate from coverage.
 Adapter controls above reuse existing output_limit_tests and reconciliation cases
 where applicable; no provider-paid calls or invented uniform finish semantics.
 This matrix is SOURCE design evidence, not adapter/runtime qualification.
+
+## V1 Review Resolution: Normative Overrides
+
+This section supersedes conflicting candidate wording above; no sixth record.
+
+1. V1 is explicitly `ordinary_text_v1`: its transcript contains ONLY ordinary
+   normalized display-text segments, never reasoning/tool/opaque/refusal bytes.
+   Header domain is ASCII `shellboy-preview-ordinary-v1`, byte00 and incarnation
+   bytes. All V1 stream_kind fields must equal text/byte00; other kinds are
+   Unknown, not silently omitted from a transcript claiming to contain them.
+   Segment scalar offsets are contiguous offsets WITHIN THIS PROJECTION, not
+   the existing mixed reasoning+text offsets. Both may coexist in future stream
+   envelopes, but mixed offsets cannot substitute for projection offsets. Core
+   constructs the projection before public admission, consistently for all three
+   adapters. No #299 reasoning authority is expanded. Producer coverage must
+   independently attest every admitted ordinary segment; non-projected content
+   cannot produce an unqualified all-content coverage claim.
+2. Every new fragment starts at sequence0/scalaroffset0 for a new incarnation.
+   Consumer validates canonical unsigned decimal u64 sequence AND projection
+   scalar offset, checks expected sequence and scalar-end equality, counts actual
+   Unicode scalars and UTF-8 bytes from exact payload, and performs checked u64
+   additions for sequence/scalars/bytes. Kind is the closed text discriminator,
+   not a free numeric counter. Overflow, invalid scalar encoding or inconsistent
+   offset makes Unknown permanently for that owner. Existing mixed offset is
+   retained only as legacy metadata, not authority for these counters.
+3. BEFORE seal, only an exact immediate previous fragment retransmission is
+   ignored without rehash. AFTER accepting a seal, ANY fragment (including an
+   exact immediate previous retransmission) makes Unknown; there is no exception.
+   An identical duplicate seal is idempotent. A different second seal, or seal
+   with invalid counters/identity/version, makes Unknown. An identical seal never
+   restores Unknown. Producer must stop old-incarnation fragments after seal.
+4. ConsumerVerifierV1 and AttemptCoverageV1 consumer requirements additionally
+   mandate exhaustive existing Q1 enumeration for the EXACT attempt and fresh
+   current path: every ordinal/node/item identity must match, including multiple
+   item ordinals sharing a node. truncated, missing ordinal/member, stale path,
+   unsupported item or non-FINAL body makes replacement unavailable. Count is
+   a consistency check only, not identity/coverage. No new member list is saved;
+   reuse existing bounded attempt/output_item linkage and all-FINAL/CAS guards.
+
+No-adoption states (rollback, stale turn, cancelled/failed attempt or declined
+Applied transition) leave witness NULL; no negative witness is separately saved
+outside adoption. A successful adoption may save Unknown/Unrepresented when
+reconciliation cannot attest coverage; the same NULL-to-once rule applies. NULL
+never means covered empty. Covered-positive, including empty, can only be saved
+with the successful output/cohort adoption transaction and exact frozen seal.
+Negative/Unknown witnesses are not later upgraded or rewritten; a retry uses a
+new attempt/incarnation. This distinction does not claim every historical NULL
+can be classified retrospectively.
+
+Finite tests must cover projection-vs-mixed-offset divergence with reasoning,
+scalar/byte differences for astral text, each checked overflow, wrong first offset,
+pre-seal exact duplicate, post-seal same duplicate -> Unknown, duplicate/conflicting
+seal, unknown irreversibility, and exact ordinal identities with same-node members.
+These are design obligations, not executed results. Wire placement, dependencies,
+new schema number/constructor and live-off behavior still need explicit adoption.
