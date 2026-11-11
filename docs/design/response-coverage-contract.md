@@ -272,3 +272,58 @@ facts as already bounded; proof never bypasses Studio FINAL ownership/path/CAS.
 Ordinary replacement does not retire reasoning-domain content. Legacy/Unknown
 policy is not declared fixed by a Core witness; D current-visible representation
 work remains independently required. No all-USER incident fix claim is made.
+
+## Constructor And Retention Clarification
+
+The earlier reconcile_ordinary(seal,response) signature is INSUFFICIENT and is
+superseded. Producer::freeze(self) returns private FrozenAdmission containing
+FrozenSeal AND bounded OrdinaryEqualityEvidence: separate incremental SHA-256
+of exact admitted ordinary UTF-8 concatenation, checked scalar/byte totals, and
+an irreversible supported/lossless flag. No second body or segment list is saved.
+Only the producer can construct this evidence. reconcile_ordinary takes this
+FrozenAdmission plus borrowed adopted ModelResponse, not a bare seal.
+
+V1 positive algorithm is deliberately narrower than arbitrary semantic exclusion:
+iterate the saved output's supported ordinary answer-text members in authoritative
+ordinal/content order; reject tool-only, refusal, partial, opaque, unsupported
+member or any ambiguous ordering/mapping. Incrementally hash the same exact UTF-8
+concatenation with a separate equality-domain header, compare digest AND scalar/
+byte totals to the producer evidence. No trim/NFC/CRLF rewrite. Supported mapping
+must make these bytes exactly the displayed ordinary-text projection; unsupported
+cross-member presentation separators make Unknown. This is lossless ordinary
+projection equality, not inferring meaning from the transcript-identity digest.
+A positive also requires the exact segment-identity seal and successful adoption.
+The equality evidence never travels to consumers as private provider content.
+
+Initial V1 allows covered_empty only with zero admitted ordinary scalars/bytes and
+zero supported saved answer members, plus explicit_no_answer terminal display.
+Nonempty-to-empty deliberate exclusion is NOT implementable by this equality
+algorithm and remains Unknown/NULL; future exclusion proofs require separate
+scope adoption. It must not mint coverage from a seal alone or invent an exclusion.
+Finite controls include same-size different bytes/order, normalization differences,
+unsupported member boundaries, zero versus nonzero ordinary projection and stale
+transaction. Hash collision resistance is a stated crypto assumption, not a claim
+of mathematical byte equality or arbitrary semantic reconciliation.
+
+V1 segment preservation must fit the CURRENT live registry entry-count, delta-
+count and UTF-8 retention budgets; it never increases those limits. Any inability
+to preserve original boundaries under those caps marks coverage Unknown before
+coalescing/dropping; existing legacy projection may continue independently.
+Terminal seal belongs to the existing attempt/live owner only: at most one seal
+per retained live attempt, charged to that owner's existing byte/count budget,
+dropped on the existing attempt replacement/eviction/disconnect/shutdown path.
+No separately retained terminal history map is authorized. If current lifecycle
+removes the owner before wait delivery, the seal is unavailable/Unknown; batch64
+is a delivery batch limit, NOT a storage-retention cap or permission to retain.
+A future implementation must bind these rules to actual existing constants, not
+invent longer retention to make coverage succeed.
+
+UnknownHeld and LegacyHeld expire at their EXISTING owner lifetime/retention
+limit, never pin or indefinitely retain a preview. At that point body storage is
+released and the view transitions to a bounded explicit terminal disposition:
+`preview unavailable; saved-answer coverage not established`, not an empty answer
+or a false `saved` claim. The exact UI wording/presentation remains D-owned, but
+the semantic distinction is mandatory. No new expiry timer or lifetime is adopted;
+reuse existing owner eviction and current-view state. If that state itself is
+no longer owned, no orphaned disposition/cache is retained. This does not claim
+the current live-off disappearance defect is fixed without D's implementation.
