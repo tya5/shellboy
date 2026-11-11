@@ -359,3 +359,29 @@ refuses more retained attempts; teardown/clear removes its seal too. Preserving
 more fragments may therefore reach the SAME cap sooner and turn coverage Unknown.
 No new independent map, larger cap or terminal TTL is selected. Delivery batch64
 is independent. Studio's existing preview bound is not increased either.
+
+### D Final Five-Scope Source Receipt
+
+D confirms no existing TS incremental SHA dependency. @noble/hashes1.8.0 is only a
+candidate whose npm existence was checked; D has NOT audited that release or
+qualified exports, browser sync API, vectors or bounded memory. No install.
+WebCrypto whole-input async digest does not directly meet synchronous incremental
+fixed-state requirements. Required validation: selected package incremental API,
+canonical Rust/TS vectors, synchronous browser operation and bounded UTF-8 chunks
+without full-input concatenation. Crypto remains unqualified, not called audited.
+
+D sole TS seams: web/data/src/live.ts LiveFrame/LiveText.apply/finish/reset/Preview;
+protocol.ts PushFrame/parsePush live/live_end; store.ts onLive/finishLive handoff
+binding; ui-core/FINAL/model/Conversation. Coordinate data/handoff files with S
+before writes; D retains sole Conversation/model ownership.
+
+Concrete state names align D's existing owner:
+receiving -> boundedHeldUnverified (legacy/Unknown/missing/late/mismatch reason)
+-> positiveVerifiedAwaitingFinal -> canonicalOwned only at atomic complete fresh
+all-cohort FINAL mount with original/scope/generation/ref CAS. Revoke/revision/
+unmount invalidate closure and rederive only under current bounded original
+qualification. No permanent suppressed set or retention. On existing retention
+exhaustion release preview bytes and expose explicit unavailable terminal state
+only while the view is still owned; no unconditional zero-disappearance guarantee.
+Receipt/read bounds do not grow. Empty explanation and reasoning-domain exclusions
+remain as the normative rules above. New live-off behavior is proposed, not code.
