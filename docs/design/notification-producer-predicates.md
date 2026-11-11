@@ -79,3 +79,32 @@ Preserve exact creator context on retries/multiple runs. Retention/FK policy is 
 required design choice, not authority for GC edits. No new number/index/table or
 five-wire additions are selected here. SQL plan work, if needed, must be disposable;
 no user database or service is accessed. This checkpoint executes no qualification.
+
+## Leader Adoption: Implementation Authorized
+
+Leader explicitly adopts Core302 storage/wire scope after S6 fc6c3cd0. Final
+architect contract: Studio commit d3e4fd71327e13403712e2943f2131d6742c5c46,
+file SHA256 b68642d764e1f2a4675cba4dbd4d1d16aaab06b364a7f62d0613eba2ae4b63c2.
+The candidate language above is historical SOURCE investigation, superseded for
+implementation by this adoption and the final architect contract.
+
+Migration0042 adds nullable node.notification_event_id referencing event with
+NO ACTION, event.semantic_json and an indexed node-marker reference. Migrations40
+and41 stay byte-immutable; conflicting42 requires reporting, never renumbering.
+Existing node.turn_id is creator witness. Only private canonical admission writes
+a marker on NEW node insertion in its transaction; old existing nodes get no link.
+Typed producer snapshot is saved with event creation in a separate transaction.
+Historical reads validate marker/snapshot/creator, NOT live delivery, processed
+attempt or mutable event target_run. Old read-matrix conditions are SUPERSEDED.
+GC source may add only indexed marked-node event protection alongside existing
+root protection; no broader deletion, CASCADE, SET NULL or actual cleanup authority.
+
+Adopted public scope: five closed facts, optional existing-history descriptor,
+2048-byte pre-materialization bound, ID256, whole descriptor accounting before
+receipt encoding and final8MiB response; typed body4MiB remains separate. No raw
+body, arguments or changed setting values published. Required finite controls:
+old NULL/unknown, delivery deletion, fork/retry marker immutability, GC protection,
+fresh/upgrade SQL convergence, secret sentinels and encoded boundary +/-1.
+O is sole implementation author. One heavy queue; no installed migration42,
+owner/service/private DB/RPC/browser/paid-provider operation permission. Source,
+focused, exact-SHA CI and fresh nonforce main qualification remain separate gates.
