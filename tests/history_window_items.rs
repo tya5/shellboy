@@ -271,6 +271,8 @@ fn actual_projection_bounds_execution_links_and_preserves_source_identity() {
         encoded[1]["item_identity"], encoded[2]["item_identity"],
         "equal text at different coordinates is not one item"
     );
+    assert_eq!(encoded[0]["detail_availability"], "execution_linked");
+    assert_eq!(encoded[0]["descriptor"]["call_id"], "a");
     assert!(!serde_json::to_string(&result).unwrap().contains("SECRET_"));
     assert_eq!(
         result,
@@ -457,11 +459,19 @@ fn readable_reasoning_response_budget_counts_text_and_keeps_atomic_suffix() {
 #[test]
 fn generic_call_zero_exec() {
     let mut db = db();
-    append(&mut db, "generic", "assistant_response", json!({"output":[{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"SECRET_ARGS","extra":"SECRET_EXTRA"}]}));
+    append(
+        &mut db,
+        "generic",
+        "assistant_response",
+        json!({"output":[{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"SECRET_ARGS","extra":"SECRET_EXTRA"}]}),
+    );
     let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
     let item = &result["items"][0]["items"][0];
     assert_eq!(item["execution_ids"], json!([]));
-    assert_eq!(item["descriptor"], json!({"name":"lookup","name_state":"available","call_id":"call-1","call_id_state":"available"}));
+    assert_eq!(
+        item["descriptor"],
+        json!({"name":"lookup","name_state":"available","call_id":"call-1","call_id_state":"available"})
+    );
     assert_eq!(item["detail_availability"], "unavailable");
     assert!(!item.to_string().contains("SECRET"));
 }
@@ -469,10 +479,18 @@ fn generic_call_zero_exec() {
 #[test]
 fn generic_result_zero_exec() {
     let mut db = db();
-    append(&mut db, "generic-result", "tool_result", json!({"item":{"type":"function_call_output","call_id":"call-1","name":"SECRET_RESULT_NAME","output":"SECRET_RESULT"}}));
+    append(
+        &mut db,
+        "generic-result",
+        "tool_result",
+        json!({"item":{"type":"function_call_output","call_id":"call-1","name":"SECRET_RESULT_NAME","output":"SECRET_RESULT"}}),
+    );
     let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
     let item = &result["items"][0]["items"][0];
-    assert_eq!(item["descriptor"], json!({"name_state":"not_applicable","call_id":"call-1","call_id_state":"available"}));
+    assert_eq!(
+        item["descriptor"],
+        json!({"name_state":"not_applicable","call_id":"call-1","call_id_state":"available"})
+    );
     assert_eq!(item["detail_availability"], "unavailable");
     assert!(!item.to_string().contains("SECRET"));
 }
@@ -480,9 +498,19 @@ fn generic_result_zero_exec() {
 #[test]
 fn invalid_descriptor_unavailable() {
     let mut db = db();
-    let fields = [(json!(null), "missing"), (json!(42), "invalid"), (json!(""), "invalid"), (json!("x".repeat(257)), "field_budget")];
+    let fields = [
+        (json!(null), "missing"),
+        (json!(42), "invalid"),
+        (json!(""), "invalid"),
+        (json!("x".repeat(257)), "field_budget"),
+    ];
     for (i, (value, _)) in fields.iter().enumerate() {
-        append(&mut db, &format!("invalid{i}"), "assistant_response", json!({"output":[{"type":"function_call","name":value,"call_id":value}]}));
+        append(
+            &mut db,
+            &format!("invalid{i}"),
+            "assistant_response",
+            json!({"output":[{"type":"function_call","name":value,"call_id":value}]}),
+        );
     }
     let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
     for (i, (_, expected)) in fields.iter().enumerate() {
@@ -497,7 +525,12 @@ fn invalid_descriptor_unavailable() {
 #[test]
 fn compacted_call_descriptor() {
     let mut db = db();
-    append(&mut db, "spill-generic", "spill", json!({"output":[{"type":"function_call","name":"lookup","call_id":"call","arguments":"SECRET_ARGS"},{"type":"function_call_output","call_id":"call","output":"SECRET_OMITTED_METADATA"}]}));
+    append(
+        &mut db,
+        "spill-generic",
+        "spill",
+        json!({"output":[{"type":"function_call","name":"lookup","call_id":"call","arguments":"SECRET_ARGS"},{"type":"function_call_output","call_id":"call","output":"SECRET_OMITTED_METADATA"}]}),
+    );
     let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
     let items = &result["items"][0]["items"];
     assert_eq!(items[0]["descriptor"]["name"], "lookup");
@@ -509,26 +542,44 @@ fn compacted_call_descriptor() {
 fn conflicting_calls_not_merged() {
     let mut db = db();
     for (node, name) in [("first-call", "one"), ("second-call", "two")] {
-        append(&mut db, node, "assistant_response", json!({"output":[{"type":"function_call","name":name,"call_id":"duplicate"}]}));
+        append(
+            &mut db,
+            node,
+            "assistant_response",
+            json!({"output":[{"type":"function_call","name":name,"call_id":"duplicate"}]}),
+        );
     }
-    append(&mut db, "orphan-result", "tool_result", json!({"item":{"type":"function_call_output","call_id":"duplicate","output":"SECRET"}}));
+    append(
+        &mut db,
+        "orphan-result",
+        "tool_result",
+        json!({"item":{"type":"function_call_output","call_id":"duplicate","output":"SECRET"}}),
+    );
     let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
     let first = &result["items"][0]["items"][0];
     let second = &result["items"][1]["items"][0];
     assert_ne!(first["item_identity"], second["item_identity"]);
     assert_eq!(first["descriptor"]["name"], "one");
     assert_eq!(second["descriptor"]["name"], "two");
-    assert_eq!(result["items"][2]["items"][0]["descriptor"]["name_state"], "not_applicable");
+    assert_eq!(
+        result["items"][2]["items"][0]["descriptor"]["name_state"],
+        "not_applicable"
+    );
 }
 
 #[test]
 fn descriptor_secret_exclusion_and_exact_unicode_id_budget() {
     let mut db = db();
-    append(&mut db, "safe-fields", "assistant_response", json!({"output":[
-        {"type":"function_call","name":"lookup","call_id":"界".repeat(85),"arguments":"SECRET_ARGS","extra":{"name":"SECRET_EXTRA"}},
-        {"type":"function_call","name":"bad name","call_id":"界".repeat(86)},
-        {"type":"provider_opaque","name":"SECRET_OPAQUE","call_id":"SECRET_OPAQUE_ID"}
-    ]}));
+    append(
+        &mut db,
+        "safe-fields",
+        "assistant_response",
+        json!({"output":[
+            {"type":"function_call","name":"lookup","call_id":"界".repeat(85),"arguments":"SECRET_ARGS","extra":{"name":"SECRET_EXTRA"}},
+            {"type":"function_call","name":"bad name","call_id":"界".repeat(86)},
+            {"type":"provider_opaque","name":"SECRET_OPAQUE","call_id":"SECRET_OPAQUE_ID"}
+        ]}),
+    );
     let result = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
     let items = &result["items"][0]["items"];
     assert_eq!(items[0]["descriptor"]["call_id"], "界".repeat(85));
@@ -536,4 +587,32 @@ fn descriptor_secret_exclusion_and_exact_unicode_id_budget() {
     assert_eq!(items[1]["descriptor"]["name_state"], "invalid");
     assert!(!items.to_string().contains("SECRET"));
     let _: Vec<HistoryItem> = serde_json::from_value(items.clone()).unwrap();
+}
+
+#[test]
+fn descriptor_bytes_share_response_budget_atomic_node_suffix() {
+    let mut db = db();
+    let text = "x".repeat(ITEM_TEXT_BYTES);
+    for n in 0..129 {
+        append(
+            &mut db,
+            &format!("budget{n}"),
+            "assistant_response",
+            json!({"output":[
+                {"type":"function_call","name":"n".repeat(256),"call_id":"c".repeat(256)},
+                {"type":"message","content":[{"type":"output_text","text":text},{"type":"output_text","text":text}]}
+            ]}),
+        );
+    }
+    let encoded = serde_json::to_value(window(&db, &args()).unwrap()).unwrap();
+    let nodes = encoded["items"].as_array().unwrap();
+    // 126 * (32768 + 512) fits; 127 does not. Descriptor bytes are not free.
+    assert_eq!(
+        nodes[125]["items"][0]["descriptor"]["name_state"],
+        "available"
+    );
+    for node in &nodes[126..] {
+        assert!(node["items"].is_null());
+        assert_eq!(node["items_unavailable_reason"], "response_budget");
+    }
 }

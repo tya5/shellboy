@@ -2181,6 +2181,13 @@ mod tests {
             let payload = spill_payload(&group).unwrap();
             let output = payload["output"].as_array().unwrap();
             assert_eq!(output[0]["arguments"], arguments);
+            let projected = crate::history::items::project("spill", "spill", &payload, &[]);
+            let typed = serde_json::to_value(projected).unwrap();
+            assert_eq!(typed[0]["descriptor"]["call_id"], format!("c-{i}"));
+            assert_eq!(typed[0]["descriptor"]["name_state"], "missing");
+            assert_eq!(typed[1]["descriptor"]["name_state"], "not_applicable");
+            assert!(!typed.to_string().contains("stdout"));
+            assert!(!typed.to_string().contains("arguments"));
             let mut placeholder: Value =
                 serde_json::from_str(output[1]["output"].as_str().unwrap()).unwrap();
             assert_eq!(placeholder["omitted"], true);

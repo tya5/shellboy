@@ -44,6 +44,24 @@ pub fn project(
                 reason: Reason::Legacy,
             }];
         }
+    } else if kind == "spill" {
+        // Compaction copies call/result structure; other spill contents confer no text authority.
+        if let Some(output) = payload.get("output").and_then(Value::as_array) {
+            for (index, value) in output.iter().enumerate().rev() {
+                if matches!(
+                    value.get("type").and_then(Value::as_str),
+                    Some("function_call" | "function_call_output")
+                ) {
+                    tasks.push(Task::Value(value, format!("/output/{index}")));
+                }
+            }
+        }
+        if tasks.is_empty() {
+            return vec![HistoryItem::Unavailable {
+                item_identity: identity(node, ""),
+                reason: Reason::Legacy,
+            }];
+        }
     } else if kind == "tool_result" {
         tasks.push(Task::Value(
             payload.get("item").unwrap_or(payload),
@@ -186,17 +204,38 @@ pub fn project(
 fn tool_descriptor(value: &Value, call: bool) -> crate::protocol::ToolDescriptor {
     use crate::protocol::{ToolDescriptor, ToolFieldAvailability as State};
     fn field(value: Option<&Value>, name: bool) -> (Option<String>, State) {
-        let Some(value) = value.filter(|value| !value.is_null()) else { return (None, State::Missing) };
-        let Some(text) = value.as_str() else { return (None, State::Invalid) };
-        if text.len() > 256 { return (None, State::FieldBudget); }
-        if text.is_empty() || (name && (!text.is_ascii() || text.bytes().any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control()))) {
+        let Some(value) = value.filter(|value| !value.is_null()) else {
+            return (None, State::Missing);
+        };
+        let Some(text) = value.as_str() else {
+            return (None, State::Invalid);
+        };
+        if text.len() > 256 {
+            return (None, State::FieldBudget);
+        }
+        if text.is_empty()
+            || (name
+                && (!text.is_ascii()
+                    || text
+                        .bytes()
+                        .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())))
+        {
             return (None, State::Invalid);
         }
         (Some(text.to_owned()), State::Available)
     }
     let (call_id, call_id_state) = field(value.get("call_id"), false);
-    let (name, name_state) = if call { field(value.get("name"), true) } else { (None, State::NotApplicable) };
-    ToolDescriptor { call_id, call_id_state, name, name_state }
+    let (name, name_state) = if call {
+        field(value.get("name"), true)
+    } else {
+        (None, State::NotApplicable)
+    };
+    ToolDescriptor {
+        call_id,
+        call_id_state,
+        name,
+        name_state,
+    }
 }
 
 pub fn text_bytes(items: &[HistoryItem]) -> usize {
@@ -204,11 +243,12 @@ pub fn text_bytes(items: &[HistoryItem]) -> usize {
         .iter()
         .map(|item| match item {
             HistoryItem::Text { text, .. } | HistoryItem::ReasoningText { text, .. } => text.len(),
-            HistoryItem::ToolCall { descriptor, .. } | HistoryItem::ToolResult { descriptor, .. } =>
+            HistoryItem::ToolCall { descriptor, .. }
+            | HistoryItem::ToolResult { descriptor, .. } => {
                 descriptor.call_id.as_ref().map_or(0, String::len)
-                    + descriptor.name.as_ref().map_or(0, String::len),
-            HistoryItem::ReasoningUnavailable { .. }
-            | HistoryItem::Unavailable { .. } => 0,
+                    + descriptor.name.as_ref().map_or(0, String::len)
+            }
+            HistoryItem::ReasoningUnavailable { .. } | HistoryItem::Unavailable { .. } => 0,
         })
         .sum()
 }
@@ -443,7 +483,12 @@ mod structural_tool_tests {
     use serde_json::json;
     #[test]
     fn descriptor_both_fields_share_text_byte_ledger() {
-        let items = project("node", "assistant_response", &json!({"output":[{"type":"function_call","name":"lookup","call_id":"界".repeat(85)}]}), &[]);
+        let items = project(
+            "node",
+            "assistant_response",
+            &json!({"output":[{"type":"function_call","name":"lookup","call_id":"界".repeat(85)}]}),
+            &[],
+        );
         assert_eq!(text_bytes(&items), 255 + 6);
     }
 }
