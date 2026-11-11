@@ -130,19 +130,16 @@ pub(super) fn project(
     };
     // Count two candidates before reading their JSON; corrupt/oversized rows remain ambiguous.
     let mut statement = db.prepare(REVERSE_LOOKUP)?;
-    let candidates = statement
-        .query_map([thread, node], |r| r.get::<_, String>(0))?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut rows = statement.query([thread, node])?;
+    let first = rows.next()?.is_some();
+    let ambiguous = first && rows.next()?.is_some();
+    drop(rows);
     drop(statement);
-    if candidates.len() > 1 {
+    if ambiguous {
         return Ok(None);
     }
     let Some((request, raw)) = unique_reverse(db, thread, node)? else {
-        return Ok(if candidates.is_empty() {
-            own_relation
-        } else {
-            None
-        });
+        return Ok(if !first { own_relation } else { None });
     };
     if !id(&request, node) {
         return Ok(None);
