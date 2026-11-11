@@ -51,6 +51,8 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
         );
         request.validate().unwrap();
         assert!(serde_json::to_vec(&request).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
+        let replay_request = request.clone();
+        let operation = request.operation_id.clone();
         let (response, _) = control.evaluate(request, CancellationToken::new()).await;
         assert!(response.ok, "handler error: {:?}", response.error);
         let result = response.result.as_ref().unwrap();
@@ -61,6 +63,34 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
         );
         assert_eq!(result["text"], baseline.result.as_ref().unwrap()["text"]);
         assert!(serde_json::to_vec(&response).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
+        let expected = result.clone();
+        let saved = control
+            .store
+            .database
+            .call(move |db| {
+                use rusqlite::OptionalExtension;
+                let raw: Option<String> = db
+                    .query_row(
+                        "SELECT result_ref_json FROM operation_receipt WHERE operation_id=?1",
+                        [operation],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .flatten();
+                Ok(raw)
+            })
+            .await
+            .unwrap();
+        if let Some(raw) = saved {
+            assert!(raw.len() <= 8 * 1024 * 1024);
+            let saved: Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(saved["result"], expected);
+        }
+        let (replayed, _) = control
+            .evaluate(replay_request, CancellationToken::new())
+            .await;
+        assert!(replayed.ok, "replay error: {:?}", replayed.error);
+        assert_eq!(replayed.result.as_ref(), Some(&expected));
     }
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
