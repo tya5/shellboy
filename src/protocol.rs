@@ -1,4 +1,6 @@
 //! Versioned local-operation contracts shared by CLI, Control, and TUI.
+mod coverage;
+pub use coverage::*;
 mod sender;
 pub use sender::{MessageSender, SenderKind, validate_sender_label};
 
