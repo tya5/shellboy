@@ -889,6 +889,14 @@ fn assert_interruption_audits(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log() {
+    completed_trigger_rejection("profile_changed").await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn completed_trigger_real_run_turn_rejections_are_visible_in_status_and_log() {
+    completed_trigger_rejection("run_stopped").await;
+    completed_trigger_rejection("turn_changed").await;
+}
+async fn completed_trigger_rejection(reason: &'static str) {
     crate::test_watchdog::watchdog("completed trigger discard pipeline", async {
         let root=tempfile::tempdir().unwrap();
         let (url,mut receive,server)=proxy().await;
@@ -908,7 +916,12 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
         let (attempt,usage,response)=control.store.database.call(move |db| {
             let row=db.query_row("SELECT a.id,a.usage_json,a.response_id FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND json_extract(a.error_json,'$.automatic_trim_attempt.token') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",[&scope],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
             // Real captured-input invalidation, not a forged rejection/error body.
-            db.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id=?1",[scope])?;
+            match reason {
+                "profile_changed" => {db.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id=?1",[scope])?;}
+                "run_stopped" => {db.execute("UPDATE run SET state='stopping' WHERE thread_id=?1 AND state='live'",[scope])?;}
+                "turn_changed" => {db.execute("UPDATE turn SET generation=generation+1 WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[scope])?;}
+                _ => unreachable!(),
+            }
             Ok(row)
         }).await.unwrap();
         summary.reply.send((200,answer("short synthetic summary"))).unwrap();
@@ -917,7 +930,7 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
             loop {
                 let id=expected.clone();
                 let saved=control.store.database.call(move |db|Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.discard.reason') FROM model_attempt WHERE id=?1",[id],|r|r.get::<_,Option<String>>(0))?)).await.unwrap();
-                if saved.as_deref()==Some("profile_changed") {break;}
+                if saved.as_deref()==Some(reason) {break;}
                 tokio::task::yield_now().await;
             }
         }).await.unwrap();
@@ -926,7 +939,7 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
             let page=crate::status::snapshot(db,&StatusArgs{thread_id:Some(scope),all:true,limit:200,..Default::default()},"fixture").unwrap();
             let current=page.items.iter().find(|row|row.id==id).unwrap();
             let fact=current.compaction_discard.unwrap();
-            assert_eq!(fact.reason,crate::compaction::discard::DiscardReason::ProfileChanged);
+            assert_eq!(serde_json::to_value(fact.reason).unwrap(),reason);
             assert_eq!(fact.phase,crate::compaction::discard::DiscardPhase::ClosedSummary);
             let point=crate::status::observation::prepare(crate::status::observation::read_status_tx(db,&[crate::status::observation::Key{kind:crate::status::observation::Kind::Attempt,id:id.clone()}],&mut Default::default()).unwrap());
             assert_eq!(point["items"][0]["current"]["compaction_discard"],serde_json::to_value(fact).unwrap());
@@ -941,7 +954,7 @@ async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log()
         let text=std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
         let facts=text.lines().map(|line|serde_json::from_str::<Value>(line).unwrap()).filter(|row|row["event"]=="compaction_discard").collect::<Vec<_>>();
         assert_eq!(facts.len(),1);
-        assert_eq!(facts[0]["compaction_discard"]["reason"],"profile_changed");
+        assert_eq!(facts[0]["compaction_discard"]["reason"],reason);
         assert_eq!(facts[0]["ids"]["attempt_id"],attempt);
         assert_eq!(facts[0]["compaction_discard"],serde_json::to_value(status_fact).unwrap());
         assert!(!facts[0].to_string().contains("PRIVATE_SENTINEL"));

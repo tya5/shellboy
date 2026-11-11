@@ -89,8 +89,14 @@ struct Finished {
 impl JobContext<'_> {
     fn cancelled(&self, budget: &SummaryBudget<'_>) -> ApiError {
         match self.kind {
-            Kind::Map => invalid("Compaction cancelled; original path retained"),
-            Kind::Reduce => budget.error("Summary cancelled; original path retained"),
+            Kind::Map => discard::rejected(
+                discard::DiscardReason::Cancelled,
+                "Compaction cancelled; original path retained",
+            ),
+            Kind::Reduce => discard::with_reason(
+                budget.error("Summary cancelled; original path retained"),
+                discard::DiscardReason::Cancelled,
+            ),
         }
     }
     fn ensure_slot(&self, budget: &SummaryBudget<'_>) -> Result<(), ApiError> {

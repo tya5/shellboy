@@ -610,3 +610,31 @@ async fn a_context_limit_split_keeps_the_original_order_with_out_of_order_replie
     })
     .await;
 }
+
+#[tokio::test]
+async fn parallel_cancel_reason_survives_map_and_reduce_usage() {
+    guarded("typed parallel cancellation", async {
+        for kind in [Kind::Map, Kind::Reduce] {
+            let fake = Fake::start().await;
+            let rig = rig(&fake.url).await;
+            let mut ledger = usage::UsageLedger::new(&rig.snapshot);
+            let mut limits = budget(&mut ledger, 8, 8);
+            let cancel = CancellationToken::new();
+            cancel.cancel();
+            let error = match run(&rig, kind, jobs(1), &mut limits, &cancel).await {
+                Err(error) => error,
+                Ok(_) => panic!("cancelled work must reject"),
+            };
+            assert_eq!(error.code, ErrorCode::InvalidState);
+            assert_eq!(
+                error.details.as_ref().unwrap()["compaction_discard_reason"],
+                "cancelled"
+            );
+            if matches!(kind, Kind::Reduce) {
+                assert_eq!(error.details.as_ref().unwrap()["map_limit"], 8);
+            }
+            rig.db.shutdown().await.unwrap();
+        }
+    })
+    .await;
+}
