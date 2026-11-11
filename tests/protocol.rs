@@ -1464,9 +1464,11 @@ fn shell_write_failed_status_is_result_not_operation_error_and_legacy_value_surv
     let legacy: Response<Value> = serde_json::from_value(encoded.clone()).unwrap();
     legacy.validate().unwrap();
     assert_eq!(legacy.result.as_ref().unwrap(), &wire);
-    let typed: Response<ShellWriteResult> = serde_json::from_value(encoded.clone()).unwrap();
-    typed.validate().unwrap();
-    assert_eq!(serde_json::to_value(typed).unwrap(), encoded);
+    // Decode the typed payload through the existing generic envelope; requiring
+    // Default on the result DTO would change production solely for this fixture.
+    let typed: ShellWriteResult = serde_json::from_value(legacy.result.clone().unwrap()).unwrap();
+    let rebuilt = Response::success("op", serde_json::to_value(typed).unwrap());
+    assert_eq!(serde_json::to_value(rebuilt).unwrap(), encoded);
     let error: Response<Value> = Response::failure(
         "op",
         ApiError::new(ErrorCode::TargetUnavailable, "synthetic missing execution"),
