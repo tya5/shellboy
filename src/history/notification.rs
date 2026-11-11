@@ -158,6 +158,18 @@ pub(crate) fn decode(raw: &str) -> Option<Value> {
 mod tests {
     use super::*;
     #[test]
+    fn raw_snapshot_byte_limit_is_exact_before_parse() {
+        let base = r#"{"kind":"turn_started"}"#;
+        for bytes in [2047, 2048, 2049] {
+            let raw = format!("{base}{}", " ".repeat(bytes - base.len()));
+            assert_eq!(decode(&raw).is_some(), bytes <= 2048);
+        }
+        for count in [127, 128, 129] {
+            let raw=serde_json::json!({"kind":"shell_ended","execution_id":"\u{e9}".repeat(count),"state":"exited"}).to_string();
+            assert_eq!(decode(&raw).is_some(), count <= 128);
+        }
+    }
+    #[test]
     fn dto_deserialization_is_not_the_strict_admission_boundary() {
         for raw in [
             r#"{"kind":"shell_ended","execution_id":"e","state":"exited","exit_code":null}"#,

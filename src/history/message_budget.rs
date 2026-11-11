@@ -137,6 +137,35 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn notification_competes_as_whole_field_with_relation_in_exact_envelope() {
+        let notification = json!({"kind":"shell_ended","execution_id":"\"\\\u{e9}","state":"exited","exit_code":0});
+        let message = json!({"expect_reply":false,"reply_to":"id\"\\"});
+        let template = Response::success(
+            "op\"\\",
+            json!({"provenance":{"kind":"event","message":message,"notification":notification},"text":"body-sentinel","opaque":{"notification":{"secret":"DO_NOT_VISIT"}},"padding":""}),
+        );
+        let full = serde_json::to_vec(&template).unwrap().len();
+        for delta in [-1i64, 0, 1] {
+            let mut response = template.clone();
+            response.result.as_mut().unwrap()["padding"] =
+                Value::String("x".repeat((MAX_FRAME_BYTES as i64 - full as i64 + delta) as usize));
+            fit(&mut response, Slots::Body).unwrap();
+            let body = response.result.as_ref().unwrap();
+            assert!(body["provenance"].get("message").is_some());
+            assert_eq!(body["provenance"].get("notification").is_some(), delta <= 0);
+            assert_eq!(body["text"], "body-sentinel");
+            assert_eq!(body["opaque"], template.result.as_ref().unwrap()["opaque"]);
+            assert!(serde_json::to_vec(&response).unwrap().len() <= MAX_FRAME_BYTES);
+        }
+        let mut page = Response::success("page", json!({"items":[template.result.unwrap()]}));
+        fit(&mut page, Slots::Nodes).unwrap();
+        assert!(
+            page.result.as_ref().unwrap()["items"][0]["provenance"]
+                .get("notification")
+                .is_some()
+        );
+    }
+    #[test]
     fn relation_states_exclusive_targets_and_utf8_ids_are_strict() {
         for message in [
             json!({"expect_reply":false,"reply_to":"a","reply_node_id":"b"}),
