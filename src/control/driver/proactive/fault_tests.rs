@@ -816,14 +816,18 @@ fn assert_interruption_audits(
                 | "interruption_details" => kind.as_str(),
                 _ => "other",
             };
-            let (run_state,generation):(Option<String>,Option<i64>)=db.query_row(
+            let metadata=db.query_row(
                 "SELECT r.state,t.generation FROM turn t JOIN run r ON r.id=t.run_id WHERE t.id=?1",
                 [turn.as_deref()],|r|Ok((r.get(0)?,r.get(1)?)),
-            ).optional()?.unwrap_or((None,None));
+            ).optional();
+            let query_failed = metadata.is_err();
+            let (run_state, generation): (Option<String>, Option<i64>) =
+                metadata.unwrap_or(None).unwrap_or((None, None));
             let run_state = match run_state.as_deref() {
                 Some("live" | "stopping" | "completed" | "cancelled" | "failed") => {
                     run_state.as_deref().unwrap()
                 }
+                _ if query_failed => "query_failed",
                 _ => "other_or_missing",
             };
             json!({"node_kind":node_kind,"turn_present":turn.is_some(),"ordinal":captured_prefix_len+offset,"phase":phase,"run_state":run_state,"turn_generation":generation,"captured_prefix_len":captured_prefix_len})
