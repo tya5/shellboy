@@ -2,7 +2,7 @@ use super::*;
 use migration_integrity::{Check, pending, persist};
 
 fn downgrade_copy(db: &Connection, version: i64) {
-    db.execute_batch("DROP INDEX receipt_reply_node_lookup;")
+    db.execute_batch("DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup;")
         .unwrap();
     db.execute_batch("DROP INDEX IF EXISTS receipt_human_reply_pending; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at;")
         .unwrap();
