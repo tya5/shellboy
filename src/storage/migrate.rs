@@ -654,11 +654,8 @@ mod activity_migration_tests {
                     .unwrap(),
                 crate::storage::SCHEMA_VERSION
             );
-            assert_eq!(
-                crate::storage::SCHEMA_VERSION,
-                40,
-                "schema 40 adds the non-append selection witness"
-            );
+            assert_eq!(crate::storage::SCHEMA_VERSION, 41, "schema 41 adds the receipt reverse lookup index");
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=40",[],|row|row.get::<_,String>(0)).unwrap(),"0040_selection_nonappend_generation");
             assert_eq!(
                 db.query_row(
                     "SELECT name FROM schema_migration WHERE version=25",
