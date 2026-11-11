@@ -385,3 +385,13 @@ exhaustion release preview bytes and expose explicit unavailable terminal state
 only while the view is still owned; no unconditional zero-disappearance guarantee.
 Receipt/read bounds do not grow. Empty explanation and reasoning-domain exclusions
 remain as the normative rules above. New live-off behavior is proposed, not code.
+
+### TS Crypto Candidate Rejection
+
+Leader rejects the historical @noble/hashes1.8.0 candidate: reported official
+SECURITY support policy excludes versions below2.4. The earlier candidate/API
+references are historical and NOT adopted dependencies or qualified API contracts.
+D is authorized to investigate exact2.4.0 disposably only. Production installation,
+API binding and lockfile changes await those actual results and explicit adoption.
+Rust continues to reuse existing sha2; no custom browser crypto or unsupported
+package is a fallback. This correction does not block independent302 work.
