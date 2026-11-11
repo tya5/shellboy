@@ -122,6 +122,9 @@ pub(super) async fn retry_or_recover(
     saved["rate_observation"] = failure.facts.rate_metadata();
     saved["rate_observation"]["applied_wait_ms"] =
         json!(failure.facts.admission_wait_ms.unwrap_or(0));
+    let trusted_observation = trim_not_applied
+        .clone()
+        .map(super::trim_observation::DriverTrimObservation::from_reduction);
     if let Some(observation) = trim_not_applied {
         saved["automatic_trim_attempt"] = observation;
     }
@@ -132,7 +135,14 @@ pub(super) async fn retry_or_recover(
         saved["automatic_retry_exhausted"] =
             json!({"retries":automatic_retries,"limit":retry_limit});
     }
-    recover(control, snapshot, error.clone(), Some((attempt, saved))).await?;
+    recover_with_observation(
+        control,
+        snapshot,
+        error.clone(),
+        Some((attempt, saved)),
+        trusted_observation,
+    )
+    .await?;
     Err(error)
 }
 #[cfg(test)]

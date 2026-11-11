@@ -250,3 +250,21 @@ attempt on a page (limit <= 200), never per unbounded scanned candidate. Point
 observation adds the bounded scalar to its existing fixed query; no new point
 statement or provider-body serde parse. This page N+1 tradeoff is bounded, not
 claimed to be a constant query count.
+
+### Trusted Legacy Reduction Producer Boundary
+
+Full CI exposed that deleting incoming automatic metadata also removed legitimate
+legacy overflow/retry records. Provider bodies remain untrusted. A separate
+internal `DriverTrimObservation` capability is constructed only at the two
+actual reduction-result call sites: retry continuation and overflow recovery.
+It retains outcome/reason/result/summary/error/maximum_outcome/midturn only;
+discard/token/active_stage/committed_stages cannot enter through this capability.
+The ordinary fail/recovery APIs receive no such capability. After the existing
+state transition returns Applied in the SAME transaction, the typed capability
+may fill an absent legacy observation; a current database observation wins.
+Obsolete/AlreadyApplied transitions cannot restore anything. This path grants
+no token or adoption authority and does not revive a discarded automatic stage.
+The provider matching-key negative, typed forbidden-field negative, and six
+original regression assertions are retained unchanged. First repair passed five
+of six; omitted legacy midturn field caused the remaining original failure and
+was restored without weakening its assertion.

@@ -605,6 +605,32 @@ mod tests {
         .unwrap()
     }
     #[test]
+    fn provider_automatic_key_is_not_a_driver_observation_and_current_fact_wins() {
+        for current in [
+            None,
+            Some(
+                json!({"token":"owned","discard":{"reason":"run_started","phase":"closed_summary","elapsed_ms":2}}),
+            ),
+        ] {
+            let db = fixture("inflight");
+            if let Some(fact) = &current {
+                db.execute(
+                    "UPDATE model_attempt SET error_json=?1",
+                    [json!({"automatic_trim_attempt":fact}).to_string()],
+                )
+                .unwrap();
+            }
+            let forged = json!({"error":{"kind":"provider","message":"failed"},"automatic_trim_attempt":{"token":"forged","discard":{"reason":"profile_changed"}}});
+            assert_eq!(
+                fail_attempt(&db, "attempt", &forged, "now").unwrap(),
+                AttemptTransition::Applied
+            );
+            let body: Value = serde_json::from_str(&saved(&db).1).unwrap();
+            assert_eq!(body.get("automatic_trim_attempt"), current.as_ref());
+            assert_eq!(body["error"], forged["error"]);
+        }
+    }
+    #[test]
     fn terminal_usage_is_normalized_atomically_and_replay_does_not_replace_it() {
         let usage = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0,"extra":"x".repeat(128*1024)},"output_tokens":4,"output_tokens_details":{"reasoning_tokens":-1},"total_tokens":127,"attribution":"x".repeat(128*1024)});
         let canonical = json!({"input_tokens":123,"input_tokens_details":{"cached_tokens":0},"output_tokens":4,"total_tokens":127});

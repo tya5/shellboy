@@ -8,6 +8,7 @@ mod retry;
 mod shell_output;
 mod tools;
 mod trim;
+mod trim_observation;
 use adoption::adopt_response;
 use overflow::OverflowBudget;
 use request::{AdmittedRequest, Instructions, model_client, prepare_attempt, stream_response};
@@ -751,6 +752,15 @@ async fn recover(
     error: ApiError,
     attempt: Option<(String, Value)>,
 ) -> Result<(), ApiError> {
+    recover_with_observation(control, snapshot, error, attempt, None).await
+}
+async fn recover_with_observation(
+    control: &Arc<Control>,
+    snapshot: &Snapshot,
+    error: ApiError,
+    attempt: Option<(String, Value)>,
+    observation: Option<trim_observation::DriverTrimObservation>,
+) -> Result<(), ApiError> {
     let error = crate::config_setup::enrich(
         &control.store.config,
         Some(&snapshot.profile),
@@ -787,7 +797,10 @@ async fn recover(
             )?;
             if let Some((attempt, mut body)) = attempt {
                 body["attempt_id"] = json!(attempt);
-                super::state::incomplete_attempt(&tx, &attempt, &body, &now())?;
+                let transition = super::state::incomplete_attempt(&tx, &attempt, &body, &now())?;
+                if let Some(observation) = &observation {
+                    observation.persist_applied(&tx, &attempt, transition)?;
+                }
                 save_received_failure(&tx, &snapshot.turn, &body)?;
             }
             tx.commit()?;

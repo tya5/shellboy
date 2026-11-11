@@ -365,6 +365,9 @@ pub(super) async fn retry_or_recover<'a>(
                 "delay_ms":delay.as_millis() as u64,"partial_response_discarded":partial,
                 "possible_duplicate_charge":true}});
         body["rate_observation"] = failure.facts.rate_metadata();
+        let trusted_observation = trim_not_applied
+            .clone()
+            .map(super::trim_observation::DriverTrimObservation::from_reduction);
         if let Some(observation) = trim_not_applied {
             if observation["outcome"] == "adopted" && observation.get("result").is_some() {
                 body["automatic_trim"] = observation["result"].clone();
@@ -380,6 +383,9 @@ pub(super) async fn retry_or_recover<'a>(
                 let tx = db.transaction()?;
                 let transition =
                     super::super::state::fail_attempt(&tx, &saved_attempt, &body, &now())?;
+                if let Some(observation) = &trusted_observation {
+                    observation.persist_applied(&tx, &saved_attempt, transition)?;
+                }
                 if transition == super::super::state::AttemptTransition::Applied && partial {
                     save_received_failure(&tx, &turn, &body)?;
                 }
