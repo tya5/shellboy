@@ -2,6 +2,25 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
+/// This wrapper, not the public DTO's derive, is the strict admission boundary.
+#[allow(dead_code)]
+pub(super) struct ValidatedNotification(crate::protocol::NotificationDescriptor);
+impl ValidatedNotification {
+    #[allow(dead_code)]
+    pub(super) fn into_descriptor(self) -> crate::protocol::NotificationDescriptor {
+        self.0
+    }
+}
+#[allow(dead_code)]
+pub(super) fn descriptor(
+    db: &Connection,
+    node: &str,
+) -> rusqlite::Result<Option<ValidatedNotification>> {
+    Ok(snapshot(db, node)?
+        .and_then(|value| serde_json::from_value(value).ok())
+        .map(ValidatedNotification))
+}
+
 // Preserve duplicate-key evidence at every depth before building a JSON Value.
 struct UniqueJson(Value);
 impl<'de> serde::Deserialize<'de> for UniqueJson {
@@ -138,6 +157,17 @@ fn decode(raw: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dto_deserialization_is_not_the_strict_admission_boundary() {
+        for raw in [
+            r#"{"kind":"shell_ended","execution_id":"e","state":"exited","exit_code":null}"#,
+            r#"{"kind":"shell_ended","execution_id":" ","state":"exited"}"#,
+            r#"{"kind":"thread_settings_changed","changed_fields":["cwd","cwd"]}"#,
+        ] {
+            assert!(serde_json::from_str::<crate::protocol::NotificationDescriptor>(raw).is_ok());
+            assert!(decode(raw).is_none());
+        }
+    }
     #[test]
     fn actual_schema_upgrade_converges_and_marker_fk_preserves_event() {
         let schema = include_str!("../storage/current.sql");

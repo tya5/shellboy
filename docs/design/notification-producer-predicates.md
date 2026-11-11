@@ -119,3 +119,12 @@ behavior for cancel/recovery redelivery. Invalid NEW admission context remains a
 error. Instructions first_seen currently means no previous instruction snapshot;
 a previous recorded absent observation followed by present is updated, not first
 snapshot. This explicit interpretation awaits matching closed-fact read controls.
+
+### Strict Read Boundary
+
+The public notification DTO derive alone is NOT validation: serde permits optional
+exit_code:null, blank IDs and repeated changed_fields. Private raw decoding rejects
+all duplicate object keys recursively and validates closed semantic constraints
+before constructing ValidatedNotification. Only that wrapper may yield a typed
+history attachment. Do not replace this validation with from_value on arbitrary
+saved JSON. The private wrapper currently has no public history caller.
