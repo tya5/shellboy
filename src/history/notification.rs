@@ -2,6 +2,67 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
+// Preserve duplicate-key evidence at every depth before building a JSON Value.
+struct UniqueJson(Value);
+impl<'de> serde::Deserialize<'de> for UniqueJson {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl<'de> serde::de::Visitor<'de> for Visitor {
+            type Value = UniqueJson;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("JSON without duplicate object keys")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut object = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if object.contains_key(&key) {
+                        return Err(serde::de::Error::custom("duplicate object key"));
+                    }
+                    object.insert(key, map.next_value::<UniqueJson>()?.0);
+                }
+                Ok(UniqueJson(Value::Object(object)))
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut values = Vec::new();
+                while let Some(value) = seq.next_element::<UniqueJson>()? {
+                    values.push(value.0);
+                }
+                Ok(UniqueJson(Value::Array(values)))
+            }
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Bool(v)))
+            }
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+                Ok(UniqueJson(v.into()))
+            }
+            fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+                serde_json::Number::from_f64(v)
+                    .map(|n| UniqueJson(Value::Number(n)))
+                    .ok_or_else(|| E::custom("nonfinite number"))
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::String(v.into())))
+            }
+            fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::String(v)))
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(UniqueJson(Value::Null))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
 #[allow(dead_code)]
 pub(super) fn snapshot(db: &Connection, node: &str) -> rusqlite::Result<Option<Value>> {
     let raw: Option<Option<String>> = db.query_row(
@@ -14,7 +75,7 @@ fn decode(raw: &str) -> Option<Value> {
     if raw.len() > 2048 {
         return None;
     }
-    let value: Value = serde_json::from_str(raw).ok()?;
+    let value = serde_json::from_str::<UniqueJson>(raw).ok()?.0;
     let fields = value.as_object()?;
     let kind = fields.get("kind")?.as_str()?;
     let allowed: &[&str] = match kind {
@@ -76,6 +137,24 @@ fn decode(raw: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn duplicate_keys_fail_before_value_normalization_at_every_depth() {
+        for raw in [
+            r#"{"kind":"future","kind":"turn_started"}"#,
+            r#"{"kind":"future","k\u0069nd":"turn_started"}"#,
+            r#"{"kind":"shell_ended","execution_id":"secret","execution_id":"public","state":"exited"}"#,
+        ] {
+            assert!(decode(raw).is_none());
+        }
+        for raw in [
+            r#"{"nested":{"key":1,"key":2}}"#,
+            r#"[{"nested":{"key":1,"key":2}}]"#,
+        ] {
+            assert!(serde_json::from_str::<UniqueJson>(raw).is_err());
+        }
+        assert!(decode(r#"{"kind":"turn_started"} {}"#).is_none());
+        assert!(decode(r#"{"kind":"turn_started"}"#).is_some());
+    }
     #[test]
     fn strict_snapshot_rejects_unknown_null_and_secret_fields() {
         for raw in [
