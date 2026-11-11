@@ -98,6 +98,69 @@ mod tests {
         db
     }
     #[test]
+    fn canonical_admission_is_atomic_and_shared_fork_keeps_creator_marker() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("PRAGMA foreign_keys=ON; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('thread','/','','p','m','now'),('fork','/','','p','m','now'); INSERT INTO run(id,thread_id,state,created_at) VALUES('run','thread','completed','now'),('retry','thread','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('turn','thread','run','completed','now'),('next','thread','retry','completed','now'); INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,semantic_json,created_at) VALUES('e','context_changed','{}','thread','{}','{\"kind\":\"turn_started\"}','now'); INSERT INTO delivery(event_id,recipient_id,state) VALUES('e','run','pending'),('e','retry','pending');").unwrap();
+        {
+            let tx = db.transaction().unwrap();
+            assert_eq!(
+                admit_notification_tx(&tx, "thread", "run", "turn", "e", "synthetic", "now")
+                    .unwrap(),
+                Admission::Inserted
+            );
+            tx.rollback().unwrap();
+        }
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM node WHERE id='event-e'", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let tx = db.transaction().unwrap();
+        assert_eq!(
+            admit_notification_tx(&tx, "thread", "run", "turn", "e", "synthetic", "now").unwrap(),
+            Admission::Inserted
+        );
+        tx.commit().unwrap();
+        db.execute(
+            "INSERT INTO thread_path(thread_id,ordinal,node_id) VALUES('fork',0,'event-e')",
+            [],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        assert_eq!(
+            admit_notification_tx(&tx, "thread", "retry", "next", "e", "synthetic", "now").unwrap(),
+            Admission::Conflict
+        );
+        tx.commit().unwrap();
+        let saved: (String, String) = db
+            .query_row(
+                "SELECT notification_event_id,turn_id FROM node WHERE id='event-e'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, ("e".into(), "turn".into()));
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM thread_path WHERE node_id='event-e'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            0
+        );
+    }
+    #[test]
     fn pending_constructor_rejects_wrong_creator_and_missing_delivery() {
         let mut db = fixture();
         let tx = db.transaction().unwrap();
