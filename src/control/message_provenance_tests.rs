@@ -52,7 +52,7 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
         request.validate().unwrap();
         assert!(serde_json::to_vec(&request).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
         let (response, _) = control.evaluate(request, CancellationToken::new()).await;
-        assert!(response.ok);
+        assert!(response.ok, "handler error: {:?}", response.error);
         let result = response.result.as_ref().unwrap();
         assert_eq!(result["provenance"].get("message").is_some(), delta <= 0);
         assert_eq!(
