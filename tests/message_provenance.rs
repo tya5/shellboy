@@ -219,7 +219,10 @@ async fn invalid_relation_preserves_independent_sender_and_body_after_reopen() {
         .call(move |db| {
             db.execute(
                 "UPDATE receipt SET sender_json=?1 WHERE message_node_id=?2",
-                rusqlite::params!["x".repeat(8193), identity],
+                rusqlite::params![
+                    serde_json::json!({"kind":"unknown","padding":"x".repeat(8193)}).to_string(),
+                    identity
+                ],
             )?;
             Ok(())
         })

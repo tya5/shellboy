@@ -116,14 +116,15 @@ pub(super) fn project(
     thread: &str,
 ) -> rusqlite::Result<Option<MessageProvenance>> {
     use rusqlite::OptionalExtension;
-    let own: Option<String> = db
+    let own_row: Option<Option<String>> = db
         .query_row(
             "SELECT CASE WHEN length(CAST(id AS BLOB))<=256 THEN id END FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2",
             [node, thread],
             |r| r.get::<_,Option<String>>(0),
         )
-        .optional()?.flatten();
-    let own_relation = if let Some(receipt) = own {
+        .optional()?;
+    let own_present = own_row.is_some();
+    let own_relation = if let Some(Some(receipt)) = own_row {
         bounded_receipt(db, &receipt)?.and_then(|raw| saved_relation(&raw, node, thread))
     } else {
         None
@@ -179,6 +180,10 @@ pub(super) fn project(
             return Ok(None);
         }
         return Ok(Some(own));
+    }
+    // A malformed own saved acceptance is not repaired from reverse evidence.
+    if own_present {
+        return Ok(None);
     }
     Ok(Some(MessageProvenance {
         expect_reply: false,

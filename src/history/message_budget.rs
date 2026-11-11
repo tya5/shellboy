@@ -124,6 +124,38 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn relation_states_exclusive_targets_and_utf8_ids_are_strict() {
+        for message in [
+            json!({"expect_reply":false,"reply_to":"a","reply_node_id":"b"}),
+            json!({"expect_reply":true,"reply_to":"a","reply_state":"replied","reply_node_id":"b"}),
+            json!({"expect_reply":true,"reply_state":"pending","reply_node_id":"b"}),
+            json!({"expect_reply":false,"reply_to":null}),
+            json!({"expect_reply":false,"reply_to":"\u{e9}".repeat(129)}),
+        ] {
+            let mut response = Response::success(
+                "op",
+                json!({"provenance":{"kind":"user","message":message},"text":"unchanged"}),
+            );
+            fit(&mut response, Slots::Body).unwrap();
+            assert!(
+                response.result.as_ref().unwrap()["provenance"]
+                    .get("message")
+                    .is_none()
+            );
+            assert_eq!(response.result.as_ref().unwrap()["text"], "unchanged");
+        }
+        let mut exact = Response::success(
+            "op",
+            json!({"provenance":{"message":{"expect_reply":false,"reply_to":"\u{e9}".repeat(128)}}}),
+        );
+        fit(&mut exact, Slots::Body).unwrap();
+        assert!(
+            exact.result.as_ref().unwrap()["provenance"]
+                .get("message")
+                .is_some()
+        );
+    }
+    #[test]
     fn opaque_payload_provenance_is_never_visited() {
         let opaque = json!({"provenance":{"message":{"unknown":"private opaque content"}}});
         let mut response = Response::success(
