@@ -243,8 +243,10 @@ async fn notification_marker_survives_delivery_removal_and_all_official_history_
     let (_root, store) = fixture().await;
     store.database.call(|db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('nr','recipient','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('nt','recipient','nr','completed','now'); INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,semantic_json,created_at) VALUES('ne','context_changed','{}','recipient','{\"private\":\"SECRET_SENTINEL\"}','{\"kind\":\"turn_started\"}','now');")?;
-        shellboy::history::append_node(db,"recipient","nn",Some("nt"),"event",&serde_json::json!({"role":"developer","content":[{"type":"input_text","text":"synthetic notification body"}]}),"now")?;
-        db.execute("UPDATE node SET notification_event_id='ne' WHERE id='nn'",[])?;
+        let tx=db.transaction()?;
+        shellboy::history::append_node(&tx,"recipient","nn",Some("nt"),"event",&serde_json::json!({"role":"developer","content":[{"type":"input_text","text":"synthetic notification body"}]}),"now")?;
+        tx.execute("UPDATE node SET notification_event_id='ne' WHERE id='nn'",[])?;
+        tx.commit()?;
         db.execute_batch("INSERT INTO delivery(event_id,recipient_id,state) VALUES('ne','nr','pending'); DELETE FROM delivery WHERE event_id='ne';")?;
         Ok(())
     }).await.unwrap();
