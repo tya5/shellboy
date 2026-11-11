@@ -109,6 +109,77 @@ pub(super) fn unique_reverse(
     Ok(bounded_receipt(db, &receipt)?.map(|raw| (body, raw)))
 }
 
+/// Relate only receipts proved by durable node identity and its creation Thread.
+pub(super) fn project(
+    db: &rusqlite::Connection,
+    node: &str,
+    thread: &str,
+) -> rusqlite::Result<Option<MessageProvenance>> {
+    use rusqlite::OptionalExtension;
+    let own: Option<String> = db
+        .query_row(
+            "SELECT id FROM receipt WHERE message_node_id=?1 AND target_thread_id=?2",
+            [node, thread],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let own_relation = if let Some(receipt) = own {
+        bounded_receipt(db, &receipt)?.and_then(|raw| saved_relation(&raw, node, thread))
+    } else {
+        None
+    };
+    // Count two candidates before reading their JSON; corrupt/oversized rows remain ambiguous.
+    let mut statement = db.prepare(REVERSE_LOOKUP)?;
+    let candidates = statement
+        .query_map([thread, node], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    if candidates.len() > 1 {
+        return Ok(None);
+    }
+    let Some((request, raw)) = unique_reverse(db, thread, node)? else {
+        return Ok(if candidates.is_empty() {
+            own_relation
+        } else {
+            None
+        });
+    };
+    if !id(&request, node) {
+        return Ok(None);
+    }
+    let Some(original) = saved_relation(&raw, &request, thread) else {
+        return Ok(None);
+    };
+    if !original.expect_reply || original.reply_node_id.as_deref() != Some(node) {
+        return Ok(None);
+    }
+    let value: Value = serde_json::from_str(&raw).expect("already bounded and parsed");
+    let valid_sender = value
+        .get("reply")
+        .and_then(|r| r.get("by"))
+        .and_then(|by| serde_json::from_value::<crate::protocol::SenderIdentity>(by.clone()).ok())
+        .is_some();
+    if !valid_sender {
+        return Ok(None);
+    }
+    let request_in_context:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn t ON t.id=n.created_turn_id WHERE n.id=?1 AND t.thread_id=?2)",[request.as_str(),thread],|r|r.get(0))?;
+    if !request_in_context {
+        return Ok(None);
+    }
+    if let Some(own) = own_relation {
+        if own.expect_reply || own.reply_to.as_deref() != Some(request.as_str()) {
+            return Ok(None);
+        }
+        return Ok(Some(own));
+    }
+    Ok(Some(MessageProvenance {
+        expect_reply: false,
+        reply_to: Some(request),
+        reply_state: None,
+        reply_node_id: None,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
