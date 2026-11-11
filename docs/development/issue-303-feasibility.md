@@ -83,3 +83,17 @@ silent local build. Performance optimization and paid measurement are deferred.
   compatibility review; no claim that all consumers silently accept additions.
 - 0043 remains coverage-exclusive. No schema implementation until fresh maximum
   and a distinct migration number/order have independent leader adoption.
+
+## Persistence Proposal (Not Implemented / No Number Reserved)
+
+One nullable Thread column is needed:
+`auto_compact_target_percent INTEGER CHECK(auto_compact_target_percent IS NULL OR auto_compact_target_percent BETWEEN 1 AND 100)`.
+Proposed DDL is a single ALTER TABLE thread ADD COLUMN with that definition.
+Existing rows remain NULL/inherit, not backfilled20/80. This changes neither
+applied0040-0042 nor coverage0043; filename/registry/version await leader order.
+Attempt percentage uses the existing qualified automatic observation JSON, not
+another model_attempt column; old observation absent stays UNKNOWN.
+
+First source checkpoint intentionally wires connection/default only; Thread
+storage/get/set and public schema remain incomplete pending migration allocation.
+No local compile, formatting build or tests have run under the heavy hold.

@@ -89,6 +89,7 @@ struct Automatic {
     thread: String,
     turn: String,
     target_tokens: Option<u64>,
+    target_percent: u8,
 }
 
 impl Automatic {
@@ -173,7 +174,7 @@ impl Automatic {
             target: self.target_tokens.map(|tokens| {
                 (
                     crate::compaction::CompactionKeys::new(&self.thread).automatic_target(),
-                    json!({"attempt":self.attempt,"target_tokens":tokens,"scope":scope,"turn":self.turn,"marks":null,"provisional":true}).to_string(),
+                    json!({"attempt":self.attempt,"target_tokens":tokens,"target_percent":self.target_percent,"scope":scope,"turn":self.turn,"marks":null,"provisional":true}).to_string(),
                 )
             }),
         }
@@ -234,6 +235,8 @@ pub(super) async fn maybe_compact(
     let threshold = config
         .compaction
         .auto_at_tokens_for(thread_override, config.connections.get(&snapshot.profile));
+    // Thread storage wiring follows only after its migration is assigned.
+    let target_percent = crate::config::auto_compact_target_percent_for(None, config.connections.get(&snapshot.profile));
     if threshold == 0 {
         if budget.status_context.take().is_some() {
             super::proactive_guard::hide_status(control, &snapshot.thread).await?;
@@ -290,7 +293,7 @@ pub(super) async fn maybe_compact(
                 && previous != attempt
             {
                 let same_model: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt old JOIN model_attempt new ON old.profile_id=new.profile_id AND old.model_id=new.model_id WHERE old.id=?1 AND new.id=?2)", params![previous,attempt], |row| row.get(0))?;
-                if !same_model || target != ((threshold as u128 * 4) / 5) as u64 {
+                if !same_model || !target::pending_matches(threshold, target_percent, pending["target_percent"].as_u64(), target) {
                     db.execute("DELETE FROM app_meta WHERE key=?1", [&target_key])?;
                 } else {
                     if pending["verified"].is_null() {
@@ -397,7 +400,7 @@ pub(super) async fn maybe_compact(
     let open_loop = compactor.tool_loop_open(&snapshot.thread).await?;
     let calibrated = evidence
         .input_characters
-        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars))
+        .and_then(|chars| target::plan(threshold, target_percent, evidence.input_tokens, chars))
         .is_some();
     let marks = candidates.as_ref().map(|candidate| {
         candidate
@@ -535,7 +538,7 @@ pub(super) async fn maybe_compact(
             open_loop
                 && evidence
                     .input_characters
-                    .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars))
+                    .and_then(|chars| target::plan(threshold, target_percent, evidence.input_tokens, chars))
                     .is_none(),
             calibrated || spill_new,
         )
@@ -549,7 +552,7 @@ pub(super) async fn maybe_compact(
     let status_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_status();
     let target_plan = evidence
         .input_characters
-        .and_then(|chars| target::plan(threshold, evidence.input_tokens, chars));
+        .and_then(|chars| target::plan(threshold, target_percent, evidence.input_tokens, chars));
     // #226: the provisional `unknown` record shares the witness transaction, so
     // every stage after it can append its fact to a record that exists.
     let automatic = Automatic {
@@ -558,8 +561,9 @@ pub(super) async fn maybe_compact(
         thread: snapshot.thread.clone(),
         turn: snapshot.turn.clone(),
         target_tokens: target_plan.map(|plan| plan.target_tokens),
+        target_percent,
     };
-    let provisional_trigger = json!({"auto_at_tokens": threshold, "input_tokens": evidence.input_tokens, "run_id": snapshot.run});
+    let provisional_trigger = json!({"target_percent":target_percent,"auto_at_tokens": threshold, "input_tokens": evidence.input_tokens, "run_id": snapshot.run});
     let provisional_plan = target_plan.map_or(Value::Null, |plan| json!({"target_tokens":plan.target_tokens,"remove_characters":plan.remove_characters,"input_characters":evidence.input_characters}));
     let (provisional_trigger_copy, provisional_plan_copy) =
         (provisional_trigger.clone(), provisional_plan.clone());
@@ -931,6 +935,7 @@ pub(super) async fn maybe_compact(
         observation["target_plan"] = json!({"target_tokens":plan.target_tokens,"remove_characters":plan.remove_characters,"input_characters":evidence.input_characters});
     }
     observation["trigger"] = json!({
+        "target_percent":target_percent,
         "auto_at_tokens": threshold,
         "input_tokens": evidence.input_tokens,
         "run_id": snapshot.run,
@@ -949,7 +954,7 @@ pub(super) async fn maybe_compact(
     let pending_target = if adopted {
         target_plan.map(|plan| {
             let scope = if observation["cancelled"] == true || observation["summary"]["summary_node_id"].is_string() { summary_scope } else { "spill" };
-            let mut value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"scope":scope,"turn":snapshot.turn,"marks":baseline});
+            let mut value = json!({"attempt":evidence.attempt,"target_tokens":plan.target_tokens,"target_percent":target_percent,"scope":scope,"turn":snapshot.turn,"marks":baseline});
             if value.to_string().len() > 1_048_576 {
                 value["marks"] = Value::Null;
             }

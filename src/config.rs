@@ -199,6 +199,8 @@ pub struct Connection {
     pub auto_trim_on_disconnect: bool,
     /// Overrides `[compaction] auto_at_tokens` for this connection; 0 disables.
     pub auto_at_tokens: Option<u64>,
+    #[serde(default, deserialize_with = "target_percent_option")]
+    pub auto_compact_target_percent: Option<u8>,
     /// Overrides `[compaction] segment_chars` for this connection.
     pub segment_chars: Option<usize>,
     /// Overrides `[compaction] reduce_rounds` for this connection.
@@ -243,6 +245,7 @@ impl Default for Connection {
             response_retry_partial: true,
             auto_trim_on_disconnect: true,
             auto_at_tokens: None,
+            auto_compact_target_percent: None,
             segment_chars: None,
             reduce_rounds: None,
             credentials_file: None,
@@ -283,6 +286,7 @@ impl fmt::Debug for Connection {
             .field("response_retry_partial", &self.response_retry_partial)
             .field("auto_trim_on_disconnect", &self.auto_trim_on_disconnect)
             .field("auto_at_tokens", &self.auto_at_tokens)
+            .field("auto_compact_target_percent", &self.auto_compact_target_percent)
             .field("segment_chars", &self.segment_chars)
             .field("reduce_rounds", &self.reduce_rounds)
             .field("credentials_file", &self.credentials_file)
@@ -1132,6 +1136,19 @@ impl Default for Compaction {
         }
     }
 }
+pub const DEFAULT_AUTO_COMPACT_TARGET_PERCENT: u8 = 20;
+fn target_percent_option<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u8>, D::Error> {
+    let value = Option::<u8>::deserialize(deserializer)?;
+    if value.is_some_and(|v| !(1..=100).contains(&v)) {
+        return Err(serde::de::Error::custom("auto_compact_target_percent must be an integer from 1 through 100"));
+    }
+    Ok(value)
+}
+/// Thread override, connection override, then user-selected default policy.
+pub fn auto_compact_target_percent_for(thread: Option<u8>, connection: Option<&Connection>) -> u8 {
+    thread.or_else(|| connection.and_then(|c| c.auto_compact_target_percent))
+        .unwrap_or(DEFAULT_AUTO_COMPACT_TARGET_PERCENT)
+}
 pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
 pub const DEFAULT_SEGMENT_CHARS: usize = 64_000;
 pub const DEFAULT_REDUCE_ROUNDS: usize = 4;
@@ -1186,5 +1203,25 @@ impl Compaction {
                     .unwrap_or(u64::MAX),
             )
             .max(2000)
+    }
+}
+
+#[cfg(test)]
+mod target_percent_tests {
+    use super::*;
+    #[test]
+    fn target_percent_connection_validation_and_effective_inheritance() {
+        let mut connection=Connection::default();
+        assert_eq!(auto_compact_target_percent_for(None,Some(&connection)),20);
+        connection.auto_compact_target_percent=Some(80);
+        assert_eq!(auto_compact_target_percent_for(None,Some(&connection)),80);
+        assert_eq!(auto_compact_target_percent_for(Some(35),Some(&connection)),35);
+        for value in ["0","101","-1","20.5","\"20\""] {
+            assert!(toml::from_str::<Connection>(&format!("auto_compact_target_percent={value}")).is_err());
+        }
+        for value in [1,20,80,100] {
+            let parsed:Connection=toml::from_str(&format!("auto_compact_target_percent={value}")).unwrap();
+            assert_eq!(parsed.auto_compact_target_percent,Some(value));
+        }
     }
 }
