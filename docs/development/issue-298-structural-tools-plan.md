@@ -68,3 +68,54 @@ Documented hybrid project RAG returned no hits and semantic_not_ready /
 index_incompatible. No reindex or embedding request was started. This proposal
 uses current source and issue 298, not prior-agent conclusions as authority.
 No Rust/heavy job, implementation test or runtime success is claimed here.
+
+## Fixed Proposed Wire And Budget Table (S6 60c68ede)
+
+Pending the leader's explicit public-authority adoption; no payload code yet.
+These fields extend existing ToolCall / ToolResult only. Canonical identities and
+verified execution_ids retain their existing qualifications. No result name join.
+
+| Typed field | Values / meaning | Source |
+| --- | --- | --- |
+| descriptor.call_id | optional exact string, omitted unless state available | this item's own typed call_id only |
+| descriptor.call_id_state | available / missing / invalid / field_budget | closed ToolFieldAvailability enum |
+| descriptor.name | optional exact string, ToolCall only; ToolResult always omitted | this call's own typed name only |
+| descriptor.name_state | available / missing / invalid / field_budget / not_applicable | not_applicable on ToolResult, never inferred |
+| detail_availability | execution_linked / unavailable | existing verified execution_ids nonempty / otherwise; not proof output is retained |
+
+ToolFieldAvailability is a closed enum. `missing` means absent or null;
+`invalid` means wrong type, empty, or (name only) non-ASCII / whitespace / control;
+`field_budget` means a string exceeds 256 UTF-8 bytes. Validate length first, then
+syntax. `available` has the exact field present; other states omit it completely.
+These are metadata states, never text_complete or answer-completeness claims.
+A name syntactically qualifies only as an identifier. The leader must explicitly
+adopt current saved typed name/call_id as public structural authority; ASCII is
+NOT a secret-safety guarantee. No text from extras/arguments/output/opaque qualifies.
+
+`descriptor` is present even with no available fields. This is an honest bounded
+identifier descriptor, not a natural-language description, argument summary or
+result body. `detail_availability = execution_linked` only identifies existing
+execution resource routing by actual ID; retention/access remains that resource's
+responsibility. Zero-exec tools explicitly report unavailable; no reader is added.
+
+| Budget boundary | Rule / omission |
+| --- | --- |
+| Each tool field | <=256 UTF-8 bytes, all-or-nothing; never publish a truncated ID/name |
+| Each tool item | at most 512 new string bytes (call ID + call-only name), below existing 16 KiB leaf ceiling; fixed closed states only |
+| Each source node | existing 1 MiB source-byte limit and actual source qualification remain; source_budget yields existing unavailable projection, no descriptor recovery |
+| Response | sum both available field byte lengths in the SAME existing 4 MiB text/reasoning ledger; no independent metadata budget or free extra fields |
+| Response exhaustion | preserve existing atomic node projection and null/deferred suffix with response_budget; publish no partial IDs or partial admitted node |
+| Spill metadata | existing #274 8-source / 256-byte ID / 16 KiB / truncated rules unchanged; no new spill traversal or coverage inference |
+
+Duplicate/foreign call IDs retain separate node/pointer identity and do not infer
+name, result ownership or execution associations. No additional global lookup,
+neighbor query, body hydration or generic detail read is authorized. Exact item
+coordinates are kept even when all descriptor fields are unavailable.
+
+Implementation will update effective-spec before payload source, add one formal
+case helper for field qualification and reuse it in the existing tool branch;
+extend exhaustive response accounting and generated schema/golden. Actual-producer
+nine-row tests cover explicit field states, source/response budgets, Unicode IDs,
+field-overbudget atomic omission, duplicates/foreign scope and secret exclusions.
+S6 conditional design acceptance is not leader payload-authority approval and
+not runtime adoption. Public extension remains blocked on that explicit decision.
