@@ -1,5 +1,7 @@
 //! Per-Thread model/tool loop. A long wait keeps its IPC slot for the whole wait.
 mod adoption;
+#[allow(dead_code)]
+mod coverage;
 mod overflow;
 mod proactive;
 mod proactive_guard;
