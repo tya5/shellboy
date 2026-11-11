@@ -3509,6 +3509,39 @@
       "title": "MessageDetails",
       "type": "object"
     },
+    "MessageProvenance": {
+      "properties": {
+        "expect_reply": {
+          "type": "boolean"
+        },
+        "reply_node_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reply_state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageReplyState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reply_to": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "expect_reply"
+      ],
+      "type": "object"
+    },
     "MessageReplyArgs": {
       "additionalProperties": false,
       "properties": {
@@ -3530,6 +3563,15 @@
         "text"
       ],
       "type": "object"
+    },
+    "MessageReplyState": {
+      "enum": [
+        "pending",
+        "replied",
+        "ignored",
+        "cancelled"
+      ],
+      "type": "string"
     },
     "MessageSendArgs": {
       "additionalProperties": false,
@@ -3686,6 +3728,16 @@
         },
         "kind": {
           "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MessageProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "origin_thread_id": {
           "type": [

@@ -25,9 +25,7 @@ pub mod rewind;
 pub fn reachability_for_tests(db: &Connection, id: &str) -> rusqlite::Result<bool> {
     reachability::searchable(db, id)
 }
-#[allow(dead_code)] // Connected with relation emission after resolver controls pass.
 pub(crate) mod message_budget;
-#[allow(dead_code)] // Emission is wired only after the final response ledger is installed.
 mod message_provenance;
 mod relations;
 mod thread;

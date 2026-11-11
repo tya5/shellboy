@@ -102,13 +102,25 @@ async fn human_reply_only_reverse_relation_is_exact_across_unrelated_send() {
 #[tokio::test]
 async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
     use shellboy::storage::DbWorker;
-    let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("old40.sqlite");
+    let (root, store) = fixture().await;
+    let result = store
+        .execute(request(send(false)), None)
+        .await
+        .unwrap()
+        .result;
+    let node = result["message_id"].as_str().unwrap().to_owned();
+    store.database.shutdown().await.unwrap();
+    let path = root.path().join("db");
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(include_str!("../src/storage/current.sql"))
+    let before: String = db
+        .query_row(
+            "SELECT result_json FROM receipt WHERE message_node_id=?1",
+            [&node],
+            |r| r.get(0),
+        )
         .unwrap();
-    // Index-only migration has no table mutations: reconstruct its exact predecessor.
-    db.execute_batch("DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version=41; PRAGMA user_version=40; INSERT INTO receipt(id,target_thread_id,state,created_at,updated_at,result_json) VALUES('legacy','missing','pending','now','now','{malformed');").unwrap();
+    // Reconstruct the exact index-only predecessor without rewriting saved table data.
+    db.execute_batch("DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version=41; PRAGMA user_version=40;").unwrap();
     drop(db);
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
@@ -122,12 +134,12 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
     assert_eq!(
         upgraded
             .query_row(
-                "SELECT result_json FROM receipt WHERE id='legacy'",
-                [],
+                "SELECT result_json FROM receipt WHERE message_node_id=?1",
+                [node],
                 |r| r.get::<_, String>(0)
             )
             .unwrap(),
-        "{malformed"
+        before
     );
     let fresh_path = root.path().join("fresh.sqlite");
     let fresh = DbWorker::open(&fresh_path).await.unwrap();
