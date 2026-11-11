@@ -250,3 +250,6 @@ pub(crate) mod history_collection;
 
 #[path = "../history_window_items.rs"]
 mod history_window_items;
+
+#[path = "../message_provenance.rs"]
+mod message_provenance;

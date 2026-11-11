@@ -850,7 +850,7 @@ pub fn read_node(
     )?;
     let body = HistoryBody {
         context: crate::context::for_node(connection, &args.node_id)?,
-        provenance: provenance(connection, &args.node_id)?,
+        provenance: relations::projected_provenance(connection, &args.node_id)?,
         node_id: args.node_id.clone(),
         kind: row.kind,
         text: text[start..end].into(),

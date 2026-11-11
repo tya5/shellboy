@@ -10,7 +10,7 @@ use super::sql_error;
 
 /// Metadata describes creation, not the potentially many Threads selecting a node.
 pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenance, ApiError> {
-    let mut result = connection
+    let result = connection
         .query_row(
             "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id),COALESCE((SELECT sender_json FROM receipt WHERE message_node_id=n.id ORDER BY rowid LIMIT 1),(SELECT json_extract(result_json,'$.reply.by') FROM receipt WHERE target_thread_id=COALESCE(t.thread_id,r.thread_id) AND json_extract(result_json,'$.reply.node_id')=n.id ORDER BY rowid LIMIT 1)) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",
             [node_id],
@@ -30,6 +30,15 @@ pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenan
         .optional()
         .map_err(sql_error)?
         .ok_or_else(|| ApiError::new(ErrorCode::TargetUnavailable, "history node not found"))?;
+    Ok(result)
+}
+
+/// Only history get/list/window publish the separately budgeted optional relation.
+pub(super) fn projected_provenance(
+    connection: &Connection,
+    node_id: &str,
+) -> Result<NodeProvenance, ApiError> {
+    let mut result = provenance(connection, node_id)?;
     if result.kind == "user" {
         if let Some(thread) = result.origin_thread_id.as_deref() {
             result.message = super::message_provenance::project(connection, node_id, thread)

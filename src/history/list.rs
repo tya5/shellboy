@@ -217,7 +217,7 @@ pub(super) fn history_snippet(
             .get::<_, Option<i64>>(6)
             .map_err(sql_error)?
             .map(|n| n as u64),
-        provenance: provenance(connection, &node_id)?,
+        provenance: super::relations::projected_provenance(connection, &node_id)?,
         context: crate::context::for_node(connection, &node_id)?,
         selection: HistorySelection {
             thread_id: thread_id.into(),
@@ -295,7 +295,7 @@ pub(super) fn history_snippet_with_items(
         item_projection: Some(item_projection),
         spill_tools,
         payload_chars,
-        provenance: provenance(connection, &node_id)?,
+        provenance: super::relations::projected_provenance(connection, &node_id)?,
         context: crate::context::for_node(connection, &node_id)?,
         selection: HistorySelection {
             thread_id: thread_id.into(),
