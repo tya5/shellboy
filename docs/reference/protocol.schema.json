@@ -3326,6 +3326,14 @@
       "title": "IndexStatus",
       "type": "object"
     },
+    "InstructionObservation": {
+      "enum": [
+        "first_seen",
+        "updated",
+        "removed"
+      ],
+      "type": "string"
+    },
     "MessageAccepted": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -3748,6 +3756,16 @@
             }
           ]
         },
+        "notification": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NotificationDescriptor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "origin_thread_id": {
           "type": [
             "string",
@@ -3787,6 +3805,118 @@
         "source_revision"
       ],
       "type": "object"
+    },
+    "NotificationDescriptor": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "turn_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "recovery_resumed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "changed_fields": {
+              "items": {
+                "$ref": "#/definitions/NotificationSetting"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "thread_settings_changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "changed_fields"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "instructions_observed",
+              "type": "string"
+            },
+            "observation": {
+              "$ref": "#/definitions/InstructionObservation"
+            }
+          },
+          "required": [
+            "kind",
+            "observation"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "execution_id": {
+              "type": "string"
+            },
+            "exit_code": {
+              "format": "int32",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "shell_ended",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/definitions/NotificationTerminal"
+            }
+          },
+          "required": [
+            "kind",
+            "execution_id",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "NotificationSetting": {
+      "enum": [
+        "cwd",
+        "connection",
+        "model",
+        "effort"
+      ],
+      "type": "string"
+    },
+    "NotificationTerminal": {
+      "enum": [
+        "exited",
+        "failed",
+        "stopped"
+      ],
+      "type": "string"
     },
     "OperationTarget": {
       "additionalProperties": false,
