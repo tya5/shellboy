@@ -13,6 +13,18 @@ pub(crate) fn record(
     tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at) VALUES(?1,'context_changed',?2,?3,?4,?5)", params![uuid::Uuid::new_v4().to_string(),actor.to_string(),thread,json!({"kind":kind,"actor":actor,"change":change,"observed_at":at,"timezone":chrono::Local::now().offset().to_string()}).to_string(),at])?;
     Ok(())
 }
+pub(super) fn record_fact(
+    tx: &Connection,
+    thread: &str,
+    kind: &str,
+    actor: Value,
+    change: Value,
+    at: &str,
+    fact: super::notification::Fact,
+) -> rusqlite::Result<()> {
+    tx.execute("INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,semantic_json,created_at) VALUES(?1,'context_changed',?2,?3,?4,?5,?6)",params![uuid::Uuid::new_v4().to_string(),actor.to_string(),thread,json!({"kind":kind,"actor":actor,"change":change,"observed_at":at,"timezone":chrono::Local::now().offset().to_string()}).to_string(),fact.encoded(),at])?;
+    Ok(())
+}
 pub(super) fn turn_started(
     tx: &Connection,
     thread: &str,
@@ -25,12 +37,13 @@ pub(super) fn turn_started(
         params![thread, turn],
         |row| row.get(0),
     )?;
-    record(
+    record_fact(
         tx,
         thread,
         "turn_started",
         json!({"kind":"shellboy"}),
         json!({"run_id":run,"turn_id":turn,"previous_turn_ended_at":previous}),
         at,
+        super::notification::Fact::TurnStarted,
     )
 }

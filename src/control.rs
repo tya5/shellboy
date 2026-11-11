@@ -9,6 +9,7 @@ mod live;
 mod live_admission;
 mod memory;
 pub(crate) mod message_delivery;
+mod notification;
 mod owner_shutdown;
 pub(crate) mod pending_messages;
 mod runtime;

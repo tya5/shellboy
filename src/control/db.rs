@@ -2141,13 +2141,14 @@ fn assign_message(
                                 "Turn changed before explicit recovery resume",
                             ));
                         }
-                        super::context::record(
+                        super::context::record_fact(
                             tx,
                             id,
                             "recovery_resumed",
                             actor(caller),
                             json!({"run_id":run_id,"turn_id":turn_id}),
                             now,
+                            super::notification::Fact::RecoveryResumed,
                         )
                         .map_err(sql_error)?;
                         let still_recovering: bool = tx
@@ -2926,13 +2927,14 @@ fn retry_run(
             "Run has no recoverable Turn",
         ));
     }
-    super::context::record(
+    super::context::record_fact(
         tx,
         &details.thread_id,
         "recovery_resumed",
         actor(caller),
         json!({"run_id":id}),
         now,
+        super::notification::Fact::RecoveryResumed,
     )
     .map_err(sql_error)?;
     Ok(MutationResult {

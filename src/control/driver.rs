@@ -1,5 +1,6 @@
 //! Per-Thread model/tool loop. A long wait keeps its IPC slot for the whole wait.
 mod adoption;
+mod notification_admission;
 mod overflow;
 mod proactive;
 mod proactive_guard;
@@ -642,10 +643,8 @@ async fn next_with_clients(
         let nodes:Vec<String>=pending.iter().map(|(_,node)|node.clone()).collect();
         snapshot.receipts=pending.into_iter().map(|(receipt,_)|receipt).collect();
         super::message_delivery::append_admitted_tx(&tx,&thread,snapshot.selection as u64,&nodes,&now())?;
-        for (event,payload)in &events{
-            let node=format!("event-{event}");
-            let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node WHERE id=?1)",[&node],|r|r.get(0))?;
-            if !exists{history::append_node(&tx,&thread,&node,Some(&turn),"event",&json!({"role":"developer","content":[{"type":"input_text","text":format!("Shellboy event v1: {payload}")}],"event_id":event}),&now())?;}
+        for (event,payload)in &events {
+            notification_admission::admit_notification_tx(&tx,&thread,&run,&turn,event,payload,&now())?;
         }
         // #183: after the delivered events, so a change notice and the new
         // context line arrive together. Only once the Turn's AGENTS reference
