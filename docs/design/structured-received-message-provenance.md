@@ -287,3 +287,14 @@ unique indexed reverse receipt's saved `reply.by` evidence. This intentionally
 removes the previous COALESCE/row-order fallback, not a claim of byte-for-byte
 legacy fallback compatibility. Invalid/ambiguous message relations never remove
 independently valid own sender evidence or saved body text.
+
+### Reverse Index Key Order Refinement
+
+The adopted index orders the safe reply-node expression first and target Thread
+second. Both equality keys and the CASE expression remain unchanged. An actual
+bundled-SQLite full-schema synthetic comparison (512 rows, 256 target rows, two
+pending) measured thread-first unforced pending lookup at 1549 VM steps instead of
+17 before the index. Expression-first removes that thread-only prefix candidate.
+The preserved unforced comparison, reverse two-key SEARCH, and fresh/migrated index
+SQL convergence qualify this change; forced old-index usability alone does not.
+These synthetic counts are not wall-clock or production-distribution guarantees.

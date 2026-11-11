@@ -253,6 +253,12 @@ mod tests {
                 (forced.0, forced.1)
             );
             assert!(before.1 > 0 && after.1 > 0 && forced.1 > 0);
+            assert!(
+                after.0.contains("receipt_reply_pending"),
+                "unforced pending scope changed: {}",
+                after.0
+            );
+            assert_eq!(before.1, after.1, "bounded pending VM work changed");
         }
     }
     #[test]
