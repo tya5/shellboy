@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 
 pub(super) struct Producer {
     hash: Sha256,
+    unknown: bool,
     sequence: u64,
     scalars: u64,
     bytes: u64,
@@ -20,24 +21,31 @@ impl Producer {
         hash.update(incarnation);
         Self {
             hash,
+            unknown: false,
             sequence: 0,
             scalars: 0,
             bytes: 0,
         }
     }
     pub(super) fn admit_ordinary(&mut self, offset: u64, text: &str) -> Result<(), ()> {
-        if offset != self.scalars {
+        if self.unknown {
             return Err(());
         }
-        let sequence = self.sequence.checked_add(1).ok_or(())?;
-        let scalars = self
-            .scalars
-            .checked_add(text.chars().count().try_into().map_err(|_| ())?)
-            .ok_or(())?;
-        let bytes = self
-            .bytes
-            .checked_add(text.len().try_into().map_err(|_| ())?)
-            .ok_or(())?;
+        let counts = (|| {
+            if offset != self.scalars {
+                return None;
+            }
+            Some((
+                self.sequence.checked_add(1)?,
+                self.scalars
+                    .checked_add(text.chars().count().try_into().ok()?)?,
+                self.bytes.checked_add(text.len().try_into().ok()?)?,
+            ))
+        })();
+        let Some((sequence, scalars, bytes)) = counts else {
+            self.unknown = true;
+            return Err(());
+        };
         self.hash.update([1]);
         self.hash.update(self.sequence.to_be_bytes());
         self.hash.update([0]);
@@ -49,17 +57,20 @@ impl Producer {
         self.bytes = bytes;
         Ok(())
     }
-    pub(super) fn freeze(mut self) -> FrozenSeal {
+    pub(super) fn freeze(mut self) -> Result<FrozenSeal, ()> {
+        if self.unknown {
+            return Err(());
+        }
         self.hash.update([2]);
         for n in [self.sequence, self.scalars, self.bytes] {
             self.hash.update(n.to_be_bytes());
         }
-        FrozenSeal {
+        Ok(FrozenSeal {
             digest: self.hash.finalize().into(),
             next_sequence: self.sequence,
             scalar_end: self.scalars,
             utf8_bytes: self.bytes,
-        }
+        })
     }
 }
 
@@ -83,7 +94,7 @@ mod tests {
                     )
                     .unwrap();
             }
-            let seal = producer.freeze();
+            let seal = producer.freeze().unwrap();
             let digest = seal
                 .digest
                 .iter()
@@ -109,10 +120,14 @@ mod tests {
         let mut p = Producer::begin([0; 16]);
         assert!(p.admit_ordinary(1, "a").is_err());
         assert_eq!(p.sequence, 0);
+        assert!(p.admit_ordinary(0, "valid-after-error").is_err());
+        assert!(p.freeze().is_err());
+        let mut p = Producer::begin([0; 16]);
         p.sequence = u64::MAX;
         assert!(p.admit_ordinary(0, "a").is_err());
         assert_eq!(p.bytes, 0);
-        p.sequence = 0;
+        assert!(p.freeze().is_err());
+        let mut p = Producer::begin([0; 16]);
         p.bytes = u64::MAX;
         assert!(p.admit_ordinary(0, "a").is_err());
         assert_eq!(p.sequence, 0);
