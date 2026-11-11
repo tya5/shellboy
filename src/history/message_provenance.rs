@@ -154,7 +154,7 @@ pub(super) fn project(
     let valid_sender = value
         .get("reply")
         .and_then(|r| r.get("by"))
-        .and_then(|by| serde_json::from_value::<crate::protocol::SenderIdentity>(by.clone()).ok())
+        .and_then(|by| serde_json::from_value::<crate::protocol::MessageSender>(by.clone()).ok())
         .is_some();
     if !valid_sender {
         return Ok(None);
