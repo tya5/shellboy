@@ -101,3 +101,12 @@ installed binary change, private DB, live provider or paid request. Focused sour
 and response-budget/privacy controls are in history/items and history_window_items.
 Independent plan condition S6 a824 accepted; implementation review / exact-SHA
 all-OS CI are still required. See acceptance.md for actual failed and passed runs.
+
+## Core #298 Bounded Structural Tools
+
+Owner issue-298/structural-tools, baseline05e358. Approved typed saved call name /
+call IDs only, closed descriptor/detail availability, shared response byte ledger,
+canonical identity/execution authority unchanged. Synthetic producers and protocol
+schema golden pass; first spill omission and zero-filter mistakes are retained in
+acceptance history. S6 source gate accepted; exact final CI/main remains pending.
+No #274 reader rewrite, #297 sender edit, schema40 or installed change.

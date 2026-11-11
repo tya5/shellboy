@@ -11470,3 +11470,27 @@ retained in .local/private-reports/core299-source-integrity (outside Git). The f
 race hypothesis was withdrawn after direct shell stderr/HEAD comparison. Restore
 was limited to owned changes, fmt completed alone, then source committed/hashed
 before checking. Those mutable/failed runs are never counted as green evidence.
+
+## Core #298 Structural Tool Descriptor Initial Increment
+
+Adopted contract: effective-spec + issue-298-structural-tools-plan; S6 design
+60c68ede and leader explicit saved-name/call-ID authority precede implementation.
+Tool descriptors contain only exact bounded structural name/call ID and closed
+availability. Result name is never inferred. Detail availability means verified
+execution routing only, not retained output. No arguments/results/opaque text,
+global call join, new reader, #274 rewrite or database migration is authorized.
+
+Actual local evidence (synthetic saved producers only): /tmp/core298-second-*.log:
+check PASS, history items14 PASS, window17 PASS, relations5 PASS, generated-schema
+golden1 PASS. Actual compaction spill_payload control1 PASS in
+/tmp/core298-exact-compaction.log; bounded spill1 PASS and list/window preservation1
+PASS in /tmp/core298-exact-spill-v3.log and core298-exact-spill-window.log.
+First window15 PASS/1 FAIL exposed spill legacy-only descriptor omission; corrected
+by admitting only exact copied tool items, not spill messages or private bodies.
+Two incorrect filter names matched zero tests; those runs are not evidence. Source
+control references are corrected in the plan. All original failed/zero logs remain.
+
+Source/privacy/budget review of 831d0907 accepted by S6; subsequent change only fixes
+documentation control names. Exact final CI/review/main adoption is still pending.
+No Studio consumption, installed Core, paid provider, private DB or UI success is
+implied by these producer tests. Schema40 and installed owner remain unchanged.
