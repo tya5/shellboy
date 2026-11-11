@@ -88,6 +88,76 @@ pub(super) fn adoption_size(original: u64, summary: u64, limit: OutputLimit) -> 
     (summary < original).then_some(AdoptionSize { exceeded_output_limit: summary > limit.0 })
 }
 
+/// Real HTTP execution path for the new summarizer. Entry-point/adoption
+/// integration is separate: caller must snapshot/revalidate the selected range.
+pub(super) struct Dispatched {
+    pub(super) selected: Range<usize>,
+    pub(super) response: model::ModelResponse,
+    pub(super) size: AdoptionSize,
+}
+impl Compactor {
+    pub(super) async fn dispatch_single_summary(
+        &self, snapshot:&Snapshot, selected:Range<usize>, limit:OutputLimit,
+        cancel:&CancellationToken, ledger:&mut usage::UsageLedger,
+        eligible:impl Fn(Range<usize>)->bool,
+    ) -> Result<Dispatched,ApiError> {
+        let connection=self.config.connections.get(&snapshot.profile)
+            .ok_or_else(||ApiError::new(ErrorCode::ConfigInvalid,"Connection not found"))?;
+        let client=self.clients.get(&snapshot.profile).map_err(|e|invalid(&e.to_string()))?;
+        let mut trial=Trial::new(&snapshot.thread,snapshot,selected,limit)
+            .ok_or_else(||invalid("No summary range"))?;
+        let mut retries=0u32;
+        loop {
+            if cancel.is_cancelled() {return Err(discard::rejected(discard::DiscardReason::Cancelled,"Compaction cancelled; original path retained"));}
+            let selected=trial.selected().ok_or_else(||invalid("Summary trial already ended"))?;
+            let payload=request(snapshot,selected.clone(),limit);
+            // Preserve existing transport admission and durable usage accounting.
+            // Legacy usage counters remain until public schema retirement step.
+            let observation=ledger.begin(&self.database,false).await?;
+            let state=model::SendState::default();
+            let result=retry::within(
+                client.response_with_state(connection,&payload,cancel.clone(),state),
+                connection.request_timeout_ms,
+            ).await;
+            let response=match result {
+                Ok(response)=>{
+                    ledger.observe_http(&self.database,observation,response.response_facts).await?;
+                    ledger.observe(&self.database,usage::usage_of(Some(&response.raw))).await?;
+                    response
+                }
+                Err(failure)=>{
+                    ledger.observe_http(&self.database,observation,failure.facts).await?;
+                    ledger.observe(&self.database,usage::usage_of(failure.raw_response.as_ref())).await?;
+                    if cancel.is_cancelled() {return Err(discard::rejected(discard::DiscardReason::Cancelled,"Compaction cancelled; original path retained"));}
+                    if !failure.error.is_context_limit() {
+                        if let Some(delay)=retry::retry_delay(connection,&failure,retries) {
+                            retries+=1;
+                            tokio::select! {
+                                _=cancel.cancelled()=>return Err(discard::rejected(discard::DiscardReason::Cancelled,"Compaction cancelled; original path retained")),
+                                _=tokio::time::sleep(delay)=>{}
+                            }
+                            continue;
+                        }
+                        return Err(invalid("Summary request failed; original path retained"));
+                    }
+                    match trial.finish_request(snapshot,Err(&failure.error),&eligible) {
+                        Next::RetryPrefix(_)=>{retries=0;continue;}
+                        Next::Done|Next::Failed=>return Err(invalid("Summary context refusal at final eligible prefix; original path retained")),
+                    }
+                }
+            };
+            if summary_refused(&response.output) {return Err(discard::rejected(discard::DiscardReason::SummaryRefused,"Summary was refused; original path retained"));}
+            if response.text.trim().is_empty() {return Err(discard::rejected(discard::DiscardReason::SummaryEmpty,"Summary was empty; original path retained"));}
+            let original=snapshot.groups[selected.clone()].iter().flat_map(|g|g.sources.iter())
+                .map(|source|edit::projection_characters(&source.payload,snapshot.epoch)).sum::<usize>() as u64;
+            let size=adoption_size(original,response.text.chars().count() as u64,limit)
+                .ok_or_else(||discard::rejected(discard::DiscardReason::SummaryNotShrinking,"Summary does not shrink its original source projection; original path retained"))?;
+            trial.finish_request(snapshot,Ok(()),&eligible);
+            return Ok(Dispatched{selected,response,size});
+        }
+    }
+}
+
 /// Claude recommendation adopted by leader: two latest slots, not a history.
 #[derive(Clone, Copy)]
 pub(super) enum Region { Closed, Active }
