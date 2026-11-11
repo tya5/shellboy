@@ -293,7 +293,7 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
             .await
             .unwrap();
     }
-    assert_boundary(&control, &target, active, summary).await;
+    assert_boundary(&control, &target, active, summary, "shutdown").await;
     control
         .store
         .database
@@ -311,7 +311,7 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
     owner.shutdown().await.unwrap();
     let owner = proactive_owner(root.path(), &url, limits).await;
     let control = Control::new(&owner, root.path().into());
-    assert_boundary(&control, &target, active, summary).await;
+    assert_boundary(&control, &target, active, summary, "reopen").await;
     let id = target.clone();
     control
         .store
@@ -408,7 +408,13 @@ async fn assert_immutable(control: &Control) {
     }).await.unwrap();
 }
 
-async fn assert_boundary(control: &Control, target: &str, active: bool, summary: bool) {
+async fn assert_boundary(
+    control: &Control,
+    target: &str,
+    active: bool,
+    summary: bool,
+    phase: &'static str,
+) {
     assert_immutable(control).await;
     let target = target.to_owned();
     control.store.database.call(move |db| {
@@ -419,7 +425,7 @@ async fn assert_boundary(control: &Control, target: &str, active: bool, summary:
         assert!(current_path.len() >= committed_path.len());
         assert_eq!(&current_path[..committed_path.len()], committed_path, "committed selection is preserved exactly");
         let appended = &current_path[committed_path.len()..];
-        assert_interruption_audits(db, appended)?;
+        assert_interruption_audits(db, appended, phase, committed_path.len())?;
         assert_eq!(current_path.last(), Some(&cursor));
         assert_eq!(current_revision, revision + appended.len() as i64, "only validated audit append commits advance selection_revision");
         assert_eq!(current_epoch, epoch, "committed reasoning epoch survives failure/restart");
@@ -776,6 +782,8 @@ async fn proxy() -> (
 fn assert_interruption_audits(
     db: &rusqlite::Connection,
     appended: &[String],
+    phase: &'static str,
+    captured_prefix_len: usize,
 ) -> Result<(), crate::storage::StorageError> {
     let sections = [
         "runs",
@@ -787,13 +795,39 @@ fn assert_interruption_audits(
     ];
     let mut details = std::collections::BTreeMap::new();
     let mut reasons = std::collections::BTreeSet::new();
-    for id in appended {
+    for (offset, id) in appended.iter().enumerate() {
         let (kind, turn, at, body): (String, Option<String>, String, String) = db.query_row(
             "SELECT kind,turn_id,created_at,payload_json FROM node WHERE id=?1",
             [id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
-        assert!(turn.is_none());
+        assert!(turn.is_none(), "postcommit suffix metadata: {}", {
+            // Failure-only closed metadata: never print node/Turn IDs, payload,
+            // paths, or provider fields. Unknown kinds/states are not forwarded.
+            let node_kind = match kind.as_str() {
+                "user"
+                | "message"
+                | "model_output"
+                | "tool_call"
+                | "tool_result"
+                | "summary"
+                | "spill"
+                | "interruption_context"
+                | "interruption_details" => kind.as_str(),
+                _ => "other",
+            };
+            let (run_state,generation):(Option<String>,Option<i64>)=db.query_row(
+                "SELECT r.state,t.generation FROM turn t JOIN run r ON r.id=t.run_id WHERE t.id=?1",
+                [turn.as_deref()],|r|Ok((r.get(0)?,r.get(1)?)),
+            ).optional()?.unwrap_or((None,None));
+            let run_state = match run_state.as_deref() {
+                Some("live" | "stopping" | "completed" | "cancelled" | "failed") => {
+                    run_state.as_deref().unwrap()
+                }
+                _ => "other_or_missing",
+            };
+            json!({"node_kind":node_kind,"turn_present":turn.is_some(),"ordinal":captured_prefix_len+offset,"phase":phase,"run_state":run_state,"turn_generation":generation,"captured_prefix_len":captured_prefix_len})
+        });
         let payload: Value = serde_json::from_str(&body).unwrap();
         let audit: Value = serde_json::from_str(payload["text"].as_str().unwrap()).unwrap();
         match kind.as_str() {
