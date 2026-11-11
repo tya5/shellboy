@@ -20,7 +20,10 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
     let command:Command=serde_json::from_value(json!({"command":"message.send","args":{"thread_id":"recipient","text":"synthetic saved body","expect_reply":true}})).unwrap();
     let saved = control
         .store
-        .execute(Request::new("saved-request", command), None)
+        .execute(
+            Request::new(format!("{}:saved-request", owner.instance_id), command),
+            None,
+        )
         .await
         .unwrap()
         .result;
@@ -28,7 +31,10 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
     let command: Command =
         serde_json::from_value(json!({"command":"history.get","args":{"node_id":node}})).unwrap();
     let (baseline, _) = control
-        .evaluate(Request::new("x", command.clone()), CancellationToken::new())
+        .evaluate(
+            Request::new(format!("{}:x", owner.instance_id), command.clone()),
+            CancellationToken::new(),
+        )
         .await;
     assert!(baseline.ok);
     assert!(
@@ -39,7 +45,10 @@ async fn history_handler_drops_only_relation_at_exact_frame_boundary() {
     let baseline_bytes = serde_json::to_vec(&baseline).unwrap().len();
     for delta in [-1i64, 0, 1] {
         let length = (crate::protocol::MAX_FRAME_BYTES - baseline_bytes + 1) as i64 + delta;
-        let request = Request::new("x".repeat(length as usize), command.clone());
+        let request = Request::new(
+            format!("{}:{}", owner.instance_id, "x".repeat(length as usize)),
+            command.clone(),
+        );
         request.validate().unwrap();
         assert!(serde_json::to_vec(&request).unwrap().len() <= crate::protocol::MAX_FRAME_BYTES);
         let (response, _) = control.evaluate(request, CancellationToken::new()).await;
