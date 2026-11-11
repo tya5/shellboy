@@ -2,7 +2,7 @@
 use crate::protocol::{MAX_FRAME_BYTES, MessageProvenance, Response};
 use serde_json::Value;
 
-// Only provenance.message is optional here; typed text and all other metadata stay intact.
+// Only official optional message/notification slots may be omitted; text stays intact.
 pub(crate) enum Slots {
     Body,
     Nodes,
@@ -34,26 +34,38 @@ pub(crate) fn fit(response: &mut Response<Value>, slots: Slots) -> Result<(), se
             .map(|i| format!("/items/{i}/provenance"))
             .collect(),
     };
-    let mut saved = Vec::with_capacity(paths.len());
+    let mut saved = Vec::with_capacity(paths.len() * 2);
     for path in &paths {
-        let message = response
-            .result
-            .as_mut()
-            .and_then(|r| r.pointer_mut(path))
-            .and_then(Value::as_object_mut)
-            .and_then(|p| p.remove("message"));
-        saved.push(message);
+        for field in ["message", "notification"] {
+            let value = response
+                .result
+                .as_mut()
+                .and_then(|r| r.pointer_mut(path))
+                .and_then(Value::as_object_mut)
+                .and_then(|p| p.remove(field));
+            saved.push((path, field, value));
+        }
     }
     let mut used = serde_json::to_vec(response)?.len();
-    for (path, message) in paths.iter().zip(saved) {
-        let Some(message) = message else { continue };
-        let Ok(relation) = serde_json::from_value::<MessageProvenance>(message.clone()) else {
-            continue;
+    for (path, field, value) in saved {
+        let Some(value) = value else { continue };
+        let bytes = serde_json::to_vec(&value)?;
+        let valid = match field {
+            "message" => serde_json::from_value::<MessageProvenance>(value.clone())
+                .ok()
+                .is_some_and(|relation| bytes.len() <= 4096 && valid(&value, &relation)),
+            "notification" => {
+                bytes.len() <= 2048
+                    && std::str::from_utf8(&bytes)
+                        .ok()
+                        .and_then(super::notification::decode)
+                        .is_some()
+            }
+            _ => false,
         };
-        if !valid(&message, &relation) {
+        if !valid {
             continue;
         }
-        let bytes = serde_json::to_vec(&message)?.len();
         let Some(provenance) = response
             .result
             .as_mut()
@@ -62,15 +74,16 @@ pub(crate) fn fit(response: &mut Response<Value>, slots: Slots) -> Result<(), se
         else {
             continue;
         };
-        let charge =
-            serde_json::to_vec("message")?.len() + 1 + bytes + usize::from(!provenance.is_empty());
-        if bytes <= 4096
-            && used
-                .checked_add(charge)
-                .is_some_and(|n| n <= MAX_FRAME_BYTES)
+        let charge = serde_json::to_vec(field)?.len()
+            + 1
+            + bytes.len()
+            + usize::from(!provenance.is_empty());
+        if used
+            .checked_add(charge)
+            .is_some_and(|total| total <= MAX_FRAME_BYTES)
         {
             used += charge;
-            provenance.insert("message".into(), message);
+            provenance.insert(field.into(), value);
         }
     }
     Ok(())

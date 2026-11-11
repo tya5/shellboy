@@ -90,7 +90,7 @@ pub(super) fn snapshot(db: &Connection, node: &str) -> rusqlite::Result<Option<V
     ).optional()?;
     Ok(raw.flatten().and_then(|raw| decode(&raw)))
 }
-fn decode(raw: &str) -> Option<Value> {
+pub(crate) fn decode(raw: &str) -> Option<Value> {
     if raw.len() > 2048 {
         return None;
     }

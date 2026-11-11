@@ -11,7 +11,7 @@ use super::sql_error;
 /// Metadata describes creation, not the potentially many Threads selecting a node.
 pub fn provenance(connection: &Connection, node_id: &str) -> Result<NodeProvenance, ApiError> {
     let mut result=connection.query_row(
-        "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[node_id],|row|Ok(NodeProvenance{message:None,sender:None,kind:row.get(0)?,created_at:row.get(1)?,source_revision:row.get(2)?,turn_id:row.get(3)?,run_id:row.get(4)?,origin_thread_id:row.get(5)?})
+        "SELECT n.kind,n.created_at,n.payload_revision,n.turn_id,t.run_id,COALESCE(t.thread_id,r.thread_id) FROM node n LEFT JOIN turn t ON t.id=n.turn_id LEFT JOIN run r ON r.id=t.run_id WHERE n.id=?1",[node_id],|row|Ok(NodeProvenance{ notification: None,message:None,sender:None,kind:row.get(0)?,created_at:row.get(1)?,source_revision:row.get(2)?,turn_id:row.get(3)?,run_id:row.get(4)?,origin_thread_id:row.get(5)?})
     ).optional().map_err(sql_error)?.ok_or_else(||ApiError::new(ErrorCode::TargetUnavailable,"history node not found"))?;
     if result.kind == "user" {
         let own:Option<Option<String>>=connection.query_row("SELECT CASE WHEN length(CAST(sender_json AS BLOB))<=8192 THEN sender_json END FROM receipt WHERE message_node_id=?1",[node_id],|r|r.get(0)).optional().map_err(sql_error)?;
@@ -42,6 +42,11 @@ pub(super) fn projected_provenance(
     {
         result.message =
             super::message_provenance::project(connection, node_id, thread).map_err(sql_error)?;
+    }
+    if result.kind == "event" {
+        result.notification = super::notification::descriptor(connection, node_id)
+            .map_err(sql_error)?
+            .map(|value| value.into_descriptor());
     }
     Ok(result)
 }
