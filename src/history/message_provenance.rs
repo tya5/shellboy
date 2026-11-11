@@ -159,7 +159,7 @@ pub(super) fn project(
     if !valid_sender {
         return Ok(None);
     }
-    let request_in_context:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn t ON t.id=n.created_turn_id WHERE n.id=?1 AND t.thread_id=?2)",[request.as_str(),thread],|r|r.get(0))?;
+    let request_in_context:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn t ON t.id=n.turn_id WHERE n.id=?1 AND t.thread_id=?2)",[request.as_str(),thread],|r|r.get(0))?;
     if !request_in_context {
         return Ok(None);
     }

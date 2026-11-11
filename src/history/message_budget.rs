@@ -11,6 +11,18 @@ pub(crate) enum Slots {
 pub(crate) fn fit(response: &mut Response<Value>, slots: Slots) -> Result<(), serde_json::Error> {
     // These paths are supplied by the operation's typed response boundary, never payload keys.
     // Nodes inherits history list/window's existing maximum of 200, owned by this response.
+    if matches!(slots, Slots::Nodes)
+        && response
+            .result
+            .as_ref()
+            .and_then(|r| r.get("items"))
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.len() > 200)
+    {
+        return Err(<serde_json::Error as serde::ser::Error>::custom(
+            "history node count exceeds response bound",
+        ));
+    }
     let paths = match slots {
         Slots::Body => vec!["/provenance".to_owned()],
         Slots::Nodes => (0..response
@@ -18,8 +30,7 @@ pub(crate) fn fit(response: &mut Response<Value>, slots: Slots) -> Result<(), se
             .as_ref()
             .and_then(|r| r.get("items"))
             .and_then(Value::as_array)
-            .map_or(0, Vec::len)
-            .min(200))
+            .map_or(0, Vec::len))
             .map(|i| format!("/items/{i}/provenance"))
             .collect(),
     };

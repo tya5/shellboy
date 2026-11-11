@@ -942,6 +942,13 @@ impl Control {
         let operation = request.operation_id.clone();
         let observation = !request.command.requires_receipt();
         let observation_name = request.command.name();
+        let message_slots = match &request.command {
+            Command::HistoryGet(_) => Some(crate::history::message_budget::Slots::Body),
+            Command::HistoryList(_) | Command::HistoryWindow(_) => {
+                Some(crate::history::message_budget::Slots::Nodes)
+            }
+            _ => None,
+        };
         let terminal_fence = matches!(&request.command, Command::Status(args) if !args.memory);
         let result = async {
             request.validate()?;
@@ -1066,10 +1073,24 @@ impl Control {
             result
         };
         match result {
-            Ok(effects) => (
-                Response::success(operation, effects.result.clone()),
-                Some(effects),
-            ),
+            Ok(effects) => {
+                let mut response = Response::success(operation, effects.result.clone());
+                if let Some(slots) = message_slots {
+                    if crate::history::message_budget::fit(&mut response, slots).is_err() {
+                        return (
+                            Response::failure(
+                                response.operation_id,
+                                ApiError::new(
+                                    ErrorCode::InvalidState,
+                                    "History provenance response budget failed",
+                                ),
+                            ),
+                            None,
+                        );
+                    }
+                }
+                (response, Some(effects))
+            }
             Err(error) => {
                 if error.is_storage_failure() {
                     self.fail_storage().await;
