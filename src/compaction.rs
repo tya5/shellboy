@@ -36,6 +36,7 @@ pub use edit::ContextEditResult;
 mod policy;
 mod range;
 mod summary;
+mod single_request;
 mod usage;
 pub(crate) use keys::CompactionKeys;
 #[cfg(test)]
