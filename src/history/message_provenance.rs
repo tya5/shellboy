@@ -6,7 +6,7 @@ use serde_json::Value;
 // Match the existing saved outcome ceiling, before allocating/parsing receipt JSON.
 const MAX_RECEIPT_BYTES: usize = 8 * 1024 * 1024;
 
-pub(super) const REVERSE_LOOKUP: &str = "SELECT id,message_node_id,result_json FROM receipt INDEXED BY receipt_reply_node_lookup WHERE target_thread_id=?1 AND (CASE WHEN json_valid(result_json) THEN CASE WHEN json_type(result_json,'$.reply.node_id')='text' THEN json_extract(result_json,'$.reply.node_id') END END)=?2 LIMIT 2";
+pub(super) const REVERSE_LOOKUP: &str = "SELECT id,message_node_id FROM receipt INDEXED BY receipt_reply_node_lookup WHERE target_thread_id=?1 AND (CASE WHEN json_valid(result_json) THEN CASE WHEN json_type(result_json,'$.reply.node_id')='text' THEN json_extract(result_json,'$.reply.node_id') END END)=?2 LIMIT 2";
 
 fn id(value: &str, source: &str) -> bool {
     !value.trim().is_empty() && value.len() <= 256 && value != source
@@ -67,7 +67,40 @@ pub(super) fn bounded_receipt(
     receipt: &str,
 ) -> rusqlite::Result<Option<String>> {
     use rusqlite::OptionalExtension;
-    db.query_row("SELECT CASE WHEN length(CAST(result_json AS BLOB))<=?2 THEN result_json END FROM receipt WHERE id=?1", rusqlite::params![receipt, MAX_RECEIPT_BYTES], |row|row.get(0)).optional().map(Option::flatten)
+    db.query_row("SELECT CASE WHEN length(CAST(result_json AS BLOB))<=?2 THEN result_json END FROM receipt WHERE id=?1", rusqlite::params![receipt, MAX_RECEIPT_BYTES as i64], |row|row.get(0)).optional().map(Option::flatten)
+}
+
+/// Count identities first: an oversized candidate still makes two receipts ambiguous.
+pub(super) fn unique_reverse(
+    db: &rusqlite::Connection,
+    thread: &str,
+    node: &str,
+) -> rusqlite::Result<Option<(String, String)>> {
+    let mut statement = db.prepare(REVERSE_LOOKUP)?;
+    let mut rows = statement.query([thread, node])?;
+    let Some(first) = rows.next()? else {
+        return Ok(None);
+    };
+    let receipt: String = first.get(0)?;
+    // Never materialize an oversized ID or body identity from a corrupt legacy row.
+    if receipt.len() > 256 {
+        return Ok(None);
+    }
+    let body: Option<String> = match first.get_ref(1)? {
+        rusqlite::types::ValueRef::Text(bytes) if bytes.len() <= 256 => {
+            std::str::from_utf8(bytes).ok().map(str::to_owned)
+        }
+        _ => None,
+    };
+    if rows.next()?.is_some() {
+        return Ok(None);
+    }
+    drop(rows);
+    drop(statement);
+    let Some(body) = body else {
+        return Ok(None);
+    };
+    Ok(bounded_receipt(db, &receipt)?.map(|raw| (body, raw)))
 }
 
 #[cfg(test)]
@@ -97,6 +130,28 @@ mod tests {
             )
             .is_none()
         );
+    }
+    #[test]
+    fn oversized_second_reverse_candidate_remains_ambiguous() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT);").unwrap();
+        db.execute_batch(include_str!(
+            "../../migrations/0041_receipt_reply_node_lookup.sql"
+        ))
+        .unwrap();
+        db.execute(
+            "INSERT INTO receipt VALUES('one','t','request',?1)",
+            [r#"{"reply":{"node_id":"reply"}}"#],
+        )
+        .unwrap();
+        assert!(unique_reverse(&db, "t", "reply").unwrap().is_some());
+        let large=serde_json::json!({"reply":{"node_id":"reply"},"padding":"x".repeat(MAX_RECEIPT_BYTES)}).to_string();
+        db.execute(
+            "INSERT INTO receipt VALUES('two','t','request',?1)",
+            [large],
+        )
+        .unwrap();
+        assert!(unique_reverse(&db, "t", "reply").unwrap().is_none());
     }
     #[test]
     fn sqlite_materialization_is_byte_bounded_and_reverse_search_uses_both_keys() {
