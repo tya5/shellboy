@@ -108,3 +108,14 @@ fresh/upgrade SQL convergence, secret sentinels and encoded boundary +/-1.
 O is sole implementation author. One heavy queue; no installed migration42,
 owner/service/private DB/RPC/browser/paid-provider operation permission. Source,
 focused, exact-SHA CI and fresh nonforce main qualification remain separate gates.
+
+### Retry Outcome Refinement
+
+A validated delivery whose event-named node already exists returns OldUnlinked,
+SameAdmission or Conflict without rewriting the node. Conflict is a skipped
+notification admission, not a Schema error that fails the new run. The original
+creator/marker remain unchanged; this preserves the driver's pre-marker skip
+behavior for cancel/recovery redelivery. Invalid NEW admission context remains an
+error. Instructions first_seen currently means no previous instruction snapshot;
+a previous recorded absent observation followed by present is updated, not first
+snapshot. This explicit interpretation awaits matching closed-fact read controls.

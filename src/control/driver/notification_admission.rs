@@ -30,6 +30,13 @@ impl<'a> PendingNotification<'a> {
         })
     }
 }
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Admission {
+    Inserted,
+    OldUnlinked,
+    SameAdmission,
+    Conflict,
+}
 pub(super) fn admit_notification_tx(
     tx: &Transaction<'_>,
     thread: &str,
@@ -38,7 +45,7 @@ pub(super) fn admit_notification_tx(
     event: &str,
     payload: &str,
     at: &str,
-) -> Result<(), crate::storage::StorageError> {
+) -> Result<Admission, crate::storage::StorageError> {
     let pending = PendingNotification::validate(tx, thread, run, turn, event)?;
     let (thread, run, turn, event) = (pending.thread, pending.run, pending.turn, pending.event);
     let node = format!("event-{event}");
@@ -51,20 +58,20 @@ pub(super) fn admit_notification_tx(
         .optional()?;
     // Old unlinked nodes remain unlinked; retries never reassign authority.
     if let Some(link) = existing {
-        if link.as_deref().is_some_and(|link| link != event) {
-            return Err(crate::storage::StorageError::Schema(
-                "notification admission conflict".into(),
-            ));
+        let Some(link) = link else {
+            return Ok(Admission::OldUnlinked);
+        };
+        if link != event {
+            return Ok(Admission::Conflict);
         }
-        if link.is_some() {
-            let same:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn u ON u.id=n.turn_id WHERE n.id=?1 AND n.kind='event' AND u.thread_id=?2 AND u.run_id=?3 AND u.id=?4)",params![node,thread,run,turn],|r|r.get(0))?;
-            if !same {
-                return Err(crate::storage::StorageError::Schema(
-                    "notification creator reuse conflict".into(),
-                ));
-            }
-        }
-        return Ok(());
+        let same:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM node n JOIN turn u ON u.id=n.turn_id WHERE n.id=?1 AND n.kind='event' AND u.thread_id=?2 AND u.run_id=?3 AND u.id=?4)",params![node,thread,run,turn],|r|r.get(0))?;
+        // A later run may receive the same event. Preserve the original admission
+        // without failing unrelated turn work or changing its creator witness.
+        return Ok(if same {
+            Admission::SameAdmission
+        } else {
+            Admission::Conflict
+        });
     }
     crate::history::append_node(
         tx,
@@ -79,7 +86,7 @@ pub(super) fn admit_notification_tx(
         "UPDATE node SET notification_event_id=?2 WHERE id=?1 AND notification_event_id IS NULL",
         params![node, event],
     )?;
-    Ok(())
+    Ok(Admission::Inserted)
 }
 
 #[cfg(test)]
@@ -98,6 +105,58 @@ mod tests {
         assert!(PendingNotification::validate(&tx, "thread", "run", "foreign-turn", "e").is_err());
         tx.execute("DELETE FROM delivery", []).unwrap();
         assert!(PendingNotification::validate(&tx, "thread", "run", "turn", "e").is_err());
+    }
+    #[test]
+    fn redelivery_skips_conflict_without_reassigning_marker_or_failing_run() {
+        let mut db = fixture();
+        db.execute_batch("CREATE TABLE node(id TEXT PRIMARY KEY,notification_event_id TEXT,turn_id TEXT,kind TEXT); INSERT INTO node VALUES('event-e','e','turn','event'); INSERT INTO turn VALUES('next-turn','thread','next-run'); INSERT INTO delivery VALUES('e','next-run','pending');").unwrap();
+        let tx = db.transaction().unwrap();
+        assert_eq!(
+            admit_notification_tx(
+                &tx,
+                "thread",
+                "next-run",
+                "next-turn",
+                "e",
+                "private",
+                "now"
+            )
+            .unwrap(),
+            Admission::Conflict
+        );
+        assert_eq!(
+            admit_notification_tx(&tx, "thread", "run", "turn", "e", "private", "now").unwrap(),
+            Admission::SameAdmission
+        );
+        let original: (String, String) = tx
+            .query_row(
+                "SELECT notification_event_id,turn_id FROM node WHERE id='event-e'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(original, ("e".into(), "turn".into()));
+        tx.execute("UPDATE node SET notification_event_id=NULL", [])
+            .unwrap();
+        assert_eq!(
+            admit_notification_tx(
+                &tx,
+                "thread",
+                "next-run",
+                "next-turn",
+                "e",
+                "private",
+                "now"
+            )
+            .unwrap(),
+            Admission::OldUnlinked
+        );
+        assert!(
+            tx.query_row("SELECT notification_event_id IS NULL FROM node", [], |r| {
+                r.get::<_, bool>(0)
+            })
+            .unwrap()
+        );
     }
     #[test]
     fn pending_constructor_rejects_other_target_run() {
