@@ -207,8 +207,12 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 41,
         sql: include_str!("../../migrations/0041_receipt_reply_node_lookup.sql"),
-    include_str!("../../migrations/0042_notification_semantic_descriptor.sql"),
         foreign_keys: Some(Impact::IndexOnly),
+    },
+    Migration {
+        version: 42,
+        sql: include_str!("../../migrations/0042_notification_semantic_descriptor.sql"),
+        foreign_keys: None,
     },
 ];
 
