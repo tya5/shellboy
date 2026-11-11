@@ -4,7 +4,7 @@
 
 The complete numbered specification0-13 at the end of this document supersedes
 conflicting historical proactive/summary policy. Source of truth: USER-confirmed
-SHA256 `492ce66f174a20018830c0c16743813498277c6f1a7444353a9cddf0164e3ba2`
+SHA256 `b822f2b54f8cb5940bc8e0e65dc7287818b1b55457c629fd655eb12b3c2e1a61`
 from `.local/claude/auto-compaction-redesign.md`, read in full against fresh main
 `4e6241a9a3235bb6ceffb03574ae983c5919765b`. The specification text is copied
 verbatim below, including USER/Claude-recommendation/to-confirm distinctions.
@@ -13,7 +13,7 @@ This is DESIGN, not an assertion of implemented behavior. Old Core303 branch
 part of this branch. Its migration43, target estimator and implementation are
 not adopted. No new table, column, migration number or code is introduced here.
 
-Rule/branch/test mapping, superseded-section scope, five required source checks,
+Rule/branch/test mapping, superseded-section scope, single required #A source check,
 public-surface inventory and unresolved decisions:
 `docs/development/compaction-redesign-review.md`.
 No quality/reachability gate is introduced: original reachability explains why
@@ -1425,8 +1425,9 @@ summary size policy remain separate concerns.
 同じ要約器を、手動の `/compact`、範囲指定の要約、窓超過からの復旧も使っている。
 
 - 要約器は 1 つ（1 回の要求 ＋ 拒否なら半分）に統一する。経路ごとに別の実装を残さない。
-- 窓超過からの復旧の範囲決め（`overflow_prefix`）は `segment_chars` を基準にしている。置き換え方は設計レビューで案を示すこと。推測の数値を新しく作らない。【要確認】
-- 窓超過のときの段取りそのもの（failure-driven reduction の順序、最大限の省略）は、この設計の対象外。
+- 窓超過からの復旧は、まず最大限の省略（API を使わない）で行う。要約を使うのは最終段（最新の group も含めて spill → 要約）だけで、省略に対象が無いか、省略のあとも拒否された場合に限る。この段取りは変えない。
+- 最終段の要約の範囲だけを変える。いまは `overflow_prefix` が、現在の Turn の古い group を「残りが `segment_chars` 以下になるまで」足している。この数値の条件を外し、path の先頭から、最初の触れない物（安全でない group、最後の group）の手前までとする。
+- 要約のしかたは 4.2 と同じ（1 回の要求、拒否なら半分、半分で成功したら終わり）。窓超過の復旧のための特別な規則は足さない。
 
 ## 11. 既知のトレードオフ（設計文書に明記する）
 
@@ -1439,13 +1440,14 @@ summary size policy remain separate concerns.
 
 ## 12. 実装前に確かめること【要確認】
 
-結果は報告すること。合わない事実が出たら、設計を勝手に変えずに報告すること。
+確かめるのは 1 点だけ。#A が、表や列を増やさずに、有界な問い合わせで求まるか（7 章）。求まらないと分かったら、設計を勝手に変えず、実装せずに報告すること。
 
-1. 1 回の要求が、実際に窓に収まるか（整形とプロンプトの分を含む）。
-2. 窓超過の拒否が、処理の前に返るか（接続ごと）。
-3. 保護 node が path のどこに現れるか（active の範囲がどれだけ切り詰められるか）。
-4. #A が、有界な問い合わせで求まるか。
-5. 1 回の要求の所要時間（記録するだけ。保証値にしない）。
+次の点は、確かめなくてよい。拒否されたら半分にする規則があり、結果がどうでも設計は変わらないため。
+
+- 1 回の要求が、実際に窓に収まるか。
+- 窓超過の拒否が、処理の前に返るか。
+- 保護 node が path のどこに現れるか。
+- 1 回の要求の所要時間。
 
 ## 13. 進め方
 

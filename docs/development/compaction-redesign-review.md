@@ -1,7 +1,7 @@
 # Compaction Redesign: Design-Only Review Packet
 
 Baseline4e6241a9a3235bb6ceffb03574ae983c5919765b; authoritative file SHA256
-492ce66f174a20018830c0c16743813498277c6f1a7444353a9cddf0164e3ba2.
+b822f2b54f8cb5940bc8e0e65dc7287818b1b55457c629fd655eb12b3c2e1a61.
 Its complete text0-13 is verbatim in docs/design/compaction.md. USER decisions,
 Claude recommendations and to-confirm facts retain their original labels.
 The following branch/test identifiers are implementation PROPOSALS, not existing
@@ -20,7 +20,7 @@ functions or executed tests. Independent S6 review must precede product edits.
 | #271 spill shortfall | new2.2,9 | Remove continuation below threshold and size-estimated widening. |
 | #300 append-only adoption | new5 | Retain nonappend generation/prefix/tail proof and atomic fresh CAS. |
 | #301A reason recording / #301 body | new5 | Keep typed content-free observation; retire map/reduce labels with code. Review each dependency; do NOT delete guards wholesale. |
-| #50 overflow recovery selection | new10 | Shared summarizer changes; failure-driven stage ordering/maximum omission remain outside scope. Replacement for segment-based range needs review, not a new guessed constant. |
+| #50 overflow recovery selection | new10 | Omission priorities and final-summary ordering remain unchanged. Final range is path start to first unsafe group or before last group; remove segment_chars remainder condition; common4.2 summarizer. |
 | Receipt/source retention, restoration, audit, reasoning rules | no blanket override | Preserve except where an explicit new rule changes them. No quality gate or paid efficacy study added. |
 
 ## Rule -> One Branch -> One Test Mapping
@@ -68,25 +68,29 @@ All tests below are planned, not run; reuse existing fixture files where possibl
 | 7 bounded #A | read_a | query bound/index proof plus no hidden zero on incomplete evidence; unresolved below |
 | 8 settings | settings.resolve | threshold unchanged, percentage only #A, summary cap; names/ranges pending explicit choice |
 | 9 removals | obsolete API/schema/config removal | no compatibility shim; old paid part-cache data not deleted |
-| 10 shared summarizer [recommendation] | manual/range/overflow callers -> single_summary | same halving/adoption path, overflow stage ordering unchanged |
+| 10 shared summarizer [recommendation] | manual/range/overflow callers -> single_summary | same4.2 halving/adoption; overflow path-start prefix stops before first unsafe or latest group; omission priority/stage unchanged |
 | 11 tradeoffs | docs/attempt record | no token-goal guarantee, no latency guarantee, no extra retry/quality gate |
-| 12 checks | source report below | UNKNOWN not promoted to proof or approval for paid tests |
+| 12 sole #A check | source report below | feasibility unproven; other four checks canceled, no measurement gate |
 | 13 rollout | design->independent review->code->cloud qualification | new migration separately assigned only if required; USER/Claude installation only |
 
-## Five Required Pre-Implementation Checks (Source / Saved Evidence Only)
+## Sole Required Pre-Implementation Check: #A
 
-| Check | Actual source/evidence | Result / unknown / needed evidence |
-| --- | --- | --- |
-| 12.1 Full request fits window including prompt | compaction.rs summary construction; parallel.rs formatting; KEEP_INSTRUCTIONS and retained-round additions; connection/model request serializers | UNKNOWN for each actual connection/model/range. No tokenizer or trusted window guarantee in inspected source; existing segment bounds are being removed and do not prove full request fit. No token-from-character estimate permitted. Halving requires an actual context rejection, not guessed preflight. No paid request made. |
-| 12.2 Overflow rejected before processing per connection | compaction/retry.rs retry_delay; model/retry_class.rs context classification | Classifier exists but does NOT prove provider processing/billing stage. Per-connection guarantee UNKNOWN; no real connection configuration or provider transaction inspected. Need authoritative provider contract or already-authorized evidence, not inference from error code. |
-| 12.3 Protected-node positions | compaction.rs snapshot queries receipt accepted/held by target Thread; policy::safe_prefix/protected; range validation | SOURCE CONFIRMED protected messages can occur inside complete tool spans or elsewhere on path; whole containing group fenced. Existing tests (e.g. audit protection safe_prefix) support structure only. Actual positions/frequency/cutoff in user paths UNKNOWN; no private DB read. |
-| 12.4 Bounded #A and indexes | context_usage latest_query; bounded.rs33 recent turns/201 replacement cap; attempts_by_turn, attempts_completed_scope, automatic_compaction_turn, turns_by_thread; thread_replacement PK | NOT PROVEN. Existing canonical query finds latest, not first completion after latest trial/manual adoption; bounded display CTE may exclude old boundary and is not exact #A. Automatic trial start/end/no-op and manual adopted scope chronology need exact tie/order semantics. Existing indexes not shown to yield finite seeks for all new predicates. No EXPLAIN proof or query run. No table/column/index added. If persistence/index needed, stop/report for separate approval. |
-| 12.5 Single request duration | saved301 baseline summary UTC2026-11-11T22:10:50 source05e:32 Other stage facts total3749028ms; diagnostics observed starts before stage preparation/model/retry/adoption | Single-provider-request time UNKNOWN. Aggregate is stage duration with retry/preparation, not32 requests nor exact single request latency. Cannot divide into a valid request timing estimate. Drops37, possible rotation1, mismatched status/log denominator prevent completeness. No new measurement; no guarantee or performance optimization inferred. |
+USER update b822 explicitly CANCELS investigation/measurement of window fit,
+overflow rejection timing, protected-node positions and request duration. None
+is a gate, prerequisite, question or future required task here. Historical
+source notes about those four are superseded and removed from this review.
 
-Read-only source checks do NOT fulfill unknown provider guarantees. No private
-user DB/config read, paid compaction, owner startup, Rust/Node build/test or new
-cloud dispatch was performed. The old cloud startup_failure remains unrelated
-resource evidence, not proof of new design infeasibility.
+Existing context_usage::latest_query returns latest rather than first completion
+after latest trial/manual adoption. bounded.rs caps recent turns33 and
+replacements201: that display optimization is NOT a proven exact #A query.
+Indexes attempts_by_turn, attempts_completed_scope, automatic_compaction_turn,
+turns_by_thread and thread_replacement PK are candidates, not EXPLAIN proof.
+Result: exact bounded #A WITHOUT new tables/columns is UNPROVEN, not proven
+impossible. No query implementation, table/column/index or migration introduced.
+Next permitted source work is a bounded query design and index/order proof using
+existing records. If it cannot represent trial/no-op/manual chronology and scope
+exactly, STOP and report; do not manufacture missing=0 for incomplete evidence.
+No private DB/config read or paid/model measurement is authorized or performed.
 
 ## #301 Dependency Review (Decisions Still Require Proof)
 
@@ -115,14 +119,15 @@ resource evidence, not proof of new design infeasibility.
   Candidate names auto_compact_target_percent/summary_max_chars match existing
   conventions, but accepted integer bounds/rounding require leader decision.
 - Current fresh main user_version42; old3030043 exists only in historical WT.
-  New persistence may need two nullable Thread settings; NO DDL/column/version
+  New settings persistence is unresolved under the no-added-column constraint; NO DDL/column/version
   is created here and no migration is reserved. #A must first be proven from
   current records. A new table is expressly forbidden.
 - Manual compact in #A and unified summarizer across manual/range/overflow are
   Claude recommendations in the source, not rewritten as USER decisions.
-- Overflow range replacement proposal: use the same structural closed/active
-  eligibility rather than an invented segment-size constant; preserve existing
-  failure-driven order. This is a review proposal, not implemented/approved code.
+- Overflow range is USER-fixed: path start through prefix before the first unsafe
+  group or before the latest group. Remove segment_chars remaining-size checks;
+  keep omission priorities and final-summary stage ordering; use common4.2.
+  No alternative-range comparison or new exception is proposed.
 - Clarify before code: reliable latest-compression chronology (including no-op,
   manual adopted/reverted and connection/model changes), behavior for incomplete
   bounded evidence vs mandated missing=>0, exact identity of a "report value"
