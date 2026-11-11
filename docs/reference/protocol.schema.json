@@ -6600,26 +6600,45 @@
     },
     "ShellWriteResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
       "properties": {
         "bytes_written": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
-        "execution_id": {
-          "type": "string"
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "state": {
-          "$ref": "#/definitions/ShellState"
+        "status": {
+          "$ref": "#/definitions/ShellWriteStatus"
+        },
+        "stdin_open": {
+          "type": "boolean"
         }
       },
       "required": [
-        "execution_id",
         "bytes_written",
-        "state"
+        "status",
+        "stdin_open"
       ],
       "title": "ShellWriteResult",
       "type": "object"
+    },
+    "ShellWriteStatus": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "enum": [
+        "complete",
+        "timeout",
+        "closed",
+        "stopped",
+        "failed"
+      ],
+      "title": "ShellWriteStatus",
+      "type": "string"
     },
     "SpillToolSource": {
       "properties": {
@@ -10346,23 +10365,30 @@
     },
     "shell.write": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": true,
       "properties": {
         "bytes_written": {
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
         },
-        "execution_id": {
-          "type": "string"
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "state": {
-          "$ref": "#/definitions/ShellState"
+        "status": {
+          "$ref": "#/definitions/ShellWriteStatus"
+        },
+        "stdin_open": {
+          "type": "boolean"
         }
       },
       "required": [
-        "execution_id",
         "bytes_written",
-        "state"
+        "status",
+        "stdin_open"
       ],
       "title": "ShellWriteResult",
       "type": "object"
