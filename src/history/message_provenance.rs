@@ -204,7 +204,7 @@ mod tests {
             if full_schema {
                 db.execute_batch(include_str!("../storage/current.sql"))
                     .unwrap();
-                db.execute_batch("PRAGMA foreign_keys=OFF; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version=41; PRAGMA user_version=40;").unwrap();
+                db.execute_batch("PRAGMA foreign_keys=OFF; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=41; PRAGMA user_version=40;").unwrap();
             } else {
                 db.execute_batch("CREATE TABLE schema_migration(version INTEGER PRIMARY KEY,name TEXT); CREATE TABLE receipt(id TEXT PRIMARY KEY,target_thread_id TEXT,message_node_id TEXT,result_json TEXT); CREATE INDEX receipt_reply_pending ON receipt(target_thread_id) WHERE json_extract(result_json,'$.reply.state')='pending';").unwrap();
             }
