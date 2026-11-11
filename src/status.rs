@@ -12,6 +12,8 @@ use std::cmp::Ordering;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkItem {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_v1: Option<crate::protocol::AttemptCoverageV1>,
     pub kind: String,
     pub id: String,
     pub state: String,
@@ -437,6 +439,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
         .max_by_key(|(t, _)| *t)
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidState, "Work has no recorded timestamp"))?;
     let mut item = WorkItem {
+        coverage_v1: None,
         kind: kind.as_str().into(),
         id: id.clone(),
         state,

@@ -135,6 +135,7 @@ impl Fixture {
                     && swallow.load(std::sync::atomic::Ordering::SeqCst)
                 {
                     let result = EventsWaitResult {
+                        coverage_seals_v1: Vec::new(),
                         status: EventsWaitStatus::Timeout,
                         cursor,
                         changes: vec![],
@@ -155,6 +156,7 @@ impl Fixture {
                     && resync.swap(false, std::sync::atomic::Ordering::SeqCst)
                 {
                     let result = EventsWaitResult {
+                        coverage_seals_v1: Vec::new(),
                         status: EventsWaitStatus::ResyncRequired,
                         cursor: EventCursor {
                             v: 1,

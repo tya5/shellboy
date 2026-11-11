@@ -489,6 +489,7 @@ impl Inner {
                         last.text.push_str(&delta.text);
                     }
                     _ => deltas.push(EventTextDelta {
+                        coverage_v1: None,
                         offset: delta.offset,
                         reasoning: delta.reasoning,
                         text: delta.text.as_ref().to_owned(),
@@ -496,6 +497,7 @@ impl Inner {
                 }
             }
             attempts.push(EventLiveText {
+                coverage_v1: None,
                 thread_id: thread.clone(),
                 attempt_id: entry.attempt.clone(),
                 gap: after < entry.floor,
@@ -904,6 +906,7 @@ mod tests {
             panic!("expected ready")
         };
         let reply = serde_json::to_vec(&crate::protocol::EventsWaitResult {
+            coverage_seals_v1: Vec::new(),
             status: crate::protocol::EventsWaitStatus::Changed,
             cursor: "c".repeat(1024),
             changes: changes

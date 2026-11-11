@@ -496,6 +496,7 @@ fn canonical_item(
         None
     };
     let mut item = super::WorkItem {
+        coverage_v1: None,
         kind: kind.as_str().into(),
         id: id.clone(),
         state,
