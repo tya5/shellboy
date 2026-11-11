@@ -73,12 +73,11 @@ scans. Do not implement until USER/leader clarifies this interpretation of7/12.
 If only retrospective existing history queries are permitted, report inability
 rather than add storage/schema or infer missing boundaries.
 
-## Optional Small Verification: Scope To Authorize First
+## Historical Verification Proposal: Withdrawn / Not Needed
 
-If desired, one Python stdlib sqlite3 command with :memory: only can create
-synthetic minimal attempt/turn tables + EXACT existing indexes, insert capped
-adversarial synthetic rows, and run EXPLAIN QUERY PLAN plus sqlite progress
-handler counts for candidate SELECT. No repository/user DB opens, network,
-provider/config reads, installed process or Rust/Node. It can demonstrate the
-scan growth counterexample; it CANNOT recover missing chronology or prove a
-new app_meta design. Not run: awaiting narrow permission if useful.
+The earlier optional memory-only Python EXPLAIN/progress-count proposal was
+withdrawn by the author and leader. It is NOT a follow-up task or prerequisite.
+Missing chronology/manual scope/scope-change evidence cannot be recovered by
+query-plan experiments. No experiment ran; do not reopen this investigation.
+The source counterexamples remain bounded findings, not proof that every
+possible existing-storage alternative is impossible or an actual user trace.

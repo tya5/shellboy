@@ -119,9 +119,11 @@ No private DB/config read or paid/model measurement is authorized or performed.
   Candidate names auto_compact_target_percent/summary_max_chars match existing
   conventions, but accepted integer bounds/rounding require leader decision.
 - Current fresh main user_version42; old3030043 exists only in historical WT.
-  New settings persistence is unresolved under the no-added-column constraint; NO DDL/column/version
-  is created here and no migration is reserved. #A must first be proven from
-  current records. A new table is expressly forbidden.
+  The chapter12 no-added-table/column check applies specifically to #A records.
+  New settings persistence is a SEPARATE unresolved decision for leader/USER;
+  that distinction does not grant permission to add columns. No DDL/column/
+  version is created here, no migration is reserved, and no new table is proposed.
+  #A feasibility must be resolved before product implementation.
 - Manual compact in #A and unified summarizer across manual/range/overflow are
   Claude recommendations in the source, not rewritten as USER decisions.
 - Overflow range is USER-fixed: path start through prefix before the first unsafe
