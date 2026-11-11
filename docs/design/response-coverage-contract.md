@@ -208,7 +208,8 @@ This section supersedes conflicting candidate wording above; no sixth record.
    adapters. No #299 reasoning authority is expanded. Producer coverage must
    independently attest every admitted ordinary segment; non-projected content
    cannot produce an unqualified all-content coverage claim.
-2. Every new fragment starts at sequence0/scalaroffset0 for a new incarnation.
+2. The first fragment of a new incarnation starts at sequence0/scalaroffset0;
+   subsequent fragments must match the next expected sequence and scalar offset.
    Consumer validates canonical unsigned decimal u64 sequence AND projection
    scalar offset, checks expected sequence and scalar-end equality, counts actual
    Unicode scalars and UTF-8 bytes from exact payload, and performs checked u64
