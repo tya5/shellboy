@@ -433,22 +433,22 @@ impl ChangeClock {
             if start > 0 {
                 c.lost = true;
             }
-            if !reasoning {
-                if let Some(producer) = c.producer.as_mut() {
-                    if producer.admit_ordinary(c.scalars, text).is_ok() {
-                        metadata = Some(crate::protocol::CoverageFragmentV1 {
-                            sequence: c.next.to_string(),
-                            scalar_offset: c.scalars.to_string(),
-                            stream_kind: crate::protocol::CoverageStreamKind::Text,
-                        });
-                        c.next = c.next.checked_add(1).expect("producer checked sequence");
-                        c.scalars = c
-                            .scalars
-                            .checked_add(text.chars().count() as u64)
-                            .expect("producer checked scalars");
-                    } else {
-                        c.lost = true;
-                    }
+            if !reasoning
+                && let Some(producer) = c.producer.as_mut()
+            {
+                if producer.admit_ordinary(c.scalars, text).is_ok() {
+                    metadata = Some(crate::protocol::CoverageFragmentV1 {
+                        sequence: c.next.to_string(),
+                        scalar_offset: c.scalars.to_string(),
+                        stream_kind: crate::protocol::CoverageStreamKind::Text,
+                    });
+                    c.next = c.next.checked_add(1).expect("producer checked sequence");
+                    c.scalars = c
+                        .scalars
+                        .checked_add(text.chars().count() as u64)
+                        .expect("producer checked scalars");
+                } else {
+                    c.lost = true;
                 }
             }
         }
