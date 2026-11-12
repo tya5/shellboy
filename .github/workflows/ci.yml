@@ -4,10 +4,6 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
-      source_prepare:
-        description: Non-release source formatting, compile and focused artifacts
-        type: boolean
-        default: false
       shutdown_repeats:
         description: Run only the shutdown PTY test 50 times on native macOS, before and after
         type: boolean
@@ -57,56 +53,6 @@ permissions:
   contents: read
   actions: read
 jobs:
-  source-prepare:
-    if: inputs.source_prepare
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Prepare source
-        run: |
-          set -euo pipefail
-          mkdir -p source-artifacts
-          git rev-parse HEAD > source-artifacts/source-sha.txt
-          git rev-parse HEAD^{tree} > source-artifacts/source-tree.txt
-          printf '%s\n' "$GITHUB_RUN_ID" > source-artifacts/run-id.txt
-          run_recorded() {
-            local name="$1"; shift
-            local result=0
-            "$@" || result=$?
-            printf '%s\t%s\n' "$name" "$result" >> source-artifacts/command-status.tsv
-            return "$result"
-          }
-          run_recorded format cargo fmt --all
-          git diff --binary > source-artifacts/format.patch
-          run_recorded check cargo check --tests 2>&1 | tee source-artifacts/check.log
-          run_recorded single-request cargo test --lib compaction::single_request:: 2>&1 | tee source-artifacts/single-request.log
-          run_recorded a-state cargo test --lib compaction::a_state:: 2>&1 | tee source-artifacts/a-state.log
-          run_recorded migration-parity cargo test --lib executor_matches_registered_migration_versions 2>&1 | tee source-artifacts/migration-parity.log
-          run_recorded migration-upgrade cargo test --lib pinned_schema42_startup_upgrade_writer_settings_and_reopen 2>&1 | tee source-artifacts/migration-upgrade.log
-          run_recorded release-schema-python python3 -m unittest scripts.tests.test_public_release_upgrade_args 2>&1 | tee source-artifacts/release-schema-python.log
-          run_recorded focused-nonzero python3 -c 'import pathlib,re; names=("single-request","a-state","migration-parity","migration-upgrade"); [(lambda text,name: (_ for _ in ()).throw(SystemExit(f"{name}: missing nonzero test evidence")) if not any(re.search(r"test result: ok\. ([1-9][0-9]*) passed",line) for line in text.splitlines()) else None)(pathlib.Path(f"source-artifacts/{name}.log").read_text(),name) for name in names]'
-          run_recorded build cargo build --bin shellboy
-          run_recorded schema target/debug/shellboy protocol schema > source-artifacts/protocol.schema.json
-      - name: Bind non-release source evidence
-        if: always()
-        run: |
-          python3 - <<'PYART'
-          import hashlib,json,pathlib
-          p=pathlib.Path('source-artifacts')
-          result={'kind':'non-release-working-tree-preparation','source_sha':(p/'source-sha.txt').read_text().strip(),'source_tree':(p/'source-tree.txt').read_text().strip(),'run_id':(p/'run-id.txt').read_text().strip(),'files':{f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in p.iterdir() if f.is_file()}}
-          statuses=dict(line.split('\t') for line in (p/'command-status.tsv').read_text().splitlines()) if (p/'command-status.tsv').exists() else {}
-          result['command_exit_status']={k:int(v) for k,v in statuses.items()}
-          expected={'format','check','single-request','a-state','migration-parity','migration-upgrade','release-schema-python','focused-nonzero','build','schema'}
-          result['qualification']='preparation-only' if set(statuses)==expected and all(v=='0' for v in statuses.values()) else 'failed-or-incomplete-reference-only'
-          (p/'manifest.json').write_text(json.dumps(result,indent=2)+'\n')
-          PYART
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: source-artifacts
-          path: source-artifacts/
   reuse:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -145,7 +91,7 @@ jobs:
           done
   check:
     needs: reuse
-    if: always() && !inputs.source_prepare && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
+    if: always() && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
     strategy:
       fail-fast: false
       matrix:

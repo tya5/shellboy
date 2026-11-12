@@ -776,8 +776,9 @@ There is no CLI to erase all active vectors while retaining history; do not dele
 
 ## Explicit summary size limits
 
-`compact --summary` maps chronological parts and consolidates them into one
-summary. It removes repeated goals/constraints, requests the latest confirmed
+`compact --summary` sends the whole selected range in one request and receives one
+summary (if the provider refuses for context length, the range is halved from its start and
+retried). It removes repeated goals/constraints, requests the latest confirmed
 state, and retains decisions/reasons, uncertainty, unresolved work and references.
 These prompts are not a guarantee of factual correctness; inspect sources when needed.
 
@@ -802,14 +803,15 @@ Closed, manual and active-Turn summary requests use one typed request and one
 transactional adoption path. No map/reduce request budgets, segment-size settings,
 or reduce-round settings are supported. `config check` keeps rejecting unknown
 keys; configurations that still contain retired keys must remove them. A successful
-response that exceeds its output limit or fails the shrink guard is not adopted.
+response that exceeds its output limit is adopted when it still shrinks the source; one that
+does not shrink it is not adopted.
 On failure, inspect `source_characters`, `summary_characters`, `summary_limit` and
 `model_requests` in the error details. Successful results expose these under
 `compact` alongside before/after context sizes. Existing source history is retained
-and restorable. Startup migration 43 archives per-Thread retired segment/reduce
-values for audit, then removes those columns from the runtime schema; migration
-40–42 are unchanged. Proactive failure stage 2 and argument-free `compact` use the same
-summarizer. An over-limit automatic summary is not adopted; existing #50 recovery
+and restorable. Startup migration 43 adds the two per-Thread settings below and drops the
+retired segment/reduce columns; saved history, receipts and usage records are not
+rewritten (migrations 40–42 are unchanged). Proactive failure stage 2 and argument-free `compact` use the same
+summarizer. A summary that is not smaller than its source is not adopted; existing #50 recovery
 handling enters recovery wait. The prior spill stage may already be saved.
 
 Omitted history can stay omitted. Use bounded keyword RAG/`history get` first;
@@ -837,15 +839,24 @@ therefore one request late by design. Only the provider-reported count is used;
 there is no estimate, and providers or gateways that report no input tokens never
 trigger it. Context-overflow reduction remains the last-resort fallback.
 
-If the compaction is not adopted (summary failure, nothing safely compactable),
-the request continues. Another attempt is made only when the saved history changes so that the bounded
-candidate forecast shows new or grown eligible content (a new spill group or
-summary source) compared with the saved evidence; a later Turn alone, or more
-input tokens alone, does not retry. If a spill succeeds but
-the summary is rejected, `compact list` records an adopted spill with
-`metrics.summary_rejected: true` and the failed summary's reported usage; the
-same eligible-content gate applies before another attempt. Proactive spill selects only
-safe groups whose replayed JSON becomes shorter; this is not a token estimate.
+Each provider-reported input count gets at most one attempt. The branch depends on
+`#A`, the input tokens the provider reported for the first request after the last
+compaction (0 when there is none): if `#A` is at most the target (the threshold times
+`auto_compact_target_percent`, default 20% — the measure of whether the previous
+compaction was deep enough), only spill runs; otherwise spill is followed by one
+summary of the oldest unsummarized region (earlier Turns first, then the current
+Turn). The summary is a single request; on a context-length refusal the range is
+halved from its start. A summary that is refused, empty or not smaller than its source
+is remembered for that exact range and settings (latest closed and latest active
+range per Thread) and is not tried again; rate limits, server errors and
+cancellation are retried at the next eligible report. If a spill succeeds but the
+summary fails, `compact list` records an adopted spill with
+`metrics.summary_rejected: true` and the failed summary's reported usage. Proactive spill
+selects only safe groups whose replayed JSON becomes shorter; this is not a token estimate.
+Set the target per Thread with `shellboy thread set --auto-compact-target-percent N`
+(1–100, `''` restores the connection / default value) and the summary output limit with
+`--summary-max-chars N`; `thread get` shows `effective_auto_compact_target_percent` and
+`effective_summary_max_chars`.
 Ordinary summary protects
 the current and latest completed Turns; a long current Turn's old tool outputs
 can be spilled, but its text is not included in that summary.
@@ -856,7 +867,7 @@ can also reduce prompt-cache hits. Each event's `metrics.summary_usage` and the
 `compaction` section of `shellboy usage get` show the provider-reported tokens of
 those summary requests (input, cached, cache-creation, output), separate from
 conversation requests, so you can judge whether the threshold pays off. Values a
-provider does not report stay unknown; reused cached summary parts send nothing. To keep a persistently large context, set
+provider does not report stay unknown. To keep a persistently large context, set
 `auto_at_tokens = 0` globally or for one connection, then restart the owner.
 To change the threshold for one Thread without a restart, use
 `shellboy thread set --auto-compact-at N` (`0` turns proactive compaction off for
@@ -872,8 +883,8 @@ The former `segment_chars`, `reduce_rounds`, `summary_map_max_requests` and
 `summary_reduce_max_requests` settings and their Thread/connection/CLI overrides
 are removed. They are not aliases and are not accepted. Configuration parsing
 remains strict: remove these keys from old files; unrelated unknown keys continue
-to be errors. Existing per-Thread values are copied by migration 43 to
-`thread_retired_summary_settings` and are never used by runtime summary behavior.
+to be errors. Existing per-Thread values of the two retired columns are dropped by migration 43
+(nothing reads them); saved summaries, receipts and usage records are not rewritten.
 
 ### Unknown shell arguments
 

@@ -217,10 +217,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 43,
         sql: include_str!("../../migrations/0043_thread_single_summary_settings.sql"),
-        foreign_keys: Some(Impact::Tables(&[
-            "thread_retired_summary_settings",
-            "summary_usage_stage_archive",
-        ])),
+        foreign_keys: None,
     },
 ];
 
@@ -422,6 +419,8 @@ mod activity_migration_tests {
         // by downgrading today's schema or replaying the executor under test.
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("conversation.sqlite");
+        let usage = r#"{"id":"saved","thread_id":"old","requests":3,"map_requests":2,"reduce_requests":1,"oversized_reduce_parts":4,"input_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":10,"unknown_count":0,"overflow":false},"output_tokens":{"known_sum":10,"unknown_count":0,"overflow":false}}"#;
+        let node = r#"{"summary_usage":{"map_requests":4,"reduce_requests":5,"oversized_reduce_parts":6},"kept":"safe"}"#;
         {
             let db = Connection::open(&path).unwrap();
             db.execute_batch(include_str!("../../tests/fixtures/compaction-schema42.sql"))
@@ -432,209 +431,37 @@ mod activity_migration_tests {
                 42
             );
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,segment_chars,reduce_rounds) VALUES('old','/','','p','m','now',48000,3)",[]).unwrap();
-            db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.old.saved',?1)",[r#"{"id":"saved","thread_id":"old","requests":3,"map_requests":2,"reduce_requests":1,"oversized_reduce_parts":4,"input_tokens":{"known_sum":10,"unknown_count":0,"overflow":false}}"#]).unwrap();
-            db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.orphan.saved',?1)",[r#"{"id":"orphan","thread_id":"missing","requests":2,"map_requests":1,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}"#]).unwrap();
             db.execute(
-                "INSERT INTO app_meta(key,value) VALUES('summary.usage.malformed.saved','{')",
-                [],
+                "INSERT INTO app_meta(key,value) VALUES('summary.usage.old.saved',?1)",
+                [usage],
             )
             .unwrap();
             db.execute(
-                "INSERT INTO app_meta(key,value) VALUES('summary.usage.nested.saved',?1)",
-                [format!("{{\"nested\":{{\"{}\":1}}}}", "x".repeat(100_000))],
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES('summary-old','summary','now',?1)",
+                [node],
             )
             .unwrap();
-            db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('run-old','old','completed','now')",[]).unwrap();
-            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('turn-old','old','run-old','completed','now')",[]).unwrap();
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES('attempt-old','turn-old',0,0,'p','m',0,'completed','{}',?1,'now')",[r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1,"reduce_requests":2,"oversized_reduce_parts":3},"kept":"safe"}}}"#]).unwrap();
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES('attempt-nested','turn-old',0,1,'p','m',0,'completed','{}',?1,'now')",[r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1,"reduce_requests":2,"oversized_reduce_parts":3},"kept":"safe"}}}}"#]).unwrap();
-            db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('summary-old','summary','now',?1)",[r#"{"summary_usage":{"map_requests":4,"reduce_requests":5,"oversized_reduce_parts":6},"kept":"safe"}"#]).unwrap();
-            // Supported sources archive/strip; unsupported shapes below must remain byte-identical.
-            db.execute(
-                "INSERT INTO app_meta(key,value) VALUES('summary.usage.valid.extra',?1)",
-                [r#"{"map_requests":7,"other":{"kept":true}}"#],
-            )
-            .unwrap();
-            let unsupported_meta = [
-                ("summary.usage.scalar.root", "17"),
-                (
-                    "summary.usage.boolean.counter",
-                    r#"{"map_requests":true,"keep":"x"}"#,
-                ),
-                (
-                    "summary.usage.nested.counter",
-                    r#"{"reduce_requests":{"n":2},"keep":"x"}"#,
-                ),
-                (
-                    "summary.usage.out_of_i64.counter",
-                    r#"{"oversized_reduce_parts":9223372036854775808,"keep":"x"}"#,
-                ),
-            ];
-            for (key, value) in unsupported_meta {
-                db.execute(
-                    "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
-                    [key, value],
-                )
-                .unwrap();
-            }
-            let unsupported_nodes = [
-                (
-                    "summary-array-usage",
-                    r#"{"summary_usage":[{"map_requests":1}],"keep":"x"}"#,
-                ),
-                (
-                    "summary-scalar-usage",
-                    r#"{"summary_usage":"legacy","keep":"x"}"#,
-                ),
-                (
-                    "summary-boolean-counter",
-                    r#"{"summary_usage":{"map_requests":false},"keep":"x"}"#,
-                ),
-                (
-                    "summary-nested-counter",
-                    r#"{"summary_usage":{"reduce_requests":{"n":2}},"keep":"x"}"#,
-                ),
-                (
-                    "summary-out-of-i64-counter",
-                    r#"{"summary_usage":{"oversized_reduce_parts":9223372036854775808},"keep":"x"}"#,
-                ),
-            ];
-            for (id, payload) in unsupported_nodes {
-                db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'summary','now',?2)", [id, payload]).unwrap();
-            }
-            let unsupported_attempts = [
-                ("attempt-bad-root", "{"),
-                (
-                    "attempt-scalar-stage",
-                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"legacy"}}}"#,
-                ),
-                (
-                    "attempt-array-stages",
-                    r#"{"automatic_trim_attempt":{"committed_stages":[{"summary_usage":{"map_requests":1}}]}}"#,
-                ),
-                (
-                    "attempt-array-usage",
-                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":[{"map_requests":1}]}}}}"#,
-                ),
-                (
-                    "attempt-scalar-usage",
-                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":"legacy"}}}}"#,
-                ),
-                (
-                    "attempt-boolean-counter",
-                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":true}}}}}"#,
-                ),
-                (
-                    "attempt-nested-counter",
-                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"reduce_requests":{"n":2}}}}}}"#,
-                ),
-                (
-                    "attempt-out-of-i64-counter",
-                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"oversized_reduce_parts":9223372036854775808}}}}}"#,
-                ),
-            ];
-            for (id, error_json) in unsupported_attempts {
-                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES(?1,'turn-old',0,2,'p','m',0,'completed','{}',?2,'now')", [id, error_json]).unwrap();
-            }
-            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES('attempt-supported','turn-old',0,3,'p','m',0,'completed','{}',?1,'now')", [r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":8,"reduce_requests":9},"kept":"stage"},"open":{"kept":"untouched"}},"keep":"attempt"}}"#]).unwrap();
-            db.execute("INSERT INTO app_meta(key,value) VALUES('compact.result.valid',?1)",[r#"{"outcome":{"result":{"compact":{"summary_usage":{"map_requests":11,"kept":"result"}}}},"keep":"receipt"}"#]).unwrap();
-            db.execute("INSERT INTO app_meta(key,value) VALUES('compact.result.unsupported',?1)",[r#"{"outcome":{"result":{"compact":{"summary_usage":{"map_requests":true}}}},"keep":"receipt"}"#]).unwrap();
         }
         // open_connection is the actual startup migration path. Keep this
         // connection open while the foreground DbWorker owns a second handle.
         let _startup = crate::storage::open_connection(&path, None, None, false).unwrap();
         let writer = crate::storage::DbWorker::open(&path).await.unwrap();
-        writer.call(|db| {
+        writer.call(move |db| {
             assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,43);
             let old:(Option<i64>,Option<i64>)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
             assert_eq!(old,(None,None));
-            let retired:Vec<(String,i64)>=db.prepare("SELECT setting_name,setting_value FROM thread_retired_summary_settings WHERE thread_id='old' ORDER BY setting_name")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(retired,[("reduce_rounds".to_owned(),3),("segment_chars".to_owned(),48000)]);
-            let archived_keys:Vec<String>=db.prepare("SELECT record_key FROM summary_usage_stage_archive ORDER BY record_key")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(archived_keys,["attempt:attempt-nested","attempt:attempt-supported","compact.result:compact.result.valid","node:summary-old","summary.usage.old.saved","summary.usage.orphan.saved","summary.usage.valid.extra"]);
-            let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
-            let legacy:serde_json::Value=serde_json::from_str(&legacy).unwrap();
-            assert_eq!(legacy["map_requests"],2);assert_eq!(legacy["reduce_requests"],1);assert_eq!(legacy["oversized_reduce_parts"],4);
-            let current:String=db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.old.saved'",[],|r|r.get(0))?;
-            let current:serde_json::Value=serde_json::from_str(&current).unwrap();
-            for key in ["map_requests","reduce_requests","oversized_reduce_parts"] {assert!(current.get(key).is_none());}
-            assert_eq!(current["input_tokens"]["known_sum"],10);
-            let orphan:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.orphan.saved'",[],|r|r.get(0))?;
-            let orphan:serde_json::Value=serde_json::from_str(&orphan).unwrap();
-            assert_eq!(orphan["map_requests"],1);
-            let orphan_current:String=db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.orphan.saved'",[],|r|r.get(0))?;
-            let orphan_current:serde_json::Value=serde_json::from_str(&orphan_current).unwrap();
-            assert_eq!(orphan_current["thread_id"],"missing");
-            assert!(orphan_current.get("map_requests").is_none());
-            assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
-            assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.malformed.saved'",[],|r|r.get::<_,String>(0))?,"{");
-            let unsupported_meta = [
-                ("summary.usage.scalar.root", "17"),
-                ("summary.usage.boolean.counter", r#"{"map_requests":true,"keep":"x"}"#),
-                ("summary.usage.nested.counter", r#"{"reduce_requests":{"n":2},"keep":"x"}"#),
-                ("summary.usage.out_of_i64.counter", r#"{"oversized_reduce_parts":9223372036854775808,"keep":"x"}"#),
-            ];
-            for (key, original) in unsupported_meta {
-                let actual:String=db.query_row("SELECT value FROM app_meta WHERE key=?1",[key],|r|r.get(0))?;
-                assert_eq!(actual,original,"unsupported app_meta bytes changed: {key}");
-                assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive WHERE record_key=?1",[key],|r|r.get::<_,i64>(0))?,0);
-            }
-            let unsupported_nodes = [
-                ("summary-array-usage", r#"{"summary_usage":[{"map_requests":1}],"keep":"x"}"#),
-                ("summary-scalar-usage", r#"{"summary_usage":"legacy","keep":"x"}"#),
-                ("summary-boolean-counter", r#"{"summary_usage":{"map_requests":false},"keep":"x"}"#),
-                ("summary-nested-counter", r#"{"summary_usage":{"reduce_requests":{"n":2}},"keep":"x"}"#),
-                ("summary-out-of-i64-counter", r#"{"summary_usage":{"oversized_reduce_parts":9223372036854775808},"keep":"x"}"#),
-            ];
-            for (id, original) in unsupported_nodes {
-                let actual:String=db.query_row("SELECT payload_json FROM node WHERE id=?1",[id],|r|r.get(0))?;
-                assert_eq!(actual,original,"unsupported node bytes changed: {id}");
-                assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive WHERE record_key=?1",[format!("node:{id}")],|r|r.get::<_,i64>(0))?,0);
-            }
-            let unsupported_attempts = [
-                ("attempt-bad-root", "{"),
-                ("attempt-scalar-stage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"legacy"}}}"#),
-                ("attempt-array-stages", r#"{"automatic_trim_attempt":{"committed_stages":[{"summary_usage":{"map_requests":1}}]}}"#),
-                ("attempt-array-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":[{"map_requests":1}]}}}}"#),
-                ("attempt-scalar-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":"legacy"}}}}"#),
-                ("attempt-boolean-counter", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":true}}}}}"#),
-                ("attempt-nested-counter", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"reduce_requests":{"n":2}}}}}}"#),
-                ("attempt-out-of-i64-counter", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"oversized_reduce_parts":9223372036854775808}}}}}"#),
-            ];
-            for (id, original) in unsupported_attempts {
-                let actual:String=db.query_row("SELECT error_json FROM model_attempt WHERE id=?1",[id],|r|r.get(0))?;
-                assert_eq!(actual,original,"unsupported attempt bytes changed: {id}");
-                assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive WHERE record_key=?1",[format!("attempt:{id}")],|r|r.get::<_,i64>(0))?,0);
-            }
-            let compact_bad:String=db.query_row("SELECT value FROM app_meta WHERE key='compact.result.unsupported'",[],|r|r.get(0))?;
-            assert_eq!(compact_bad,r#"{"outcome":{"result":{"compact":{"summary_usage":{"map_requests":true}}}},"keep":"receipt"}"#);
-            assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive WHERE record_key='compact.result:compact.result.unsupported'",[],|r|r.get::<_,i64>(0))?,0);
-            let compact_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='compact.result:compact.result.valid'",[],|r|r.get(0))?;
-            assert!(compact_archive.contains("map_requests")&&!compact_archive.contains("kept"));
-            let compact_good:String=db.query_row("SELECT value FROM app_meta WHERE key='compact.result.valid'",[],|r|r.get(0))?;
-            let compact_good:serde_json::Value=serde_json::from_str(&compact_good).unwrap();
-            assert!(compact_good["outcome"]["result"]["compact"]["summary_usage"].get("map_requests").is_none());
-            assert_eq!(compact_good["keep"],"receipt");
-            let malformed_attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-old'",[],|r|r.get(0))?;
-            assert_eq!(malformed_attempt,r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1,"reduce_requests":2,"oversized_reduce_parts":3},"kept":"safe"}}}"#);
-            assert!(serde_json::from_str::<serde_json::Value>(&malformed_attempt).is_err());
-            let stage_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='attempt:attempt-nested'",[],|r|r.get(0))?;
-            assert!(stage_archive.contains("map_requests")&&stage_archive.contains("3")&&!stage_archive.contains("kept"));
-            let attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-nested'",[],|r|r.get(0))?;
-            assert!(!attempt.contains("map_requests")&&attempt.contains("kept"));
-            let supported_attempt_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='attempt:attempt-supported'",[],|r|r.get(0))?;
-            assert!(supported_attempt_archive.contains("map_requests")&&supported_attempt_archive.contains("8"));
-            let supported_attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-supported'",[],|r|r.get(0))?;
-            let supported_attempt:serde_json::Value=serde_json::from_str(&supported_attempt).unwrap();
-            assert!(supported_attempt["automatic_trim_attempt"]["committed_stages"]["closed"]["summary_usage"].get("map_requests").is_none());
-            assert_eq!(supported_attempt["automatic_trim_attempt"]["committed_stages"]["closed"]["kept"],"stage");
-            assert_eq!(supported_attempt["automatic_trim_attempt"]["committed_stages"]["open"]["kept"],"untouched");
-            let node_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='node:summary-old'",[],|r|r.get(0))?;
-            assert!(node_archive.contains("reduce_requests")&&node_archive.contains("5"));
-            let summary:String=db.query_row("SELECT payload_json FROM node WHERE id='summary-old'",[],|r|r.get(0))?;
-            assert!(!summary.contains("map_requests")&&summary.contains("kept"));
             let columns:Vec<String>=db.prepare("PRAGMA table_info(thread)")?.query_map([],|r|r.get(1))?.collect::<rusqlite::Result<_>>()?;
             assert!(!columns.iter().any(|name|matches!(name.as_str(),"segment_chars"|"reduce_rounds")));
+            // No new table, and saved history/usage is not rewritten.
+            let tables:i64=db.query_row("SELECT count(*) FROM sqlite_schema WHERE type='table' AND name IN ('thread_retired_summary_settings','summary_usage_stage_archive')",[],|r|r.get(0))?;
+            assert_eq!(tables,0);
+            let saved:String=db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.old.saved'",[],|r|r.get(0))?;
+            assert_eq!(saved,usage);
+            let summary:String=db.query_row("SELECT payload_json FROM node WHERE id='summary-old'",[],|r|r.get(0))?;
+            assert_eq!(summary,node);
+            // A retired counter in a saved usage record must still be readable.
+            let parsed:crate::compaction::SummaryUsage=serde_json::from_str(&saved).unwrap();
+            assert_eq!(parsed.requests,3);
             assert!(db.prepare("PRAGMA foreign_key_check").unwrap().query([])?.next()?.is_none());
             db.execute("UPDATE thread SET auto_compact_target_percent=80,summary_max_chars=24000 WHERE id='old'",[])?;
             Ok(())
@@ -645,12 +472,6 @@ mod activity_migration_tests {
             let saved:(i64,i64)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
             assert_eq!(saved,(80,24000));
             assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=43",[],|r|r.get::<_,i64>(0))?,1);
-            let archived:Vec<(String,i64)>=db.prepare("SELECT setting_name,setting_value FROM thread_retired_summary_settings WHERE thread_id='old' ORDER BY setting_name")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(archived,[("reduce_rounds".into(),3),("segment_chars".into(),48000)]);
-            let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
-            assert!(legacy.contains("map_requests"));
-            assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive",[],|r|r.get::<_,i64>(0))?,7);
-            assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved','summary.usage.scalar.root','summary.usage.boolean.counter','summary.usage.nested.counter','summary.usage.out_of_i64.counter','compact.result.unsupported')",[],|r|r.get::<_,i64>(0))?,7);
             Ok(())
         }).await.unwrap();
         reopened.shutdown().await.unwrap();

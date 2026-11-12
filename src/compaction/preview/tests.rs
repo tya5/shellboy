@@ -636,14 +636,14 @@ async fn explicit_summary_uses_current_settings_and_keeps_thread_policy_unset() 
     let archived =
         f.db.call(|db| {
             Ok(db.query_row(
-                "SELECT count(*) FROM thread_retired_summary_settings WHERE thread_id='t'",
+                "SELECT count(*) FROM thread WHERE id='t' AND summary_max_chars IS NULL AND auto_compact_target_percent IS NULL",
                 [],
                 |r| r.get::<_, i64>(0),
             )?)
         })
         .await
         .unwrap();
-    assert_eq!(archived, 0);
+    assert_eq!(archived, 1);
     f.close().await;
 }
 

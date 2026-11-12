@@ -226,8 +226,9 @@ impl Compactor {
             .map_err(storage_error)?;
         if blocked {
             return Err(invalid(
-                "This closed summary range already failed deterministically",
-            ));
+                "This summary range already failed deterministically; original path retained",
+            )
+            .hint("Change the range or the output limit (--max-chars), or switch the model or connection, to try again"));
         }
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
@@ -454,7 +455,16 @@ impl Compactor {
                                 .await?;
                             continue;
                         }
-                        return Err(invalid("Summary request failed; original path retained"));
+                        // Keep the provider's reason: the user needs it to act
+                        // (credentials, quota, a rejected request).
+                        return Err(invalid(&format!(
+                            "Summary request failed; original path retained: {}",
+                            failure.error.message
+                        ))
+                        .details(json!({
+                            "provider_status": failure.error.status,
+                            "provider_code": failure.error.provider_code,
+                        })));
                     }
                     match trial.finish_request(snapshot,Err(&failure.error),&eligible) {
                         Next::RetryPrefix(_)=>{retries=0;continue;}

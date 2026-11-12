@@ -492,10 +492,12 @@ configured `auto_at_tokens` (default 200,000; `compact list` shows
 `shellboy thread set --auto-compact-at N` (`0` turns it off for this Thread, `''`
 returns to the configured value); `thread get` shows `auto_compact_at` and
 `effective_auto_compact_at`. It applies from the next request boundary. If an automatic
-summary fails (not cancelled) in a Turn whose coverage is unknown, that stage is not tried
-again in the same Turn; `compact list` shows `skipped: "blocked_by_earlier_rejection"`.
-Explicit `compact --summary --from NODE --to NODE` is not blocked and a new Turn starts
-fresh; lower the range or raise `summary_max_chars` before retrying. Do not answer it with repeated
+summary fails deterministically (refused, empty, or not smaller than its source), the same
+range with the same settings is not tried again; transient failures (rate limits, server
+errors, cancellation) are retried at the next eligible report. An explicit
+`compact --summary --from NODE --to NODE` on a range that already failed this way is refused
+too ("already failed deterministically"); change the range, the output limit
+(`--max-chars`) or the model before retrying. Do not answer it with repeated
 `compact --maximal`; that drops role context and cache hits. Do targeted range
 edits only when still needed.
 An active-Turn summary may cover user messages delivered during the work. Its
@@ -527,7 +529,7 @@ does not create map/reduce parts or consult the old segment-size controls.
 
 Use `summary_max_chars` for output limits, the model and
 effort for provider behavior, and `auto_at_tokens` to control when proactive
-summaries start. The independent global auto target percentage remains supported.
+summaries start. The per-Thread `auto_compact_target_percent` (default 20) decides whether the previous compaction was deep enough to need a summary.
 Original source nodes remain available through history and restore operations.
 
 ## Large paths and long indexing tasks
@@ -803,10 +805,10 @@ unchanged. Explicit source-relation/history-get inspection remains available whe
 #274 metadata lookup uses a bounded separate column and covering index; it never parses the spill payload. Older
 spills remain unknown after migration; no automatic payload backfill or source traversal occurs.
 
-Automatic compaction does not repeat a rejected closed-range summary in the same Turn merely because tool results
-were spilled or the active Turn was summarized. Under known coverage it retries when eligible closed-summary sources
-grow/change, while new active sources remain eligible for active summarization. `compact list` can show
-`blocked_by_earlier_rejection`; explicit compact remains available. Unknown-coverage #248 blocking is unchanged.
+Automatic compaction does not repeat a deterministically failed summary range (same original endpoints, model
+and output limit); the latest closed and the latest active failure are remembered per Thread, and transient
+failures are retried at the next eligible report. An explicit compact of the same failed range is refused the same
+way until the range, the output limit or the model changes.
 
 Protocol 5 removes Run ownership and the duplicate reply-duty lists. Use `awaiting_replies` and inspect its recipient
 tag. External peers must match the advertised version exactly; update Studio/clients with the owner, without a v4

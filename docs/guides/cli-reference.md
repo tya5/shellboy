@@ -732,16 +732,18 @@ RAG reports disabled coverage in its existing degraded/scope_status/warnings.
 ### Bounded explicit summaries (#73)
 
 `compact --summary --from FIRST --to LAST [--thread ID]` also accepts
-`--max-chars N` and `--max-percent P` (summary mode only). Each overrides its
-corresponding `[compaction]` setting; omitted overrides preserve the configuration.
-Defaults are the smaller of 20,000 characters and 5% of original projected input,
-floored at 2,000. Explicit summaries consolidate parts into one bounded text,
-as one typed provider request and fail without adoption if the returned summary violates the configured output limit. `compact --dry-run` reports the selected source range and configured output limit before provider dispatch.
-The same limits apply to automatic stage 2; failure follows normal recovery wait.
+`--max-chars N` (summary mode only), which overrides the configured output limit
+(`summary_max_chars`, default 20,000) for that invocation. The whole selected range
+is sent as one typed provider request. A summary above the limit is still adopted
+when it is smaller than its source (the overrun is recorded, nothing is resent or
+truncated); a summary that is not smaller, empty or refused is not adopted. After
+such a deterministic failure the same range with the same settings is refused
+("already failed deterministically"): change the range, `--max-chars` or the model.
+`compact --dry-run` reports the selected source range and the output limit before
+provider dispatch; it cannot predict the provider's answer.
 The downstream `result.compact` adds `source_characters`, `summary_characters`,
-`summary_limit` and `model_requests`; output-limit failure details expose the same
-facts. Read [configuration](configuration.md#explicit-summary-size-limits) for
-single-limit settings, retry caching, and omitted-history caveats.
+`summary_limit` and `model_requests`; failure details expose the same facts. Read
+[configuration](configuration.md#explicit-summary-size-limits) for the settings.
 
 
 `index status` reports `held_auto_history` separately from `pending`: automatic

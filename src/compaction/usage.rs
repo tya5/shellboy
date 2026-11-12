@@ -8,7 +8,6 @@ use crate::usage_totals::Number;
 /// Counters of one compaction's summary requests. A request is counted before
 /// it is sent and its four values are unknown until the provider reports them.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SummaryUsage {
     pub requests: u64,
     pub input_tokens: Number,
