@@ -136,48 +136,7 @@ pub(super) fn active_turn_plan(s:&Snapshot)->Option<ActiveTurnPlan> {
     let messages=s.groups[first..end].iter().flat_map(|g|&g.sources).filter(|source|turn_message(source,turn)).map(|source|source.id.clone()).collect();
     Some(ActiveTurnPlan{start:first,latest:end-1,messages})
 }
-/// Oldest safe active-Turn work groups, stopping at the calibrated need.
-pub(super) fn target_active_range(
-    s: &Snapshot,
-    target: u64,
-    config: &crate::config::Compaction,
-) -> Option<(Range<usize>, u64)> {
-    let turn = s.current_turn.as_deref()?;
-    let request = request_boundary(s, Some(turn))?;
-    let latest = s.groups.iter().rposition(|g| g.tool && g.complete)?;
-    if latest <= request + 1 {
-        return None;
-    }
-    let start = (request + 1..latest)
-        .take_while(|&i| {
-            range::group_is_safe(s, i) && !s.groups[i].sources.iter().any(|n| turn_message(n, turn))
-        })
-        .find(|&i| work_group(&s.groups[i]))?;
-    let mut chars = 0u64;
-    let mut end = start;
-    let mut has_work = false;
-    for i in start..latest {
-        let group = &s.groups[i];
-        if !range::group_is_safe(s, i) || group.sources.iter().any(|n| turn_message(n, turn)) {
-            break;
-        }
-        has_work |= spill_or_tool(group);
-        chars = group
-            .sources
-            .iter()
-            .map(|n| edit::projection_characters(&n.payload, s.epoch))
-            .fold(chars, u64::saturating_add);
-        end = i + 1;
-        if has_work && chars.saturating_sub(config.summary_limit(chars)) >= target {
-            break;
-        }
-    }
-    if !has_work {
-        return None;
-    }
-    let removal = chars.saturating_sub(config.summary_limit(chars));
-    Some((start..end, target.saturating_sub(removal)))
-}
+
 
 /// Ordinary prefix target for the proactive order (#182): `None` when the
 /// prefix holds only earlier summaries, so a summary is never re-summarized
@@ -190,27 +149,7 @@ pub(super) fn unsummarized_prefix(s: &Snapshot) -> Option<Range<usize>> {
             .any(|n| n.payload.get("summary_format").is_none())
     })
 }
-pub(super) fn target_prefix(
-    s: &Snapshot,
-    target: u64,
-    config: &crate::config::Compaction,
-) -> Option<(Range<usize>, u64)> {
-    let safe = unsummarized_prefix(s)?;
-    let mut characters = 0u64;
-    let mut has_unsummarized = false;
-    for end in 1..=safe.end {
-        for source in &s.groups[end - 1].sources {
-            characters =
-                characters.saturating_add(edit::projection_characters(&source.payload, s.epoch));
-            has_unsummarized |= source.payload.get("summary_format").is_none();
-        }
-        let removal = characters.saturating_sub(config.summary_limit(characters));
-        if has_unsummarized && (removal >= target || end == safe.end) {
-            return Some((0..end, target.saturating_sub(removal)));
-        }
-    }
-    None
-}
+
 pub(super) fn turn_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize> {
     let turn = turn?;
     let boundary = s.turn_boundaries.get(turn);
@@ -241,25 +180,7 @@ mod tests {
     use super::*;
     use crate::compaction::tests::staged_snapshot;
 
-    #[test]
-    fn active_target_window_stops_and_keeps_user_and_tool_fences() {
-        let mut s = staged_snapshot();
-        s.groups[3].sources[0].payload = json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"x".repeat(10_000)}]}]});
-        let mut another = s.groups[3].clone();
-        another.sources[0].id = "second-tool".into();
-        s.groups.insert(4, another);
-        let config = crate::config::Compaction::default();
-        let (range, missing) = target_active_range(&s, 4_000, &config).unwrap();
-        assert_eq!(range, 3..4);
-        assert_eq!(missing, 0);
-        let (range, missing) = target_active_range(&s, 100_000, &config).unwrap();
-        assert_eq!(range, 3..6);
-        assert!(missing > 0);
-        s.groups[4].sources[0].payload = json!({"role":"user","content":"keep instruction"});
-        assert!(target_active_range(&s, 100_000, &config).is_none());
-        s.groups[3].complete = false;
-        assert!(target_active_range(&s, 1, &config).is_none());
-    }
+
 
     #[test]
     fn staged_spill_keeps_turn_and_group_fences() {
@@ -274,31 +195,7 @@ mod tests {
         assert!(staged_spill_ranges(&s, true).is_empty());
     }
 
-    #[test]
-    fn target_window_stops_at_whole_group_and_reports_shortfall() {
-        let mut s = staged_snapshot();
-        let template = s.groups[0].clone();
-        let mut old = Vec::new();
-        for i in 0..8 {
-            let mut group = template.clone();
-            group.sources[0].id = format!("old-{i}");
-            group.sources[0].payload = json!({"role":"user","content":"x".repeat(10_000)});
-            old.push(group);
-        }
-        old.extend(s.groups[1..].iter().cloned());
-        s.groups = old;
-        let config = crate::config::Compaction::default();
-        let (range, shortfall) = target_prefix(&s, 25_000, &config).unwrap();
-        assert_eq!(range, 0..3);
-        assert_eq!(shortfall, 0);
-        let (range, shortfall) = target_prefix(&s, 100_000, &config).unwrap();
-        assert_eq!(range, 0..8);
-        assert!(shortfall > 0);
-        s.groups[2].complete = false;
-        let (range, shortfall) = target_prefix(&s, 100_000, &config).unwrap();
-        assert_eq!(range, 0..2);
-        assert!(shortfall > 0);
-    }
+
 
     #[test]
     fn a_same_turn_marker_cannot_replace_the_selected_user_request_fence() {
