@@ -161,6 +161,11 @@ impl Compactor {
             active,
             requested_limit,
         } = request;
+        let region = if active.is_some() {
+            Region::Active
+        } else {
+            Region::Closed
+        };
         let valid = |span: Range<usize>| {
             if active.is_some() {
                 !span.is_empty()
@@ -389,7 +394,7 @@ impl Compactor {
             let selected = trial
                 .selected()
                 .ok_or_else(|| invalid("Summary trial already ended"))?;
-            let payload = request(snapshot, selected.clone(), limit);
+            let payload = super::single_request::request(snapshot, selected.clone(), limit);
             // Preserve existing transport admission and durable usage accounting.
             // Legacy usage counters remain until public schema retirement step.
             let admission = self
