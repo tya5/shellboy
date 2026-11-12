@@ -62,7 +62,7 @@ def preserved(db, before):
 
 def check_migration(db, before, start, target):
     assert db.execute('PRAGMA user_version').fetchone() == (target,)
-    expected = before + [(version, DERIVED[version].stem)
+    expected = before + [(version, next(MIGRATIONS.glob(f'{version:04d}_*.sql')).stem)
                          for version in range(start + 1, target + 1)]
     assert ledger(db) == expected, 'migration ledger prefix or suffix changed'
     assert db.execute('PRAGMA integrity_check').fetchall() == [('ok',)]
@@ -207,7 +207,8 @@ def check_migration(db, before, start, target):
 
 def apply_migration(db, version):
     if version != 39:
-        db.executescript('BEGIN IMMEDIATE;\n' + DERIVED[version].read_text() + '\nCOMMIT;')
+        sql=DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
+        db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
         return
     # Mirror the approved migration contract: check FK before committing.
     db.commit()
@@ -240,11 +241,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41), default=40,
-                        help='40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43), default=43,
+                        help='43 for current Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:
