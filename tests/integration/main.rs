@@ -227,6 +227,21 @@ mod exec_client;
 #[path = "../support/watchdog.rs"]
 pub(crate) mod test_watchdog;
 
+/// Open the exact pinned schema-42 database used by historical upgrade tests.
+/// Tests then apply their own per-version downgrade steps before opening DbWorker.
+pub(crate) fn open_schema42_fixture(path: &std::path::Path) -> rusqlite::Connection {
+    let db = rusqlite::Connection::open(path).expect("open schema-42 fixture database");
+    db.execute_batch(include_str!("../fixtures/storage-current-schema42.sql"))
+        .expect("load pinned schema-42 fixture");
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        42,
+        "pinned historical fixture must end at schema 42"
+    );
+    db
+}
+
 #[cfg(unix)]
 #[path = "../support/pty_session.rs"]
 pub(crate) mod pty_session;

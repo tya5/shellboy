@@ -858,9 +858,7 @@ async fn intermediate_and_final_v6_and_v7_upgrade_receipt_accounting_without_rep
 async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("compat-rollback.sqlite");
-    let worker = DbWorker::open(&path).await.unwrap();
-    worker.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
     // Batch historical fixture setup; the production upgrade below still commits normally.
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch("DROP INDEX node_turn; DROP INDEX IF EXISTS receipt_turn_source; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=8; DROP INDEX IF EXISTS shell_active_owner; DROP INDEX IF EXISTS run_thread_created; DROP INDEX IF EXISTS shell_terminal_time; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=7; UPDATE quota_counter SET logical_bytes=9999 WHERE category IN ('operation_receipt','operation_receipt.pending_actual'); CREATE TRIGGER compat_fail BEFORE INSERT ON quota_counter WHEN NEW.category='operation_receipt.pending_actual' BEGIN SELECT RAISE(ABORT,'injected v8 failure'); END;").unwrap();
@@ -900,17 +898,14 @@ async fn receipt_accounting_compat_upgrade_rolls_back_as_one_version() {
 async fn turn_seed_index_upgrade_is_atomic_preserves_sources_and_reopens_without_rebuilding() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("turn-index-upgrade.sqlite");
-    let worker = DbWorker::open(&path).await.unwrap();
-    worker.call(|db| {
-        seed_thread(db,"saved")?;
-        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','saved','completed','now');
-            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','saved','r','completed','now');
-            INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('source','u','user','now','{\"text\":\"日本語🌿\"}',37,'preserve-hash');
-            INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES('input','input-op','{}','saved','source','r','u','applied','now');
-            INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES('old:pending','old','null','preserve-request','pending','now',8192);")?;
-        Ok(())
-    }).await.unwrap();
-    worker.shutdown().await.unwrap();
+    let db = crate::open_schema42_fixture(&path);
+    seed_thread(&db, "saved").unwrap();
+    db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','saved','completed','now');
+        INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','saved','r','completed','now');
+        INSERT INTO node(id,turn_id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES('source','u','user','now','{\"text\":\"日本語🌿\"}',37,'preserve-hash');
+        INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,run_id,turn_id,state,created_at)VALUES('input','input-op','{}','saved','source','r','u','applied','now');
+        INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,created_at,reserved_bytes)VALUES('old:pending','old','null','preserve-request','pending','now',8192);").unwrap();
+    db.close().unwrap();
     // Recreate the exact previous schema, then collide with the second index
     // name so the first CREATE INDEX must also roll back with version/ledger.
     let db = Connection::open(&path).unwrap();
@@ -1059,9 +1054,7 @@ async fn public_schema_versions_converge_to_fresh_schema_without_data_loss() {
 async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("metadata.sqlite");
-    let writer = DbWorker::open(&path).await.unwrap();
-    writer.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
     // Batch historical fixture setup; the production upgrade below still commits normally.
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch("CREATE INDEX receipt_turn_source ON receipt(turn_id,target_thread_id,message_node_id); DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=11; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=10;").unwrap();
@@ -1121,9 +1114,7 @@ async fn schema_eleven_cleans_only_noncurrent_derived_failure_counters_once() {
 async fn schema_twenty_three_drops_revisit_metadata_and_indexes_completion_messages() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("revisit.sqlite");
-    let writer = DbWorker::open(&path).await.unwrap();
-    writer.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
     // Batch historical fixture setup; the production upgrade below still commits normally.
     db.execute_batch("BEGIN IMMEDIATE").unwrap();
     db.execute_batch("DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=12; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=11; DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%'; INSERT INTO app_meta(key,value)VALUES('revisit.fixture','preserve bounded metadata');").unwrap();
@@ -1169,9 +1160,7 @@ async fn schema_twenty_three_drops_revisit_metadata_and_indexes_completion_messa
 async fn schema_thirteen_records_positive_admission_evidence_and_keeps_uncertain_inputs_unknown() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("admission.sqlite");
-    let writer = DbWorker::open(&path).await.unwrap();
-    writer.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
     db.execute_batch("BEGIN IMMEDIATE; DROP INDEX draft_state_thread_updated; DROP INDEX draft_submitted_source_revision; ALTER TABLE turn DROP COLUMN interrupt_requested_at; ALTER TABLE receipt DROP COLUMN path_admission; DROP INDEX IF EXISTS shell_started_readback; DROP INDEX IF EXISTS shell_owner_started_readback; DROP INDEX IF EXISTS compact_operation_thread; DROP INDEX IF EXISTS automatic_compaction_turn; DROP INDEX IF EXISTS thread_parent; DROP INDEX IF EXISTS wait_run_state; DROP INDEX IF EXISTS wait_recovery_thread; DROP INDEX IF EXISTS thread_answer_latest; DROP INDEX IF EXISTS receipt_thread_order; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=13; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=12;").unwrap();
     seed_thread(&db, "t").unwrap();
     db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','stopped','0'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','stopped','0');").unwrap();

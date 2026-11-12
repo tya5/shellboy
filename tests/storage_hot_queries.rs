@@ -15,13 +15,8 @@ fn schema(db: &Connection) -> rusqlite::Result<Vec<(String, String, String)>> {
 async fn hot_query_upgrade_matches_fresh_schema_and_preserves_data() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("upgrade.sqlite");
-    let worker = DbWorker::open(&path).await.unwrap();
-    worker.call(|db| {
-        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('saved','preserve','/','/AGENTS.md','p','m','now')", [])?;
-        Ok(())
-    }).await.unwrap();
-    worker.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
+    db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('saved','preserve','/','/AGENTS.md','p','m','now')", []).unwrap();
     db.execute_batch(DROP_SELECTION_WITNESS).unwrap();
     db.execute_batch(DROP_HOT_INDEXES).unwrap();
     db.close().unwrap();
@@ -60,9 +55,7 @@ async fn hot_query_upgrade_matches_fresh_schema_and_preserves_data() {
 async fn hot_query_index_failure_rolls_back_indexes_and_version_together() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("rollback.sqlite");
-    let worker = DbWorker::open(&path).await.unwrap();
-    worker.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
     db.execute_batch(DROP_SELECTION_WITNESS).unwrap();
     db.execute_batch(DROP_HOT_INDEXES).unwrap();
     db.execute("CREATE TABLE run_thread_created(blocker INTEGER)", [])
@@ -126,14 +119,9 @@ async fn thread_parent_migration_rolls_back_then_reopens_with_identical_fresh_sc
     crate::test_watchdog::watchdog("parent index rollback and reopen", async {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("parent-upgrade.sqlite");
-    let worker = DbWorker::open(&path).await.unwrap();
-    worker.call(|db| {
-        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','saved parent','/','','p','m','now')", [])?;
-        db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,parent_thread_id)VALUES('child','saved child','/','','p','m','now','parent')", [])?;
-        Ok(())
-    }).await.unwrap();
-    worker.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
+    db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','saved parent','/','','p','m','now')", []).unwrap();
+    db.execute("INSERT INTO thread(id,title,cwd,agents_path,profile_id,model_id,updated_at,parent_thread_id)VALUES('child','saved child','/','','p','m','now','parent')", []).unwrap();
     db.execute_batch(DROP_SELECTION_WITNESS).unwrap();
     db.execute_batch("DROP INDEX thread_parent; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN branch_kind; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=17; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=16;
         CREATE TRIGGER reject_parent_ledger BEFORE INSERT ON schema_migration WHEN NEW.version=17
@@ -207,8 +195,7 @@ async fn summary_usage_accounting_migration_matches_fresh_schema() {
     crate::test_watchdog::watchdog("summary usage accounting migration", async {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("summary-usage-upgrade.sqlite");
-        DbWorker::open(&path).await.unwrap().shutdown().await.unwrap();
-        let db = Connection::open(&path).unwrap();
+        let db = crate::open_schema42_fixture(&path);
         db.execute_batch(DROP_SELECTION_WITNESS).unwrap();
         db.execute_batch("DROP INDEX gc_bytes_app_meta_history; CREATE INDEX gc_bytes_app_meta_history ON app_meta(octet_length(value)) WHERE key LIKE 'summary.part.%' OR key LIKE 'wait.pending.%' OR key LIKE 'compact.result.%' OR key LIKE 'revisit.%'; DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN branch_kind; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=18; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=17; INSERT INTO app_meta(key,value)VALUES('summary.usage.t.x','{\"requests\":1}');").unwrap();
         db.close().unwrap();
@@ -238,10 +225,11 @@ async fn summary_usage_accounting_migration_matches_fresh_schema() {
 async fn history_attempt_index_migration_from_24_matches_fresh() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("history-upgrade.sqlite");
-    let fresh = DbWorker::open(&path).await.unwrap();
+    let fresh_path = root.path().join("history-fresh-schema.sqlite");
+    let fresh = DbWorker::open(&fresh_path).await.unwrap();
     let expected = fresh.call(|db| Ok(schema(db)?)).await.unwrap();
     fresh.shutdown().await.unwrap();
-    let db = Connection::open(&path).unwrap();
+    let db = crate::open_schema42_fixture(&path);
     db.execute_batch(DROP_SELECTION_WITNESS).unwrap();
     db.execute_batch("DROP INDEX history_tool_group_attempt; DROP INDEX receipt_reply_pending; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN branch_kind; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=25; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=24;").unwrap();
     db.close().unwrap();
