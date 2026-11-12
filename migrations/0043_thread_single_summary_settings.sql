@@ -23,69 +23,204 @@ CREATE TABLE summary_usage_stage_archive(
 ) WITHOUT ROWID;
 
 -- Per-compaction usage ledger records flatten SummaryUsage into UsageRecord.
+-- Every candidate is validated before any JSON path mutation.  Mapping invalid
+-- source bytes to '{}' makes root validation safe without relying on WHERE order.
+WITH source AS (
+ SELECT key,CASE WHEN json_valid(value) THEN value ELSE '{}' END AS doc
+ FROM app_meta WHERE key LIKE 'summary.usage.%'
+), eligible AS (
+ SELECT key,doc FROM source
+ WHERE json_type(doc)='object'
+   AND (CASE WHEN json_type(doc,'$.map_requests') IS NULL THEN 1
+             WHEN json_type(doc,'$.map_requests')='integer' AND typeof(json_extract(doc,'$.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.reduce_requests') IS NULL THEN 1
+             WHEN json_type(doc,'$.reduce_requests')='integer' AND typeof(json_extract(doc,'$.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.oversized_reduce_parts') IS NULL THEN 1
+             WHEN json_type(doc,'$.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (json_type(doc,'$.map_requests') IS NOT NULL OR json_type(doc,'$.reduce_requests') IS NOT NULL OR json_type(doc,'$.oversized_reduce_parts') IS NOT NULL)
+)
 INSERT INTO summary_usage_stage_archive(record_key,legacy_json)
- SELECT key,json_object('map_requests',json_extract(value,'$.map_requests'),
-   'reduce_requests',json_extract(value,'$.reduce_requests'),
-   'oversized_reduce_parts',json_extract(value,'$.oversized_reduce_parts'))
- FROM app_meta WHERE key LIKE 'summary.usage.%' AND json_valid(value)
-   AND (json_type(value,'$.map_requests') IS NOT NULL OR json_type(value,'$.reduce_requests') IS NOT NULL OR json_type(value,'$.oversized_reduce_parts') IS NOT NULL);
+ SELECT key,json_object('map_requests',json_extract(doc,'$.map_requests'),
+   'reduce_requests',json_extract(doc,'$.reduce_requests'),
+   'oversized_reduce_parts',json_extract(doc,'$.oversized_reduce_parts')) FROM eligible;
+
+WITH source AS (
+ SELECT key,CASE WHEN json_valid(value) THEN value ELSE '{}' END AS doc
+ FROM app_meta WHERE key LIKE 'summary.usage.%'
+), eligible AS (
+ SELECT key,doc FROM source
+ WHERE json_type(doc)='object'
+   AND (CASE WHEN json_type(doc,'$.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.map_requests')='integer' AND typeof(json_extract(doc,'$.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.reduce_requests')='integer' AND typeof(json_extract(doc,'$.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (json_type(doc,'$.map_requests') IS NOT NULL OR json_type(doc,'$.reduce_requests') IS NOT NULL OR json_type(doc,'$.oversized_reduce_parts') IS NOT NULL)
+)
 UPDATE app_meta SET value=json_remove(value,'$.map_requests','$.reduce_requests','$.oversized_reduce_parts')
- WHERE key LIKE 'summary.usage.%' AND json_valid(value)
-   AND (json_type(value,'$.map_requests') IS NOT NULL OR json_type(value,'$.reduce_requests') IS NOT NULL OR json_type(value,'$.oversized_reduce_parts') IS NOT NULL);
+ WHERE key IN (SELECT key FROM eligible);
 
 -- Summary node payloads are the primary durable readback record.
+WITH source AS (
+ SELECT id,CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END AS doc
+ FROM node WHERE payload_json IS NOT NULL
+), eligible AS (
+ SELECT id,doc FROM source
+ WHERE json_type(doc)='object' AND json_type(doc,'$.summary_usage')='object'
+   AND (CASE WHEN json_type(doc,'$.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.summary_usage.map_requests')='integer' AND typeof(json_extract(doc,'$.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.summary_usage.reduce_requests')='integer' AND typeof(json_extract(doc,'$.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (json_type(doc,'$.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.summary_usage.oversized_reduce_parts') IS NOT NULL)
+)
 INSERT INTO summary_usage_stage_archive(record_key,legacy_json)
- SELECT 'node:'||id,json_object('map_requests',json_extract(payload_json,'$.summary_usage.map_requests'),
-   'reduce_requests',json_extract(payload_json,'$.summary_usage.reduce_requests'),
-   'oversized_reduce_parts',json_extract(payload_json,'$.summary_usage.oversized_reduce_parts'))
- FROM node WHERE payload_json IS NOT NULL AND json_valid(payload_json)
-   AND (json_type(payload_json,'$.summary_usage.map_requests') IS NOT NULL OR json_type(payload_json,'$.summary_usage.reduce_requests') IS NOT NULL OR json_type(payload_json,'$.summary_usage.oversized_reduce_parts') IS NOT NULL);
+ SELECT 'node:'||id,json_object('map_requests',json_extract(doc,'$.summary_usage.map_requests'),
+   'reduce_requests',json_extract(doc,'$.summary_usage.reduce_requests'),
+   'oversized_reduce_parts',json_extract(doc,'$.summary_usage.oversized_reduce_parts')) FROM eligible;
+
+WITH source AS (
+ SELECT id,CASE WHEN json_valid(payload_json) THEN payload_json ELSE '{}' END AS doc
+ FROM node WHERE payload_json IS NOT NULL
+), eligible AS (
+ SELECT id,doc FROM source
+ WHERE json_type(doc)='object' AND json_type(doc,'$.summary_usage')='object'
+   AND (CASE WHEN json_type(doc,'$.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.summary_usage.map_requests')='integer' AND typeof(json_extract(doc,'$.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.summary_usage.reduce_requests')='integer' AND typeof(json_extract(doc,'$.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (json_type(doc,'$.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.summary_usage.oversized_reduce_parts') IS NOT NULL)
+)
 UPDATE node SET payload_json=json_remove(payload_json,
  '$.summary_usage.map_requests','$.summary_usage.reduce_requests','$.summary_usage.oversized_reduce_parts')
- WHERE payload_json IS NOT NULL AND json_valid(payload_json)
-   AND (json_type(payload_json,'$.summary_usage.map_requests') IS NOT NULL OR json_type(payload_json,'$.summary_usage.reduce_requests') IS NOT NULL OR json_type(payload_json,'$.summary_usage.oversized_reduce_parts') IS NOT NULL);
+ WHERE id IN (SELECT id FROM eligible);
 
--- Compact receipts retain both successful result facts and rejected-attempt
--- usage in their current app_meta record; archive each retired object first.
+-- Compact receipts retain successful and rejected summary usage.  Each present
+-- path component must have its ordinary object shape, and every retired counter
+-- must be an exact signed SQLite integer before either branch is touched.
+WITH source AS (
+ SELECT key,CASE WHEN json_valid(value) THEN value ELSE '{}' END AS doc
+ FROM app_meta WHERE key LIKE 'compact.result.%'
+), eligible AS (
+ SELECT key,doc FROM source
+ WHERE json_type(doc)='object'
+   AND (json_type(doc,'$.outcome') IS NULL OR json_type(doc,'$.outcome')='object')
+   AND (json_type(doc,'$.outcome.result') IS NULL OR json_type(doc,'$.outcome.result')='object')
+   AND (json_type(doc,'$.outcome.result.compact') IS NULL OR json_type(doc,'$.outcome.result.compact')='object')
+   AND (json_type(doc,'$.outcome.result.compact.summary_usage') IS NULL OR json_type(doc,'$.outcome.result.compact.summary_usage')='object')
+   AND (json_type(doc,'$.outcome.error') IS NULL OR json_type(doc,'$.outcome.error')='object')
+   AND (json_type(doc,'$.outcome.error.details') IS NULL OR json_type(doc,'$.outcome.error.details')='object')
+   AND (json_type(doc,'$.outcome.error.details.summary_usage') IS NULL OR json_type(doc,'$.outcome.error.details.summary_usage')='object')
+   AND (CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.result.compact.summary_usage.map_requests')='integer' AND typeof(json_extract(doc,'$.outcome.result.compact.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests')='integer' AND typeof(json_extract(doc,'$.outcome.result.compact.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.error.details.summary_usage.map_requests')='integer' AND typeof(json_extract(doc,'$.outcome.error.details.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests')='integer' AND typeof(json_extract(doc,'$.outcome.error.details.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (json_type(doc,'$.outcome.result.compact.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NOT NULL)
+)
 INSERT INTO summary_usage_stage_archive(record_key,legacy_json)
  SELECT 'compact.result:'||key,json_object(
-  'result',json_extract(value,'$.outcome.result.compact.summary_usage'),
-  'error',json_extract(value,'$.outcome.error.details.summary_usage'))
- FROM app_meta WHERE key LIKE 'compact.result.%' AND json_valid(value)
-   AND (json_type(value,'$.outcome.result.compact.summary_usage.map_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.result.compact.summary_usage.reduce_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NOT NULL
-     OR json_type(value,'$.outcome.error.details.summary_usage.map_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.error.details.summary_usage.reduce_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NOT NULL);
+  'result',CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage')='object'
+    AND (json_type(doc,'$.outcome.result.compact.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NOT NULL)
+    THEN json_object('map_requests',json_extract(doc,'$.outcome.result.compact.summary_usage.map_requests'),
+      'reduce_requests',json_extract(doc,'$.outcome.result.compact.summary_usage.reduce_requests'),
+      'oversized_reduce_parts',json_extract(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts')) END,
+  'error',CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage')='object'
+    AND (json_type(doc,'$.outcome.error.details.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NOT NULL)
+    THEN json_object('map_requests',json_extract(doc,'$.outcome.error.details.summary_usage.map_requests'),
+      'reduce_requests',json_extract(doc,'$.outcome.error.details.summary_usage.reduce_requests'),
+      'oversized_reduce_parts',json_extract(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts')) END) FROM eligible;
+
+WITH source AS (
+ SELECT key,CASE WHEN json_valid(value) THEN value ELSE '{}' END AS doc
+ FROM app_meta WHERE key LIKE 'compact.result.%'
+), eligible AS (
+ SELECT key,doc FROM source
+ WHERE json_type(doc)='object'
+   AND (json_type(doc,'$.outcome') IS NULL OR json_type(doc,'$.outcome')='object')
+   AND (json_type(doc,'$.outcome.result') IS NULL OR json_type(doc,'$.outcome.result')='object')
+   AND (json_type(doc,'$.outcome.result.compact') IS NULL OR json_type(doc,'$.outcome.result.compact')='object')
+   AND (json_type(doc,'$.outcome.result.compact.summary_usage') IS NULL OR json_type(doc,'$.outcome.result.compact.summary_usage')='object')
+   AND (json_type(doc,'$.outcome.error') IS NULL OR json_type(doc,'$.outcome.error')='object')
+   AND (json_type(doc,'$.outcome.error.details') IS NULL OR json_type(doc,'$.outcome.error.details')='object')
+   AND (json_type(doc,'$.outcome.error.details.summary_usage') IS NULL OR json_type(doc,'$.outcome.error.details.summary_usage')='object')
+   AND (CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.result.compact.summary_usage.map_requests')='integer' AND typeof(json_extract(doc,'$.outcome.result.compact.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests')='integer' AND typeof(json_extract(doc,'$.outcome.result.compact.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.error.details.summary_usage.map_requests')='integer' AND typeof(json_extract(doc,'$.outcome.error.details.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests')='integer' AND typeof(json_extract(doc,'$.outcome.error.details.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)
+   AND (CASE WHEN json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)
+   AND (json_type(doc,'$.outcome.result.compact.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.outcome.result.compact.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.map_requests') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.reduce_requests') IS NOT NULL OR json_type(doc,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NOT NULL)
+)
 UPDATE app_meta SET value=json_remove(value,
  '$.outcome.result.compact.summary_usage.map_requests','$.outcome.result.compact.summary_usage.reduce_requests','$.outcome.result.compact.summary_usage.oversized_reduce_parts',
  '$.outcome.error.details.summary_usage.map_requests','$.outcome.error.details.summary_usage.reduce_requests','$.outcome.error.details.summary_usage.oversized_reduce_parts')
- WHERE key LIKE 'compact.result.%' AND json_valid(value)
-   AND (json_type(value,'$.outcome.result.compact.summary_usage.map_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.result.compact.summary_usage.reduce_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.result.compact.summary_usage.oversized_reduce_parts') IS NOT NULL
-     OR json_type(value,'$.outcome.error.details.summary_usage.map_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.error.details.summary_usage.reduce_requests') IS NOT NULL
-     OR json_type(value,'$.outcome.error.details.summary_usage.oversized_reduce_parts') IS NOT NULL);
+ WHERE key IN (SELECT key FROM eligible);
 
 -- Automatic stage facts are nested under each committed stage in attempt JSON.
+-- The safe CASE makes json_each see only a proven committed_stages object.  The
+-- record is accepted atomically only if every traversed stage and any summary
+-- usage object has its exact supported shape and all present counters fit i64.
+WITH source AS (
+ SELECT id,CASE WHEN json_valid(error_json) THEN error_json ELSE '{}' END AS doc
+ FROM model_attempt WHERE error_json IS NOT NULL
+), rooted AS (
+ SELECT id,doc FROM source WHERE json_type(doc)='object'
+), eligible AS (
+ SELECT r.id,r.doc FROM rooted r
+ WHERE json_type(r.doc,'$.automatic_trim_attempt')='object'
+   AND json_type(r.doc,'$.automatic_trim_attempt.committed_stages')='object'
+   AND NOT EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_type(r.doc,'$.automatic_trim_attempt')='object' AND json_type(r.doc,'$.automatic_trim_attempt.committed_stages')='object' THEN json_extract(r.doc,'$.automatic_trim_attempt.committed_stages') ELSE '{}' END) stage
+    WHERE stage.type!='object'
+       OR (json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage') IS NOT NULL AND json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage')!='object')
+       OR (CASE WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests')='integer' AND typeof(json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)=0
+       OR (CASE WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests')='integer' AND typeof(json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)=0
+       OR (CASE WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)=0
+   )
+   AND EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_type(r.doc,'$.automatic_trim_attempt')='object' AND json_type(r.doc,'$.automatic_trim_attempt.committed_stages')='object' THEN json_extract(r.doc,'$.automatic_trim_attempt.committed_stages') ELSE '{}' END) stage
+    WHERE json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests') IS NOT NULL
+       OR json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests') IS NOT NULL
+       OR json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts') IS NOT NULL
+   )
+)
 INSERT INTO summary_usage_stage_archive(record_key,legacy_json)
- SELECT 'attempt:'||a.id,json_object('committed_stages',json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages'))
- FROM model_attempt a WHERE a.error_json IS NOT NULL AND json_valid(a.error_json)
-   AND EXISTS(SELECT 1 FROM json_each(a.error_json,'$.automatic_trim_attempt.committed_stages') stage
-     WHERE json_type(stage.value,'$.summary_usage.map_requests') IS NOT NULL
-        OR json_type(stage.value,'$.summary_usage.reduce_requests') IS NOT NULL
-        OR json_type(stage.value,'$.summary_usage.oversized_reduce_parts') IS NOT NULL);
+ SELECT 'attempt:'||eligible.id,json_object('committed_stages',json((
+  SELECT json_group_object(stage.key,json_object('summary_usage',json_object(
+    'map_requests',json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests'),
+    'reduce_requests',json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests'),
+    'oversized_reduce_parts',json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts'))))
+  FROM json_each(CASE WHEN json_type(eligible.doc,'$.automatic_trim_attempt')='object' AND json_type(eligible.doc,'$.automatic_trim_attempt.committed_stages')='object' THEN json_extract(eligible.doc,'$.automatic_trim_attempt.committed_stages') ELSE '{}' END) stage
+  WHERE json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests') IS NOT NULL
+     OR json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests') IS NOT NULL
+     OR json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts') IS NOT NULL))) FROM eligible;
+
+WITH source AS (
+ SELECT id,CASE WHEN json_valid(error_json) THEN error_json ELSE '{}' END AS doc
+ FROM model_attempt WHERE error_json IS NOT NULL
+), rooted AS (
+ SELECT id,doc FROM source WHERE json_type(doc)='object'
+), eligible AS (
+ SELECT r.id,r.doc FROM rooted r
+ WHERE json_type(r.doc,'$.automatic_trim_attempt')='object'
+   AND json_type(r.doc,'$.automatic_trim_attempt.committed_stages')='object'
+   AND NOT EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_type(r.doc,'$.automatic_trim_attempt')='object' AND json_type(r.doc,'$.automatic_trim_attempt.committed_stages')='object' THEN json_extract(r.doc,'$.automatic_trim_attempt.committed_stages') ELSE '{}' END) stage
+    WHERE stage.type!='object'
+       OR (json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage') IS NOT NULL AND json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage')!='object')
+       OR (CASE WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests') IS NULL THEN 1 WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests')='integer' AND typeof(json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests'))='integer' THEN 1 ELSE 0 END)=0
+       OR (CASE WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests') IS NULL THEN 1 WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests')='integer' AND typeof(json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests'))='integer' THEN 1 ELSE 0 END)=0
+       OR (CASE WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts') IS NULL THEN 1 WHEN json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts')='integer' AND typeof(json_extract(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts'))='integer' THEN 1 ELSE 0 END)=0
+   )
+   AND EXISTS (
+    SELECT 1 FROM json_each(CASE WHEN json_type(r.doc,'$.automatic_trim_attempt')='object' AND json_type(r.doc,'$.automatic_trim_attempt.committed_stages')='object' THEN json_extract(r.doc,'$.automatic_trim_attempt.committed_stages') ELSE '{}' END) stage
+    WHERE json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.map_requests') IS NOT NULL
+       OR json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.reduce_requests') IS NOT NULL
+       OR json_type(CASE WHEN stage.type='object' THEN stage.value ELSE '{}' END,'$.summary_usage.oversized_reduce_parts') IS NOT NULL
+   )
+)
 UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.committed_stages',
  (SELECT json_group_object(stage.key,json(json_remove(stage.value,
   '$.summary_usage.map_requests','$.summary_usage.reduce_requests','$.summary_usage.oversized_reduce_parts')))
-  FROM json_each(model_attempt.error_json,'$.automatic_trim_attempt.committed_stages') stage))
- WHERE error_json IS NOT NULL AND json_valid(error_json)
-   AND EXISTS(SELECT 1 FROM json_each(error_json,'$.automatic_trim_attempt.committed_stages') stage
-     WHERE json_type(stage.value,'$.summary_usage.map_requests') IS NOT NULL
-        OR json_type(stage.value,'$.summary_usage.reduce_requests') IS NOT NULL
-        OR json_type(stage.value,'$.summary_usage.oversized_reduce_parts') IS NOT NULL);
+  FROM json_each(CASE WHEN json_type(eligible.doc,'$.automatic_trim_attempt')='object' AND json_type(eligible.doc,'$.automatic_trim_attempt.committed_stages')='object' THEN json_extract(eligible.doc,'$.automatic_trim_attempt.committed_stages') ELSE '{}' END) stage))
+FROM eligible WHERE model_attempt.id=eligible.id;
 
 INSERT INTO schema_migration(version,name) VALUES(43,'0043_thread_single_summary_settings');
 PRAGMA user_version=43;
