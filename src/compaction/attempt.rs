@@ -54,12 +54,12 @@ pub(crate) fn finish_tx(
         return Ok(false);
     };
     let changed = tx.execute(FINISH_SQL, params![body, attempt, token])?;
-    if changed == 1 {
-        if let Some(boundary) = boundary {
-            let expected =
-                serde_json::from_str(&boundary).map_err(|e| StorageError::Schema(e.to_string()))?;
-            super::a_state::reset_tx(tx, &thread, expected, token)?;
-        }
+    if changed == 1
+        && let Some(boundary) = boundary
+    {
+        let expected =
+            serde_json::from_str(&boundary).map_err(|e| StorageError::Schema(e.to_string()))?;
+        super::a_state::reset_tx(tx, &thread, expected, token)?;
     }
     Ok(changed == 1)
 }

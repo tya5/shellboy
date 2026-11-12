@@ -255,10 +255,10 @@ pub(crate) fn reset_tx(
     expected: Token,
     origin: &str,
 ) -> Result<(), StorageError> {
-    if let Some(mut state) = read(db, thread)? {
-        if state.finish_boundary(expected, origin)? {
-            save(db, thread, &state)?;
-        }
+    if let Some(mut state) = read(db, thread)?
+        && state.finish_boundary(expected, origin)?
+    {
+        save(db, thread, &state)?;
     }
     Ok(())
 }

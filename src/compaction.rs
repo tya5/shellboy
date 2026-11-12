@@ -669,7 +669,6 @@ impl Compactor {
             drop_all_reasoning: false,
             active: Some(plan),
             requested_limit: None,
-            failure_region: single_request::Region::Active,
         })
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
@@ -825,7 +824,7 @@ impl Compactor {
         response
     }
 
-    pub(super) async fn summarize_range(
+    async fn summarize_range(
         &self,
         snapshot: Snapshot,
         range: Range<usize>,
@@ -845,7 +844,6 @@ impl Compactor {
             drop_all_reasoning: false,
             active: None,
             requested_limit,
-            failure_region: single_request::Region::Closed,
         })
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
@@ -936,14 +934,26 @@ fn spill_payload(group: &Group) -> Option<Value> {
     Some(payload)
 }
 
+struct SnapshotMatch {
+    selection: Option<bool>,
+    profile: Option<bool>,
+    epoch: Option<bool>,
+    settings: Option<bool>,
+}
 fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageError> {
     use discard::{DiscardReason as R, rejected};
-    let matches:Option<(Option<bool>,Option<bool>,Option<bool>,Option<bool>)>=tx.query_row(
+    let matches:Option<SnapshotMatch>=tx.query_row(
         "SELECT selection_revision=?2,profile_revision=?3,reasoning_epoch=?4,summary_max_chars IS ?5 FROM thread WHERE id=?1 AND deleted_at IS NULL",
         params![s.thread,s.revision as i64,s.profile_revision,s.epoch,s.summary_max_chars],
-        |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+        |r|Ok(SnapshotMatch{selection:r.get(0)?,profile:r.get(1)?,epoch:r.get(2)?,settings:r.get(3)?}),
     ).optional()?;
-    let Some((selection, profile, epoch, settings)) = matches else {
+    let Some(SnapshotMatch {
+        selection,
+        profile,
+        epoch,
+        settings,
+    }) = matches
+    else {
         return Err(rejected(
             R::ThreadUnavailable,
             "Compaction snapshot changed; late result discarded",

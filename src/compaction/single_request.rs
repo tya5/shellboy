@@ -13,7 +13,6 @@ pub(super) struct SummaryRequest<'a, 'boundary> {
     pub(super) drop_all_reasoning: bool,
     pub(super) active: Option<policy::ActiveTurnPlan>,
     pub(super) requested_limit: Option<u64>,
-    pub(super) failure_region: Region,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,11 +130,20 @@ pub(super) fn adoption_size(
 }
 
 /// One real HTTP request loop; the owner derives the retry range and performs adoption.
+pub(super) struct DispatchRequest<'a, 'b> {
+    snapshot: &'a Snapshot,
+    selected: Range<usize>,
+    limit: OutputLimit,
+    identity: FailureIdentity,
+    cancel: &'a CancellationToken,
+    ledger: &'a mut usage::UsageLedger,
+    boundary: Option<&'a mut boundary::Boundary<'b>>,
+    eligible: Box<dyn Fn(Range<usize>) -> bool + 'a>,
+}
 pub(super) struct Dispatched {
     pub(super) selected: Range<usize>,
     pub(super) response: model::ModelResponse,
     pub(super) size: AdoptionSize,
-    pub(super) identity: FailureIdentity,
 }
 impl Compactor {
     pub(super) async fn summarize_single(
@@ -152,7 +160,6 @@ impl Compactor {
             drop_all_reasoning,
             active,
             requested_limit,
-            failure_region: region,
         } = request;
         let valid = |span: Range<usize>| {
             if active.is_some() {
@@ -200,16 +207,16 @@ impl Compactor {
             ));
         }
         let dispatched = self
-            .dispatch_single_summary(
-                &snapshot,
-                original,
+            .dispatch_single_summary(DispatchRequest {
+                snapshot: &snapshot,
+                selected: original,
                 limit,
-                identity.clone(),
-                &cancel,
+                identity: identity.clone(),
+                cancel: &cancel,
                 ledger,
                 boundary,
-                valid,
-            )
+                eligible: Box::new(valid),
+            })
             .await;
         let dispatched = match dispatched {
             Ok(result) => result,
@@ -348,15 +355,18 @@ impl Compactor {
 
     pub(super) async fn dispatch_single_summary(
         &self,
-        snapshot: &Snapshot,
-        selected: Range<usize>,
-        limit: OutputLimit,
-        identity: FailureIdentity,
-        cancel: &CancellationToken,
-        ledger: &mut usage::UsageLedger,
-        mut boundary: Option<&mut boundary::Boundary<'_>>,
-        eligible: impl Fn(Range<usize>) -> bool,
+        request: DispatchRequest<'_, '_>,
     ) -> Result<Dispatched, ApiError> {
+        let DispatchRequest {
+            snapshot,
+            selected,
+            limit,
+            identity,
+            cancel,
+            ledger,
+            mut boundary,
+            eligible,
+        } = request;
         let connection = self
             .config
             .connections
@@ -458,7 +468,6 @@ impl Compactor {
                 selected,
                 response,
                 size,
-                identity: trial.identity.clone(),
             });
         }
     }
@@ -496,7 +505,7 @@ pub(super) fn failure_identity(
         .flat_map(|g| g.sources.iter().rev())
         .next()?;
     Some(FailureIdentity(crate::digest::sha256_hex(
-        &serde_json::to_vec(&json!([
+        serde_json::to_vec(&json!([
             thread,
             first.id,
             last.id,
@@ -510,6 +519,7 @@ pub(super) fn failure_identity(
 
 /// Retry cursor retains the original identity while only its trial range changes.
 pub(super) struct Trial {
+    #[cfg(test)]
     identity: FailureIdentity,
     selected: Range<usize>,
     terminal: bool,
@@ -517,6 +527,7 @@ pub(super) struct Trial {
 impl Trial {
     pub(super) fn new(original: Range<usize>, identity: FailureIdentity) -> Option<Self> {
         (!original.is_empty()).then_some(Self {
+            #[cfg(test)]
             identity,
             selected: original,
             terminal: false,
@@ -816,8 +827,10 @@ mod tests {
     }
     #[test]
     fn only_explicit_manual_limit_overrides_thread_connection_defaults() {
-        let mut connection = crate::config::Connection::default();
-        connection.summary_max_chars = Some(4000);
+        let connection = crate::config::Connection {
+            summary_max_chars: Some(4000),
+            ..Default::default()
+        };
         assert_eq!(resolved_limit(None, None, None), OutputLimit(20000));
         assert_eq!(
             resolved_limit(None, None, Some(&connection)),

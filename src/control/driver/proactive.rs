@@ -8,9 +8,6 @@ mod fault_tests;
 pub(super) const REASON: &str = "proactive_threshold";
 
 /// Kept as a caller handle; no durable progress/marks policy lives here.
-#[derive(Default)]
-pub(super) struct ProactiveBudget;
-
 /// One automatic attempt's identity for the #226 recoverable record.
 struct Automatic {
     attempt: String,
@@ -148,7 +145,6 @@ pub(super) async fn maybe_compact(
     control: &Arc<Control>,
     snapshot: &mut Snapshot,
     slot: &DriverSlot,
-    budget: &mut ProactiveBudget,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<bool, ApiError> {
     // One decision per fresh provider report; no character forecast or marks.
@@ -311,11 +307,10 @@ pub(super) async fn maybe_compact(
         .await
         .map_err(storage_error)?;
     control.changed(&snapshot.thread);
-    let _ = budget; // Retired progress fields are removed in the API cleanup child.
-    if slot.stop.is_cancelled() {
-        if let Err(error) = result {
-            return Err(error);
-        }
+    if slot.stop.is_cancelled()
+        && let Err(error) = result
+    {
+        return Err(error);
     }
     Ok(true)
 }

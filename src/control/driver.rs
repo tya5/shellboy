@@ -145,7 +145,6 @@ pub(super) async fn drive(
     let boundary = control.boundary(&thread).await;
     let mut overflow = OverflowBudget::default();
     let mut retry_budget = retry::RetryBudget::default();
-    let mut proactive_budget = proactive::ProactiveBudget::default();
     let mut instructions = Instructions::default();
     loop {
         if slot.stop.is_cancelled() {
@@ -187,7 +186,6 @@ pub(super) async fn drive(
             &control,
             &mut snapshot,
             &request_slot,
-            &mut proactive_budget,
             &mut compact_boundary,
         )
         .await;

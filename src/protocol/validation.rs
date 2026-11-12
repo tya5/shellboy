@@ -164,12 +164,12 @@ impl ThreadTagArgs {
 
 impl ContextEditArgs {
     pub fn validate(&self) -> Result<(), ApiError> {
-        if let Some(chars) = self.max_chars {
-            if self.action != ContextEditAction::Summary || chars == 0 || chars > i64::MAX as u64 {
-                return Err(invalid(
-                    "summary max_chars requires summary action and integer 1..i64::MAX",
-                ));
-            }
+        if let Some(chars) = self.max_chars
+            && (self.action != ContextEditAction::Summary || chars == 0 || chars > i64::MAX as u64)
+        {
+            return Err(invalid(
+                "summary max_chars requires summary action and integer 1..i64::MAX",
+            ));
         }
         for (name, value) in [
             ("thread_id", &self.thread_id),
@@ -357,24 +357,6 @@ pub(crate) fn parse_target_percent(value: &str) -> Result<Option<i64>, ApiError>
 }
 pub(crate) fn parse_summary_chars(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "summary_max_chars", &(1..=i64::MAX as usize))
-}
-#[cfg(test)]
-pub(crate) fn parse_segment_chars(value: &str) -> Result<Option<i64>, ApiError> {
-    parse_bounded_override(value, "segment_chars", &crate::config::SEGMENT_CHARS_RANGE)
-}
-#[cfg(test)]
-pub(crate) fn parse_reduce_rounds(value: &str) -> Result<Option<i64>, ApiError> {
-    parse_bounded_override(value, "reduce_rounds", &crate::config::REDUCE_ROUNDS_RANGE)
-}
-#[cfg(test)]
-fn check_summary_parameters(segment: Option<u64>, rounds: Option<u64>) -> Result<(), ApiError> {
-    if let Some(value) = segment {
-        parse_segment_chars(&value.to_string())?;
-    }
-    if let Some(value) = rounds {
-        parse_reduce_rounds(&value.to_string())?;
-    }
-    Ok(())
 }
 
 impl ThreadSetArgs {

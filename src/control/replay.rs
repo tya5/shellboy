@@ -279,6 +279,7 @@ impl ReplayLease {
 
     /// Node anchoring the newest replayable tool group, if one exists.
     #[cfg(test)]
+    #[cfg(test)]
     pub(crate) fn latest_tool_anchor(&self) -> Option<&str> {
         self.0
             .frames
@@ -296,6 +297,7 @@ impl ReplayLease {
     /// Active-Turn summary can cover an older tool group or spill marker even
     /// if that group itself is not worth spilling. Return true only when that
     /// scope is structurally impossible, without inspecting user content.
+    #[cfg(test)]
     #[cfg(test)]
     pub(crate) fn proves_no_active_middle(&self) -> bool {
         let mut first = None;
@@ -655,6 +657,7 @@ fn outbound_item(mut item: Value) -> Value {
     }
     item
 }
+#[cfg(test)]
 fn bounded_json_characters(item: &Value, remaining: &mut usize) -> Option<u64> {
     struct Counter<'a> {
         remaining: &'a mut usize,
@@ -724,9 +727,7 @@ fn decode_frame_checked(
     ledger: &Arc<Ledger>,
 ) -> Result<Frame, FrameError> {
     #[cfg(test)]
-    let mut spill_result_item = false;
-    #[cfg(test)]
-    let mut spill_projection_safe = true;
+    let mut proof = (true, false);
     let (group, items, spill_marker) = match body {
         None => (None, Vec::new(), false),
         Some(body) => {
@@ -738,21 +739,21 @@ fn decode_frame_checked(
                 .map(str::to_owned);
             let spill = value.get("spill_version").is_some();
             #[cfg(test)]
-            let (spill_projection_safe, spill_result_item) = {
-                let no_output = value.get("output").and_then(Value::as_array).is_none();
-                let safe =
-                    !(no_output && value.get("role").is_some() && value.get("item").is_some());
-                let result = safe
-                    && no_output
-                    && value
-                        .get("item")
-                        .and_then(|item| item.get("type"))
-                        .and_then(Value::as_str)
-                        == Some("function_call_output");
-                (safe, result)
-            };
-            #[cfg(not(test))]
-            let (spill_projection_safe, spill_result_item) = (true, false);
+            {
+                proof = {
+                    let no_output = value.get("output").and_then(Value::as_array).is_none();
+                    let safe =
+                        !(no_output && value.get("role").is_some() && value.get("item").is_some());
+                    let result = safe
+                        && no_output
+                        && value
+                            .get("item")
+                            .and_then(|item| item.get("type"))
+                            .and_then(Value::as_str)
+                            == Some("function_call_output");
+                    (safe, result)
+                }
+            }
             let items = convert_kept(value, epoch, keep.contains(&stamp.id));
             (
                 group,
@@ -782,9 +783,9 @@ fn decode_frame_checked(
         items,
         group,
         #[cfg(test)]
-        spill_result_item,
+        spill_result_item: proof.1,
         #[cfg(test)]
-        spill_projection_safe,
+        spill_projection_safe: proof.0,
         spill_marker,
         bytes,
         pins: AtomicUsize::new(0),
