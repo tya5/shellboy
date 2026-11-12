@@ -113,6 +113,12 @@ impl SummaryAdoption {
                 [history::reasoning_keep_key(&self.snapshot.thread)],
             )?;
         }
+        if self.automatic.is_none() {
+            let mut state=super::a_state::scope_tx(tx,&self.snapshot.thread,&self.snapshot.profile,&self.snapshot.model)?;
+            let expected=state.token();
+            state.finish_boundary(expected,&self.replacement)?;
+            super::a_state::save(tx,&self.snapshot.thread,&state)?;
+        }
         // A partial active summary drops all earlier reasoning regardless of suffix.
         self.result.summary_node_id = Some(node);
         if let Some(stage) = &self.automatic {

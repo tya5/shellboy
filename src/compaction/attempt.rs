@@ -28,6 +28,12 @@ pub(crate) fn begin_tx(
     trigger: &Value,
     target_plan: &Value,
 ) -> Result<(), StorageError> {
+    let mut trigger=trigger.clone();
+    let scope:Option<(String,String,String)>=tx.query_row("SELECT t.thread_id,a.profile_id,a.model_id FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",[attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+    if let Some((thread,connection,model))=scope {
+        let state=super::a_state::scope_tx(tx,&thread,&connection,&model)?;
+        trigger["a_boundary"]=serde_json::to_value(state.token()).map_err(|e|StorageError::Schema(e.to_string()))?;
+    }
     let body = json!({"outcome":"unknown","provisional":true,"token":token,"reason":reason,
         "trigger":trigger,"target_plan":target_plan,"committed_stages":{}})
     .to_string();
@@ -36,6 +42,19 @@ pub(crate) fn begin_tx(
         params![body, attempt],
     )?;
     Ok(())
+}
+
+pub(crate) fn finish_tx(tx:&rusqlite::Transaction<'_>,body:&str,attempt:&str,token:&str)->Result<bool,StorageError> {
+    let row:Option<(String,Option<String>)>=tx.query_row("SELECT t.thread_id,json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1",params![attempt,token],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+    let Some((thread,boundary))=row else {return Ok(false);};
+    let changed=tx.execute(FINISH_SQL,params![body,attempt,token])?;
+    if changed==1 {
+        if let Some(boundary)=boundary {
+            let expected=serde_json::from_str(&boundary).map_err(|e|StorageError::Schema(e.to_string()))?;
+            super::a_state::reset_tx(tx,&thread,expected,token)?;
+        }
+    }
+    Ok(changed==1)
 }
 
 /// Fixed-size measurements of one adopted stage. `removed_characters` is the

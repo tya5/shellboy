@@ -20,7 +20,7 @@ pub(crate) struct State {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Report { attempt: String, input_tokens: Option<u64> }
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 pub(crate) struct Token { scope: u64, boundary: u64 }
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Reading { LegacyAbsent, AwaitingFirst, Known(u64), Unknown }
@@ -106,6 +106,12 @@ pub(crate) fn complete_report_tx(db:&rusqlite::Connection, thread:&str, connecti
     let Some(generation)=generation else {return Ok(());}; // Legacy inflight attempt has no causal scope token.
     let Some(mut state)=read(db,thread)? else {return Ok(());};
     if state.completed(Token{scope:generation,boundary:0},connection,model,attempt,input)? {save(db,thread,&state)?;}
+    Ok(())
+}
+pub(crate) fn reset_tx(db:&rusqlite::Connection,thread:&str,expected:Token,origin:&str)->Result<(),StorageError> {
+    if let Some(mut state)=read(db,thread)? {
+        if state.finish_boundary(expected,origin)? {save(db,thread,&state)?;}
+    }
     Ok(())
 }
 pub(crate) fn cleanup_tx(db:&rusqlite::Connection, thread:&str) -> Result<(),StorageError> {

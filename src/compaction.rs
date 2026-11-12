@@ -26,7 +26,7 @@ mod retry;
 use bounded::SummaryBudget;
 mod attempt;
 pub mod discard;
-pub(crate) use attempt::{
+pub(crate) use attempt::{finish_tx as attempt_finish_tx,
     AutomaticStage, FINISH_SQL as ATTEMPT_FINISH_SQL, begin_tx as attempt_begin_tx,
 };
 mod edit;
@@ -848,6 +848,10 @@ impl Compactor {
     }
     /// #182 proactive order: the ordinary prefix summary only when the prefix
     /// holds something other than earlier summaries.
+    pub(crate) async fn has_closed_summary(&self,thread:&str)->Result<bool,ApiError> {
+        let snapshot=self.snapshot(thread,true).await?;
+        Ok(policy::unsummarized_prefix(&snapshot).is_some())
+    }
     pub(crate) async fn summarize_prefix_guarded(
         &self,
         thread: &str,
