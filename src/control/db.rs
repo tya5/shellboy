@@ -1370,7 +1370,6 @@ impl Store {
                         serde_json::json!(details.effective_auto_compact_target_percent);
                     result.result["effective_summary_max_chars"] =
                         serde_json::json!(details.effective_summary_max_chars);
-
                 }
                 Ok(result)
             }
@@ -1731,9 +1730,14 @@ impl Store {
         let compaction = &config.compaction;
         details.effective_auto_compact_at =
             Some(compaction.auto_at_tokens_for(details.auto_compact_at, connection));
-        let settings=crate::config::SummarySettings::resolve(details.auto_compact_target_percent,details.summary_max_chars,connection,None);
-        details.effective_auto_compact_target_percent=Some(settings.target_percent);
-        details.effective_summary_max_chars=Some(settings.output_characters);
+        let settings = crate::config::SummarySettings::resolve(
+            details.auto_compact_target_percent,
+            details.summary_max_chars,
+            connection,
+            None,
+        );
+        details.effective_auto_compact_target_percent = Some(settings.target_percent);
+        details.effective_summary_max_chars = Some(settings.output_characters);
     }
 
     fn set_thread(

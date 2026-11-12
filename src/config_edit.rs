@@ -162,8 +162,8 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         auto_at_tokens,
         auto_compact_target_percent,
         summary_max_chars,
-        segment_chars:_,
-        reduce_rounds:_,
+        segment_chars: _,
+        reduce_rounds: _,
         credentials_file: _,
         stored_keys: _,
     } = connection;

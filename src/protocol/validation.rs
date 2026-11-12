@@ -163,10 +163,12 @@ impl ThreadTagArgs {
 }
 
 impl ContextEditArgs {
-    pub fn validate(&self) -> Result<(),ApiError> {
-        if let Some(chars)=self.max_chars {
-            if self.action!=ContextEditAction::Summary || chars==0 || chars>i64::MAX as u64 {
-                return Err(invalid("summary max_chars requires summary action and integer 1..i64::MAX"));
+    pub fn validate(&self) -> Result<(), ApiError> {
+        if let Some(chars) = self.max_chars {
+            if self.action != ContextEditAction::Summary || chars == 0 || chars > i64::MAX as u64 {
+                return Err(invalid(
+                    "summary max_chars requires summary action and integer 1..i64::MAX",
+                ));
             }
         }
         for (name, value) in [

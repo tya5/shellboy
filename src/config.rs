@@ -1101,10 +1101,15 @@ pub struct Compaction {
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct CompactionFields { auto_at_tokens:Option<u64> }
+struct CompactionFields {
+    auto_at_tokens: Option<u64>,
+}
 impl From<CompactionFields> for Compaction {
-    fn from(fields:CompactionFields)->Self {
-        Self {auto_at_tokens:fields.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),..Default::default()}
+    fn from(fields: CompactionFields) -> Self {
+        Self {
+            auto_at_tokens: fields.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),
+            ..Default::default()
+        }
     }
 }
 impl Default for Compaction {
@@ -1146,10 +1151,20 @@ pub struct SummarySettings {
     pub output_characters: u64,
 }
 impl SummarySettings {
-    pub fn resolve(thread_percent:Option<u64>,thread_characters:Option<u64>,connection:Option<&Connection>,manual_characters:Option<u64>)->Self {
+    pub fn resolve(
+        thread_percent: Option<u64>,
+        thread_characters: Option<u64>,
+        connection: Option<&Connection>,
+        manual_characters: Option<u64>,
+    ) -> Self {
         Self {
-            target_percent:thread_percent.or_else(||connection.and_then(|c|c.auto_compact_target_percent)).unwrap_or(20),
-            output_characters:manual_characters.or(thread_characters).or_else(||connection.and_then(|c|c.summary_max_chars)).unwrap_or(20000),
+            target_percent: thread_percent
+                .or_else(|| connection.and_then(|c| c.auto_compact_target_percent))
+                .unwrap_or(20),
+            output_characters: manual_characters
+                .or(thread_characters)
+                .or_else(|| connection.and_then(|c| c.summary_max_chars))
+                .unwrap_or(20000),
         }
     }
 }

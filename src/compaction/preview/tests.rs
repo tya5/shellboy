@@ -929,22 +929,39 @@ async fn automatic_candidates_notice_protection_release_without_path_revision_ch
 
 #[tokio::test]
 async fn dry_run_reflects_output_limit_from_each_level_without_map_forecast() {
-    let f=Fixture::new().await;
-    f.text("a",&"a".repeat(5000)).await;
-    f.text("b",&"b".repeat(5000)).await;
-    f.text("tail","current").await;
-    let summary=args(Some(ContextEditAction::Summary),Some("a"),Some("b"));
-    let p=forecast(&f,&summary);
-    assert_eq!(p["summary"]["summary_character_limit"],20000);
-    assert_eq!(p["summary"]["single_request"],true);
+    let f = Fixture::new().await;
+    f.text("a", &"a".repeat(5000)).await;
+    f.text("b", &"b".repeat(5000)).await;
+    f.text("tail", "current").await;
+    let summary = args(Some(ContextEditAction::Summary), Some("a"), Some("b"));
+    let p = forecast(&f, &summary);
+    assert_eq!(p["summary"]["summary_character_limit"], 20000);
+    assert_eq!(p["summary"]["single_request"], true);
     assert!(p["summary"].get("segments").is_none());
-    let mut c=config();c.connections.get_mut("p").unwrap().summary_max_chars=Some(12000);
-    assert_eq!(forecast_config(&f,&summary,&c).unwrap()["summary"]["summary_character_limit"],12000);
-    f.db.call(|db|{db.execute("UPDATE thread SET summary_max_chars=6000 WHERE id='t'",[])?;Ok(())}).await.unwrap();
-    assert_eq!(forecast_config(&f,&summary,&c).unwrap()["summary"]["summary_character_limit"],6000);
-    let mut once=summary.clone();once.max_chars=Some(3000);
-    assert_eq!(forecast_config(&f,&once,&c).unwrap()["summary"]["summary_character_limit"],3000);
-    let mut default=args(None,None,None);default.max_chars=Some(3000);
+    let mut c = config();
+    c.connections.get_mut("p").unwrap().summary_max_chars = Some(12000);
+    assert_eq!(
+        forecast_config(&f, &summary, &c).unwrap()["summary"]["summary_character_limit"],
+        12000
+    );
+    f.db.call(|db| {
+        db.execute("UPDATE thread SET summary_max_chars=6000 WHERE id='t'", [])?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        forecast_config(&f, &summary, &c).unwrap()["summary"]["summary_character_limit"],
+        6000
+    );
+    let mut once = summary.clone();
+    once.max_chars = Some(3000);
+    assert_eq!(
+        forecast_config(&f, &once, &c).unwrap()["summary"]["summary_character_limit"],
+        3000
+    );
+    let mut default = args(None, None, None);
+    default.max_chars = Some(3000);
     assert!(default.validate().is_err());
     f.close().await;
 }

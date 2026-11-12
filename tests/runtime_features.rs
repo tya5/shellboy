@@ -4084,7 +4084,11 @@ async fn compact_list_records_the_summary_parameters_in_effect() {
     let thread = thread(&control).await;
     request(
         &control,
-        Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(thread.clone(),None,Some("6000".into())))),
+        Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(
+            thread.clone(),
+            None,
+            Some("6000".into()),
+        ))),
     )
     .await;
     let summaries = proactive_third_turn(

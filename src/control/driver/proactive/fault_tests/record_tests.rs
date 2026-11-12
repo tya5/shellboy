@@ -546,7 +546,15 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     };
     let mutex = tokio::sync::Mutex::new(());
     let mut boundary = crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await);
-    let work=summary_stage(&control,&control.compactor,&thread_id,&slot,active,&mut boundary,&automatic);
+    let work = summary_stage(
+        &control,
+        &control.compactor,
+        &thread_id,
+        &slot,
+        active,
+        &mut boundary,
+        &automatic,
+    );
     let answer_summary = async {
         let request = incoming(&control, &mut receive).await;
         assert_eq!(request.body["tools"], json!([]));

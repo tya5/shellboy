@@ -455,10 +455,7 @@ async fn bounded_summary_override_and_unicode_character_count_and_nonshrinking_r
     a.max_chars = Some(3000);
     let r = edit(&f, &a).await.unwrap();
     assert_eq!(r.compact.summary_characters, Some(2000));
-    assert_eq!(
-        r.compact.summary_limit,
-        Some(3000)
-    );
+    assert_eq!(r.compact.summary_limit, Some(3000));
     assert_eq!(lines(&log), 1);
     finish(f, server).await;
     let (f, server) = setup(vec!["too large for a tiny source".into()], &log).await;

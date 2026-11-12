@@ -5,8 +5,14 @@ use super::*;
 /// Request construction consumes an already-resolved output policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct OutputLimit(pub(super) u64);
-fn resolved_limit(manual:Option<u64>,thread:Option<u64>,connection:Option<&crate::config::Connection>)->OutputLimit {
-    OutputLimit(crate::config::SummarySettings::resolve(None,thread,connection,manual).output_characters)
+fn resolved_limit(
+    manual: Option<u64>,
+    thread: Option<u64>,
+    connection: Option<&crate::config::Connection>,
+) -> OutputLimit {
+    OutputLimit(
+        crate::config::SummarySettings::resolve(None, thread, connection, manual).output_characters,
+    )
 }
 
 pub(super) fn request(snapshot: &Snapshot, selected: Range<usize>, limit: OutputLimit) -> Value {
@@ -128,7 +134,7 @@ impl Compactor {
         automatic: Option<AutomaticStage>,
         drop_all_reasoning: bool,
         active: Option<policy::ActiveTurnPlan>,
-        requested_limit:Option<u64>,
+        requested_limit: Option<u64>,
     ) -> Result<CompactResult, ApiError> {
         let region = if active.is_some() {
             Region::Active
@@ -172,7 +178,11 @@ impl Compactor {
         let max_chars = max_chars
             .map(|n| u64::try_from(n).map_err(|_| invalid("Invalid saved summary character limit")))
             .transpose()?;
-        let limit=resolved_limit(requested_limit,max_chars,self.config.connections.get(&snapshot.profile));
+        let limit = resolved_limit(
+            requested_limit,
+            max_chars,
+            self.config.connections.get(&snapshot.profile),
+        );
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
         let thread = snapshot.thread.clone();
@@ -575,19 +585,13 @@ mod tests {
     #[test]
     fn one_request_contains_whole_selected_range_and_output_instruction() {
         let snapshot = fixture(&[40, 60, 80]);
-        let body = request(&snapshot, 0..2, resolved_limit(None,None,None));
+        let body = request(&snapshot, 0..2, resolved_limit(None, None, None));
         let text = body.to_string();
         assert!(text.contains("source0") && text.contains("source1"));
         assert!(!text.contains("source2"));
         assert!(text.contains("20000") && text.contains("User instructions to keep"));
-        assert_eq!(
-            resolved_limit(Some(37),Some(80),None),
-            OutputLimit(37)
-        );
-        assert_eq!(
-            resolved_limit(None,Some(80),None),
-            OutputLimit(80)
-        );
+        assert_eq!(resolved_limit(Some(37), Some(80), None), OutputLimit(37));
+        assert_eq!(resolved_limit(None, Some(80), None), OutputLimit(80));
     }
     #[test]
     fn half_is_whole_prefix_strictly_smaller_and_success_never_schedules_remainder() {
@@ -800,14 +804,23 @@ mod tests {
     }
     #[test]
     fn only_explicit_manual_limit_overrides_thread_connection_defaults() {
-        let mut connection=crate::config::Connection::default();connection.summary_max_chars=Some(4000);
-        assert_eq!(resolved_limit(None,None,None),OutputLimit(20000));
-        assert_eq!(resolved_limit(None,None,Some(&connection)),OutputLimit(4000));
-        assert_eq!(resolved_limit(None,Some(3000),Some(&connection)),OutputLimit(3000));
-        assert_eq!(resolved_limit(Some(1000),Some(3000),Some(&connection)),OutputLimit(1000));
-        for key in ["segment_chars","reduce_rounds"] {
+        let mut connection = crate::config::Connection::default();
+        connection.summary_max_chars = Some(4000);
+        assert_eq!(resolved_limit(None, None, None), OutputLimit(20000));
+        assert_eq!(
+            resolved_limit(None, None, Some(&connection)),
+            OutputLimit(4000)
+        );
+        assert_eq!(
+            resolved_limit(None, Some(3000), Some(&connection)),
+            OutputLimit(3000)
+        );
+        assert_eq!(
+            resolved_limit(Some(1000), Some(3000), Some(&connection)),
+            OutputLimit(1000)
+        );
+        for key in ["segment_chars", "reduce_rounds"] {
             assert!(toml::from_str::<crate::config::Connection>(&format!("{key}=4")).is_err());
         }
     }
-
 }

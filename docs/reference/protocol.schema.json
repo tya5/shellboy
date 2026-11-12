@@ -1277,32 +1277,6 @@
             "null"
           ]
         },
-        "max_percent": {
-          "default": null,
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "reduce_rounds": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "segment_chars": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "thread_id": {
           "default": null,
           "type": [
@@ -1698,32 +1672,6 @@
           ]
         },
         "max_chars": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "max_percent": {
-          "default": null,
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
-        "reduce_rounds": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "segment_chars": {
           "default": null,
           "format": "uint64",
           "minimum": 0,
@@ -7522,22 +7470,6 @@
             "null"
           ]
         },
-        "effective_reduce_rounds": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "effective_segment_chars": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -7585,27 +7517,9 @@
             "null"
           ]
         },
-        "reduce_rounds": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "run_id": {
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "segment_chars": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
             "null"
           ]
         },
@@ -7828,18 +7742,6 @@
           ]
         },
         "parent_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reduce_rounds": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "segment_chars": {
           "type": [
             "string",
             "null"
@@ -10765,22 +10667,6 @@
             "null"
           ]
         },
-        "effective_reduce_rounds": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "effective_segment_chars": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -10828,27 +10714,9 @@
             "null"
           ]
         },
-        "reduce_rounds": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "run_id": {
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "segment_chars": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
             "null"
           ]
         },
@@ -10990,22 +10858,6 @@
             "null"
           ]
         },
-        "effective_reduce_rounds": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "effective_segment_chars": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -11053,27 +10905,9 @@
             "null"
           ]
         },
-        "reduce_rounds": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "run_id": {
           "type": [
             "string",
-            "null"
-          ]
-        },
-        "segment_chars": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
             "null"
           ]
         },

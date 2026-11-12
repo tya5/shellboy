@@ -939,7 +939,7 @@ impl Compactor {
     fn policy_for(&self, snapshot: &Snapshot) -> crate::config::Compaction {
         crate::config::Compaction {
             // Only an explicit manual --max-chars may occupy this override.
-            summary_max_chars:None,
+            summary_max_chars: None,
             segment_chars: snapshot.segment_chars,
             reduce_rounds: snapshot.reduce_rounds,
             ..self.config.compaction.clone()

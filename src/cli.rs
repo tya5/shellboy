@@ -1604,9 +1604,7 @@ impl Cli {
                     return Ok(Some(cmd));
                 }
 
-                if (a.max_chars.is_some())
-                    && !a.summary
-                {
+                if (a.max_chars.is_some()) && !a.summary {
                     return Err(invalid("summary limits require --summary"));
                 }
                 let action = if a.maximal {

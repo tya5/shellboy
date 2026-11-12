@@ -76,7 +76,10 @@ pub(crate) struct RawPreview {
     sql: usize,
     at: String,
 }
-struct Summary { source_characters:u64,limit:u64 }
+struct Summary {
+    source_characters: u64,
+    limit: u64,
+}
 
 struct Plan {
     original: Snapshot,
@@ -190,7 +193,10 @@ fn load(
     let profile = required(row, 3, 4096, budget)?;
     let model = required(row, 4, 4096, budget)?;
     let effort = text(row, 5, 64, budget)?;
-    let thread_summary_chars=row.get::<_,Option<i64>>(6)?.map(|n|u64::try_from(n).map_err(|_|limit())).transpose()?;
+    let thread_summary_chars = row
+        .get::<_, Option<i64>>(6)?
+        .map(|n| u64::try_from(n).map_err(|_| limit()))
+        .transpose()?;
     drop(rows);
     drop(statement);
     *sql += 1;
@@ -702,9 +708,18 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
                 "Summary connection is not configured",
             ));
         }
-        let connection=config.connections.get(&snapshot.profile);
-        let cap=crate::config::SummarySettings::resolve(None,loaded.thread_summary_chars,connection,args.max_chars).output_characters;
-        plan.summary=Some(Summary{source_characters,limit:cap});
+        let connection = config.connections.get(&snapshot.profile);
+        let cap = crate::config::SummarySettings::resolve(
+            None,
+            loaded.thread_summary_chars,
+            connection,
+            args.max_chars,
+        )
+        .output_characters;
+        plan.summary = Some(Summary {
+            source_characters,
+            limit: cap,
+        });
         plan.after = None;
         // Counts describe original messages removed, not unknown generated text.
         plan.projected.groups.drain(selected);
@@ -913,7 +928,7 @@ pub(crate) fn read_tx(
     let mut budget = TEXT;
     let mut sql = 0;
     let mut loaded = load(db, thread, args, &mut budget, &mut sql)?;
-    let plan=make_plan(&loaded,args,config);
+    let plan = make_plan(&loaded, args, config);
     if sql > SQL_MAX {
         return Err(limit());
     }

@@ -207,8 +207,8 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
             &store,
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_at: None,
-                auto_compact_target_percent:None,
-                summary_max_chars:None,
+                auto_compact_target_percent: None,
+                summary_max_chars: None,
                 agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
@@ -2510,8 +2510,12 @@ async fn thread_auto_compact_override_is_copied_by_fork() {
     store.database.shutdown().await.unwrap();
 }
 
-fn set_summary_parameters(thread:&str,chars:Option<&str>,percent:Option<&str>)->Command {
-    Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(thread.into(),percent.map(str::to_owned),chars.map(str::to_owned))))
+fn set_summary_parameters(thread: &str, chars: Option<&str>, percent: Option<&str>) -> Command {
+    Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(
+        thread.into(),
+        percent.map(str::to_owned),
+        chars.map(str::to_owned),
+    )))
 }
 
 #[tokio::test]
@@ -2594,7 +2598,10 @@ async fn thread_summary_parameters_reject_out_of_range_values_and_are_inherited(
     }
     let got = get_thread(&store, &thread).await;
     assert_eq!(
-        (got["summary_max_chars"].clone(), got["auto_compact_target_percent"].clone()),
+        (
+            got["summary_max_chars"].clone(),
+            got["auto_compact_target_percent"].clone()
+        ),
         (2_000.into(), 16.into())
     );
     // A child starts from its parent's values; later parent changes do not reach it.
@@ -2606,7 +2613,10 @@ async fn thread_summary_parameters_reject_out_of_range_values_and_are_inherited(
     execute(&store, set_summary_parameters(&thread, Some(""), Some(""))).await;
     let got = get_thread(&store, &child.thread_id).await;
     assert_eq!(
-        (got["summary_max_chars"].clone(), got["auto_compact_target_percent"].clone()),
+        (
+            got["summary_max_chars"].clone(),
+            got["auto_compact_target_percent"].clone()
+        ),
         (2_000.into(), 16.into())
     );
     store.database.shutdown().await.unwrap();
