@@ -124,7 +124,8 @@ impl LiveTextGuard<'_> {
         (self.token.clone(), self.alive.clone())
     }
     pub(crate) fn freeze(&self) {
-        self.clock.freeze_coverage(self.thread,self.attempt,&self.token);
+        self.clock
+            .freeze_coverage(self.thread, self.attempt, &self.token);
         self.changed.notify_waiters();
     }
     pub(crate) fn record(&self, offset: u64, text: &str, reasoning: bool) -> bool {
@@ -200,7 +201,12 @@ impl ChangeClock {
         if !*live {
             return;
         }
-        if thread.len()>256 || attempt.len()>256 || coverage_charge(thread,attempt)>=MAX_ATTEMPT_TEXT_BYTES {return;}
+        if thread.len() > 256
+            || attempt.len() > 256
+            || coverage_charge(thread, attempt) >= MAX_ATTEMPT_TEXT_BYTES
+        {
+            return;
+        }
         let mut inner = self.lock();
         if inner.reasoning_activity.len() >= MAX_LIVE_TEXT_ATTEMPTS
             && !inner.reasoning_activity.contains_key(thread)
@@ -228,35 +234,75 @@ impl ChangeClock {
                 charged: coverage_charge(thread, attempt),
                 coverage: Some(LiveCoverage {
                     identity: crate::protocol::CoverageIdentityV1 {
-                        version: 1, projection: crate::protocol::CoverageProjection::OrdinaryTextV1,
-                        thread_id: thread.into(), attempt_id: attempt.into(), incarnation: token.into(),
+                        version: 1,
+                        projection: crate::protocol::CoverageProjection::OrdinaryTextV1,
+                        thread_id: thread.into(),
+                        attempt_id: attempt.into(),
+                        incarnation: token.into(),
                     },
-                    producer: uuid::Uuid::parse_str(token).ok().map(|id|super::driver::coverage::Producer::begin(*id.as_bytes())),
-                    next: 0, scalars: 0, lost: false, seal: None,
+                    producer: uuid::Uuid::parse_str(token)
+                        .ok()
+                        .map(|id| super::driver::coverage::Producer::begin(*id.as_bytes())),
+                    next: 0,
+                    scalars: 0,
+                    lost: false,
+                    seal: None,
                 }),
                 floor: 0,
             },
         );
     }
     fn freeze_coverage(&self, thread: &str, attempt: &str, token: &str) {
-        let mut inner=self.lock();
-        if !inner.reasoning_activity.get(thread).is_some_and(|a|a.attempt==attempt && a.token==token){return;}
-        inner.seq+=1; let sequence=inner.seq;
-        let Some(c)=inner.text.get_mut(thread).and_then(|e|e.coverage.as_mut()) else {return;};
-        if c.seal.is_some(){return;}
-        let Some(producer)=c.producer.take() else {return;};
-        let Ok(seal)=producer.freeze() else {c.lost=true;return;};
-        c.seal=Some((sequence,crate::protocol::CoverageSealV1 {
-            identity:c.identity.clone(), next_sequence:seal.next_sequence.to_string(),
-            scalar_end:seal.scalar_end.to_string(),utf8_bytes:seal.utf8_bytes.to_string(),
-            transcript_sha256:seal.digest.iter().map(|b|format!("{b:02x}")).collect(),
-            // Source-part provenance and terminal drain are not qualified yet.
-            disposition:crate::protocol::CoverageSealDisposition::Unknown,
-        }));
+        let mut inner = self.lock();
+        if !inner
+            .reasoning_activity
+            .get(thread)
+            .is_some_and(|a| a.attempt == attempt && a.token == token)
+        {
+            return;
+        }
+        inner.seq += 1;
+        let sequence = inner.seq;
+        let Some(c) = inner.text.get_mut(thread).and_then(|e| e.coverage.as_mut()) else {
+            return;
+        };
+        if c.seal.is_some() {
+            return;
+        }
+        let Some(producer) = c.producer.take() else {
+            return;
+        };
+        let Ok(seal) = producer.freeze() else {
+            c.lost = true;
+            return;
+        };
+        c.seal = Some((
+            sequence,
+            crate::protocol::CoverageSealV1 {
+                identity: c.identity.clone(),
+                next_sequence: seal.next_sequence.to_string(),
+                scalar_end: seal.scalar_end.to_string(),
+                utf8_bytes: seal.utf8_bytes.to_string(),
+                transcript_sha256: seal.digest.iter().map(|b| format!("{b:02x}")).collect(),
+                // Source-part provenance and terminal drain are not qualified yet.
+                disposition: crate::protocol::CoverageSealDisposition::Unknown,
+            },
+        ));
     }
-    pub(crate) fn coverage_seals(&self, upto:u64, filter:&[String]) -> Vec<crate::protocol::CoverageSealV1> {
-        let inner=self.lock();
-        inner.text.iter().filter(|(t,_)|filter.is_empty() || filter.contains(t)).filter_map(|(_,e)|e.coverage.as_ref()?.seal.as_ref()).filter(|(seq,_)|*seq<=upto).map(|(_,seal)|seal.clone()).collect()
+    pub(crate) fn coverage_seals(
+        &self,
+        upto: u64,
+        filter: &[String],
+    ) -> Vec<crate::protocol::CoverageSealV1> {
+        let inner = self.lock();
+        inner
+            .text
+            .iter()
+            .filter(|(t, _)| filter.is_empty() || filter.contains(t))
+            .filter_map(|(_, e)| e.coverage.as_ref()?.seal.as_ref())
+            .filter(|(seq, _)| *seq <= upto)
+            .map(|(_, seal)| seal.clone())
+            .collect()
     }
     pub(crate) fn revoke_live(&self, thread: &str, attempt: &str, token: Option<&str>) {
         let mut inner = self.lock();
@@ -353,9 +399,20 @@ impl ChangeClock {
                 },
             );
         }
-        if inner.text.get(thread).and_then(|e|e.coverage.as_ref()).is_some_and(|c|c.seal.is_some()) {return false;}
+        if inner
+            .text
+            .get(thread)
+            .and_then(|e| e.coverage.as_ref())
+            .is_some_and(|c| c.seal.is_some())
+        {
+            return false;
+        }
         // A single oversized delta keeps its tail, cut on a character boundary.
-        let reserve=inner.text.get(thread).filter(|e|e.coverage.is_some()).map_or(0, |_|coverage_charge(thread,attempt));
+        let reserve = inner
+            .text
+            .get(thread)
+            .filter(|e| e.coverage.is_some())
+            .map_or(0, |_| coverage_charge(thread, attempt));
         let room = MAX_ATTEMPT_TEXT_BYTES - DELTA_RECORD_BYTES - reserve - 40;
         let start = text.ceil_char_boundary(text.len().saturating_sub(room));
         let offset = offset + text[..start].chars().count() as u64;
@@ -371,31 +428,65 @@ impl ChangeClock {
             activity.sequence = seq;
         }
         let entry = inner.text.get_mut(thread).expect("entry inserted above");
-        let mut metadata=None;
-        if let Some(c)=entry.coverage.as_mut() {
-            if start>0 {c.lost=true;}
+        let mut metadata = None;
+        if let Some(c) = entry.coverage.as_mut() {
+            if start > 0 {
+                c.lost = true;
+            }
             if !reasoning {
-                if let Some(producer)=c.producer.as_mut() {
-                    if producer.admit_ordinary(c.scalars,text).is_ok() {
-                        metadata=Some(crate::protocol::CoverageFragmentV1 {sequence:c.next.to_string(),scalar_offset:c.scalars.to_string(),stream_kind:crate::protocol::CoverageStreamKind::Text});
-                        c.next=c.next.checked_add(1).expect("producer checked sequence");
-                        c.scalars=c.scalars.checked_add(text.chars().count() as u64).expect("producer checked scalars");
-                    } else {c.lost=true;}
+                if let Some(producer) = c.producer.as_mut() {
+                    if producer.admit_ordinary(c.scalars, text).is_ok() {
+                        metadata = Some(crate::protocol::CoverageFragmentV1 {
+                            sequence: c.next.to_string(),
+                            scalar_offset: c.scalars.to_string(),
+                            stream_kind: crate::protocol::CoverageStreamKind::Text,
+                        });
+                        c.next = c.next.checked_add(1).expect("producer checked sequence");
+                        c.scalars = c
+                            .scalars
+                            .checked_add(text.chars().count() as u64)
+                            .expect("producer checked scalars");
+                    } else {
+                        c.lost = true;
+                    }
                 }
             }
         }
-        if start > 0 { entry.floor = seq; }
-        if start>0 {metadata=None;}
-        let cost=DELTA_RECORD_BYTES + kept.len() + metadata.as_ref().map_or(0,|m|m.sequence.len()+m.scalar_offset.len());
+        if start > 0 {
+            entry.floor = seq;
+        }
+        if start > 0 {
+            metadata = None;
+        }
+        let cost = DELTA_RECORD_BYTES
+            + kept.len()
+            + metadata
+                .as_ref()
+                .map_or(0, |m| m.sequence.len() + m.scalar_offset.len());
         // Evict before allocating the new retained body, including metadata's heap strings.
         while entry.charged + cost > MAX_ATTEMPT_TEXT_BYTES {
-            let Some(oldest)=entry.deltas.pop_front() else {return false;};
-            entry.charged-=DELTA_RECORD_BYTES+oldest.text.len()+oldest.coverage.as_ref().map_or(0,|m|m.sequence.len()+m.scalar_offset.len());
-            entry.floor=entry.floor.max(oldest.seq);
-            if let Some(c)=entry.coverage.as_mut(){c.lost=true;}
+            let Some(oldest) = entry.deltas.pop_front() else {
+                return false;
+            };
+            entry.charged -= DELTA_RECORD_BYTES
+                + oldest.text.len()
+                + oldest
+                    .coverage
+                    .as_ref()
+                    .map_or(0, |m| m.sequence.len() + m.scalar_offset.len());
+            entry.floor = entry.floor.max(oldest.seq);
+            if let Some(c) = entry.coverage.as_mut() {
+                c.lost = true;
+            }
         }
-        entry.charged+=cost;
-        entry.deltas.push_back(Delta {coverage:metadata,seq,offset,reasoning,text:kept.into()});
+        entry.charged += cost;
+        entry.deltas.push_back(Delta {
+            coverage: metadata,
+            seq,
+            offset,
+            reasoning,
+            text: kept.into(),
+        });
         true
     }
     /// The head and, when asked for, everything retained: for a client with no position.
@@ -543,7 +634,11 @@ impl Inner {
                     continue;
                 }
                 match deltas.last_mut() {
-                    Some(last) if last.reasoning == delta.reasoning && last.coverage_v1.is_none() && delta.coverage.is_none() => {
+                    Some(last)
+                        if last.reasoning == delta.reasoning
+                            && last.coverage_v1.is_none()
+                            && delta.coverage.is_none() =>
+                    {
                         last.text.push_str(&delta.text);
                     }
                     _ => deltas.push(EventTextDelta {
@@ -555,7 +650,7 @@ impl Inner {
                 }
             }
             attempts.push(EventLiveText {
-                coverage_v1: entry.coverage.as_ref().map(|c|c.identity.clone()),
+                coverage_v1: entry.coverage.as_ref().map(|c| c.identity.clone()),
                 thread_id: thread.clone(),
                 attempt_id: entry.attempt.clone(),
                 gap: after < entry.floor,
@@ -586,38 +681,55 @@ mod tests {
 
     #[test]
     fn ordinary_metadata_freezes_unknown_and_expires_with_existing_guard() {
-        let clock=ChangeClock::new();let notify=Notify::new();
-        let guard=clock.live_text_guard("thread","attempt",&notify);
-        assert!(guard.record(0,"a",false));
-        assert!(guard.record(1,"private reasoning",true));
-        assert!(guard.record(18,"b",false));
-        let (_,text,_)=clock.snapshot(&[],true,false);
-        assert_eq!(text[0].deltas.len(),2,"V1 fragments never coalesce");
-        assert_eq!(text[0].deltas[1].coverage_v1.as_ref().unwrap().scalar_offset,"1");
-        let incarnation=text[0].coverage_v1.as_ref().unwrap().incarnation.clone();
+        let clock = ChangeClock::new();
+        let notify = Notify::new();
+        let guard = clock.live_text_guard("thread", "attempt", &notify);
+        assert!(guard.record(0, "a", false));
+        assert!(guard.record(1, "private reasoning", true));
+        assert!(guard.record(18, "b", false));
+        let (_, text, _) = clock.snapshot(&[], true, false);
+        assert_eq!(text[0].deltas.len(), 2, "V1 fragments never coalesce");
+        assert_eq!(
+            text[0].deltas[1]
+                .coverage_v1
+                .as_ref()
+                .unwrap()
+                .scalar_offset,
+            "1"
+        );
+        let incarnation = text[0].coverage_v1.as_ref().unwrap().incarnation.clone();
         guard.freeze();
-        let head=clock.lock().seq;
-        let seals=clock.coverage_seals(head,&[]);
-        assert_eq!(seals.len(),1);
-        assert_eq!(seals[0].identity.incarnation,incarnation);
-        assert_eq!(seals[0].next_sequence,"2");
-        assert_eq!(seals[0].scalar_end,"2");
-        assert_eq!(seals[0].disposition,crate::protocol::CoverageSealDisposition::Unknown);
-        assert!(!guard.record(19,"late",false));
-        guard.freeze();let head=clock.lock().seq;assert_eq!(clock.coverage_seals(head,&[]).len(),1);
-        assert!(charged(&clock,"thread")<=MAX_ATTEMPT_TEXT_BYTES);
+        let head = clock.lock().seq;
+        let seals = clock.coverage_seals(head, &[]);
+        assert_eq!(seals.len(), 1);
+        assert_eq!(seals[0].identity.incarnation, incarnation);
+        assert_eq!(seals[0].next_sequence, "2");
+        assert_eq!(seals[0].scalar_end, "2");
+        assert_eq!(
+            seals[0].disposition,
+            crate::protocol::CoverageSealDisposition::Unknown
+        );
+        assert!(!guard.record(19, "late", false));
+        guard.freeze();
+        let head = clock.lock().seq;
+        assert_eq!(clock.coverage_seals(head, &[]).len(), 1);
+        assert!(charged(&clock, "thread") <= MAX_ATTEMPT_TEXT_BYTES);
         drop(guard);
-        assert!(clock.coverage_seals(u64::MAX,&[]).is_empty());
+        assert!(clock.coverage_seals(u64::MAX, &[]).is_empty());
     }
     #[test]
     fn oversized_ordinary_fragment_keeps_old_cap_and_never_claims_complete() {
-        let clock=ChangeClock::new();let notify=Notify::new();
-        let guard=clock.live_text_guard("t","a",&notify);
-        guard.record(0,&"x".repeat(MAX_ATTEMPT_TEXT_BYTES*2),false);
-        assert!(charged(&clock,"t")<=MAX_ATTEMPT_TEXT_BYTES);
+        let clock = ChangeClock::new();
+        let notify = Notify::new();
+        let guard = clock.live_text_guard("t", "a", &notify);
+        guard.record(0, &"x".repeat(MAX_ATTEMPT_TEXT_BYTES * 2), false);
+        assert!(charged(&clock, "t") <= MAX_ATTEMPT_TEXT_BYTES);
         assert!(clock.lock().text["t"].coverage.as_ref().unwrap().lost);
         guard.freeze();
-        assert_eq!(clock.coverage_seals(u64::MAX,&[])[0].disposition,crate::protocol::CoverageSealDisposition::Unknown);
+        assert_eq!(
+            clock.coverage_seals(u64::MAX, &[])[0].disposition,
+            crate::protocol::CoverageSealDisposition::Unknown
+        );
     }
     #[test]
     fn orders_by_sequence_and_merges_repeated_changes() {
