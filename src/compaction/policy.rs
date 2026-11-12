@@ -82,13 +82,11 @@ pub(super) fn request_boundary(s: &Snapshot, turn: Option<&str>) -> Option<usize
     }
     turn_boundary(s, turn)
 }
-/// #182 active-Turn summary plan. Everything before `start` (earlier Turns,
-/// the request and anything else ahead of the first tool round) stays
-/// byte-identical. Groups `start..latest` (③) are summarized; the latest
-/// complete tool group `latest` (④) is appended to the same summary as plain
-/// text. `messages` are the active Turn's user messages in that span: they
-/// leave the selected path with the rounds and the summary keeps what must
-/// stay in effect under "User instructions to keep" (user decision B).
+/// Reviewed active prefix: start is the first work marker after the request;
+/// latest is the SELECTED PREFIX END minus one, not necessarily a tool group.
+/// Selection stops before the first unsafe group. Ordinary user messages inside
+/// the prefix remain eligible; the actual latest tool position is checked by
+/// the adoption caller before retaining its plain round/reasoning epoch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct ActiveTurnPlan {
     pub(super) start: usize,
@@ -127,10 +125,8 @@ pub(super) fn turn_message(source: &Source, turn: &str) -> bool {
                 .pointer("/item/role")
                 .is_some_and(|r| r == "user"))
 }
-/// Active-Turn summary target (#181, reshaped by #182): all tool rounds of the
-/// active Turn from its first tool round through the latest complete tool
-/// group. No target unless ③ holds a tool group or spill marker (a previous
-/// summary alone never re-fires, #180), or if any covered group is incomplete.
+/// One active prefix from first work to first unsafe group. Prefix must contain
+/// a tool group or spill marker; a summary alone cannot re-trigger it.
 pub(super) fn active_turn_plan(s:&Snapshot)->Option<ActiveTurnPlan> {
     let turn=s.current_turn.as_deref()?;
     let request=request_boundary(s,Some(turn))?;
@@ -351,10 +347,15 @@ mod tests {
         let plan = active_turn_plan(&s).unwrap();
         assert_eq!((plan.start, plan.latest), (3, 5));
         assert_eq!(plan.messages, [s.groups[4].sources[0].id.clone()]);
-        // A protected node in the span means no target.
+        // An unsafe first work group gives no target; a later unsafe group
+        // preserves the preceding safe prefix rather than rejecting all work.
         let mut s = staged_snapshot();
         s.protected.insert("a-result".into());
         assert_eq!(active_turn_plan(&s), None);
+        let mut later=staged_snapshot();
+        later.protected.insert(later.groups[5].sources[0].id.clone());
+        let prefix=active_turn_plan(&later).unwrap();
+        assert_eq!(prefix.start..prefix.end(),3..5);
         // Incomplete groups: no target. ③ without a tool group or spill (a
         // previous summary alone) is no target.
         let mut s = staged_snapshot();

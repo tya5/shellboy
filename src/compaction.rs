@@ -761,7 +761,7 @@ impl Compactor {
         };
         let mut ledger = usage::UsageLedger::new(&snapshot);
         let policy = self.policy_for(&snapshot);
-        let range = plan.start..plan.latest;
+        let range = plan.start..plan.end();
         self.summarize_recorded(
             snapshot,
             range,
