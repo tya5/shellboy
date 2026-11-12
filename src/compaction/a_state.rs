@@ -228,4 +228,16 @@ mod transactional_reset_tests {
         for value in ["-1","1.0","1e20","18446744073709551616",""] {assert!(decode_generation(Some(value)).is_err());}
     }
 
+    #[test]
+    fn sqlite_json_decimal_max_and_invalid_types_are_distinct() {
+        let db=rusqlite::Connection::open_in_memory().unwrap();
+        let read=|body:&str|db.query_row("SELECT CASE WHEN json_type(?1,'$.g') IS NULL THEN NULL WHEN json_type(?1,'$.g') IN ('text','integer') THEN CAST(json_extract(?1,'$.g') AS TEXT) ELSE 'invalid-type' END",[body],|r|r.get::<_,Option<String>>(0)).unwrap();
+        let maximum=read(&json!({"g":u64::MAX.to_string()}).to_string());
+        assert_eq!(decode_generation(maximum.as_deref()).unwrap(),Some(u64::MAX));
+        for body in [r#"{"g":true}"#,r#"{"g":null}"#,r#"{"g":{}}"#,r#"{"g":1.5}"#,r#"{"g":-1}"#] {
+            assert!(decode_generation(read(body).as_deref()).is_err());
+        }
+        assert_eq!(decode_generation(read("{}").as_deref()).unwrap(),None);
+    }
+
 }
