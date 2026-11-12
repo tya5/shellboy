@@ -1,5 +1,5 @@
-//! Pure building blocks for the reviewed b822 single-request design.
-//! Not yet connected to dispatch/adoption: no #A writer or settings storage.
+//! Shared single-request pipeline: request formatting, Trial state and atomic
+//! adoption remain separate. Settings and #A facts are owned by their modules.
 use super::*;
 
 /// Request construction consumes an already-resolved output policy.

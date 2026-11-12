@@ -3977,10 +3977,9 @@ async fn proactive_threshold_compacts_once_at_the_next_boundary() {
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
     assert_eq!(events[0]["trigger"]["input_tokens"], 150);
     assert!(events[0]["metrics"]["summary_node_id"].is_string());
-    // #231: the values this summary used are recorded next to the threshold.
-    assert_eq!(events[0]["metrics"]["segment_chars"], 64_000);
-    assert_eq!(events[0]["metrics"]["reduce_rounds"], 4);
-    assert!(events[0]["metrics"]["summary_limit"].as_u64().unwrap() >= 2000);
+    assert_eq!(events[0]["metrics"]["summary_limit"], 20000);
+    assert!(events[0]["metrics"].get("segment_chars").is_none());
+    assert!(events[0]["metrics"].get("reduce_rounds").is_none());
     // #133: the summary request's reported usage, per event and in usage get.
     let usage = &events[0]["metrics"]["summary_usage"];
     assert_eq!(usage["requests"], 1, "{usage}");
@@ -4071,25 +4070,21 @@ async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compact_list_records_the_summary_parameters_in_effect() {
-    // [compaction] 50,000 / 3 rounds; the Thread's own reduce_rounds=2 wins for
-    // that value only.
+    // The typed Thread override replaces the connection output cap. The
+    // automatic trigger remains independent of the summary request settings.
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = proactive_owner(
         root.path(),
         &url,
-        "[compaction]\nauto_at_tokens=100\nsegment_chars=50000\nreduce_rounds=3\n",
+        "summary_max_chars=50000\n[compaction]\nauto_at_tokens=100\n",
     )
     .await;
     let control = Control::new(&owner, root.path().into());
     let thread = thread(&control).await;
     request(
         &control,
-        Command::ThreadSet(Box::new(ThreadSetArgs {
-            thread_id: Some(thread.clone()),
-            reduce_rounds: Some("2".into()),
-            ..Default::default()
-        })),
+        Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(thread.clone(),None,Some("6000".into())))),
     )
     .await;
     let summaries = proactive_third_turn(
@@ -4104,8 +4099,9 @@ async fn compact_list_records_the_summary_parameters_in_effect() {
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
-    assert_eq!(events[0]["metrics"]["segment_chars"], 50_000);
-    assert_eq!(events[0]["metrics"]["reduce_rounds"], 2);
+    assert_eq!(events[0]["metrics"]["summary_limit"], 6000);
+    assert!(events[0]["metrics"].get("segment_chars").is_none());
+    assert!(events[0]["metrics"].get("reduce_rounds").is_none());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
