@@ -327,6 +327,8 @@ def decoded(token):
 # These are token fingerprints of the reviewed typed-key construction and UI
 # projection functions, not source literals. If any projection changes, the
 # catalogue rule fails closed until that path is independently re-examined.
+# For #303, catalogue_label was re-reviewed after deleting only retired summary
+# field mappings; the same-ID typed UI projection and English/Ja routing remain.
 CATALOGUE_PROOF = {
     'src/operations.rs': {
         '2b97db37bf2875e148ef296b39c83352e4b4e919222669f1e790444abc738176',
@@ -340,7 +342,7 @@ CATALOGUE_PROOF = {
     },
     'src/ui/operations.rs': {
         'cdf8536fc4654255a83a3fad9095a1277dc7423b7798c4cacdd2e03b24ba6f9d',
-        'd8d259ce403c0fe00ab5ef900d70a33560e97798a8f40ec5ae87f5fb9a655202',
+        '1ba92e17ccf3925bb4a3ae057387291eee7f8addba8f1336ea9553213c0b7e25',
     },
 }
 
