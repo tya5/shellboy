@@ -43,13 +43,6 @@ macro_rules! boundary_test {
     };
 }
 boundary_tests!(
-    Fault::Cleanup,
-    record_after_cleanup_fault_closed_spill,
-    record_after_cleanup_fault_closed_summary,
-    record_after_cleanup_fault_active_spill,
-    record_after_cleanup_fault_active_summary
-);
-boundary_tests!(
     Fault::Persistent,
     record_after_persistent_fault_closed_spill,
     record_after_persistent_fault_closed_summary,
@@ -57,11 +50,10 @@ boundary_tests!(
     record_after_persistent_fault_active_summary
 );
 record_test!(
-    record_after_rejected_exception_write,
-    Fault::RejectException
+    retired_automatic_writes_are_absent,
+    Fault::RetiredWritesAbsent
 );
 record_test!(record_after_rejected_final_write, Fault::RejectFinal);
-record_test!(record_after_rejected_guard_write, Fault::RejectGuard);
 record_test!(rejected_stage_fact_prevents_adoption, Fault::RejectFact);
 
 async fn record_boundaries(fault: Fault) {
@@ -217,7 +209,7 @@ async fn assert_record(
                 // Every replacement adopted for the Thread: (kind, output node).
                 let replacements: Vec<(String, String)> = db.prepare("SELECT n.kind,n.id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 ORDER BY n.rowid")?
                     .query_map([&target], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-                let witness: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1", [&target], |r| r.get(0))?;
+                let witness: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1 AND key!='compact.automatic_active.retired-write-test'", [&target], |r| r.get(0))?;
                 let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key='compact.automatic_target.'||?1", [&target], |r| r.get(0)).optional()?;
                 let boundary: Option<(i64, i64)> = db.query_row("SELECT revision,epoch FROM fault_boundary", [], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
                 let initial: Option<i64> = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0)).optional().ok().flatten();
@@ -242,11 +234,11 @@ async fn assert_record(
     // The guard is untouched whenever the attempt's own guard write is not
     // reached or is rejected. A healthy W3 (cancellation, rejected final
     // write) legitimately saves its normal result before the failure.
-    let mut guard_expected = guard_before.to_vec();
-    if fault == Fault::RejectGuard {
-        guard_expected.push((format!("compact.automatic_status.{target}"), "seed".into()));
-    }
-    if !matches!(fault, Fault::Cancellation | Fault::RejectFinal) {
+    let guard_expected = guard_before.to_vec();
+    if !matches!(
+        fault,
+        Fault::Cancellation | Fault::RejectFinal | Fault::RetiredWritesAbsent
+    ) {
         assert_eq!(
             guard_rows(control).await,
             guard_expected,
@@ -255,7 +247,9 @@ async fn assert_record(
     }
     let outcome = match fault {
         Fault::Cancellation => "adopted",
-        Fault::Storage | Fault::Remeasurement | Fault::RejectFact => "exception",
+        Fault::Storage | Fault::Remeasurement | Fault::RejectFact | Fault::RetiredWritesAbsent => {
+            "failed"
+        }
         _ => "unknown",
     };
     assert_eq!(record["outcome"], outcome, "{fault:?} {stage} {record}");
@@ -280,7 +274,7 @@ async fn assert_record(
         "only the four stage names: {record}"
     );
     let expected: Vec<&str> = match (stage, fault) {
-        (_, Fault::RejectFinal | Fault::RejectGuard) => keys.clone(),
+        (_, Fault::RejectFinal) => keys.clone(),
         _ => {
             let upto = ORDER.iter().position(|n| *n == stage).unwrap();
             let base: &[&str] = match stage {
@@ -383,13 +377,48 @@ async fn assert_record(
             "{stage}"
         );
     }
-    // Witness: only a rejected real cleanup leaves it; restart removes it.
-    let retained = live && matches!(fault, Fault::Cleanup | Fault::Persistent);
+    // The approved redesign supersedes historical D-226 W0 prose: no persistent
+    // activity witness is written. Persistent attempt-record faults are evidenced
+    // by the provisional record and exact stage facts, not a retired W0 marker.
     assert_eq!(
-        witness,
-        i64::from(retained),
-        "witness {fault:?} live={live}"
+        witness, 0,
+        "no legacy activity witness {fault:?} live={live}"
     );
+    if fault == Fault::RetiredWritesAbsent {
+        let rows = guard_rows(control).await;
+        assert_eq!(
+            rows,
+            [
+                (
+                    format!("compact.automatic_active.retired-write-test"),
+                    "seed-active".into()
+                ),
+                (
+                    format!("compact.automatic_guard.retired-write-test"),
+                    "seed-guard".into()
+                ),
+                (
+                    format!("compact.automatic_status.retired-write-test"),
+                    "seed-status".into()
+                ),
+            ],
+            "legacy W0/W3 rows remain byte-exact"
+        );
+        if live {
+            let hits: i64 = control
+                .store
+                .database
+                .call(|db| {
+                    Ok(db.query_row("SELECT count(*) FROM retired_write_hits", [], |r| r.get(0))?)
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                hits, 0,
+                "no retired W0/W2/W3 production write was attempted"
+            );
+        }
+    }
     // Pending target: provisional until a final write replaces it.
     if !facts.is_empty() {
         let pending: Value = serde_json::from_str(&pending.expect("pending target")).unwrap();

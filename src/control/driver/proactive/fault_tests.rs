@@ -16,16 +16,14 @@ enum Fault {
     Storage,
     Cancellation,
     Remeasurement,
-    Cleanup,
     /// #226: after the checkpoint every attempt-record and automatic app_meta
     /// write is rejected, so only the stage facts and provisional target remain.
     Persistent,
-    /// #226: the real exception write (W2) is rejected after a real cleanup.
-    RejectException,
+    /// #303: observe the current failed-attempt path and prove legacy W0/W2/W3
+    /// writes are absent rather than injecting faults into removed write sites.
+    RetiredWritesAbsent,
     /// #226: the real final write (W4) is rejected; the attempt runs to its end.
     RejectFinal,
-    /// #226: the real guard write (W3) is rejected; the attempt runs to its end.
-    RejectGuard,
     /// #226: the stage fact itself is rejected before the stage adopts.
     RejectFact,
 }
@@ -33,15 +31,12 @@ impl Fault {
     /// These final-write faults do not stop at the selected stage checkpoint;
     /// on an active-spill case the driver legitimately proceeds to active summary.
     fn continues_after_stage(self) -> bool {
-        matches!(self, Fault::RejectFinal | Fault::RejectGuard)
+        matches!(self, Fault::RejectFinal)
     }
     /// Whether a final record fault allows normal attempt finalization to advance
     /// the reasoning epoch after the selected stage.
     fn continues(self) -> bool {
-        matches!(
-            self,
-            Fault::RejectFinal | Fault::RejectGuard | Fault::RejectFact
-        )
+        matches!(self, Fault::RejectFinal | Fault::RejectFact)
     }
 }
 
@@ -133,8 +128,8 @@ async fn proactive_postcommit_remeasurement_boundaries() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_postcommit_cleanup_boundaries() {
-    boundaries(Fault::Cleanup).await;
+async fn proactive_postcommit_retired_writes_are_absent() {
+    boundaries(Fault::RetiredWritesAbsent).await;
 }
 
 async fn boundaries(fault: Fault) {
@@ -179,10 +174,17 @@ async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
     } else {
         "printf '%050000d' 0"
     };
+    // The first completed usage=100 tool-call report establishes immutable A.
+    // Both seeded whole groups are committed before the separate input=200
+    // report below can enter maybe_compact.
     for index in 0..2 {
         incoming(&control, &mut receive).await.reply.send((200, json!({"id":format!("boundary-{index}"),"status":"completed","usage":{"input_tokens":100,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("boundary-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
     }
     let request_boundary = incoming(&control, &mut receive).await;
+    // Closed scenarios complete this trigger report as plain text, then open a
+    // new Turn with an eligible closed prefix. Active scenarios keep this Turn
+    // live with the ordinary tool continuation; the summary POST, if selected,
+    // is separately required to carry tools=[].
     let reached = Arc::new(AtomicBool::new(false));
     let stage = scenario.stage();
     *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
@@ -191,12 +193,10 @@ async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
             Fault::Cancellation => 0,
             Fault::Storage => 1,
             Fault::Remeasurement => 2,
-            Fault::Cleanup => 3,
             Fault::Persistent => 4,
-            Fault::RejectException => 5,
             Fault::RejectFinal => 6,
-            Fault::RejectGuard => 7,
             Fault::RejectFact => 8,
+            Fault::RetiredWritesAbsent => 9,
         },
         reached: reached.clone(),
     });
@@ -351,34 +351,13 @@ async fn boundary(fault: Fault, scenario: Scenario) {
         server,
         guard_before: _,
     } = prepare(fault, scenario).await;
-    if fault == Fault::Cleanup {
-        let id = target.clone();
-        control
-            .store
-            .database
-            .call(move |db| {
-                assert_eq!(
-                    db.query_row(
-                        "SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1",
-                        [id],
-                        |r| r.get::<_, i64>(0)
-                    )?,
-                    1,
-                    "real cleanup write was rejected"
-                );
-                Ok(())
-            })
-            .await
-            .unwrap();
-    }
     assert_boundary(&control, &target, scenario, fault, "shutdown").await;
     control
         .store
         .database
         .call(|db| {
             db.execute_batch(
-                "DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch; DROP TRIGGER fault_start;
-            DROP TRIGGER IF EXISTS fault_cleanup;",
+                "DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch; DROP TRIGGER fault_start;",
             )?;
             Ok(())
         })
@@ -506,8 +485,10 @@ async fn assert_boundary(
         assert_eq!(current_epoch, epoch, "committed reasoning epoch survives failure/restart");
         let initial_epoch: i64 = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0))?;
         assert_eq!(epoch, initial_epoch + 1 + i64::from(scenario.summary_committed(fault)), "each committed stage advances the fixture's reasoning epoch once");
-        let trigger: Value = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.trigger') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'", [], |r| r.get(0))?;
-        assert_trigger_evidence(&trigger, scenario);
+        let record_text: String = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'", [], |r| r.get(0))?;
+        let record: Value = serde_json::from_str(&record_text).unwrap();
+        assert_trigger_evidence(&record["trigger"], scenario);
+        assert!(record["committed_stages"][scenario.stage()].is_object(), "fault reached the intended stage: {record}");
         let kinds: Vec<String> = db.prepare("SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let expected: Vec<&str> = match scenario {
             Scenario::ClosedSpill | Scenario::ActiveSpill => vec!["spill", "spill"],
@@ -566,22 +547,6 @@ pub(super) async fn checkpoint(
             control.compactor.fail_remeasurement.store(true, Ordering::SeqCst);
             Ok(())
         }
-        3 => {
-            let hit = injection.reached.clone();
-            control.store.database.call(move |db| {
-                db.create_scalar_function("fault_cleanup_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
-                    hit.store(true, Ordering::SeqCst);
-                    Ok(1i64)
-                })?;
-                db.execute_batch("CREATE TEMP TRIGGER fault_cleanup BEFORE DELETE ON app_meta
-                    WHEN OLD.key GLOB 'compact.automatic_active.*'
-                    BEGIN SELECT fault_cleanup_hit(); SELECT RAISE(ABORT,'injected actual cleanup write failure'); END;")?;
-                Ok(())
-            }).await.map_err(storage_error)?;
-            // A non-storage boundary error routes to the REAL unconditional
-            // cleanup. Only its DELETE fails with SaveFailed; no stop is injected.
-            Err(ApiError::new(ErrorCode::InvalidState, "injected boundary error before cleanup"))
-        }
         4 => control.store.database.call(|db| {
             db.execute_batch("CREATE TEMP TRIGGER persistent_attempt BEFORE UPDATE OF error_json ON model_attempt
                 WHEN json_type(NEW.error_json,'$.automatic_trim_attempt')='object'
@@ -598,44 +563,42 @@ pub(super) async fn checkpoint(
             db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
             Ok(())
         }).await.map_err(storage_error),
-        5..=7 => {
+        9 => {
             let hit = injection.reached.clone();
-            let kind = injection.kind;
-            let thread = control.store.database.call(|db| Ok(db.query_row("SELECT id FROM thread LIMIT 1", [], |r| r.get::<_, String>(0))?)).await.map_err(storage_error)?;
             control.store.database.call(move |db| {
-                db.create_scalar_function("fault_site_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
+                db.execute_batch("CREATE TEMP TABLE retired_write_hits(site TEXT NOT NULL);
+                    INSERT INTO app_meta(key,value) VALUES
+                      ('compact.automatic_active.retired-write-test','seed-active'),
+                      ('compact.automatic_guard.retired-write-test','seed-guard'),
+                      ('compact.automatic_status.retired-write-test','seed-status');")?;
+                db.create_scalar_function("retired_write_hit", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
                     hit.store(true, Ordering::SeqCst);
                     Ok(1i64)
                 })?;
-                let abort = "BEGIN SELECT fault_site_hit(); SELECT RAISE(ABORT,'injected production write rejection'); END;";
-                if kind == 7 {
-                    // Seed a status row so the real clearing DELETE has a row to reject.
-                    db.execute("INSERT INTO app_meta(key,value) VALUES('compact.automatic_status.'||?1,'seed')", [&thread])?;
-                    db.execute_batch(&format!("CREATE TEMP TRIGGER fault_site BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_guard.*' {abort}
-                        CREATE TEMP TRIGGER fault_site_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_status.*' OR OLD.key GLOB 'compact.automatic_guard.*' {abort}
-                        CREATE TEMP TRIGGER fault_site_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' {abort}"))?;
-                } else {
-                    let when = if kind == 5 {
-                        "json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome')='exception'"
-                    } else {
-                        "json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome') NOT IN ('unknown','exception')"
-                    };
-                    db.execute_batch(&format!("CREATE TEMP TRIGGER fault_site BEFORE UPDATE OF error_json ON model_attempt WHEN {when} {abort}"))?;
-                }
+                db.execute_batch("CREATE TEMP TRIGGER retired_exception_write BEFORE UPDATE OF error_json ON model_attempt
+                    WHEN json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome')='exception'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W2_exception'); SELECT retired_write_hit(1); END;
+                    CREATE TEMP TRIGGER retired_active_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_active.*'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W0_insert'); SELECT retired_write_hit(1); END;
+                    CREATE TEMP TRIGGER retired_active_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_active.*'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W0_update'); SELECT retired_write_hit(1); END;
+                    CREATE TEMP TRIGGER retired_active_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_active.*'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W0_delete'); SELECT retired_write_hit(1); END;
+                    CREATE TEMP TRIGGER retired_guard_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_guard.*' OR NEW.key GLOB 'compact.automatic_status.*'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W3_insert'); SELECT retired_write_hit(1); END;
+                    CREATE TEMP TRIGGER retired_guard_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' OR OLD.key GLOB 'compact.automatic_status.*'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W3_update'); SELECT retired_write_hit(1); END;
+                    CREATE TEMP TRIGGER retired_guard_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' OR OLD.key GLOB 'compact.automatic_status.*'
+                    BEGIN INSERT INTO retired_write_hits VALUES('W3_delete'); SELECT retired_write_hit(1); END;")?;
                 Ok(())
             }).await.map_err(storage_error)?;
-            if injection.kind == 5 {
-                // A storage failure takes the real exception path (W2).
-                control.store.database.call(|db| {
-                    db.execute_batch("CREATE TEMP TABLE rejected_write(value INTEGER);
-                        CREATE TEMP TRIGGER reject_write BEFORE INSERT ON rejected_write
-                        BEGIN SELECT RAISE(ABORT,'injected independent postcommit storage write failure'); END;")?;
-                    db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
-                    Ok(())
-                }).await.map_err(storage_error)
-            } else {
+            control.store.database.call(|db| {
+                db.execute_batch("CREATE TEMP TABLE rejected_write(value INTEGER);
+                    CREATE TEMP TRIGGER reject_write BEFORE INSERT ON rejected_write
+                    BEGIN SELECT RAISE(ABORT,'injected independent postcommit storage write failure'); END;")?;
+                db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
                 Ok(())
-            }
+            }).await.map_err(storage_error)
         }
         8 => Ok(()),
         _ => unreachable!(),
@@ -646,10 +609,10 @@ pub(super) async fn checkpoint(
             "storage faults do not depend on cancellation"
         );
     }
-    if matches!(injection.kind, 1 | 4) {
+    if matches!(injection.kind, 1 | 4 | 9) {
         assert_eq!(result.as_ref().unwrap_err().code, ErrorCode::SaveFailed);
     }
-    if !matches!(injection.kind, 3 | 5..=8) {
+    if !matches!(injection.kind, 6..=8) {
         injection.reached.store(true, Ordering::SeqCst);
     }
     result
