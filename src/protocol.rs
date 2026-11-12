@@ -772,20 +772,14 @@ args!(ContextEditArgs {
     action: ContextEditAction,
     #[serde(default)] from_node_id: Option<String>,
     #[serde(default)] to_node_id: Option<String>,
-    #[serde(default)] max_chars: Option<u64>,
-    #[serde(default)] max_percent: Option<f64>,
-    #[serde(default)] segment_chars: Option<u64>,
-    #[serde(default)] reduce_rounds: Option<u64>
+    #[serde(default)] max_chars: Option<u64>
 });
 args!(#[derive(Default)] CompactPreviewArgs {
     #[serde(default)] thread_id: Option<String>,
     #[serde(default)] action: Option<ContextEditAction>,
     #[serde(default)] from_node_id: Option<String>,
     #[serde(default)] to_node_id: Option<String>,
-    #[serde(default)] max_chars: Option<u64>,
-    #[serde(default)] max_percent: Option<f64>,
-    #[serde(default)] segment_chars: Option<u64>,
-    #[serde(default)] reduce_rounds: Option<u64>
+    #[serde(default)] max_chars: Option<u64>
 });
 args!(ModelListArgs { #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String> });
 record!(ModelListResult { connection: String, models: Vec<String>, api: String, unavailable_features: Vec<String> });
