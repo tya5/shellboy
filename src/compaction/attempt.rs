@@ -167,6 +167,7 @@ mod tests {
             let mut db=rusqlite::Connection::open_in_memory().unwrap();
             db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE model_attempt(id TEXT PRIMARY KEY,error_json TEXT,state TEXT);INSERT INTO model_attempt VALUES('trial','{}','completed');").unwrap();
             let start=super::super::a_state::scope_tx(&db,"t","c","m").unwrap().token();
+            super::super::a_state::complete_report_tx(&db,"t","c","m","old",Some(0),Some(111)).unwrap();
             let trigger=json!({"a_boundary_token":start});
             {let tx=db.transaction().unwrap();begin_tx(&tx,"trial","token","test",&trigger,&json!({})).unwrap();tx.commit().unwrap();}
             let reset=|db:&rusqlite::Connection| {
@@ -176,6 +177,9 @@ mod tests {
             if manual_first {reset(&db);}
             {let tx=db.transaction().unwrap();assert!(finish_tx(&tx,"trial","token",&json!({"outcome":"noop","trigger":trigger}),&[]).unwrap());tx.commit().unwrap();}
             if !manual_first {reset(&db);}
+            let after_resets=super::super::a_state::read(&db,"t").unwrap().unwrap();
+            assert_eq!(serde_json::to_value(after_resets.token()).unwrap()["boundary"],if manual_first {1}else{2},"both commit orders have explicit expected reset counts");
+            assert_eq!(after_resets.reading(),super::super::a_state::Reading::AwaitingFirst,"successful reset clears the previous first");
             let generation=super::super::a_state::begin_report_tx(&db,"t","c","m").unwrap();
             super::super::a_state::complete_report_tx(&db,"t","c","m","report",Some(generation),Some(321)).unwrap();
             let before=super::super::a_state::read(&db,"t").unwrap().unwrap();
