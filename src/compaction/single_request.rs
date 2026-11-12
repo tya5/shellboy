@@ -110,8 +110,8 @@ impl Compactor {
         };
         if !valid(original.clone()) {return Err(invalid("No safe summary range"));}
         let settings_thread=snapshot.thread.clone();
-        let max_chars=self.database.call(move |db|Ok(db.query_row("SELECT summary_max_chars FROM thread WHERE id=?1",[settings_thread],|r|r.get::<_,Option<u64>>(0))?)).await.map_err(storage_error)?;
-        let limit=OutputLimit(crate::config::summary_chars_for(max_chars,self.config.connections.get(&snapshot.profile)));
+        let max_chars=self.database.call(move |db|Ok(db.query_row("SELECT summary_max_chars FROM thread WHERE id=?1",[settings_thread],|r|r.get::<_,Option<i64>>(0))?)).await.map_err(storage_error)?;
+        let limit=OutputLimit(crate::config::summary_chars_for(max_chars.map(|n|n as u64),self.config.connections.get(&snapshot.profile)));
         let identity=failure_identity(&snapshot.thread,&snapshot,original.clone(),limit)
             .ok_or_else(||invalid("No summary range"))?;
         let thread=snapshot.thread.clone();let lookup=identity.clone();
@@ -145,7 +145,7 @@ impl Compactor {
         let mut kept_reasoning=Vec::new();
         if let Some(plan)=&active {
             if reaches_latest {
-                kept_reasoning=history::reasoning_keep_nodes(snapshot.groups[plan.latest].sources.iter().filter(|s|s.payload["type"]=="tool_call").map(|s|(s.id.clone(),s.payload.clone(),s.turn.clone())),snapshot.epoch);
+                kept_reasoning=snapshot.groups[plan.latest].sources.iter().filter(|s|s.payload["type"]=="tool_call").map(|s|s.id.clone()).collect();
                 payload["summary_scope"]=json!("active_turn_middle");
                 payload["kept_reasoning_node_ids"]=json!(kept_reasoning);
             } else {payload["summary_scope"]=json!("active_turn_prefix");}
@@ -168,7 +168,7 @@ impl Compactor {
         };
         let config=self.config.clone();
         self.database.call(move |db| {let tx=db.transaction()?;let result=adoption.adopt_tx(&tx,&config,&cancel)?;
-            if reaches_latest {tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![history::reasoning_keep_key(&adoption.snapshot.thread),json!({"node_ids":kept_reasoning}).to_string()])?;}
+            if reaches_latest {tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![history::reasoning_keep_key(&adoption.snapshot.thread),json!({"epoch":adoption.snapshot.epoch,"nodes":kept_reasoning}).to_string()])?;}
             tx.commit()?;Ok(result)}).await.map_err(storage_error)
     }
 

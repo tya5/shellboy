@@ -376,7 +376,7 @@ impl Snapshot {
         if let Some(replay) = &self.input {
             manifest["replay"] = json!(replay.witness());
         }
-        manifest["compaction_scope_generation"] = json!(crate::compaction::a_state::begin_report_tx(tx,&self.thread,&self.profile,&self.model)?);
+        manifest["compaction_scope_generation"] = json!(crate::compaction::a_state::begin_report_tx(tx,self.thread,self.profile,self.model)?);
         manifest["cwd"] = json!(self.cwd.to_string_lossy());
         manifest["prompt_cache"] = json!({
             "diagnostics_enabled":self.cache_diagnostics_enabled,

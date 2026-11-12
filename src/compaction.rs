@@ -968,7 +968,7 @@ impl Compactor {
         cancel: CancellationToken,
         (admission, elapsed): (crate::model::http::RateAdmission, u64),
     ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
-        let mut response = match &admission {
+        let mut response: Result<crate::model::ModelResponse,crate::model::http::AttemptFailure> = match &admission {
             _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
                 "cancelled",
                 "Model request was cancelled",

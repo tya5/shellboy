@@ -374,7 +374,7 @@ pub(crate) fn parse_bounded_override(
         .ok_or_else(|| invalid(message()))
 }
 pub(crate) fn parse_target_percent(value:&str)->Result<Option<i64>,ApiError> {parse_bounded_override(value,"auto_compact_target_percent",&(1..=100))}
-pub(crate) fn parse_summary_chars(value:&str)->Result<Option<i64>,ApiError> {parse_bounded_override(value,"summary_max_chars",&(1..=i64::MAX as u64))}
+pub(crate) fn parse_summary_chars(value:&str)->Result<Option<i64>,ApiError> {parse_bounded_override(value,"summary_max_chars",&(1..=i64::MAX as usize))}
 pub(crate) fn parse_segment_chars(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "segment_chars", &crate::config::SEGMENT_CHARS_RANGE)
 }
