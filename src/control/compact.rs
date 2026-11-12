@@ -277,18 +277,12 @@ mod tests {
     fn edit() -> ContextEditArgs {
         ContextEditArgs {
             max_chars: None,
-            max_percent: None,
-            segment_chars: None,
-            reduce_rounds: None,
             thread_id: Some("thread".into()),
             action: ContextEditAction::Spill,
             from_node_id: Some("first".into()),
             to_node_id: Some("last".into()),
         }
-    }
-    fn fixture() -> Connection {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE operation_receipt(operation_id TEXT PRIMARY KEY,result_ref_json TEXT NOT NULL);").unwrap();
+      db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE operation_receipt(operation_id TEXT PRIMARY KEY,result_ref_json TEXT NOT NULL);").unwrap();
         for (operation, explicit) in [
             ("automatic-a", false),
             ("automatic-b", false),

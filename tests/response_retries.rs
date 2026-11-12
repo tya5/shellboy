@@ -1303,9 +1303,6 @@ async fn manual_maximum_is_api_free_and_recovery_retry_uses_the_new_model() {
             format!("{}:{}", f.control.store.instance_id, uuid::Uuid::new_v4()),
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
-                max_percent: None,
-                segment_chars: None,
-                reduce_rounds: None,
                 thread_id: Some(thread.clone()),
                 action: ContextEditAction::Maximal,
                 from_node_id: None,
@@ -2312,9 +2309,6 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
         from_node_id: Some("old-large-context".into()),
         to_node_id: Some("old-answer".into()),
         max_chars: None,
-        max_percent: None,
-        segment_chars: None,
-        reduce_rounds: None,
     };
     let accepted = request(&fixture.control, Command::ContextEdit(edit)).await;
     assert!(accepted["operation_id"].is_string());
@@ -2412,9 +2406,6 @@ async fn manual_summary_revalidates_selection_after_connection_wait() {
             from_node_id: Some("old-large-context".into()),
             to_node_id: Some("old-answer".into()),
             max_chars: None,
-            max_percent: None,
-            segment_chars: None,
-            reduce_rounds: None,
         }),
     )
     .await;
@@ -2599,9 +2590,6 @@ async fn summary_connection_wait_is_recorded_in_existing_usage() {
             from_node_id: Some("old-large-context".into()),
             to_node_id: Some("old-answer".into()),
             max_chars: None,
-            max_percent: None,
-            segment_chars: None,
-            reduce_rounds: None,
         }),
     )
     .await;

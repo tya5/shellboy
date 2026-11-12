@@ -714,18 +714,9 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
         let mut limits = config.compaction.clone();
         limits.segment_chars = snapshot.segment_chars;
         limits.reduce_rounds = snapshot.reduce_rounds;
-        if let Some(n) = args.segment_chars {
-            limits.segment_chars = n as usize;
-        }
-        if let Some(n) = args.reduce_rounds {
-            limits.reduce_rounds = n as usize;
-        }
         let segments = segments(groups, snapshot.epoch, limits.segment_chars)?;
         if let Some(n) = args.max_chars {
             limits.summary_max_chars = Some(n);
-        }
-        if let Some(n) = args.max_percent {
-            limits.summary_max_percent = Some(n);
         }
         let keys = segments
             .iter()

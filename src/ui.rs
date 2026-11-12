@@ -5040,9 +5040,6 @@ impl UiState {
             "/switch" if !argument.is_empty() => self.select_thread(argument.into()),
             "/compact-max" => vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
-                max_percent: None,
-                segment_chars: None,
-                reduce_rounds: None,
                 thread_id: thread_id.clone(),
                 action: ContextEditAction::Maximal,
                 from_node_id: None,
@@ -5406,9 +5403,6 @@ impl UiState {
                 };
                 vec![UiAction::Command(Command::ContextEdit(ContextEditArgs {
                     max_chars: None,
-                    max_percent: None,
-                    segment_chars: None,
-                    reduce_rounds: None,
                     thread_id: Some(thread_id),
                     action: ContextEditAction::Restore,
                     from_node_id: None,

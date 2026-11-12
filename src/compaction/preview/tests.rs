@@ -103,9 +103,6 @@ async fn trim_and_omit_match_actual_projection_and_leave_store_untouched() {
                     from_node_id: args.from_node_id,
                     to_node_id: args.to_node_id,
                     max_chars: None,
-                    max_percent: None,
-                    segment_chars: None,
-                    reduce_rounds: None,
                 },
                 CancellationToken::new(),
             )
@@ -139,9 +136,6 @@ async fn maximal_and_no_target_match_actual_projection() {
                     from_node_id: None,
                     to_node_id: None,
                     max_chars: None,
-                    max_percent: None,
-                    segment_chars: None,
-                    reduce_rounds: None,
                 },
                 CancellationToken::new(),
             )
@@ -177,9 +171,6 @@ async fn spill_matches_real_completed_tool_group_adoption() {
                 from_node_id: Some("g-old-call".into()),
                 to_node_id: Some("g-old-result".into()),
                 max_chars: None,
-                max_percent: None,
-                segment_chars: None,
-                reduce_rounds: None,
             },
             CancellationToken::new(),
         )
@@ -543,9 +534,6 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
                 from_node_id: Some("a".into()),
                 to_node_id: Some("b".into()),
                 max_chars: None,
-                max_percent: None,
-                segment_chars: None,
-                reduce_rounds: None,
             },
             CancellationToken::new(),
         )
@@ -647,9 +635,6 @@ async fn explicit_summary_uses_its_own_segment_size_records_it_and_leaves_the_th
                 from_node_id: Some("a".into()),
                 to_node_id: Some("b".into()),
                 max_chars: None,
-                max_percent: None,
-                segment_chars: Some(70_000),
-                reduce_rounds: Some(2),
             },
             CancellationToken::new(),
         )
@@ -691,9 +676,6 @@ async fn hidden_marker_after_multi_source_tool_groups_uses_group_not_node_ordina
                 from_node_id: Some("x".into()),
                 to_node_id: Some("y".into()),
                 max_chars: None,
-                max_percent: None,
-                segment_chars: None,
-                reduce_rounds: None,
             },
             CancellationToken::new(),
         )

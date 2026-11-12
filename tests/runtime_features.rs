@@ -5013,9 +5013,6 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
             from_node_id: None,
             to_node_id: None,
             max_chars: None,
-            max_percent: None,
-            segment_chars: None,
-            reduce_rounds: None,
         }),
     )
     .await;

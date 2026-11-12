@@ -342,9 +342,6 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
         from_node_id: Some(node.clone()),
         to_node_id: Some(node),
         max_chars: None,
-        max_percent: None,
-        segment_chars: None,
-        reduce_rounds: None,
     };
     // Normal Control admission, queue and Thread boundary, not a direct edit.
     let accepted = request(&control, Command::ContextEdit(edit)).await;

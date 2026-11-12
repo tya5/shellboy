@@ -656,18 +656,9 @@ pub struct CompactOptions {
     pub dry_run: bool,
     #[command(subcommand)]
     pub command: Option<CompactCommand>,
-    /// Override the absolute summary limit (minimum effective limit: 2000 characters).
+    /// Override the requested summary output character limit.
     #[arg(long, requires = "summary")]
     pub max_chars: Option<u64>,
-    /// Override the summary limit as a percentage of the original range (0 < P <= 100).
-    #[arg(long, requires = "summary")]
-    pub max_percent: Option<f64>,
-    /// Override the summary segment size (characters of original conversation per map request) for this summary only.
-    #[arg(long, requires = "summary")]
-    pub segment_chars: Option<u64>,
-    /// Override the maximum number of reduce rounds for this summary only.
-    #[arg(long, requires = "summary")]
-    pub reduce_rounds: Option<u64>,
     /// Maximum API-free reduction outside protected work; no node IDs.
     #[arg(long)]
     pub maximal: bool,
@@ -1597,9 +1588,6 @@ impl Cli {
                         || a.from_node_id.is_some()
                         || a.to_node_id.is_some()
                         || a.max_chars.is_some()
-                        || a.max_percent.is_some()
-                        || a.segment_chars.is_some()
-                        || a.reduce_rounds.is_some()
                     {
                         return Err(wire::ApiError::new(
                             wire::ErrorCode::InvalidArgument,
@@ -1616,10 +1604,7 @@ impl Cli {
                     return Ok(Some(cmd));
                 }
 
-                if (a.max_chars.is_some()
-                    || a.max_percent.is_some()
-                    || a.segment_chars.is_some()
-                    || a.reduce_rounds.is_some())
+                if (a.max_chars.is_some())
                     && !a.summary
                 {
                     return Err(invalid("summary limits require --summary"));
@@ -1646,9 +1631,6 @@ impl Cli {
                         from_node_id: a.from_node_id,
                         to_node_id: a.to_node_id,
                         max_chars: a.max_chars,
-                        max_percent: a.max_percent,
-                        segment_chars: a.segment_chars,
-                        reduce_rounds: a.reduce_rounds,
                     }));
                     cmd.validate()?;
                     return Ok(Some(cmd));
@@ -1660,9 +1642,6 @@ impl Cli {
                         from_node_id: a.from_node_id,
                         to_node_id: a.to_node_id,
                         max_chars: a.max_chars,
-                        max_percent: a.max_percent,
-                        segment_chars: a.segment_chars,
-                        reduce_rounds: a.reduce_rounds,
                     }),
                     None => C::Compact(wire::ThreadTarget {
                         thread_id: a.thread_id,

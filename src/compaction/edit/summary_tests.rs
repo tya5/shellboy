@@ -90,17 +90,12 @@ async fn configured_fixture(
 fn summary_args(from: &str, to: &str) -> ContextEditArgs {
     ContextEditArgs {
         max_chars: None,
-        max_percent: None,
-        segment_chars: None,
-        reduce_rounds: None,
         thread_id: Some("t".into()),
         action: ContextEditAction::Summary,
         from_node_id: Some(from.into()),
         to_node_id: Some(to.into()),
     }
-}
-async fn omit_middle(fixture: &Fixture) -> String {
-    for id in ["before", "middle-a", "middle-b", "after"] {
+e-a", "middle-b", "after"] {
         fixture.text(id, &format!("original text {id}")).await;
     }
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
@@ -534,9 +529,6 @@ async fn context_trim_summary_projection_does_not_change_exact_restore_or_marker
                     from_node_id: Some(marker.clone()),
                     to_node_id: None,
                     max_chars: None,
-                    max_percent: None,
-                    segment_chars: None,
-                    reduce_rounds: None,
                 },
                 CancellationToken::new(),
             )

@@ -82,15 +82,6 @@ impl Compactor {
         if let Some(value) = args.max_chars {
             limits.summary_max_chars = Some(value);
         }
-        if let Some(value) = args.max_percent {
-            limits.summary_max_percent = Some(value);
-        }
-        if let Some(value) = args.segment_chars {
-            limits.segment_chars = value as usize;
-        }
-        if let Some(value) = args.reduce_rounds {
-            limits.reduce_rounds = value as usize;
-        }
         let before = history_characters(&snapshot);
         match args.action {
             ContextEditAction::Maximal => {

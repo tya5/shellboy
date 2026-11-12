@@ -1847,24 +1847,6 @@ impl Form {
                             String::new(),
                             Number,
                         ),
-                        f(
-                            "max_percent",
-                            "要約割合上限（空=設定値）",
-                            String::new(),
-                            Number,
-                        ),
-                        f(
-                            "summary_segment_chars",
-                            "部分の大きさ（空=設定値）",
-                            String::new(),
-                            Number,
-                        ),
-                        f(
-                            "summary_reduce_rounds",
-                            "統合の最大段数（空=設定値）",
-                            String::new(),
-                            Number,
-                        ),
                     ],
                     |form, _| {
                         let action = match form.value("action")? {
@@ -1872,9 +1854,6 @@ impl Form {
                                 if form.optional("from_node")?.is_some()
                                     || form.optional("to_node")?.is_some()
                                     || form.optional("max_chars")?.is_some()
-                                    || form.optional("max_percent")?.is_some()
-                                    || form.optional("summary_segment_chars")?.is_some()
-                                    || form.optional("summary_reduce_rounds")?.is_some()
                                 {
                                     return Err(
                                     local!(form.language, "範囲を指定するときは圧縮・編集方法を選択してください", "Select a compaction or editing method when specifying a range").into()
@@ -1903,9 +1882,6 @@ impl Form {
                             from_node_id: form.optional("from_node")?,
                             to_node_id: form.optional("to_node")?,
                             max_chars: form.optional_number("max_chars")?,
-                            max_percent: form.optional_number("max_percent")?,
-                            segment_chars: form.optional_number("summary_segment_chars")?,
-                            reduce_rounds: form.optional_number("summary_reduce_rounds")?,
                         }))
                     },
                 )

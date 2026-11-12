@@ -163,28 +163,11 @@ impl ThreadTagArgs {
 }
 
 impl ContextEditArgs {
-    pub fn validate(&self) -> Result<(), ApiError> {
-        if self.max_chars.is_some() || self.max_percent.is_some() {
-            if self.action != ContextEditAction::Summary {
-                return Err(invalid("summary limits require the summary action"));
+    pub fn validate(&self) -> Result<(),ApiError> {
+        if let Some(chars)=self.max_chars {
+            if self.action!=ContextEditAction::Summary || chars==0 || chars>i64::MAX as u64 {
+                return Err(invalid("summary max_chars requires summary action and integer 1..i64::MAX"));
             }
-            if !(crate::config::Compaction {
-                summary_max_chars: self.max_chars,
-                summary_max_percent: self.max_percent,
-                ..Default::default()
-            })
-            .valid()
-            {
-                return Err(invalid(
-                    "summary limits require positive characters and/or a finite percent in (0,100]",
-                ));
-            }
-        }
-        if self.segment_chars.is_some() || self.reduce_rounds.is_some() {
-            if self.action != ContextEditAction::Summary {
-                return Err(invalid("summary parameters require the summary action"));
-            }
-            check_summary_parameters(self.segment_chars, self.reduce_rounds)?;
         }
         for (name, value) in [
             ("thread_id", &self.thread_id),
@@ -240,9 +223,6 @@ impl CompactPreviewArgs {
                 from_node_id: self.from_node_id.clone(),
                 to_node_id: self.to_node_id.clone(),
                 max_chars: self.max_chars,
-                max_percent: self.max_percent,
-                segment_chars: self.segment_chars,
-                reduce_rounds: self.reduce_rounds,
             }
             .validate()
         } else {
@@ -251,9 +231,6 @@ impl CompactPreviewArgs {
                 || self.from_node_id.is_some()
                 || self.to_node_id.is_some()
                 || self.max_chars.is_some()
-                || self.max_percent.is_some()
-                || self.segment_chars.is_some()
-                || self.reduce_rounds.is_some()
             {
                 return Err(invalid(
                     "default compact preview accepts only a Thread scope",
