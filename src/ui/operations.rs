@@ -1463,18 +1463,8 @@ impl Form {
                         String::new(),
                         Text,
                     ),
-                    f(
-                        "segment_chars",
-                        "要約の部分の大きさ（空=変更なし/none=接続の値へ）",
-                        String::new(),
-                        Text,
-                    ),
-                    f(
-                        "reduce_rounds",
-                        "要約の統合の最大段数（空=変更なし/none=接続の値へ）",
-                        String::new(),
-                        Text,
-                    ),
+                    f("auto_compact_target_percent", "Target percent (empty=no change/none=inherit)", String::new(), Text),
+                    f("summary_max_chars", "Summary output characters (empty=no change/none=inherit)", String::new(), Text),
                     f(
                         "parent",
                         "親会話（空=変更なし/none=親なし）",
@@ -1506,8 +1496,8 @@ impl Form {
                         model: form.optional("model")?,
                         effort: form.effort()?,
                         auto_compact_at: form.clearable("auto_compact_at")?,
-                        segment_chars: form.clearable("segment_chars")?,
-                        reduce_rounds: form.clearable("reduce_rounds")?,
+                        auto_compact_target_percent: form.clearable("auto_compact_target_percent")?,
+                        summary_max_chars: form.clearable("summary_max_chars")?,
                         parent_id: form.clearable("parent")?,
                     })))
                 },
