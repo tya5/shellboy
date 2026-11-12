@@ -1055,6 +1055,9 @@ impl Compactor {
         mut boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
+        if active.is_none() {
+            return self.summarize_single_closed(snapshot,range,cancel,ledger,boundary,automatic,drop_all_reasoning).await;
+        }
         // The active-Turn plan already requires complete, unprotected groups;
         // its user messages are summarized, not fences.
         if active.is_none() {

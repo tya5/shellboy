@@ -96,10 +96,56 @@ pub(super) struct Dispatched {
     pub(super) size: AdoptionSize,
 }
 impl Compactor {
+    pub(super) async fn summarize_single_closed(
+        &self, snapshot:Snapshot, original:Range<usize>, cancel:CancellationToken,
+        ledger:&mut usage::UsageLedger, boundary:Option<&mut boundary::Boundary<'_>>,
+        automatic:Option<AutomaticStage>, drop_all_reasoning:bool,
+    ) -> Result<CompactResult,ApiError> {
+        range::validate(&snapshot,std::slice::from_ref(&original),range::RangeMode::Summary)?;
+        let limit=OutputLimit(self.config.compaction.summary_max_chars as u64);
+        let identity=failure_identity(&snapshot.thread,&snapshot,original.clone(),limit)
+            .ok_or_else(||invalid("No summary range"))?;
+        let thread=snapshot.thread.clone();let lookup=identity.clone();
+        let blocked=self.database.call(move |db|same_failed_range(db,&thread,Region::Closed,&lookup)).await.map_err(storage_error)?;
+        if blocked {return Err(invalid("This closed summary range already failed deterministically"));}
+        let dispatched=self.dispatch_single_summary(&snapshot,original,limit,&cancel,ledger,boundary,|prefix| {
+            range::validate(&snapshot,std::slice::from_ref(&prefix),range::RangeMode::Summary).is_ok()
+                && snapshot.groups[prefix].iter().any(Group::eligible)
+        }).await;
+        let dispatched=match dispatched {
+            Ok(result)=>result,
+            Err(error)=>{
+                let reason=error.details.as_ref().and_then(|v|v["compaction_discard_reason"].as_str());
+                let deterministic=matches!(reason,Some("summary_refused"|"summary_empty"|"summary_not_shrinking"))
+                    || error.details.as_ref().is_some_and(|v|v["single_summary_context_terminal"]==true);
+                if deterministic {
+                    let thread=snapshot.thread.clone();let proof=snapshot.clone();
+                    self.database.call(move |db| {let tx=db.transaction()?;validate(&tx,&proof)?;remember_failure(&tx,&thread,Region::Closed,&identity)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+                }
+                return Err(error);
+            }
+        };
+        let selected=dispatched.selected;
+        let sources:Vec<Source>=snapshot.groups[selected.clone()].iter().flat_map(|g|g.sources.clone()).chain(snapshot.extra_sources.clone()).collect();
+        let originals:Vec<String>=sources.iter().map(|s|s.id.clone()).collect();
+        let text_chars=dispatched.response.text.chars().count();
+        let source_chars=sources.iter().map(|s|edit::projection_characters(&s.payload,snapshot.epoch)).sum::<usize>();
+        let payload=json!({"item":{"role":"developer","content":[{"type":"input_text","text":dispatched.response.text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
+        let projected=edit::projection_characters(&payload,snapshot.epoch);
+        if projected>=source_chars {return Err(discard::rejected(discard::DiscardReason::SummaryNotShrinking,"Summary does not shrink its original source projection; original path retained"));}
+        let adoption=SummaryAdoption {
+            automatic,removed_characters:(source_chars-projected) as u64,drop_all_reasoning,snapshot,
+            sources,payload,start:selected.start,count:selected.end,
+            result:CompactResult {source_characters:Some(source_chars),summary_characters:Some(text_chars),summary_limit:Some(limit.0 as usize),model_requests:Some(ledger.usage().requests as usize),source_nodes:originals.len(),original_node_ids:originals,summary_usage:Some(ledger.usage().clone()),..Default::default()}
+        };
+        let config=self.config.clone();
+        self.database.call(move |db| {let tx=db.transaction()?;let result=adoption.adopt_tx(&tx,&config,&cancel)?;tx.commit()?;Ok(result)}).await.map_err(storage_error)
+    }
+
     pub(super) async fn dispatch_single_summary(
         &self, snapshot:&Snapshot, selected:Range<usize>, limit:OutputLimit,
         cancel:&CancellationToken, ledger:&mut usage::UsageLedger,
-        eligible:impl Fn(Range<usize>)->bool,
+        mut boundary:Option<&mut boundary::Boundary<'_>>, eligible:impl Fn(Range<usize>)->bool,
     ) -> Result<Dispatched,ApiError> {
         let connection=self.config.connections.get(&snapshot.profile)
             .ok_or_else(||ApiError::new(ErrorCode::ConfigInvalid,"Connection not found"))?;
@@ -113,12 +159,9 @@ impl Compactor {
             let payload=request(snapshot,selected.clone(),limit);
             // Preserve existing transport admission and durable usage accounting.
             // Legacy usage counters remain until public schema retirement step.
+            let admission=self.summary_admission(&client,snapshot,cancel,boundary.as_deref_mut()).await?;
             let observation=ledger.begin(&self.database,false).await?;
-            let state=model::SendState::default();
-            let result=retry::within(
-                client.response_with_state(connection,&payload,cancel.clone(),state),
-                connection.request_timeout_ms,
-            ).await;
+            let result=Self::summary_response(&client,&snapshot.thread,payload,cancel.clone(),admission).await;
             let response=match result {
                 Ok(response)=>{
                     ledger.observe_http(&self.database,observation,response.response_facts).await?;
@@ -132,17 +175,14 @@ impl Compactor {
                     if !failure.error.is_context_limit() {
                         if let Some(delay)=retry::retry_delay(connection,&failure,retries) {
                             retries+=1;
-                            tokio::select! {
-                                _=cancel.cancelled()=>return Err(discard::rejected(discard::DiscardReason::Cancelled,"Compaction cancelled; original path retained")),
-                                _=tokio::time::sleep(delay)=>{}
-                            }
+                            self.summary_backoff(snapshot,delay,cancel,boundary.as_deref_mut()).await?;
                             continue;
                         }
                         return Err(invalid("Summary request failed; original path retained"));
                     }
                     match trial.finish_request(snapshot,Err(&failure.error),&eligible) {
                         Next::RetryPrefix(_)=>{retries=0;continue;}
-                        Next::Done|Next::Failed=>return Err(invalid("Summary context refusal at final eligible prefix; original path retained")),
+                        Next::Done|Next::Failed=>return Err(invalid("Summary context refusal at final eligible prefix; original path retained").details(json!({"single_summary_context_terminal":true}))),
                     }
                 }
             };
