@@ -294,7 +294,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
             .unwrap_or_else(|| panic!("reopened CompactList omitted persisted attempt: {list}"));
         assert_eq!(item["kind"], "automatic_reduction");
         assert_eq!(item["state"], "unknown");
-        restarted_control.shutdown().await;
+        let _ = restarted_control.shutdown().await;
         restarted.shutdown().await.unwrap();
         return;
     }
