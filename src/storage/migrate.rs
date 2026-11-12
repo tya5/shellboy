@@ -450,35 +450,88 @@ mod activity_migration_tests {
             db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES('attempt-nested','turn-old',0,1,'p','m',0,'completed','{}',?1,'now')",[r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1,"reduce_requests":2,"oversized_reduce_parts":3},"kept":"safe"}}}}"#]).unwrap();
             db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('summary-old','summary','now',?1)",[r#"{"summary_usage":{"map_requests":4,"reduce_requests":5,"oversized_reduce_parts":6},"kept":"safe"}"#]).unwrap();
             // Supported sources archive/strip; unsupported shapes below must remain byte-identical.
-            db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.valid.extra',?1)",[r#"{"map_requests":7,"other":{"kept":true}}"#]).unwrap();
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES('summary.usage.valid.extra',?1)",
+                [r#"{"map_requests":7,"other":{"kept":true}}"#],
+            )
+            .unwrap();
             let unsupported_meta = [
                 ("summary.usage.scalar.root", "17"),
-                ("summary.usage.boolean.counter", r#"{"map_requests":true,"keep":"x"}"#),
-                ("summary.usage.nested.counter", r#"{"reduce_requests":{"n":2},"keep":"x"}"#),
-                ("summary.usage.out_of_i64.counter", r#"{"oversized_reduce_parts":9223372036854775808,"keep":"x"}"#),
+                (
+                    "summary.usage.boolean.counter",
+                    r#"{"map_requests":true,"keep":"x"}"#,
+                ),
+                (
+                    "summary.usage.nested.counter",
+                    r#"{"reduce_requests":{"n":2},"keep":"x"}"#,
+                ),
+                (
+                    "summary.usage.out_of_i64.counter",
+                    r#"{"oversized_reduce_parts":9223372036854775808,"keep":"x"}"#,
+                ),
             ];
             for (key, value) in unsupported_meta {
-                db.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2)", [key, value]).unwrap();
+                db.execute(
+                    "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+                    [key, value],
+                )
+                .unwrap();
             }
             let unsupported_nodes = [
-                ("summary-array-usage", r#"{"summary_usage":[{"map_requests":1}],"keep":"x"}"#),
-                ("summary-scalar-usage", r#"{"summary_usage":"legacy","keep":"x"}"#),
-                ("summary-boolean-counter", r#"{"summary_usage":{"map_requests":false},"keep":"x"}"#),
-                ("summary-nested-counter", r#"{"summary_usage":{"reduce_requests":{"n":2}},"keep":"x"}"#),
-                ("summary-out-of-i64-counter", r#"{"summary_usage":{"oversized_reduce_parts":9223372036854775808},"keep":"x"}"#),
+                (
+                    "summary-array-usage",
+                    r#"{"summary_usage":[{"map_requests":1}],"keep":"x"}"#,
+                ),
+                (
+                    "summary-scalar-usage",
+                    r#"{"summary_usage":"legacy","keep":"x"}"#,
+                ),
+                (
+                    "summary-boolean-counter",
+                    r#"{"summary_usage":{"map_requests":false},"keep":"x"}"#,
+                ),
+                (
+                    "summary-nested-counter",
+                    r#"{"summary_usage":{"reduce_requests":{"n":2}},"keep":"x"}"#,
+                ),
+                (
+                    "summary-out-of-i64-counter",
+                    r#"{"summary_usage":{"oversized_reduce_parts":9223372036854775808},"keep":"x"}"#,
+                ),
             ];
             for (id, payload) in unsupported_nodes {
                 db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES(?1,'summary','now',?2)", [id, payload]).unwrap();
             }
             let unsupported_attempts = [
                 ("attempt-bad-root", "{"),
-                ("attempt-scalar-stage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"legacy"}}}"#),
-                ("attempt-array-stages", r#"{"automatic_trim_attempt":{"committed_stages":[{"summary_usage":{"map_requests":1}}]}}"#),
-                ("attempt-array-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":[{"map_requests":1}]}}}}"#),
-                ("attempt-scalar-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":"legacy"}}}}"#),
-                ("attempt-boolean-counter", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":true}}}}}"#),
-                ("attempt-nested-counter", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"reduce_requests":{"n":2}}}}}}"#),
-                ("attempt-out-of-i64-counter", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"oversized_reduce_parts":9223372036854775808}}}}}"#),
+                (
+                    "attempt-scalar-stage",
+                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"legacy"}}}"#,
+                ),
+                (
+                    "attempt-array-stages",
+                    r#"{"automatic_trim_attempt":{"committed_stages":[{"summary_usage":{"map_requests":1}}]}}"#,
+                ),
+                (
+                    "attempt-array-usage",
+                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":[{"map_requests":1}]}}}}"#,
+                ),
+                (
+                    "attempt-scalar-usage",
+                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":"legacy"}}}}"#,
+                ),
+                (
+                    "attempt-boolean-counter",
+                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":true}}}}}"#,
+                ),
+                (
+                    "attempt-nested-counter",
+                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"reduce_requests":{"n":2}}}}}}"#,
+                ),
+                (
+                    "attempt-out-of-i64-counter",
+                    r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"oversized_reduce_parts":9223372036854775808}}}}}"#,
+                ),
             ];
             for (id, error_json) in unsupported_attempts {
                 db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES(?1,'turn-old',0,2,'p','m',0,'completed','{}',?2,'now')", [id, error_json]).unwrap();

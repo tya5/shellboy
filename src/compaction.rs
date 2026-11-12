@@ -622,7 +622,6 @@ impl Compactor {
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
     }
-    #[cfg(test)]
     pub(crate) async fn proactive_history_characters(&self, thread: &str) -> Result<u64, ApiError> {
         #[cfg(test)]
         if self
