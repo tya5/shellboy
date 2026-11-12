@@ -111,7 +111,8 @@ impl Compactor {
         if !valid(original.clone()) {return Err(invalid("No safe summary range"));}
         let settings_thread=snapshot.thread.clone();
         let max_chars=self.database.call(move |db|Ok(db.query_row("SELECT summary_max_chars FROM thread WHERE id=?1",[settings_thread],|r|r.get::<_,Option<i64>>(0))?)).await.map_err(storage_error)?;
-        let limit=OutputLimit(crate::config::summary_chars_for(max_chars.map(|n|n as u64),self.config.connections.get(&snapshot.profile)));
+        let max_chars=max_chars.map(|n|u64::try_from(n).map_err(|_|invalid("Invalid saved summary character limit"))).transpose()?;
+        let limit=OutputLimit(crate::config::summary_chars_for(max_chars,self.config.connections.get(&snapshot.profile)));
         let identity=failure_identity(&snapshot.thread,&snapshot,original.clone(),limit)
             .ok_or_else(||invalid("No summary range"))?;
         let thread=snapshot.thread.clone();let lookup=identity.clone();

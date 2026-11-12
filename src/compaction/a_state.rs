@@ -95,6 +95,14 @@ pub(crate) fn save(tx:&rusqlite::Connection, thread:&str, state:&State) -> Resul
 }
 pub(crate) fn reading(state:Option<&State>) -> Reading { state.map(State::reading).unwrap_or(Reading::LegacyAbsent) }
 
+/// Decimal text preserves the full u64 counter domain across SQLite JSON1.
+pub(crate) fn decode_generation(text:Option<&str>)->Result<Option<u64>,StorageError> {
+    text.map(|value| {
+        if value.is_empty() || value.len()>20 || !value.bytes().all(|b|b.is_ascii_digit()) {return Err(StorageError::from(bad()));}
+        value.parse::<u64>().map_err(|_|StorageError::from(bad()))
+    }).transpose()
+}
+
 pub(crate) fn scope_tx(db:&rusqlite::Connection, thread:&str, connection:&str, model:&str) -> Result<State,StorageError> {
     let mut state=read(db,thread)?.unwrap_or(State::new(connection,model)?);
     state.change_scope(connection,model)?;save(db,thread,&state)?;Ok(state)
@@ -213,4 +221,11 @@ mod transactional_reset_tests {
         tx.commit().unwrap();
         assert_eq!(read(&db,"t").unwrap().unwrap().reading(),Reading::Unknown);
     }
+    #[test]
+    fn generation_decimal_has_no_signed_wrap_or_domain_truncation() {
+        assert_eq!(decode_generation(Some(&u64::MAX.to_string())).unwrap(),Some(u64::MAX));
+        assert_eq!(decode_generation(None).unwrap(),None);
+        for value in ["-1","1.0","1e20","18446744073709551616",""] {assert!(decode_generation(Some(value)).is_err());}
+    }
+
 }
