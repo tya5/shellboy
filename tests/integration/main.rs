@@ -229,6 +229,8 @@ pub(crate) mod test_watchdog;
 
 #[path = "../support/schema42_fixture.rs"]
 pub(crate) mod schema42_fixture;
+#[path = "../support/schema42_integration_migrations.rs"]
+pub(crate) mod schema42_integration_migrations;
 
 #[cfg(unix)]
 #[path = "../support/pty_session.rs"]

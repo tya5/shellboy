@@ -1205,24 +1205,7 @@ async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata()
           INSERT INTO node(id,kind,created_at,payload_json) VALUES('pending-request','user','now','{}');
           INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('pending-request','pending-request','{}','child','pending-request','held','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');
           INSERT INTO app_meta(key,value) VALUES('reply-migration-witness','preserve');").unwrap();
-    db.execute_batch(
-        "DROP TRIGGER selection_generation_combined_write;
-         DROP TRIGGER selection_generation_update;
-         DROP TRIGGER selection_thread_conflict;
-         DROP TRIGGER selection_generation_insert;
-         DROP TRIGGER selection_path_insert;
-         DROP TRIGGER selection_path_delete;
-         DROP TRIGGER selection_path_update;
-         DROP TRIGGER selection_revision_same_cursor;
-         ALTER TABLE thread DROP COLUMN selection_nonappend_generation;
-         DROP INDEX receipt_reply_node_lookup;
-         DROP INDEX node_notification_event;
-         ALTER TABLE node DROP COLUMN notification_event_id;
-         ALTER TABLE event DROP COLUMN semantic_json;
-         DELETE FROM schema_migration WHERE version>=40;
-         PRAGMA user_version=39;",
-    )
-    .unwrap();
+    crate::schema42_integration_migrations::downgrade_schema42_to_schema39(&db);
     let legacy = db;
     legacy
         .execute_batch(
