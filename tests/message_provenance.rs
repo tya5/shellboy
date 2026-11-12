@@ -120,6 +120,7 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
         )
         .unwrap();
     // Reconstruct the exact index-only predecessor without rewriting saved table data.
+    db.execute_batch(crate::schema42_fixture::REWIND_43_TO_42).unwrap();
     db.execute_batch("DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=41; PRAGMA user_version=40;").unwrap();
     drop(db);
     let worker = DbWorker::open(&path).await.unwrap();
@@ -291,7 +292,7 @@ async fn independently_pinned_schema41_upgrades_through_worker_to42() {
     drop(db);
     let worker = DbWorker::open(&path).await.unwrap();
     worker.call(|db| {
-        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,42);
+        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,43);
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=42 AND name='0042_notification_semantic_descriptor'",[],|r|r.get::<_,i64>(0))?,1);
         assert_eq!(db.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get::<_,i64>(0))?,0);
         Ok(())

@@ -2767,7 +2767,7 @@ async fn single_summary_settings_inherit_clear_and_reopen() {
     };
     let result = execute(&store, Command::ThreadSet(Box::new(clear))).await;
     assert!(result.result["summary_max_chars"].is_null());
-    assert_eq!(result.result["effective_summary_max_chars"], 20000);
+    assert_eq!(result.result["effective_summary_max_chars"], 10000); // connection value precedes the default
     assert_eq!(result.result["effective_auto_compact_target_percent"], 20);
     assert_eq!(result.result["effective_auto_compact_at"], 0);
     let config = store.config.clone();

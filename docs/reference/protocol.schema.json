@@ -1339,23 +1339,8 @@
           "minimum": 0,
           "type": "integer"
         },
-        "map_requests": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
         "output_tokens": {
           "$ref": "#/definitions/UsageNumber"
-        },
-        "oversized_reduce_parts": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "reduce_requests": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
         },
         "requests": {
           "format": "uint64",
@@ -1367,9 +1352,6 @@
         "compactions",
         "malformed_records",
         "requests",
-        "map_requests",
-        "reduce_requests",
-        "oversized_reduce_parts",
         "input_tokens",
         "cached_tokens",
         "cache_creation_tokens",
@@ -1780,6 +1762,7 @@
         "thread_unavailable",
         "selection_changed",
         "profile_changed",
+        "summary_settings_changed",
         "epoch_changed",
         "run_started",
         "run_stopped",
