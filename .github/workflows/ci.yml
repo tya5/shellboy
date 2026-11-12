@@ -83,6 +83,8 @@ jobs:
           run_recorded check cargo check --tests 2>&1 | tee source-artifacts/check.log
           run_recorded single-request cargo test --lib compaction::single_request:: 2>&1 | tee source-artifacts/single-request.log
           run_recorded a-state cargo test --lib compaction::a_state:: 2>&1 | tee source-artifacts/a-state.log
+          run_recorded migration-parity cargo test --lib executor_matches_registered_migration_versions 2>&1 | tee source-artifacts/migration-parity.log
+          run_recorded migration-upgrade cargo test --lib pinned_schema42_writer_upgrade_settings_and_reopen 2>&1 | tee source-artifacts/migration-upgrade.log
           run_recorded build cargo build --bin shellboy
           run_recorded schema target/debug/shellboy protocol schema > source-artifacts/protocol.schema.json
       - name: Bind non-release source evidence
@@ -94,7 +96,7 @@ jobs:
           result={'kind':'non-release-working-tree-preparation','source_sha':(p/'source-sha.txt').read_text().strip(),'source_tree':(p/'source-tree.txt').read_text().strip(),'run_id':(p/'run-id.txt').read_text().strip(),'files':{f.name:hashlib.sha256(f.read_bytes()).hexdigest() for f in p.iterdir() if f.is_file()}}
           statuses=dict(line.split('\t') for line in (p/'command-status.tsv').read_text().splitlines()) if (p/'command-status.tsv').exists() else {}
           result['command_exit_status']={k:int(v) for k,v in statuses.items()}
-          expected={'format','check','single-request','a-state','build','schema'}
+          expected={'format','check','single-request','a-state','migration-parity','migration-upgrade','build','schema'}
           result['qualification']='preparation-only' if set(statuses)==expected and all(v=='0' for v in statuses.values()) else 'failed-or-incomplete-reference-only'
           (p/'manifest.json').write_text(json.dumps(result,indent=2)+'\n')
           PYART
