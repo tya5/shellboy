@@ -71,6 +71,13 @@ source/tests do not establish release adoption, all-OS CI or actual-owner accept
 Core0.11.2 publication follows independent exact review and hosted CI; owner updates
 are exclusively outside Claude after publication, never author shell operations.
 
+### v0.12.0 Candidate (#303 single-request compaction)
+
+#303 landed on main at cf9b662d0c (exact-SHA all-OS CI success, two independent
+reviews). See [release notes](release-v0.12.0-draft.md). The version bump, candidate
+build verification, tag and publication follow; installation on a real data
+directory is a separate approved step (schema 42 to 43, backup first).
+
 ### v0.11.2 Qualification Candidate
 
 See [candidate notes](release-v0.11.2-draft.md). The combined #296 producer and
