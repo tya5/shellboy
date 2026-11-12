@@ -114,7 +114,7 @@ async fn raw_parts(fixture: &Fixture) -> i64 {
 }
 
 #[tokio::test]
-async fn omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and_raw_provenance() {
+async fn omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and_provenance() {
     let (fixture, mut requests, _release, server) = configured_fixture(1, false).await;
     let marker = omit_middle(&fixture).await;
     let snapshot_before = fixture.compactor.snapshot("t", false).await.unwrap();
@@ -151,9 +151,9 @@ async fn omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and
             assert_eq!(serde_json::from_str::<Value>(&payload).unwrap(),json!({"role":"user","content":format!("original text {id}")}));
         }Ok(())
     }).await.unwrap();
-    assert_eq!(raw_parts(&fixture).await, 1);
+    assert_eq!(raw_parts(&fixture).await, 0); // raw part cache retired (§9)
     assert_eq!(
-        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and_raw_provenance", server)
+        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: omitted_middle_summary_uses_original_data_and_retains_prefix_suffix_and_provenance", server)
             .await
             .unwrap()
             .unwrap(),
@@ -202,7 +202,7 @@ async fn partial_hidden_summary_is_rejected_with_boundary_candidates_without_htt
 }
 
 #[tokio::test]
-async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part()
+async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path()
  {
     for selection_change in [false, true] {
         let (fixture, mut requests, release, server) = configured_fixture(1, true).await;
@@ -212,7 +212,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
         let args = summary_args("middle-a", "middle-b");
         let request =
             tokio::spawn(async move { compactor.edit("t", &args, CancellationToken::new()).await });
-        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part", requests.recv())
+        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path", requests.recv())
             .await
             .unwrap()
             .unwrap();
@@ -232,7 +232,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
                 .unwrap();
         }
         release.send(()).unwrap();
-        let error = crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part", request)
+        let error = crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path", request)
             .await
             .unwrap()
             .unwrap()
@@ -244,7 +244,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
             expected.push("later".into());
         }
         assert_eq!(fixture.path().await, expected);
-        assert_eq!(raw_parts(&fixture).await, 1);
+        assert_eq!(raw_parts(&fixture).await, 0); // raw part cache retired (§9)
         fixture
             .db
             .call(|db| {
@@ -261,7 +261,7 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
             .await
             .unwrap();
         assert_eq!(
-            crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_but_keeps_raw_part", server)
+            crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path", server)
                 .await
                 .unwrap()
                 .unwrap(),
@@ -318,11 +318,11 @@ async fn explicit_tool_span_summary_sends_complete_groups_in_one_request() {
     }
     assert_eq!(raw_parts(&fixture).await, 0);
     assert_eq!(
-        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_character_partitioning", server)
+        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: explicit_tool_span_summary_sends_complete_groups_in_one_request", server)
             .await
             .unwrap()
             .unwrap(),
-        3
+        1
     );
     fixture.close().await;
 }

@@ -34,7 +34,8 @@ pub(super) fn request(snapshot: &Snapshot, selected: Range<usize>, limit: Output
     let text = snapshot.groups[selected]
         .iter()
         .flat_map(|group| group.sources.iter())
-        .chain(snapshot.extra_sources.iter())
+        // `extra_sources` are validation witnesses (a hidden marker), never
+        // summary material: its notice is not original text.
         .map(|source| render(source, snapshot.epoch))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -274,7 +275,6 @@ impl Compactor {
         let sources: Vec<Source> = snapshot.groups[selected.clone()]
             .iter()
             .flat_map(|g| g.sources.clone())
-            .chain(snapshot.extra_sources.clone())
             .collect();
         let originals: Vec<String> = sources.iter().map(|s| s.id.clone()).collect();
         let text_chars = dispatched.response.text.chars().count();

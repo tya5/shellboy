@@ -135,61 +135,77 @@ async fn one_request_summary_preserves_latest_state_and_adopts_exact_selected_so
         .unwrap();
     let value: Value = serde_json::from_str(&payload).unwrap();
     assert_eq!(value["item"]["content"][0]["text"], final_text);
-    assert_eq!(value["summary_scope"], "selected_range");
+    assert!(value.get("summary_scope").is_none());
     finish(f, server).await;
 }
 
 #[tokio::test]
-async fn summary_retries_oversize_output_then_adopts_on_later_invocation() {
+async fn oversized_but_shrinking_summary_is_adopted_once_and_records_the_exceeded_limit() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
-    let mut replies = vec!["あ".repeat(2001); 5];
-    replies.push("valid concise summary".into());
-    let (f, server) = setup(replies, &log).await;
+    let (f, server) = setup(vec!["あ".repeat(2001)], &log).await;
     f.text("n0", &"source".repeat(5000)).await;
     let before = f.path().await;
     let mut a = args("n0");
-    a.max_chars = Some(1); // The effective floor remains 2000.
-    let e = edit(&f, &a).await.unwrap_err();
-    let d = e.details.unwrap();
-    assert_eq!(d["summary_limit"], 2000);
-    assert_eq!(d["summary_characters"], 2001);
-    assert_eq!(d["model_requests"], 5);
-    assert_eq!(lines(&log), 5);
-    assert_eq!(f.path().await, before);
+    a.max_chars = Some(1000);
+    // §4.3: over the requested cap but smaller than the source: adopt, record
+    // the excess, never resend the whole range.
     let result = edit(&f, &a).await.unwrap();
-    assert!(result.compact.summary_node_id.is_some());
-    assert_eq!(lines(&log), 6);
+    assert_eq!(result.compact.model_requests, Some(1));
+    assert_eq!(result.compact.summary_limit, Some(1000));
+    assert_eq!(result.compact.summary_characters, Some(2001));
+    assert_eq!(lines(&log), 1);
     assert_ne!(f.path().await, before);
+    let id = f.path().await[0].clone();
+    let payload = f
+        .db
+        .call(move |db| {
+            Ok(db.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| {
+                r.get::<_, String>(0)
+            })?)
+        })
+        .await
+        .unwrap();
+    let value: Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(value["summary_output_limit_exceeded"], true);
     finish(f, server).await;
 }
 
 #[tokio::test]
-async fn oversized_retry_is_bounded_across_operations() {
+async fn nonshrinking_failure_is_suppressed_until_the_selection_changes() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
-    let mut replies = vec!["あ".repeat(2001)];
-    replies.extend(vec!["short changed selection".into(); 2]);
+    let replies = vec![
+        "too large for a tiny source".to_owned(),
+        "short changed selection".to_owned(),
+    ];
     let (f, server) = setup(replies, &log).await;
-    f.text("n0", &"source".repeat(5000)).await;
+    f.text("n0", "a").await;
     let before = f.path().await;
     let mut a = args("n0");
-    a.max_chars = Some(1);
-    assert!(edit(&f, &a).await.is_err());
-    assert!(edit(&f, &a).await.is_err());
-    let count = lines(&log);
-    assert_eq!(count, 1);
+    assert!(
+        edit(&f, &a)
+            .await
+            .unwrap_err()
+            .message
+            .contains("does not shrink")
+    );
+    assert_eq!(lines(&log), 1);
+    // §6: the same range and settings are not sent again.
     let error = edit(&f, &a).await.unwrap_err();
-    assert!(error.message.contains("retry already used"));
-    assert_eq!(lines(&log), count);
+    assert!(
+        error.message.contains("already failed deterministically"),
+        "{}",
+        error.message
+    );
+    assert_eq!(lines(&log), 1);
     assert_eq!(f.path().await, before);
     f.text("n1", &"changed source".repeat(500)).await;
     a.to_node_id = Some("n1".into());
     let result = edit(&f, &a).await.unwrap();
     assert!(result.compact.summary_node_id.is_some());
     assert_ne!(f.path().await, before);
-    server.abort();
-    f.close().await;
+    finish(f, server).await;
 }
 
 #[tokio::test]
@@ -233,7 +249,7 @@ async fn large_explicit_range_is_sent_as_one_summary_request() {
     let request: Value = serde_json::from_str(&std::fs::read_to_string(&log).unwrap()).unwrap();
     let prompt = request["input"][1]["content"][0]["text"].as_str().unwrap();
     for i in [0, 32, 64] {
-        assert!(prompt.contains(&format!("n{i}:")));
+        assert!(prompt.contains(&format!("Node n{i} ")), "{i}");
     }
     assert!(result.after_characters < result.before_characters);
     finish(f, server).await;
