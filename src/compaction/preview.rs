@@ -68,8 +68,7 @@ struct Loaded {
     kinds: HashMap<String, String>,
     stopping: bool,
     /// The Thread's own overrides; the connection and `[compaction]` fill in the rest.
-    thread_segment_chars: Option<usize>,
-    thread_reduce_rounds: Option<usize>,
+    thread_summary_chars: Option<u64>,
 }
 pub(crate) struct RawPreview {
     plan: Plan,
@@ -77,14 +76,8 @@ pub(crate) struct RawPreview {
     sql: usize,
     at: String,
 }
-struct Summary {
-    source_characters: u64,
-    limit: u64,
-    segment_chars: usize,
-    reduce_rounds: usize,
-    keys: Vec<Option<String>>,
-    cached: usize,
-}
+struct Summary { source_characters:u64,limit:u64 }
+
 struct Plan {
     original: Snapshot,
     projected: Snapshot,
@@ -181,7 +174,7 @@ fn load(
     sql: &mut usize,
 ) -> Result<Loaded, StorageError> {
     *sql += 1;
-    let mut statement=db.prepare("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL")?;
+    let mut statement=db.prepare("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL")?;
     let mut rows = statement.query([thread])?;
     let row = rows.next()?.ok_or_else(|| {
         StorageError::from(ApiError::new(
@@ -197,8 +190,7 @@ fn load(
     let profile = required(row, 3, 4096, budget)?;
     let model = required(row, 4, 4096, budget)?;
     let effort = text(row, 5, 64, budget)?;
-    let thread_segment_chars = row.get::<_, Option<i64>>(6)?.map(|v| v as usize);
-    let thread_reduce_rounds = row.get::<_, Option<i64>>(7)?.map(|v| v as usize);
+    let thread_summary_chars=row.get::<_,Option<i64>>(6)?.map(|n|u64::try_from(n).map_err(|_|limit())).transpose()?;
     drop(rows);
     drop(statement);
     *sql += 1;
@@ -418,8 +410,7 @@ fn load(
         hidden,
         kinds,
         stopping,
-        thread_segment_chars,
-        thread_reduce_rounds,
+        thread_summary_chars,
     })
 }
 
@@ -711,38 +702,9 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
                 "Summary connection is not configured",
             ));
         }
-        let mut limits = config.compaction.clone();
-        limits.segment_chars = snapshot.segment_chars;
-        limits.reduce_rounds = snapshot.reduce_rounds;
-        let segments = segments(groups, snapshot.epoch, limits.segment_chars)?;
-        if let Some(n) = args.max_chars {
-            limits.summary_max_chars = Some(n);
-        }
-        let keys = segments
-            .iter()
-            .map(|(start, end, _)| {
-                let sources = groups[*start..*end]
-                    .iter()
-                    .flat_map(|g| g.sources.clone())
-                    .collect::<Vec<_>>();
-                if sources.iter().any(|s| virtual_sources.contains_key(&s.id)) {
-                    None
-                } else {
-                    Some(CompactionKeys::summary_part(&summary_key(
-                        &plan.projected,
-                        &sources,
-                    )))
-                }
-            })
-            .collect();
-        plan.summary = Some(Summary {
-            source_characters,
-            limit: limits.summary_limit(source_characters),
-            segment_chars: limits.segment_chars,
-            reduce_rounds: limits.reduce_rounds,
-            keys,
-            cached: 0,
-        });
+        let connection=config.connections.get(&snapshot.profile);
+        let cap=args.max_chars.unwrap_or_else(||crate::config::summary_chars_for(loaded.thread_summary_chars,connection));
+        plan.summary=Some(Summary{source_characters,limit:cap});
         plan.after = None;
         // Counts describe original messages removed, not unknown generated text.
         plan.projected.groups.drain(selected);
@@ -951,44 +913,7 @@ pub(crate) fn read_tx(
     let mut budget = TEXT;
     let mut sql = 0;
     let mut loaded = load(db, thread, args, &mut budget, &mut sql)?;
-    // Resolve like the owner's snapshot: Thread, then connection, then [compaction].
-    let connection = config.connections.get(&loaded.snapshot.profile);
-    loaded.snapshot.segment_chars = config
-        .compaction
-        .segment_chars_for(loaded.thread_segment_chars, connection);
-    loaded.snapshot.reduce_rounds = config
-        .compaction
-        .reduce_rounds_for(loaded.thread_reduce_rounds, connection);
-    let mut plan = make_plan(&loaded, args, config);
-    if let Some(summary) = &mut plan.summary {
-        sql += 1;
-        let keys = summary.keys.iter().flatten().cloned().collect::<Vec<_>>();
-        let mut statement = db.prepare(
-            "SELECT m.value FROM json_each(?1) q JOIN app_meta m ON m.key=q.value LIMIT 4097",
-        )?;
-        let mut rows = statement.query([json_ids(keys)])?;
-        let mut count = 0;
-        while let Some(row) = rows.next()? {
-            count += 1;
-            if count > ROWS {
-                return Err(limit());
-            }
-            if let Some(body) = text(row, 0, PAYLOAD, &mut budget)?
-                && serde_json::from_str::<CachedPart>(&body)
-                    .ok()
-                    .is_some_and(|part| part.reusable())
-            {
-                summary.cached += 1;
-            }
-        }
-        let uncached = summary.keys.len().saturating_sub(summary.cached);
-        if uncached > config.compaction.summary_map_max_requests {
-            plan.failure=Some(invalid("Summary requires more map requests than the configured budget")
-                .details(json!({"uncached_segments":uncached,"request_budget":config.compaction.summary_map_max_requests})));
-            plan.after = Some(plan.intermediate_after);
-            plan.removed = (0, 0);
-        }
-    }
+    let plan=make_plan(&loaded,args,config);
     if sql > SQL_MAX {
         return Err(limit());
     }
@@ -1015,9 +940,7 @@ pub(crate) fn prepare(raw: RawPreview) -> Value {
     }
     let mut ids = plan.targets.iter().collect::<Vec<_>>();
     ids.sort();
-    let summary=plan.summary.as_ref().map(|s|json!({"source_characters":s.source_characters,"summary_character_limit":s.limit,"segment_chars":s.segment_chars,"reduce_rounds":s.reduce_rounds,
-        "segments":s.keys.len(),"cached_segments":s.cached,"uncached_segments":s.keys.len().saturating_sub(s.cached),
-        "generated_characters":null,"provider_requests":0,"model_output_and_provider_errors_unknown":true}));
+    let summary=plan.summary.as_ref().map(|s|json!({"source_characters":s.source_characters,"summary_character_limit":s.limit,"single_request":true,"generated_characters":null,"provider_requests":0,"model_output_and_provider_errors_unknown":true}));
     json!({"dry_run":true,"thread_id":plan.original.thread,"mode":plan.mode,"coverage_complete":true,"observed_at":raw.at,
         "selection_revision":plan.original.revision,"profile_revision":plan.original.profile_revision,"reasoning_epoch":plan.original.epoch,
         "target_nodes":{"count":plan.targets.len(),"by_kind":by_kind,"sample_node_ids":ids.into_iter().take(16).collect::<Vec<_>>(),"more":plan.targets.len()>16},
