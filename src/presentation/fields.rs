@@ -68,8 +68,6 @@ fn field_name(key: &str) -> &str {
         "total" => "合計使用量",
         "compactions" => "要約回数",
         "requests" => "要求数",
-        "map_requests" => "map要求数",
-        "reduce_requests" => "reduce要求数",
         "summary_requests" => "要約要求数",
         "definitions" => "項目の定義",
         "spaces" => "索引空間",
@@ -232,8 +230,6 @@ fn english_key(value: &str) -> String {
         "total" => return "Combined Total".into(),
         "compactions" => return "Compactions".into(),
         "requests" => return "Requests".into(),
-        "map_requests" => return "Map Requests".into(),
-        "reduce_requests" => return "Reduce Requests".into(),
         "summary_requests" => return "Summary Requests".into(),
         "current_source" => return "Current Source".into(),
         "repeat_result" => return "Repeat Result".into(),
@@ -959,15 +955,6 @@ mod tests {
             assert_eq!(group_label(pointer, Ja).1, japanese);
             assert_eq!(group_label(pointer, En).1, english);
         }
-        let raw = serde_json::json!({"items":[{"compaction":{"map_requests":2}}]});
-        assert_eq!(
-            human_label_for("/items/0/compaction/map_requests", &raw, Ja),
-            "項目 1 › 要約使用量 › map要求数"
-        );
-        assert_eq!(
-            human_label_for("/items/0/compaction/map_requests", &raw, En),
-            "Item 1 › Summary Usage › Map Requests"
-        );
     }
     #[test]
     fn generated_field_labels_follow_language_without_changing_pointers_or_values() {

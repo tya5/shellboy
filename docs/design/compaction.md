@@ -25,6 +25,8 @@ of whether the instruction-preservation heading "works" is required.
 
 対象snapshotには選択revision、profile revision、reasoning epoch、経路順node ID・payload revision・実本文hashを固定する。API待機中にDB transactionを保持しない。採用時に固定版を照合し、要約node・replacement・全source参照・選択pathを同一transactionで保存する。原文nodeは変更しない。元の経路を選び直した場合は、完全一致する入力と生成規則の成功片だけを再利用する。
 
+> **Current contract (Issue #303):** Closed, manual and active summaries issue one typed provider request and share one owned transactional adoption path. Map/reduce, segment-size and reduce-round controls are retired, not deferred performance work. The historical #73/#231/#133 implementation notes below describe the prior design and are not current runtime/API behavior. Migration 43 archives stored per-Thread segment/reduce values and removes those runtime columns; configuration remains strict and rejects retired keys. Existing `history get --parts` output remains solely for reading historical cache records.
+
 ## Append-only summary adoption (#300)
 
 Automatic summary snapshots capture the full selected path and an internal monotonic

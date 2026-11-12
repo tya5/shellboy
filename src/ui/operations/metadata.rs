@@ -77,8 +77,6 @@ impl Form {
             "model" => FieldId::Model,
             "effort" => FieldId::Effort,
             "auto_compact_at" => FieldId::AutoCompactAt,
-            "segment_chars" => FieldId::SegmentChars,
-            "reduce_rounds" => FieldId::ReduceRounds,
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "archived" => FieldId::Archived,
@@ -111,8 +109,6 @@ impl Form {
             "to_node" => FieldId::ToNode,
             "max_chars" => FieldId::SummaryMaxChars,
             "max_percent" => FieldId::SummaryMaxPercent,
-            "summary_segment_chars" => FieldId::SummarySegmentChars,
-            "summary_reduce_rounds" => FieldId::SummaryReduceRounds,
             "scope" => FieldId::IndexScope,
             "space" => FieldId::Space,
             "threads" => FieldId::Threads,
@@ -1150,12 +1146,6 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Model => local!(language, "モデル名", "Model name"),
         FieldId::Effort => local!(language, "推論設定", "Reasoning effort"),
         FieldId::AutoCompactAt => local!(language, "自動要約の閾値", "Auto-compaction threshold"),
-        FieldId::SegmentChars => local!(language, "要約の部分の大きさ", "Summary part size"),
-        FieldId::ReduceRounds => local!(
-            language,
-            "要約の統合の最大段数",
-            "Summary maximum reduce rounds"
-        ),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
@@ -1200,16 +1190,6 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             language,
             "要約割合上限（空=設定値）",
             "Summary percentage limit (empty = configured)"
-        ),
-        FieldId::SummarySegmentChars => local!(
-            language,
-            "部分の大きさ（空=設定値）",
-            "Part size (empty = configured)"
-        ),
-        FieldId::SummaryReduceRounds => local!(
-            language,
-            "統合の最大段数（空=設定値）",
-            "Maximum reduce rounds (empty = configured)"
         ),
         FieldId::IndexScope => local!(language, "索引対象範囲", "Index scope"),
         FieldId::Space => local!(language, "索引領域ID", "Index space ID"),
@@ -1480,16 +1460,6 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
             "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
         ),
-        FieldId::SegmentChars => local!(
-            language,
-            "このThreadだけの要約の部分の大きさ（元の会話の文字数、2000から1000000）です。CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
-            "Summary part size in original-conversation characters (2000 to 1000000) for this Thread only. An empty CLI value returns to the connection value."
-        ),
-        FieldId::ReduceRounds => local!(
-            language,
-            "このThreadだけの要約の統合の最大段数（1から16）です。CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
-            "Maximum summary reduce rounds (1 to 16) for this Thread only. An empty CLI value returns to the connection value."
-        ),
         FieldId::Title => local!(
             language,
             "保存タイトルを変更します。空文字は自動タイトルへ戻します。",
@@ -1644,16 +1614,6 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "summaryだけで指定できます。元の文字数に対する割合で、0より大きく100以下です。",
             "Only for summary. Percentage of original characters, greater than zero and at most 100."
-        ),
-        FieldId::SummarySegmentChars => local!(
-            language,
-            "summaryだけで指定できます。この要約だけの、部分（モデル要求1回分）の元の文字数です。2000から1000000です。",
-            "Only for summary. Original characters per part (one model request) for this summary only, 2000 to 1000000."
-        ),
-        FieldId::SummaryReduceRounds => local!(
-            language,
-            "summaryだけで指定できます。この要約だけの、統合の最大段数です。1から16です。",
-            "Only for summary. Maximum reduce rounds for this summary only, 1 to 16."
         ),
         FieldId::IndexScope => local!(
             language,

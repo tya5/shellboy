@@ -36,7 +36,6 @@ pub struct MarkerFacts {
     pub fired_at: Option<u64>,
     pub threshold: Option<u64>,
     pub source_nodes: Option<u64>,
-    pub parts: Option<u64>,
     pub summary_chars: Option<u64>,
     pub spilled_groups: Option<u64>,
     /// A spill was adopted but its summary was rejected.
@@ -92,7 +91,6 @@ impl MarkerFacts {
             fired_at: event["trigger"]["input_tokens"].as_u64(),
             threshold: event["trigger"]["auto_at_tokens"].as_u64(),
             source_nodes: metrics["source_nodes"].as_u64(),
-            parts: metrics["summary_parts"].as_u64(),
             summary_chars: metrics["summary_characters"].as_u64(),
             spilled_groups: metrics["spilled_groups"].as_u64(),
             summary_rejected: !has_summary && metrics["summary_rejected"] == true,
@@ -144,20 +142,13 @@ impl MarkerFacts {
             };
             let made = if en {
                 format!(
-                    "{} ({})",
-                    self.parts
-                        .map_or("summary count unknown".into(), |p| if p == 1 {
-                            "1 summary".into()
-                        } else {
-                            format!("{p} summaries")
-                        }),
+                    "summary ({})",
                     self.summary_chars
                         .map_or("size unknown".into(), |c| format!("{} chars", k(c)))
                 )
             } else {
                 format!(
-                    "要約 {}（{}）",
-                    self.parts.map_or("件数不明".into(), |p| format!("{p} 件")),
+                    "要約（{}）",
                     self.summary_chars
                         .map_or("字数不明".into(), |c| format!("{} 字", k(c)))
                 )
@@ -239,7 +230,7 @@ mod tests {
     use serde_json::json;
     fn adopted(kind: &str) -> Value {
         json!({"kind":kind,"state":"adopted","trigger":{"input_tokens":205000,"auto_at_tokens":200000},
-            "metrics":{"summary_node_id":"s","source_nodes":412,"summary_parts":1,"summary_characters":31000,"spilled_groups":8,
+            "metrics":{"summary_node_id":"s","source_nodes":412,"summary_characters":31000,"spilled_groups":8,
             "summary_usage":{"input_tokens":{"known_sum":30000,"unknown_count":0,"overflow":false},
               "output_tokens":{"known_sum":2000,"unknown_count":0,"overflow":false}}},
             "post_compaction_attempt_id":"a","post_compaction_input_tokens":32000})

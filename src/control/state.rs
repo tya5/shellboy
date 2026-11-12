@@ -136,7 +136,7 @@ pub(super) fn complete_attempt(
     )?;
     if changed == 1 {
         let evidence:(String,String,String,Option<String>)=db.query_row(
-            "SELECT t.thread_id,a.profile_id,a.model_id,CASE WHEN json_type(a.input_manifest_json,'$.compaction_scope_generation') IS NULL THEN NULL WHEN json_type(a.input_manifest_json,'$.compaction_scope_generation') IN ('text','integer') THEN CAST(json_extract(a.input_manifest_json,'$.compaction_scope_generation') AS TEXT) ELSE 'invalid-type' END FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",
+            "SELECT t.thread_id,a.profile_id,a.model_id,CASE WHEN json_type(a.input_manifest_json,'$.compaction_report_token') IS NULL THEN NULL WHEN json_type(a.input_manifest_json,'$.compaction_report_token')='object' THEN json_extract(a.input_manifest_json,'$.compaction_report_token') ELSE 'invalid-type' END FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",
             [attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
         crate::compaction::a_state::complete_report_tx(
             db,
@@ -144,7 +144,14 @@ pub(super) fn complete_attempt(
             &evidence.1,
             &evidence.2,
             attempt,
-            crate::compaction::a_state::decode_generation(evidence.3.as_deref())?,
+            evidence
+                .3
+                .as_deref()
+                .map(|json| {
+                    serde_json::from_str::<crate::compaction::a_state::Token>(json)
+                        .map_err(|e| crate::storage::StorageError::Schema(e.to_string()))
+                })
+                .transpose()?,
             crate::usage::StandardUsage::from_value(&response["usage"]).input_tokens,
         )?;
     }

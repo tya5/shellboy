@@ -1,4 +1,4 @@
-//! Bounded factual #A state; not yet wired to terminal/provider/Thread writers.
+//! Bounded factual #A state, transactionally updated from provider request tokens.
 //! All writes require the caller's existing SQLite transaction.
 use super::*;
 use serde::{Deserialize, Serialize};
@@ -23,7 +23,8 @@ struct Report {
     attempt: String,
     input_tokens: Option<u64>,
 }
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Token {
     scope: u64,
     boundary: u64,
@@ -124,8 +125,8 @@ impl State {
         self.first = None;
         Ok(true)
     }
-    /// Completion order is transaction order. An older boundary token is valid;
-    /// an older SCOPE token is not, even after connection/model ABA.
+    /// Completion order is transaction order. Both the captured scope and boundary
+    /// token must still be current, even after connection/model ABA.
     pub(crate) fn completed(
         &mut self,
         started: Token,
@@ -138,6 +139,7 @@ impl State {
             return Err(bad());
         }
         if started.scope != self.scope_generation
+            || started.boundary != self.boundary_generation
             || connection != self.connection
             || model != self.model
             || self.first.is_some()
@@ -190,17 +192,6 @@ pub(crate) fn reading(state: Option<&State>) -> Reading {
     state.map(State::reading).unwrap_or(Reading::LegacyAbsent)
 }
 
-/// Decimal text preserves the full u64 counter domain across SQLite JSON1.
-pub(crate) fn decode_generation(text: Option<&str>) -> Result<Option<u64>, StorageError> {
-    text.map(|value| {
-        if value.is_empty() || value.len() > 20 || !value.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(StorageError::from(bad()));
-        }
-        value.parse::<u64>().map_err(|_| StorageError::from(bad()))
-    })
-    .transpose()
-}
-
 pub(crate) fn scope_tx(
     db: &rusqlite::Connection,
     thread: &str,
@@ -217,8 +208,8 @@ pub(crate) fn begin_report_tx(
     thread: &str,
     connection: &str,
     model: &str,
-) -> Result<u64, StorageError> {
-    Ok(scope_tx(db, thread, connection, model)?.scope_generation)
+) -> Result<Token, StorageError> {
+    Ok(scope_tx(db, thread, connection, model)?.token())
 }
 pub(crate) fn complete_report_tx(
     db: &rusqlite::Connection,
@@ -226,25 +217,16 @@ pub(crate) fn complete_report_tx(
     connection: &str,
     model: &str,
     attempt: &str,
-    generation: Option<u64>,
+    started: Option<Token>,
     input: Option<u64>,
 ) -> Result<(), StorageError> {
-    let Some(generation) = generation else {
+    let Some(started) = started else {
         return Ok(());
-    }; // Legacy inflight attempt has no causal scope token.
+    }; // Old inflight attempts have no causal token.
     let Some(mut state) = read(db, thread)? else {
         return Ok(());
     };
-    if state.completed(
-        Token {
-            scope: generation,
-            boundary: 0,
-        },
-        connection,
-        model,
-        attempt,
-        input,
-    )? {
+    if state.completed(started, connection, model, attempt, input)? {
         save(db, thread, &state)?;
     }
     Ok(())
@@ -281,10 +263,19 @@ mod tests {
         let mut s = State::new("A", "model").unwrap();
         let started = s.token();
         assert!(s.finish_boundary(started, "trial1").unwrap());
-        assert!(s.completed(started, "A", "model", "first", None).unwrap());
+        assert!(
+            !s.completed(started, "A", "model", "pre-boundary", None)
+                .unwrap()
+        );
+        assert_eq!(s.reading(), Reading::AwaitingFirst);
+        let after_boundary = s.token();
+        assert!(
+            s.completed(after_boundary, "A", "model", "first", None)
+                .unwrap()
+        );
         assert_eq!(s.reading(), Reading::Unknown);
         assert!(
-            !s.completed(started, "A", "model", "later", Some(999))
+            !s.completed(after_boundary, "A", "model", "later", Some(999))
                 .unwrap()
         );
         assert!(s.change_scope("B", "model").unwrap());
@@ -315,6 +306,22 @@ mod tests {
         assert!(s.completed(now, "c", "m", "b", Some(20)).unwrap());
         assert!(!s.finish_boundary(old, "manual1").unwrap());
         assert_eq!(s.reading(), Reading::Known(20));
+    }
+    #[test]
+    fn report_token_round_trips_full_counter_domain_and_rejects_malformed_values() {
+        let token = Token {
+            scope: u64::MAX,
+            boundary: u64::MAX,
+        };
+        let encoded = serde_json::to_string(&token).unwrap();
+        assert_eq!(serde_json::from_str::<Token>(&encoded).unwrap(), token);
+        for body in [
+            r#"{"scope":-1,"boundary":0}"#,
+            r#"{"scope":0,"boundary":"1"}"#,
+            r#"{"scope":0,"boundary":0,"extra":1}"#,
+        ] {
+            assert!(serde_json::from_str::<Token>(body).is_err(), "{body}");
+        }
     }
     #[test]
     fn transaction_rollback_bounded_read_and_legacy_absence() {
@@ -358,50 +365,64 @@ mod tests {
         let mut db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
             .unwrap();
-        let mut state = State::new("c", "m").unwrap();
-        let old = state.token();
-        assert!(
-            state
-                .completed(old, "c", "m", "report1", Some(111))
-                .unwrap()
+        let start = {
+            let tx = db.transaction().unwrap();
+            let t = begin_report_tx(&tx, "t", "c", "m").unwrap();
+            tx.commit().unwrap();
+            t
+        };
+        {
+            let tx = db.transaction().unwrap();
+            complete_report_tx(&tx, "t", "c", "m", "report1", Some(start), Some(111)).unwrap();
+            tx.commit().unwrap();
+        }
+        let state = read(&db, "t").unwrap().unwrap();
+        assert_eq!(state.reading(), Reading::Known(111));
+        {
+            let tx = db.transaction().unwrap();
+            assert!(reset_tx(&tx, "t", start, "trial2").is_ok());
+            tx.commit().unwrap();
+        }
+        assert_eq!(
+            read(&db, "t").unwrap().unwrap().first,
+            None,
+            "reset clears old input attribution"
         );
         {
             let tx = db.transaction().unwrap();
-            save(&tx, "t", &state).unwrap();
+            complete_report_tx(&tx, "t", "c", "m", "stale", Some(start), Some(222)).unwrap();
             tx.commit().unwrap();
         }
-        let mut state = read(&db, "t").unwrap().unwrap();
-        assert!(state.finish_boundary(old, "trial2").unwrap());
         assert_eq!(
-            state.first, None,
-            "reset clears both identity and tokens atomically"
+            read(&db, "t").unwrap().unwrap().reading(),
+            Reading::AwaitingFirst,
+            "request started before boundary cannot become #A"
         );
-        let new = state.token();
-        assert!(
-            state
-                .completed(old, "c", "m", "report2", Some(222))
-                .unwrap(),
-            "pre-boundary start may complete after reset"
-        );
-        assert!(!state.finish_boundary(old, "trial2").unwrap());
-        assert!(
-            !state.finish_boundary(new, "trial2").unwrap(),
-            "same origin remains idempotent with fresh token too"
+        let current = {
+            let tx = db.transaction().unwrap();
+            let t = begin_report_tx(&tx, "t", "c", "m").unwrap();
+            tx.commit().unwrap();
+            t
+        };
+        {
+            let tx = db.transaction().unwrap();
+            complete_report_tx(&tx, "t", "c", "m", "report2", Some(current), Some(333)).unwrap();
+            tx.commit().unwrap();
+        }
+        assert_eq!(
+            read(&db, "t").unwrap().unwrap().reading(),
+            Reading::Known(333)
         );
         {
             let tx = db.transaction().unwrap();
-            save(&tx, "t", &state).unwrap();
+            reset_tx(&tx, "t", start, "trial2").unwrap();
             tx.commit().unwrap();
         }
-        let persisted = read(&db, "t").unwrap().unwrap();
         assert_eq!(
-            persisted.first,
-            Some(Report {
-                attempt: "report2".into(),
-                input_tokens: Some(222)
-            })
+            read(&db, "t").unwrap().unwrap().reading(),
+            Reading::Known(333),
+            "duplicate terminal completion cannot erase a newer first report"
         );
-        assert_eq!(persisted.reading(), Reading::Known(222));
     }
 }
 
@@ -438,7 +459,8 @@ mod transactional_reset_tests {
             1
         );
         reset_tx(&tx, "t", boundary, "trial").unwrap();
-        complete_report_tx(&tx, "t", "c", "m", "first", Some(boundary.scope), None).unwrap();
+        let post_boundary = read(&tx, "t").unwrap().unwrap().token();
+        complete_report_tx(&tx, "t", "c", "m", "first", Some(post_boundary), None).unwrap();
         tx.commit().unwrap();
         assert_eq!(read(&db, "t").unwrap().unwrap().reading(), Reading::Unknown);
         let tx = db.transaction().unwrap();
@@ -447,42 +469,77 @@ mod transactional_reset_tests {
                 .unwrap(),
             0
         );
-        complete_report_tx(&tx, "t", "c", "m", "later", Some(boundary.scope), Some(9)).unwrap();
+        complete_report_tx(&tx, "t", "c", "m", "later", Some(post_boundary), Some(9)).unwrap();
         tx.commit().unwrap();
         assert_eq!(read(&db, "t").unwrap().unwrap().reading(), Reading::Unknown);
     }
     #[test]
-    fn generation_decimal_has_no_signed_wrap_or_domain_truncation() {
-        assert_eq!(
-            decode_generation(Some(&u64::MAX.to_string())).unwrap(),
-            Some(u64::MAX)
-        );
-        assert_eq!(decode_generation(None).unwrap(), None);
-        for value in ["-1", "1.0", "1e20", "18446744073709551616", ""] {
-            assert!(decode_generation(Some(value)).is_err());
-        }
-    }
-
-    #[test]
-    fn sqlite_json_decimal_max_and_invalid_types_are_distinct() {
-        let db = rusqlite::Connection::open_in_memory().unwrap();
-        let read = |body: &str| {
-            db.query_row("SELECT CASE WHEN json_type(?1,'$.g') IS NULL THEN NULL WHEN json_type(?1,'$.g') IN ('text','integer') THEN CAST(json_extract(?1,'$.g') AS TEXT) ELSE 'invalid-type' END",[body],|r|r.get::<_,Option<String>>(0)).unwrap()
+    fn pre_boundary_request_completion_cannot_become_post_boundary_a() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
+            .unwrap();
+        let old_start = {
+            let tx = db.transaction().unwrap();
+            let token = begin_report_tx(&tx, "t", "c", "m").unwrap();
+            tx.commit().unwrap();
+            token
         };
-        let maximum = read(&json!({"g":u64::MAX.to_string()}).to_string());
-        assert_eq!(
-            decode_generation(maximum.as_deref()).unwrap(),
-            Some(u64::MAX)
-        );
-        for body in [
-            r#"{"g":true}"#,
-            r#"{"g":null}"#,
-            r#"{"g":{}}"#,
-            r#"{"g":1.5}"#,
-            r#"{"g":-1}"#,
-        ] {
-            assert!(decode_generation(read(body).as_deref()).is_err());
+        let committed_boundary = {
+            let tx = db.transaction().unwrap();
+            let state = read(&tx, "t").unwrap().unwrap();
+            assert!(reset_tx(&tx, "t", state.token(), "trial").is_ok());
+            let after = read(&tx, "t").unwrap().unwrap().token();
+            tx.commit().unwrap();
+            after
+        };
+        assert_ne!(old_start.boundary, committed_boundary.boundary);
+        {
+            let tx = db.transaction().unwrap();
+            complete_report_tx(
+                &tx,
+                "t",
+                "c",
+                "m",
+                "pre-boundary",
+                Some(old_start),
+                Some(111),
+            )
+            .unwrap();
+            tx.commit().unwrap();
         }
-        assert_eq!(decode_generation(read("{}").as_deref()).unwrap(), None);
+        assert_eq!(
+            read(&db, "t").unwrap().unwrap().reading(),
+            Reading::AwaitingFirst
+        );
+        let new_start = {
+            let tx = db.transaction().unwrap();
+            let token = begin_report_tx(&tx, "t", "c", "m").unwrap();
+            tx.commit().unwrap();
+            token
+        };
+        assert_eq!(new_start, committed_boundary);
+        {
+            let tx = db.transaction().unwrap();
+            complete_report_tx(
+                &tx,
+                "t",
+                "c",
+                "m",
+                "post-boundary",
+                Some(new_start),
+                Some(222),
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let state = read(&db, "t").unwrap().unwrap();
+        assert_eq!(
+            state.first,
+            Some(Report {
+                attempt: "post-boundary".into(),
+                input_tokens: Some(222)
+            })
+        );
+        assert_eq!(state.reading(), Reading::Known(222));
     }
 }

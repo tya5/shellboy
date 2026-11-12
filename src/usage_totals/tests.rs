@@ -823,7 +823,6 @@ fn connection_rates_survive_database_reopen_and_group_summary_records() {
         .unwrap();
         let usage = crate::compaction::SummaryUsage {
             requests: 2,
-            map_requests: 2,
             ..Default::default()
         };
         let mut record = json!(usage);

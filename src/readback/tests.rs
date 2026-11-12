@@ -245,7 +245,7 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
             "2026-10-31T00:01:00Z",
             json!({"item":{"role":"developer","content":[{"type":"input_text","text":"\u{03b1}\0\u{03b2}"}]},"summary_part_keys":["one","two"]}),
         );
-        let summary = json!({"before_characters":1000,"after_characters":100,"omitted_nodes":0,"compact":{"source_nodes":1,"created_parts":2,"reused_parts":0,"summary_limit":20000,"segment_chars":32000,"reduce_rounds":3,"summary_node_id":"sum","original_node_ids":["original"]}});
+        let summary = json!({"before_characters":1000,"after_characters":100,"omitted_nodes":0,"compact":{"source_nodes":1,"model_requests":1,"summary_limit":20000,"summary_node_id":"sum","original_node_ids":["original"]}});
         operation(
             &c,
             "summary-op",
@@ -289,12 +289,12 @@ fn compaction_sources_merge_without_merging_restore_into_its_omission() {
             1
         );
         assert_eq!(rows[2]["metrics"]["summary_characters"], 3);
-        assert_eq!(rows[2]["metrics"]["summary_parts"], 2);
-        // #231: the values this summary used are recorded with the existing limits.
+        // The current list projection contains only the active single-request contract.
         assert_eq!(rows[2]["metrics"]["summary_limit"], 20000);
-        assert_eq!(rows[2]["metrics"]["segment_chars"], 32000);
-        assert_eq!(rows[2]["metrics"]["reduce_rounds"], 3);
-        assert!(rows[0]["metrics"]["segment_chars"].is_null());
+        assert_eq!(rows[2]["metrics"]["model_requests"], 1);
+        assert!(rows[2]["metrics"].get("summary_parts").is_none());
+        assert!(rows[2]["metrics"].get("segment_chars").is_none());
+        assert!(rows[2]["metrics"].get("reduce_rounds").is_none());
         assert_eq!(rows[2]["operation_count"], 2);
         let mut a = comp_args();
         a.since = Some("2026-10-31T00:02:00Z".into());

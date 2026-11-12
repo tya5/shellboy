@@ -3071,7 +3071,7 @@ fn marker_event(kind: &str, state: &str, summary: bool) -> serde_json::Value {
     let mut event = serde_json::json!({"kind":kind,"state":state,
         "trigger":{"input_tokens":205000,"auto_at_tokens":200000},"metrics":{}});
     if summary {
-        event["metrics"] = serde_json::json!({"summary_node_id":"sum","source_nodes":412,"summary_parts":1,"summary_characters":31000,"spilled_groups":8,
+        event["metrics"] = serde_json::json!({"summary_node_id":"sum","source_nodes":412,"summary_characters":31000,"spilled_groups":8,
             "summary_usage":{"input_tokens":{"known_sum":30000,"unknown_count":0,"overflow":false},"output_tokens":{"known_sum":2000,"unknown_count":0,"overflow":false}}});
         event["post_compaction_attempt_id"] = "next".into();
         event["post_compaction_input_tokens"] = 32000.into();

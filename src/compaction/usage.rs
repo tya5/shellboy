@@ -8,12 +8,9 @@ use crate::usage_totals::Number;
 /// Counters of one compaction's summary requests. A request is counted before
 /// it is sent and its four values are unknown until the provider reports them.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SummaryUsage {
     pub requests: u64,
-    pub map_requests: u64,
-    pub reduce_requests: u64,
-    #[serde(default)]
-    pub oversized_reduce_parts: u64,
     pub input_tokens: Number,
     pub cached_tokens: Number,
     pub cache_creation_tokens: Number,
@@ -28,13 +25,8 @@ impl SummaryUsage {
             &mut self.output_tokens,
         ]
     }
-    pub(super) fn begin(&mut self, reduce: bool) {
+    pub(super) fn begin(&mut self) {
         self.requests += 1;
-        if reduce {
-            self.reduce_requests += 1;
-        } else {
-            self.map_requests += 1;
-        }
         for field in self.fields() {
             field.add(None, 1);
         }
@@ -57,11 +49,6 @@ impl SummaryUsage {
     }
     pub(crate) fn merge(&mut self, other: &SummaryUsage) {
         self.requests = self.requests.saturating_add(other.requests);
-        self.map_requests = self.map_requests.saturating_add(other.map_requests);
-        self.reduce_requests = self.reduce_requests.saturating_add(other.reduce_requests);
-        self.oversized_reduce_parts = self
-            .oversized_reduce_parts
-            .saturating_add(other.oversized_reduce_parts);
         let mut theirs = other.clone();
         for (mine, theirs) in self.fields().into_iter().zip(theirs.fields()) {
             mine.overflow |= theirs.overflow;
@@ -105,8 +92,7 @@ pub(crate) struct UsageRecord {
     pub usage: SummaryUsage,
 }
 pub(crate) const RECORD_PREFIX: &str = "summary.usage.";
-/// Bounds the request observations as well as the token counters. The configured
-/// map and reduce request budgets permit at most 8192 observations per ledger.
+/// Bounds each per-summary accounting record, including retry observations.
 pub(crate) const RECORD_MAX_BYTES: i64 = 2 * 1024 * 1024;
 pub(crate) fn record_key(thread: &str, id: &str) -> String {
     format!("{RECORD_PREFIX}{thread}.{id}")
@@ -148,15 +134,11 @@ impl UsageLedger {
     }
     /// Count the request durably before it is sent, so an interrupted request
     /// remains a request with unknown usage rather than disappearing.
-    pub(super) async fn begin(
-        &mut self,
-        database: &DbWorker,
-        reduce: bool,
-    ) -> Result<usize, ApiError> {
+    pub(super) async fn begin(&mut self, database: &DbWorker) -> Result<usize, ApiError> {
         if self.record.usage.requests == 0 {
             self.record.started_at = timestamp();
         }
-        self.record.usage.begin(reduce);
+        self.record.usage.begin();
         let index = self.record.rate_observations.len();
         self.record.rate_observation_pending = Some(index as u64);
         self.record.rate_observations.push(Value::Null);
@@ -231,39 +213,15 @@ mod tests {
         }
     }
     #[test]
-    fn oversized_reduce_count_survives_projection_and_merge() {
-        let mut first = SummaryUsage {
-            oversized_reduce_parts: 2,
-            ..Default::default()
-        };
-        let second = SummaryUsage {
-            oversized_reduce_parts: 3,
-            ..Default::default()
-        };
-        first.merge(&second);
-        let saved = json!(first);
-        assert_eq!(SummaryUsage::sanitize(&saved)["oversized_reduce_parts"], 5);
-        let mut old = saved.as_object().unwrap().clone();
-        old.remove("oversized_reduce_parts");
-        assert_eq!(
-            SummaryUsage::sanitize(&Value::Object(old))["oversized_reduce_parts"],
-            0
-        );
-    }
-
-    #[test]
     fn unreported_values_stay_unknown_and_known_values_sum() {
         let mut usage = SummaryUsage::default();
-        usage.begin(false);
+        usage.begin();
         usage.observe(Some(reported(100, 10, Some(80))));
-        usage.begin(false);
+        usage.begin();
         usage.observe(None);
-        usage.begin(true);
+        usage.begin();
         usage.observe(Some(reported(50, 5, None)));
-        assert_eq!(
-            (usage.requests, usage.map_requests, usage.reduce_requests),
-            (3, 2, 1)
-        );
+        assert_eq!(usage.requests, 3);
         assert_eq!(usage.input_tokens.known_sum, Some(150));
         assert_eq!(usage.input_tokens.unknown_count, 1);
         assert_eq!(usage.output_tokens.known_sum, Some(15));

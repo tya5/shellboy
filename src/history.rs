@@ -450,9 +450,9 @@ pub fn fork_thread_kind(
         ));
     }
     let source = tx.query_row(
-        "SELECT cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,auto_compact_at,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        "SELECT cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,auto_compact_at FROM thread WHERE id=?1 AND deleted_at IS NULL",
         [&args.thread_id],
-        |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,i64>(5)?,row.get::<_,i64>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<i64>>(8)?,row.get::<_,Option<i64>>(9)?)),
+        |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,i64>(5)?,row.get::<_,i64>(6)?,row.get::<_,Option<i64>>(7)?)),
     ).optional().map_err(sql_error)?.ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound,"source Thread not found"))?;
     let ordinal: i64 = tx
         .query_row(
@@ -491,8 +491,8 @@ pub fn fork_thread_kind(
         (source.0, source.1)
     };
     tx.execute(
-        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,auto_compact_at,segment_chars,reduce_rounds) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13,?14,?15)",
-        params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now,source.7,source.8,source.9],
+        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,auto_compact_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13)",
+        params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now,source.7],
     ).map_err(sql_error)?;
     tx.execute(
         "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,ordinal,node_id FROM thread_path WHERE thread_id=?2 AND ordinal<=?3 ORDER BY ordinal",

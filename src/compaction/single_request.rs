@@ -399,7 +399,7 @@ impl Compactor {
             let admission = self
                 .summary_admission(&client, snapshot, cancel, boundary.as_deref_mut())
                 .await?;
-            let observation = ledger.begin(&self.database, false).await?;
+            let observation = ledger.begin(&self.database).await?;
             let result = Self::summary_response(
                 &client,
                 &snapshot.thread,

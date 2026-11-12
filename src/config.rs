@@ -203,12 +203,6 @@ pub struct Connection {
     pub auto_compact_target_percent: Option<u64>,
     #[serde(default, deserialize_with = "summary_chars_option")]
     pub summary_max_chars: Option<u64>,
-    /// Overrides `[compaction] segment_chars` for this connection.
-    #[serde(skip)]
-    pub segment_chars: Option<usize>,
-    /// Overrides `[compaction] reduce_rounds` for this connection.
-    #[serde(skip)]
-    pub reduce_rounds: Option<usize>,
     /// The `credentials.toml` beside the loaded configuration file (#269); never
     /// accepted from TOML. `None` when the connection did not come from a file.
     #[serde(skip)]
@@ -251,8 +245,6 @@ impl Default for Connection {
             auto_at_tokens: None,
             auto_compact_target_percent: None,
             summary_max_chars: None,
-            segment_chars: None,
-            reduce_rounds: None,
             credentials_file: None,
             stored_keys: StoredKeys::default(),
         }
@@ -296,8 +288,6 @@ impl fmt::Debug for Connection {
                 &self.auto_compact_target_percent,
             )
             .field("summary_max_chars", &self.summary_max_chars)
-            .field("segment_chars", &self.segment_chars)
-            .field("reduce_rounds", &self.reduce_rounds)
             .field("credentials_file", &self.credentials_file)
             .finish()
     }
@@ -1083,21 +1073,9 @@ pub struct Compaction {
     pub summary_max_chars: Option<u64>,
     #[serde(skip_serializing)]
     pub summary_max_percent: Option<f64>,
-    #[serde(skip_serializing)]
-    pub summary_map_max_requests: usize,
-    #[serde(skip_serializing)]
-    pub summary_reduce_max_requests: usize,
     /// Proactive compaction threshold on the provider-reported input tokens of
     /// the last adopted attempt. 0 disables; connections may override it.
     pub auto_at_tokens: u64,
-    /// Characters of original conversation per map part (one model request
-    /// each) and the packing size of a reduce request. Connections and a
-    /// Thread may override it; a compaction may override it once.
-    #[serde(skip_serializing)]
-    pub segment_chars: usize,
-    /// Maximum reduce rounds before a still-too-long summary is rejected.
-    #[serde(skip_serializing)]
-    pub reduce_rounds: usize,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -1117,11 +1095,7 @@ impl Default for Compaction {
         Self {
             summary_max_chars: Some(20_000),
             summary_max_percent: Some(5.0),
-            summary_map_max_requests: 128,
-            summary_reduce_max_requests: 16,
             auto_at_tokens: DEFAULT_AUTO_AT_TOKENS,
-            segment_chars: DEFAULT_SEGMENT_CHARS,
-            reduce_rounds: DEFAULT_REDUCE_ROUNDS,
         }
     }
 }
@@ -1169,12 +1143,6 @@ impl SummarySettings {
     }
 }
 pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
-pub const DEFAULT_SEGMENT_CHARS: usize = 64_000;
-pub const DEFAULT_REDUCE_ROUNDS: usize = 4;
-/// Accepted summary segment sizes (characters): the lower end is the minimum
-/// summary limit, the upper end bounds one request's source text.
-pub const SEGMENT_CHARS_RANGE: std::ops::RangeInclusive<usize> = 2_000..=1_000_000;
-pub const REDUCE_ROUNDS_RANGE: std::ops::RangeInclusive<usize> = 1..=16;
 impl Compaction {
     pub fn valid(&self) -> bool {
         (self.summary_max_chars.is_some() || self.summary_max_percent.is_some())
@@ -1182,36 +1150,12 @@ impl Compaction {
             && self
                 .summary_max_percent
                 .is_none_or(|p| p.is_finite() && p > 0.0 && p <= 100.0)
-            && (1..=4096).contains(&self.summary_map_max_requests)
-            && (1..=4096).contains(&self.summary_reduce_max_requests)
-            && SEGMENT_CHARS_RANGE.contains(&self.segment_chars)
-            && REDUCE_ROUNDS_RANGE.contains(&self.reduce_rounds)
     }
     /// The Thread override wins, then the connection; 0 means proactive compaction is off.
     pub fn auto_at_tokens_for(&self, thread: Option<u64>, connection: Option<&Connection>) -> u64 {
         thread
             .or_else(|| connection.and_then(|c| c.auto_at_tokens))
             .unwrap_or(self.auto_at_tokens)
-    }
-    /// Per-invocation value (when given), then the Thread override, then the
-    /// connection, then `[compaction]`. Each level was range-checked on entry.
-    pub fn segment_chars_for(
-        &self,
-        thread: Option<usize>,
-        connection: Option<&Connection>,
-    ) -> usize {
-        thread
-            .or_else(|| connection.and_then(|c| c.segment_chars))
-            .unwrap_or(self.segment_chars)
-    }
-    pub fn reduce_rounds_for(
-        &self,
-        thread: Option<usize>,
-        connection: Option<&Connection>,
-    ) -> usize {
-        thread
-            .or_else(|| connection.and_then(|c| c.reduce_rounds))
-            .unwrap_or(self.reduce_rounds)
     }
     pub fn summary_limit(&self, source: u64) -> u64 {
         self.summary_max_chars

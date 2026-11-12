@@ -25,10 +25,6 @@ impl<'a> CompactionKeys<'a> {
     pub(crate) fn result(operation: &str) -> String {
         format!("compact.result.{operation}")
     }
-    #[cfg(test)]
-    pub(super) fn summary_part(digest: &str) -> String {
-        format!("summary.part.{digest}")
-    }
 }
 #[cfg(test)]
 mod tests {
@@ -47,6 +43,5 @@ mod tests {
             CompactionKeys::result("owner:operation"),
             "compact.result.owner:operation"
         );
-        assert_eq!(CompactionKeys::summary_part("hash"), "summary.part.hash");
     }
 }

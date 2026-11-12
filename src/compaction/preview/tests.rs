@@ -380,25 +380,22 @@ async fn query_only_exact_statement_count_and_indexed_plans() {
     f.close().await;
 }
 #[tokio::test]
-async fn summary_budget_and_stopping_are_forecast_errors() {
+async fn summary_forecast_reports_single_request_limit_and_stopping_errors() {
     let f = Fixture::new().await;
     f.text("a", &"a".repeat(40_000)).await;
     f.text("b", &"b".repeat(40_000)).await;
     f.text("tail", "current").await;
     let mut c = config();
-    c.compaction.summary_map_max_requests = 1;
+    c.compaction.summary_max_chars = Some(12_000);
     let p = forecast_config(
         &f,
         &args(Some(ContextEditAction::Summary), Some("a"), Some("b")),
         &c,
     )
     .unwrap();
-    assert!(
-        p["predicted_failure"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("budget")
-    );
+    assert!(p["predicted_failure"].is_null());
+    assert_eq!(p["summary"]["summary_character_limit"], 12_000);
+    assert!(p["summary"]["single_request"] == true);
     assert_eq!(p["after_characters"], p["before_characters"]);
     assert_eq!(
         p["removed_original_messages"],
@@ -580,7 +577,7 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
 }
 
 #[tokio::test]
-async fn explicit_summary_uses_its_own_segment_size_records_it_and_leaves_the_thread_unset() {
+async fn explicit_summary_uses_current_settings_and_keeps_thread_policy_unset() {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -640,22 +637,21 @@ async fn explicit_summary_uses_its_own_segment_size_records_it_and_leaves_the_th
         )
         .await
         .unwrap();
-    // The call's own values were used and recorded (they feed `compact list`).
-    assert_eq!(result.compact.segment_chars, Some(70_000));
-    assert_eq!(result.compact.reduce_rounds, Some(2));
+    assert_eq!(result.compact.model_requests, Some(1));
+    assert_eq!(result.compact.source_nodes, 2);
     assert_eq!(server.await.unwrap(), 1);
     // The Thread itself stays unset.
-    let stored =
+    let archived =
         f.db.call(|db| {
             Ok(db.query_row(
-                "SELECT segment_chars,reduce_rounds FROM thread WHERE id='t'",
+                "SELECT count(*) FROM thread_retired_summary_settings WHERE thread_id='t'",
                 [],
-                |r| Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?)),
+                |r| r.get::<_, i64>(0),
             )?)
         })
         .await
         .unwrap();
-    assert_eq!(stored, (None, None));
+    assert_eq!(archived, 0);
     f.close().await;
 }
 

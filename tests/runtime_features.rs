@@ -2687,7 +2687,7 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
     crate::test_watchdog::watchdog("tests/runtime_features.rs: automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend",async {
         let root=tempfile::tempdir().unwrap();let (url,mut receive,server)=proxy().await;
         let config=root.path().join("config.toml");
-        std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=8\n[compaction]\nsummary_max_chars=2000\nsummary_map_max_requests=1\nsummary_reduce_max_requests=1\n")).unwrap();
+        std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=8\n[compaction]\nsummary_max_chars=2000\n")).unwrap();
         let owner=DataOwner::start(Some(config),Some(root.path().join("data")),root.path().into()).await.unwrap();
         let control=Control::new(&owner,root.path().into());let thread=thread(&control).await;
         send(&control,&thread,"protected task").await;
@@ -2720,7 +2720,7 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
             assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,3);
             let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
             let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
-            assert_eq!(facts["map_requests"],1);assert_eq!(facts["reduce_requests"],1);assert_eq!(facts["summary_limit"],2000);Ok(())
+            assert_eq!(facts["summary_limit"],2000);assert_eq!(facts["summary_usage"]["requests"],1);Ok(())
         }).await.unwrap();
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),2);
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();

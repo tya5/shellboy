@@ -217,7 +217,10 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 43,
         sql: include_str!("../../migrations/0043_thread_single_summary_settings.sql"),
-        foreign_keys: None,
+        foreign_keys: Some(Impact::Tables(&[
+            "thread_retired_summary_settings",
+            "summary_usage_stage_archive",
+        ])),
     },
 ];
 
@@ -428,7 +431,8 @@ mod activity_migration_tests {
                     .unwrap(),
                 42
             );
-            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')",[]).unwrap();
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,segment_chars,reduce_rounds) VALUES('old','/','','p','m','now',48000,3)",[]).unwrap();
+            db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.old.saved',?1)",[r#"{"id":"saved","thread_id":"old","requests":3,"map_requests":2,"reduce_requests":1,"oversized_reduce_parts":4,"input_tokens":{"known_sum":10,"unknown_count":0,"overflow":false}}"#]).unwrap();
         }
         // open_connection is the actual startup migration path. Keep this
         // connection open while the foreground DbWorker owns a second handle.
@@ -438,6 +442,18 @@ mod activity_migration_tests {
             assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,43);
             let old:(Option<i64>,Option<i64>)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
             assert_eq!(old,(None,None));
+            let retired:Vec<(String,i64)>=db.prepare("SELECT setting_name,setting_value FROM thread_retired_summary_settings WHERE thread_id='old' ORDER BY setting_name")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            assert_eq!(retired,[("reduce_rounds".to_owned(),3),("segment_chars".to_owned(),48000)]);
+            let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
+            let legacy:serde_json::Value=serde_json::from_str(&legacy).unwrap();
+            assert_eq!(legacy["map_requests"],2);assert_eq!(legacy["reduce_requests"],1);assert_eq!(legacy["oversized_reduce_parts"],4);
+            let current:String=db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.old.saved'",[],|r|r.get(0))?;
+            let current:serde_json::Value=serde_json::from_str(&current).unwrap();
+            for key in ["map_requests","reduce_requests","oversized_reduce_parts"] {assert!(current.get(key).is_none());}
+            assert_eq!(current["input_tokens"]["known_sum"],10);
+            let columns:Vec<String>=db.prepare("PRAGMA table_info(thread)")?.query_map([],|r|r.get(1))?.collect::<rusqlite::Result<_>>()?;
+            assert!(!columns.iter().any(|name|matches!(name.as_str(),"segment_chars"|"reduce_rounds")));
+            assert!(db.prepare("PRAGMA foreign_key_check").unwrap().query([])?.next()?.is_none());
             db.execute("UPDATE thread SET auto_compact_target_percent=80,summary_max_chars=24000 WHERE id='old'",[])?;
             Ok(())
         }).await.unwrap();
@@ -447,6 +463,10 @@ mod activity_migration_tests {
             let saved:(i64,i64)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
             assert_eq!(saved,(80,24000));
             assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=43",[],|r|r.get::<_,i64>(0))?,1);
+            let archived:Vec<(String,i64)>=db.prepare("SELECT setting_name,setting_value FROM thread_retired_summary_settings WHERE thread_id='old' ORDER BY setting_name")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            assert_eq!(archived,[("reduce_rounds".into(),3),("segment_chars".into(),48000)]);
+            let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
+            assert!(legacy.contains("map_requests"));
             Ok(())
         }).await.unwrap();
         reopened.shutdown().await.unwrap();

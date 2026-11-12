@@ -745,7 +745,7 @@ fn each_changed_field_says_it_needs_a_restart_and_sensitive_values_are_left_out(
                 json!({"X-New":"written-secret-value"}),
             ),
             change("shell.env.OTHER", json!("written-secret-value")),
-            change("compaction.segment_chars", json!(32000)),
+            change("connections.plain.response_max_retries", json!(3)),
             removal("ui.bell"),
         ],
     )

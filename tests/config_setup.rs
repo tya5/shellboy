@@ -264,14 +264,6 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
             assert_eq!(value["result"]["auto_history"], false);
             assert_eq!(value["result"]["compaction"]["summary_max_chars"], 20000);
             assert_eq!(value["result"]["compaction"]["summary_max_percent"], 5.0);
-            assert_eq!(
-                value["result"]["compaction"]["summary_map_max_requests"],
-                128
-            );
-            assert_eq!(
-                value["result"]["compaction"]["summary_reduce_max_requests"],
-                16
-            );
             assert_eq!(value["result"]["compaction"]["auto_at_tokens"], 200000);
         }
         if ok && !advertised {

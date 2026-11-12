@@ -3,7 +3,7 @@ use crate::{
     app::storage_error,
     config::Config,
     history,
-    model::{self, http::HttpClients},
+    model::http::HttpClients,
     protocol::{ApiError, ErrorCode},
     storage::{DbWorker, StorageError},
 };
@@ -46,7 +46,6 @@ pub(crate) use usage::{
 };
 
 #[cfg(test)]
-const SEGMENT_CHARS: usize = crate::config::DEFAULT_SEGMENT_CHARS;
 // A graph-work bound, independent of provider context capacity.
 const TURN_BOUNDARY_IDS: usize = 65_536;
 // Assigned nodes carry their Turn directly. Held unassigned messages receive
@@ -121,17 +120,10 @@ pub struct CompactResult {
     pub summary_characters: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary_limit: Option<u64>,
-    /// Segment size and reduce-round limit this summary used (#231).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub segment_chars: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reduce_rounds: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_requests: Option<usize>,
     pub spilled_groups: usize,
     pub source_nodes: usize,
-    pub created_parts: usize,
-    pub reused_parts: usize,
     pub summary_node_id: Option<String>,
     pub original_node_ids: Vec<String>,
     pub no_target: bool,
@@ -152,47 +144,6 @@ struct CachedPart {
     stage: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     round: Option<u32>,
-}
-// Refusal remains displayable in normal conversation; only the summary
-// adoption boundary excludes it, including mixed output_text/refusal responses.
-fn summary_refused(output: &[Value]) -> bool {
-    output
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-        .filter_map(|item| item.get("content").and_then(Value::as_array))
-        .flatten()
-        .any(|part| part.get("type").and_then(Value::as_str) == Some("refusal"))
-}
-impl CachedPart {
-    #[cfg(test)]
-    fn load(db: &Connection, key: &str) -> Result<Option<Self>, StorageError> {
-        let body: Option<String> = db
-            .query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| {
-                row.get(0)
-            })
-            .optional()?;
-        Ok(body.and_then(|body| serde_json::from_str(&body).ok()))
-    }
-    #[cfg(test)]
-    fn encode(&self) -> String {
-        serde_json::to_string(self).expect("cached test fixture serializes")
-    }
-    #[cfg(test)]
-    async fn save(&self, database: &DbWorker, lookup: String) -> Result<(), ApiError> {
-        let saved = self.encode();
-        database.call(move|db|{db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![lookup,saved])?;Ok(())}).await.map_err(storage_error)
-    }
-    fn reusable(&self) -> bool {
-        if self.text.trim().is_empty() {
-            return false;
-        }
-        self.raw_response
-            .as_ref()
-            .and_then(|raw| model::ModelResponse::completed(raw.clone(), false).ok())
-            .is_some_and(|response| {
-                response.text == self.text && !summary_refused(&response.output)
-            })
-    }
 }
 /// Most parts one `history get --parts` reads (a summary has far fewer).
 const PART_READ_LIMIT: usize = 1024;
@@ -247,7 +198,6 @@ pub(crate) fn inspect_parts(db: &Connection, payload: &Value) -> Result<(Value, 
             "sources":(!part.sources.is_empty()).then(|| json!({"first":part.sources.first(),"last":part.sources.last(),"count":part.sources.len()})),
             "characters":part.text.chars().count(),
             "usage":usage,
-            "reusable":part.reusable(),
         }));
         text.push_str(&format!("--- part {key} ---\n{}\n\n", part.text));
     }
@@ -1147,38 +1097,6 @@ fn source_groups(sources: Vec<Source>, completed: &HashSet<String>) -> Vec<Group
     }
     groups
 }
-#[cfg(test)]
-fn segments(
-    groups: &[Group],
-    epoch: i64,
-    segment_chars: usize,
-) -> Result<Vec<(usize, usize, u8)>, ApiError> {
-    let mut result = Vec::new();
-    let mut start = 0;
-    let mut count = 0;
-    for (i, group) in groups.iter().enumerate() {
-        let size = group
-            .sources
-            .iter()
-            .map(|n| render(n, epoch).chars().count())
-            .sum::<usize>();
-        if size > segment_chars {
-            return Err(invalid(
-                "An indivisible conversation group exceeds the summary segment baseline; inspect the original or narrow the whole-group range",
-            ).hint("Spill tool results if they are not already spilled. Otherwise inspect the sources and consider explicit --omit or --maximal; these remove selected context, while originals remain available."));
-        }
-        if count + size > segment_chars && i > start {
-            result.push((start, i, 0));
-            start = i;
-            count = 0;
-        }
-        count += size;
-    }
-    if start < groups.len() {
-        result.push((start, groups.len(), 0));
-    }
-    Ok(result)
-}
 fn summary_marker_item(payload: &Value) -> Option<&Value> {
     if !payload.get("context_trim")?.is_object() || payload.get("output").is_some() {
         return None;
@@ -1284,44 +1202,23 @@ mod tests {
         }
     }
     #[test]
-    fn part_keys_follow_segment_boundaries_so_other_sizes_never_reuse_parts() {
-        let groups: Vec<Group> = ["g1", "g2", "g3"]
-            .into_iter()
-            .map(|id| Group {
-                sources: vec![source(
-                    id,
-                    None,
-                    json!({"role":"user","content":id.repeat(15_000)}),
-                )],
-                complete: true,
-                tool: false,
-            })
-            .collect();
+    fn summary_key_is_stable_for_the_same_exact_source_range_and_changes_with_sources() {
+        let groups = vec![Group {
+            sources: vec![
+                source("a", None, json!({"role":"user","content":"a"})),
+                source("b", None, json!({"role":"user","content":"b"})),
+            ],
+            complete: true,
+            tool: false,
+        }];
         let snapshot = fixture_snapshot(groups.clone());
-        let keys = |segment_chars: usize| -> Vec<String> {
-            segments(&groups, snapshot.epoch, segment_chars)
-                .unwrap()
-                .into_iter()
-                .map(|(start, end, _)| {
-                    let sources: Vec<Source> = groups[start..end]
-                        .iter()
-                        .flat_map(|g| g.sources.clone())
-                        .collect();
-                    CompactionKeys::summary_part(&summary_key(&snapshot, &sources))
-                })
-                .collect()
-        };
-        // Each group renders to a little over 30,000 characters.
-        let large = keys(64_000);
-        let small = keys(40_000);
-        assert_eq!((large.len(), small.len()), (2, 3));
-        // A part covering different sources has a different key, so a size
-        // change never reuses (or overwrites) another size's part...
-        assert!(large[0] != small[0] && large[0] != small[1]);
-        // ...while a part with identical sources keeps its key and is reused.
-        assert_eq!(large[1], small[2]);
-        // Same size, same keys.
-        assert_eq!(keys(64_000), large);
+        let both: Vec<Source> = groups.iter().flat_map(|g| g.sources.clone()).collect();
+        let only_a = vec![groups[0].sources[0].clone()];
+        assert_eq!(summary_key(&snapshot, &both), summary_key(&snapshot, &both));
+        assert_ne!(
+            summary_key(&snapshot, &both),
+            summary_key(&snapshot, &only_a)
+        );
     }
     #[test]
     fn source_groups_preserve_interleaved_audit_without_assigning_group_ids() {
@@ -1454,15 +1351,6 @@ mod tests {
             ["old", "last", "current", "a-call", "a-result"]
         );
         assert_eq!(prefix_count(&s, true), overflow);
-        let suffix_size = |start: usize| {
-            s.groups[start..]
-                .iter()
-                .flat_map(|g| &g.sources)
-                .map(|n| render(n, s.epoch).chars().count())
-                .sum::<usize>()
-        };
-        assert!(suffix_size(overflow - 1) > SEGMENT_CHARS);
-        assert!(suffix_size(overflow) <= SEGMENT_CHARS);
         assert_eq!(s.groups[overflow].sources[0].id, "spilled-b");
     }
     #[test]
@@ -1589,7 +1477,6 @@ mod tests {
             let payload = json!({"item":{"role":"developer","id":"provider-local","content":[{"type":"input_text","text":"Shellboy context notice: original history remains retrievable."}]},
                 "context_trim":{"version":1,"original_order":ids,"retained_node_ids":[]},"source_node_ids":ids});
             let marker = source("marker", None, payload.clone());
-            assert!(payload.to_string().chars().count() > SEGMENT_CHARS);
             let text = render(&marker, 0);
             let projected = crate::control::replay::convert(payload.clone(), 0);
             assert!(text.contains(&projected[0].to_string()));
@@ -1600,40 +1487,7 @@ mod tests {
             );
             assert!(text.chars().count() < 2048);
             assert_eq!(marker.payload, payload);
-            assert_eq!(
-                segments(
-                    &[Group {
-                        sources: vec![marker],
-                        complete: true,
-                        tool: false
-                    }],
-                    0,
-                    SEGMENT_CHARS
-                )
-                .unwrap(),
-                vec![(0, 1, 0)]
-            );
         }
-    }
-    #[test]
-    fn context_trim_large_visible_notice_still_obeys_group_limit_and_actionable_hint() {
-        let marker = source(
-            "marker",
-            None,
-            json!({"context_trim":{"version":1},"item":{"role":"developer","content":[{"type":"input_text","text":"x".repeat(SEGMENT_CHARS+1)}]}}),
-        );
-        let error = segments(
-            &[Group {
-                sources: vec![marker],
-                complete: true,
-                tool: false,
-            }],
-            0,
-            SEGMENT_CHARS,
-        )
-        .unwrap_err();
-        let hint = error.hint.as_deref().unwrap();
-        assert!(hint.contains("--omit") && hint.contains("--maximal"));
     }
     #[test]
     fn context_trim_invalid_marker_and_non_marker_audit_are_not_hidden() {
@@ -1677,20 +1531,6 @@ mod tests {
             json!({"context_trim":{},"item":{"role":"developer","content":"notice"}}),
         )];
         assert_ne!(summary_key(&snapshot, &marker), old_key(&snapshot, &marker));
-    }
-    #[test]
-    fn segment_boundaries_never_split_a_group() {
-        let group = |id, size| Group {
-            sources: vec![source(id, None, json!({"text":"あ".repeat(size)}))],
-            complete: true,
-            tool: false,
-        };
-        let groups = vec![group("a", 35_000), group("b", 35_000), group("c", 10)];
-        assert_eq!(
-            segments(&groups, 0, SEGMENT_CHARS).unwrap(),
-            vec![(0, 1, 0), (1, 3, 0)]
-        );
-        assert!(segments(&[group("huge", 64_001)], 0, SEGMENT_CHARS).is_err());
     }
     #[test]
     fn spill_placeholder_avoids_repeated_arguments_and_reduces_synthetic_growth() {
@@ -2017,174 +1857,6 @@ mod tests {
         );
         config
     }
-    /// The synthetic 895 s-shaped history: 85 tool groups and 148 messages.
-    pub(super) async fn seed_895(db: &DbWorker) {
-        db.call(|db| {
-            let tx = db.transaction()?;
-            tx.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','live','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('old','t','r','completed','now'),('last','t','r','completed','now'),('current','t','r','running','now'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','old',0,0,'fixture','fixture',0,'completed','{}','now');")?;
-            for i in 0..85 {
-                let group = format!("g{i}");
-                let call = format!("call{i}");
-                let result = format!("result{i}");
-                tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','old','completed','now')", [&group])?;
-                tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?1,0,'shell','{}','completed')", [&group])?;
-                let arguments = json!({"command":"x".repeat(1450)}).to_string();
-                history::append_node(&tx,"t",&call,Some("old"),"assistant_response",&json!({"group_id":group,"reasoning_epoch":0,"output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"r".repeat(200)}],"encrypted_content":"opaque-not-summary"},{"type":"function_call","call_id":group,"name":"shell","arguments":arguments}]}),"now")?;
-                let output = json!({"stdout":"y".repeat(4610)}).to_string();
-                history::append_node(&tx,"t",&result,Some("old"),"tool_result",&json!({"group_id":group,"item":{"type":"function_call_output","call_id":group,"output":output}}),"now")?;
-                tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?1,?2,'completed')", params![group,result])?;
-            }
-            for i in 0..148 {
-                history::append_node(&tx,"t",&format!("message{i}"),Some("old"),"message",&json!({"role":"user","content":"z".repeat(1600)}),"now")?;
-            }
-            tx.execute("UPDATE thread SET reasoning_epoch=1 WHERE id='t'", [])?;
-            history::append_node(&tx,"t","last-user",Some("last"),"message",&json!({"role":"user","content":"last"}),"now")?;
-            history::append_node(&tx,"t","current-user",Some("current"),"message",&json!({"role":"user","content":"current"}),"now")?;
-            tx.commit()?;
-            Ok(())
-        }).await.unwrap();
-    }
-    /// Synthetic measurement only: no user history or paid provider.
-    #[tokio::test]
-    async fn synthetic_895_shape_spill_and_summary_measurement() {
-        let (_root, db) = database().await;
-        seed_895(&db).await;
-        let baseline = Compactor::new(db.clone(), Arc::new(Config::default()));
-        let snapshot = baseline.snapshot("t", true).await.unwrap();
-        let range = policy::unsummarized_prefix(&snapshot).unwrap();
-        let nodes: usize = snapshot.groups[range.clone()]
-            .iter()
-            .map(|g| g.sources.len())
-            .sum();
-        let originals: Vec<String> = snapshot
-            .groups
-            .iter()
-            .flat_map(|g| &g.sources)
-            .map(|s| s.id.clone())
-            .collect();
-        assert_eq!(originals.len(), 320);
-        let before = edit::history_characters(&snapshot);
-        let tool_result_characters: u64 = snapshot
-            .groups
-            .iter()
-            .flat_map(|g| &g.sources)
-            .filter(|source| {
-                source.payload.pointer("/item/type").and_then(Value::as_str)
-                    == Some("function_call_output")
-            })
-            .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
-            .sum();
-        println!(
-            "synthetic total_nodes={} tool_result_projection_chars={tool_result_characters}",
-            originals.len()
-        );
-        let map_count = segments(
-            &snapshot.groups[range.clone()],
-            snapshot.epoch,
-            SEGMENT_CHARS,
-        )
-        .unwrap()
-        .len();
-        let mut old_groups = snapshot.groups[range.clone()].to_vec();
-        for source in old_groups.iter_mut().flat_map(|g| &mut g.sources) {
-            if let Some(items) = source
-                .payload
-                .get_mut("output")
-                .and_then(Value::as_array_mut)
-            {
-                items.retain(|item| item["type"] != "reasoning");
-            }
-        }
-        let old_map_count = segments(&old_groups, snapshot.epoch, SEGMENT_CHARS)
-            .unwrap()
-            .len();
-        let old_rendered: usize = old_groups
-            .iter()
-            .flat_map(|g| &g.sources)
-            .map(|s| render(s, snapshot.epoch).chars().count())
-            .sum();
-        let new_rendered: usize = snapshot.groups[range.clone()]
-            .iter()
-            .flat_map(|g| &g.sources)
-            .map(|s| render(s, snapshot.epoch).chars().count())
-            .sum();
-        println!(
-            "synthetic readable_reasoning_added_chars={} map_requests_before={old_map_count} map_requests_after={map_count}",
-            new_rendered.saturating_sub(old_rendered)
-        );
-        let reply = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"map summary"}]}]});
-        let (url, server) = summary_proxy_capturing(vec![reply; map_count + 1]).await;
-        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
-        let result = compactor
-            .summarize_snapshot(snapshot, range, CancellationToken::new(), None, None)
-            .await
-            .unwrap();
-        let calls = server.await.unwrap();
-        let map_chars: usize = calls[..map_count]
-            .iter()
-            .map(|body| {
-                body["input"][1]["content"][0]["text"]
-                    .as_str()
-                    .unwrap()
-                    .chars()
-                    .count()
-            })
-            .sum();
-        println!(
-            "synthetic baseline nodes={nodes} replay_chars={before} summary_source_chars={} map_input_chars={map_chars} map_requests={map_count} requests={}",
-            result.source_characters.unwrap(),
-            calls.len()
-        );
-        assert!((700_000..850_000).contains(&before));
-        assert_eq!(calls.len(), map_count + 1);
-        let originals_again = originals.clone();
-        db.call(move |db| {
-            let tx = db.transaction()?;
-            let revision =
-                history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
-            history::select_path(&tx, "t", revision, &originals, "now")?;
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let before_spill = compactor.proactive_history_characters("t").await.unwrap();
-        let spill = compactor
-            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new(), None)
-            .await
-            .unwrap();
-        let after_spill = compactor.proactive_history_characters("t").await.unwrap();
-        let removed = before_spill.saturating_sub(after_spill);
-        println!(
-            "synthetic after spilled_groups={} removed_chars={removed} remaining_need={} summary_source_chars=0 model_requests=0",
-            spill.spilled_groups,
-            156_310u64.saturating_sub(removed)
-        );
-        assert!(removed >= 156_310);
-        db.call(move |db| {
-            let tx = db.transaction()?;
-            let revision =
-                history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
-            history::select_path(&tx, "t", revision, &originals_again, "now")?;
-            tx.execute("UPDATE thread SET reasoning_epoch=0 WHERE id='t'", [])?;
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let live_before = compactor.proactive_history_characters("t").await.unwrap();
-        let live_spill = compactor
-            .spill_staged_cancellable("t", false, 156_310, CancellationToken::new(), None)
-            .await
-            .unwrap();
-        let live_after = compactor.proactive_history_characters("t").await.unwrap();
-        println!(
-            "synthetic live_epoch_spill groups={} before={live_before} after={live_after} removed={} versus_old_epoch_removed={removed}",
-            live_spill.spilled_groups,
-            live_before.saturating_sub(live_after)
-        );
-        db.shutdown().await.unwrap();
-    }
     #[tokio::test]
     async fn summary_http_429_is_recorded_with_retry_after_and_an_exhausted_budget_does_not_resend()
     {
@@ -2222,7 +1894,11 @@ mod tests {
         .unwrap();
         // One map request in the budget: the 429 is retryable but no slot is left.
         let mut config = summary_config(format!("http://{address}/v1"));
-        config.compaction.summary_map_max_requests = 1;
+        config
+            .connections
+            .get_mut("proxy")
+            .unwrap()
+            .response_max_retries = 0;
         let compactor = Compactor::new(db.clone(), Arc::new(config));
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         let error = compactor
@@ -2761,7 +2437,16 @@ mod tests {
         // The oversized summary needs a reduce request that no server answers:
         // one slot, so the failed request is not retried.
         let mut config = summary_config(url);
-        config.compaction.summary_reduce_max_requests = 1;
+        config
+            .connections
+            .get_mut("proxy")
+            .unwrap()
+            .summary_max_chars = Some(4_000);
+        config
+            .connections
+            .get_mut("proxy")
+            .unwrap()
+            .response_max_retries = 0;
         let compactor = Compactor::new(db.clone(), Arc::new(config));
         let error = compactor
             .summarize_active_turn("t", CancellationToken::new())
@@ -3143,17 +2828,10 @@ mod tests {
         db.shutdown().await.unwrap();
     }
 
-    // #133: N summary requests are recorded with exactly the reported numbers;
-    // a fully cached repeat sends nothing and adds no record.
+    // #133: the unified summary request is recorded with exactly reported usage.
     #[tokio::test]
-    async fn summary_request_usage_is_recorded_and_cached_reuse_adds_none() {
-        let reply = |text: &str, usage: Value| json!({"status":"completed","usage":usage,"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}]});
-        let (url, server) = summary_proxy(vec![
-            reply("part a", json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_creation_tokens":5},"output_tokens":10})),
-            reply("part b", json!({"input_tokens":200,"output_tokens":20})),
-            reply("final summary", json!({"input_tokens":50,"input_tokens_details":{"cached_tokens":0},"output_tokens":7})),
-        ])
-        .await;
+    async fn summary_request_usage_is_recorded_and_read_back_as_one_request() {
+        let(url,server)=summary_proxy(vec![json!({"status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"cache_creation_tokens":5},"output_tokens":10},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Final summary"}]}]})]).await;
         let (_root, db) = database().await;
         db.call(|db| {
             let tx = db.transaction()?;
@@ -3180,38 +2858,11 @@ mod tests {
             .await
             .unwrap();
         let usage = first.summary_usage.clone().unwrap();
-        assert_eq!(
-            (usage.requests, usage.map_requests, usage.reduce_requests),
-            (3, 2, 1)
-        );
-        assert_eq!(first.model_requests, Some(3));
-        assert_eq!(server.await.unwrap(), 3);
-        // Put the originals back on the path; the same range now hits the cache.
-        db.call(|db| {
-            let tx = db.transaction()?;
-            let revision =
-                history::selection_revision(&tx, "t", history::ThreadScope::Live)? as u64;
-            history::select_path(
-                &tx,
-                "t",
-                revision,
-                &["a".into(), "b".into(), "tail".into()],
-                "now",
-            )?;
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let snapshot = compactor.snapshot("t", true).await.unwrap();
-        let second = compactor
-            .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
-            .await
-            .unwrap();
-        assert_eq!((second.created_parts, second.reused_parts), (0, 2));
-        assert_eq!(second.summary_usage.as_ref().unwrap().requests, 0);
-        let first_node = first.summary_node_id.unwrap();
-        let second_node = second.summary_node_id.unwrap();
+        assert_eq!(usage.requests, 1);
+        assert_eq!(first.model_requests, Some(1));
+        assert_eq!(first.source_nodes, 2);
+        assert_eq!(server.await.unwrap(), 1);
+        let node = first.summary_node_id.unwrap();
         db.call(move |db| {
             let totals = crate::usage_totals::read(
                 db,
@@ -3225,29 +2876,25 @@ mod tests {
             let c = &totals["compaction"];
             assert_eq!(
                 (c["compactions"].as_u64(), c["requests"].as_u64()),
-                (Some(1), Some(3))
-            );
-            assert_eq!(
-                (c["map_requests"].as_u64(), c["reduce_requests"].as_u64()),
-                (Some(2), Some(1))
+                (Some(1), Some(1))
             );
             assert_eq!(
                 c["input_tokens"],
-                json!({"known_sum":350,"unknown_count":0,"overflow":false})
+                json!({"known_sum":100,"unknown_count":0,"overflow":false})
             );
             assert_eq!(
                 c["output_tokens"],
-                json!({"known_sum":37,"unknown_count":0,"overflow":false})
+                json!({"known_sum":10,"unknown_count":0,"overflow":false})
             );
             assert_eq!(
                 c["cached_tokens"],
-                json!({"known_sum":80,"unknown_count":1,"overflow":false})
+                json!({"known_sum":80,"unknown_count":0,"overflow":false})
             );
             assert_eq!(
                 c["cache_creation_tokens"],
-                json!({"known_sum":5,"unknown_count":2,"overflow":false})
+                json!({"known_sum":5,"unknown_count":0,"overflow":false})
             );
-            // Conversation attempts stay separate.
+            assert!(c.get("map_requests").is_none() && c.get("reduce_requests").is_none());
             assert_eq!(totals["model_attempts"], json!({}));
             let plan = db
                 .prepare(&format!(
@@ -3272,25 +2919,14 @@ mod tests {
             let args: crate::protocol::CompactListArgs =
                 serde_json::from_value(json!({"thread_id":"t"})).unwrap();
             let listed = crate::readback::compactions(db, "t", &args).unwrap();
-            let usage_of = |node: &str| {
-                listed["items"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|item| item["event_id"] == node)
-                    .unwrap()["metrics"]["summary_usage"]
-                    .clone()
-            };
-            let first = usage_of(&first_node);
-            assert_eq!(
-                (
-                    first["requests"].as_u64(),
-                    first["input_tokens"]["known_sum"].as_u64(),
-                    first["output_tokens"]["known_sum"].as_u64()
-                ),
-                (Some(3), Some(350), Some(37))
-            );
-            assert_eq!(usage_of(&second_node)["requests"], 0);
+            let event = listed["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["event_id"] == node)
+                .unwrap();
+            assert_eq!(event["metrics"]["summary_usage"]["requests"], 1);
+            assert_eq!(event["metrics"]["model_requests"], 1);
             Ok(())
         })
         .await
@@ -3327,10 +2963,11 @@ mod tests {
     /// #232 S2: a fork shares node rows and copies the Thread settings, so the
     /// same prefix with the same settings hits the parent's map parts.
     #[tokio::test]
-    async fn fork_summarizing_the_shared_prefix_reuses_the_parents_map_parts() {
-        let (url, server) = summary_proxy(vec![json!({"id":"summary","status":"completed","output":[
-            {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Shared prefix summary"}]}
-        ]})]).await;
+    async fn fork_summarizing_the_shared_prefix_uses_its_own_single_request() {
+        let(url,server)=summary_proxy(vec![
+            json!({"id":"parent-summary","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Parent summary"}]}]}),
+            json!({"id":"fork-summary","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Fork summary"}]}]})
+        ]).await;
         let (_root, db) = database().await;
         db.call(|db| {
             let tx = db.transaction()?;
@@ -3355,7 +2992,8 @@ mod tests {
             .summarize("t", false, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!((parent.created_parts, parent.reused_parts), (1, 0));
+        assert_eq!(parent.model_requests, Some(1));
+        assert_eq!(parent.source_nodes, 2);
         db.call(|db| {
             let tx = db.transaction()?;
             let revision = tx.query_row(
@@ -3390,14 +3028,16 @@ mod tests {
             .summarize("fork", false, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!((fork.created_parts, fork.reused_parts), (0, 1));
-        // The mock served exactly one request: the fork made none.
-        assert_eq!(server.await.unwrap(), 1);
+        assert_eq!(fork.model_requests, Some(1));
+        assert_eq!(fork.source_nodes, 2);
+        // Each Thread uses the same current request/adoption contract.
+        assert_eq!(server.await.unwrap(), 2);
         db.shutdown().await.unwrap();
     }
 
     #[tokio::test]
-    async fn successful_summary_cached_and_adopted_atomically_without_losing_originals() {
+    async fn successful_summary_uses_current_request_and_adopts_atomically_without_losing_originals()
+     {
         let(url,server)=summary_proxy(vec![json!({"id":"summary","status":"completed","usage":{"input_tokens":100,"input_tokens_details":{"cached_tokens":80,"extra":"x".repeat(128*1024)},"output_tokens":10,"attribution":"x".repeat(128*1024)},"output":[
             {"type":"reasoning","summary":[{"type":"summary_text","text":"PRIVATE-REASONING"},{"type":"reasoning_text","text":"PRIVATE-DETAIL"}],"encrypted_content":"OPAQUE-AUDIT"},
             {"type":"message","role":"assistant","content":[{"type":"output_text","text":"## 目的\n"},{"type":"output_text","text":"Remember the task"}]}
@@ -3460,9 +3100,9 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result.source_nodes, 2);
-        assert_eq!(result.created_parts, 1);
+        assert_eq!(result.model_requests, Some(1));
         assert_eq!(server.await.unwrap(), 1);
-        db.call(|db| {
+        db.call(move |db| {
             let body: String = db.query_row(
                 "SELECT payload_json FROM node WHERE kind='summary'",
                 [],
@@ -3476,28 +3116,17 @@ mod tests {
                     && !text.contains("PRIVATE-DETAIL")
                     && !text.contains("OPAQUE-AUDIT")
             );
-            let lookup = payload["summary_part_keys"][0].as_str().unwrap();
-            let part: String =
-                db.query_row("SELECT value FROM app_meta WHERE key=?1", [lookup], |r| {
-                    r.get(0)
-                })?;
-            let part: Value = serde_json::from_str(&part).unwrap();
-            assert_eq!(part["text"], "## 目的\nRemember the task");
-            assert_eq!(part["raw_response"]["usage"],json!({"input_tokens":100,"input_tokens_details":{"cached_tokens":80},"output_tokens":10}));
-            assert!(part["raw_response"]["usage"].to_string().len()<256);
-            assert_eq!(part["sources"], json!(["one", "two"]));
-            assert_eq!(part["stage"], "map");
-            assert!(part.get("round").is_none());
-            assert_eq!(payload["summary_reduce_keys"], json!([]));
-            assert_eq!(
-                part["raw_response"]["output"][0]["encrypted_content"],
-                "OPAQUE-AUDIT"
-            );
-            assert!(
-                part["raw_response"]
-                    .to_string()
-                    .contains("PRIVATE-REASONING")
-            );
+            assert!(payload.get("summary_part_keys").is_none());
+            assert!(payload.get("summary_reduce_keys").is_none());
+            assert_eq!(payload["summary_usage"]["requests"], 1);
+            // A historical per-part record remains available but is never used
+            // as a current response or modified by the single-request path.
+            let old: String = db.query_row(
+                "SELECT value FROM app_meta WHERE key=?1",
+                [format!("summary.part.{legacy}")],
+                |r| r.get(0),
+            )?;
+            assert!(old.contains("OLD-REASONING-CONTAMINATION"));
             let replay = crate::control::replay::ReplayCache::new(0).load(db, "t")?;
             let sent = serde_json::to_string(&replay.materialize()).unwrap();
             assert!(
@@ -3512,33 +3141,6 @@ mod tests {
         .unwrap();
         let counts=db.call(|db|Ok((db.query_row("SELECT count(*) FROM thread_path",[],|r|r.get::<_,i64>(0))?,db.query_row("SELECT count(*) FROM node WHERE id IN ('one','two') AND payload_json IS NOT NULL",[],|r|r.get::<_,i64>(0))?,db.query_row("SELECT count(*) FROM replacement_source",[],|r|r.get::<_,i64>(0))?))).await.unwrap();
         assert_eq!(counts, (1, 2, 2));
-        // Restore precisely the original source path: exact cache reuse requires
-        // no additional network request (the fixture server has closed).
-        db.call(|db| {
-            let tx = db.transaction()?;
-            let revision = tx.query_row(
-                "SELECT selection_revision FROM thread WHERE id='t'",
-                [],
-                |r| r.get::<_, i64>(0),
-            )?;
-            history::select_path(
-                &tx,
-                "t",
-                revision as u64,
-                &["one".into(), "two".into()],
-                "now",
-            )?;
-            tx.commit()?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-        let result = compactor
-            .summarize("t", false, CancellationToken::new())
-            .await
-            .unwrap();
-        assert_eq!(result.reused_parts, 1);
-        assert_eq!(result.created_parts, 0);
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -3709,7 +3311,7 @@ mod tests {
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
-    async fn reasoning_only_summary_keeps_raw_but_not_a_successful_part_or_replacement() {
+    async fn reasoning_only_summary_is_not_adopted_and_original_path_remains() {
         let(url,server)=summary_proxy(vec![json!({"id":"empty-summary","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"AUDIT-ONLY"}]}]}),json!({"id":"valid-summary","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid assistant summary"}]}]})]).await;
         let (_root, db) = database().await;
         db.call(|db| {
@@ -3734,10 +3336,10 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.code, ErrorCode::InvalidState);
-        let lookup = error.details.unwrap()["summary_part_key"]
-            .as_str()
-            .unwrap()
-            .to_owned();
+        assert_eq!(
+            error.details.as_ref().unwrap()["summary_usage"]["requests"],
+            1
+        );
         db.call(move |db| {
             assert_eq!(
                 db.query_row(
@@ -3753,13 +3355,6 @@ mod tests {
                 })?,
                 0
             );
-            let body: String =
-                db.query_row("SELECT value FROM app_meta WHERE key=?1", [lookup], |r| {
-                    r.get(0)
-                })?;
-            let part: Value = serde_json::from_str(&body).unwrap();
-            assert_eq!(part["text"], "");
-            assert!(part["raw_response"].to_string().contains("AUDIT-ONLY"));
             Ok(())
         })
         .await
@@ -3768,13 +3363,8 @@ mod tests {
             .summarize("t", false, CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(result.created_parts, 1);
-        assert_eq!(result.reused_parts, 0);
-        assert_eq!(
-            server.await.unwrap(),
-            2,
-            "empty audit record must not be reused as success"
-        );
+        assert_eq!(result.model_requests, Some(1));
+        assert_eq!(server.await.unwrap(), 2);
         db.shutdown().await.unwrap();
     }
     #[tokio::test]
@@ -3818,10 +3408,6 @@ mod tests {
                 usage["input_tokens"],
                 json!({"known_sum":null,"unknown_count":1,"overflow":false})
             );
-            let lookup = error.details.unwrap()["summary_part_key"]
-                .as_str()
-                .unwrap()
-                .to_owned();
             db.call(move |db| {
                 assert_eq!(
                     db.query_row(
@@ -3837,87 +3423,19 @@ mod tests {
                     })?,
                     0
                 );
-                let part: String =
-                    db.query_row("SELECT value FROM app_meta WHERE key=?1", [lookup], |r| {
-                        r.get(0)
-                    })?;
-                assert_eq!(
-                    serde_json::from_str::<Value>(&part).unwrap()["raw_response"],
-                    refusal
-                );
                 Ok(())
             })
             .await
             .unwrap();
-            // The existing rejected record must not become a cached success.
+            // A later invocation may try the configured provider again; the
+            // prior refusal left both history and replacement state untouched.
             let result = compactor
                 .summarize("t", false, CancellationToken::new())
                 .await
                 .unwrap();
-            assert_eq!((result.created_parts, result.reused_parts), (1, 0));
+            assert_eq!(result.model_requests, Some(1));
             assert_eq!(server.await.unwrap(), 2);
             db.shutdown().await.unwrap();
         }
-    }
-    #[test]
-    fn cached_success_requires_matching_valid_raw_and_no_typed_refusal() {
-        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid summary"}]}]});
-        let mut part = CachedPart {
-            text: "Valid summary".into(),
-            sources: vec!["source".into()],
-            cache_key: None,
-            raw_response: Some(raw.clone()),
-            stage: None,
-            round: None,
-        };
-        assert!(
-            part.reusable(),
-            "valid v2 cache must avoid unnecessary model calls"
-        );
-        part.raw_response = None;
-        assert!(!part.reusable());
-        part.raw_response = Some(raw.clone());
-        part.text = "different".into();
-        assert!(!part.reusable());
-        part.text = "Valid summary".into();
-        let mut refusal = raw.clone();
-        refusal["output"][0]["content"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!({"type":"refusal","refusal":""}));
-        part.raw_response = Some(refusal);
-        assert!(
-            !part.reusable(),
-            "even empty typed refusal in old v2 cache is not a summary"
-        );
-        let mut incomplete = raw;
-        incomplete["status"] = json!("incomplete");
-        part.raw_response = Some(incomplete);
-        assert!(!part.reusable());
-    }
-}
-
-#[cfg(test)]
-mod metadata_keys_policy_tests {
-    use super::*;
-    #[test]
-    fn typed_cached_part_lookup_keeps_missing_and_malformed_entries_as_cache_misses() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
-            .unwrap();
-        let key = CompactionKeys::summary_part("fixture");
-        assert!(CachedPart::load(&db, &key).unwrap().is_none());
-        db.execute("INSERT INTO app_meta VALUES(?1,'not JSON')", [&key])
-            .unwrap();
-        assert!(CachedPart::load(&db, &key).unwrap().is_none());
-        let retained: String = db
-            .query_row("SELECT value FROM app_meta WHERE key=?1", [&key], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(
-            retained, "not JSON",
-            "a cache miss neither cleans nor normalizes stored audit data"
-        );
     }
 }

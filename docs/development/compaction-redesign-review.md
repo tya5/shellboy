@@ -1,5 +1,13 @@
 # Compaction Redesign: Design-Only Review Packet
 
+> **Superseded for Issue #303 implementation:** this packet's obsolete map/reduce,
+> part-cache and old-config proposal inventory has been implemented as a single
+> typed summary request with one owned adoption transaction. Historical parts stay
+> readable but are not written/reused. Removed Thread settings are archived by
+> migration 43 then absent from runtime; 40–42 remain unchanged. Strict config
+> parsing rejects retired keys. Provider measurement is not a qualification gate.
+> This note records the current design boundary; it does not qualify source or release.
+
 Baseline4e6241a9a3235bb6ceffb03574ae983c5919765b; authoritative file SHA256
 b822f2b54f8cb5940bc8e0e65dc7287818b1b55457c629fd655eb12b3c2e1a61.
 Its complete text0-13 is verbatim in docs/design/compaction.md. USER decisions,

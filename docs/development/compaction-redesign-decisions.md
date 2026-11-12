@@ -157,3 +157,25 @@ adoption owns final saved-projection shrink check and transactional revalidation
 This refactor does not merge those responsibilities, weaken guards, add legacy
 fallbacks, or claim tests passed. Remaining obsolete runtime fixtures are part
 of this same migration group, not a reason to restore removed public fields.
+
+## 2026-11-12 — #A request-start boundary ordering (leader decision)
+
+A #A report belongs to the first request initiated after the completed compaction
+boundary, not the first provider response that completes afterward. `input_tokens`
+reports the request's start input; therefore persist both request-start scope and
+boundary generations and require both to match when completion is recorded. A
+stale pre-boundary completion does not become #A and does not reset/retry; the
+next request captures the current boundary. Preserve scope ABA guards. Required
+race fixture ordering: old request start → boundary commit → old completion
+ignored → new request start/completion records #A.
+
+## 2026-11-12 — #A request-start boundary ordering (leader decision)
+
+A #A report belongs to the first request initiated after the completed compaction
+boundary, not the first provider response that completes afterward. `input_tokens`
+reports the request's start input; therefore persist both request-start scope and
+boundary generations and require both to match when completion is recorded. A
+stale pre-boundary completion does not become #A and does not reset/retry; the
+next request captures the current boundary. Preserve scope ABA guards. Required
+race fixture ordering: old request start → boundary commit → old completion
+ignored → new request start/completion records #A.

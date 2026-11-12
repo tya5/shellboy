@@ -546,7 +546,6 @@ fn insert_summary(
         "id": id, "thread_id": thread, "turn_id": thread, "run_id": thread,
         "profile_id": "p", "model_id": "m", "started_at": started_at,
         "updated_at": started_at, "requests": usage["requests"],
-        "map_requests": usage["map_requests"], "reduce_requests": usage["reduce_requests"],
         "input_tokens": usage["input_tokens"], "cached_tokens": usage["cached_tokens"],
         "cache_creation_tokens": usage["cache_creation_tokens"], "output_tokens": usage["output_tokens"]
     });
@@ -573,28 +572,28 @@ fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
         "t1",
         "before",
         "2026-10-30T23:59:59Z",
-        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":11,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":2,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":3,"unknown_count":0,"overflow":false}}),
+        serde_json::json!({"requests":1,"input_tokens":{"known_sum":11,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":2,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":3,"unknown_count":0,"overflow":false}}),
     );
     insert_summary(
         &db,
         "t1",
         "first",
         "2026-10-31T00:00:00Z",
-        serde_json::json!({"requests":2,"map_requests":1,"reduce_requests":1,"input_tokens":{"known_sum":100,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":20,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":2,"overflow":false},"output_tokens":{"known_sum":30,"unknown_count":1,"overflow":false}}),
+        serde_json::json!({"requests":2,"input_tokens":{"known_sum":100,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":20,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":2,"overflow":false},"output_tokens":{"known_sum":30,"unknown_count":1,"overflow":false}}),
     );
     insert_summary(
         &db,
         "t1",
         "until",
         "2026-11-01T00:00:00Z",
-        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":999,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":0,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}}),
+        serde_json::json!({"requests":1,"input_tokens":{"known_sum":999,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":0,"unknown_count":0,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}}),
     );
     insert_summary(
         &db,
         "t1",
         "missing-time",
         "2026-10-31T12:00:00Z",
-        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
+        serde_json::json!({"requests":1,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
     );
     db.execute(
         "UPDATE app_meta SET value=json_remove(value,'$.started_at') WHERE key=?1",
@@ -609,7 +608,7 @@ fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
         "t1",
         "unknown-time",
         "not-a-timestamp",
-        serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
+        serde_json::json!({"requests":1,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}),
     );
     db.execute(
         "INSERT INTO app_meta(key,value) VALUES('summary.usage.t1.bad','{')",
@@ -622,8 +621,8 @@ fn compaction_usage_uses_first_request_time_half_open_buckets_and_unknowns() {
     assert_eq!(item["key"], "2026-10-31");
     assert_eq!(item["compaction"]["compactions"], 1);
     assert_eq!(item["compaction"]["requests"], 2);
-    assert_eq!(item["compaction"]["map_requests"], 1);
-    assert_eq!(item["compaction"]["reduce_requests"], 1);
+    assert!(item["compaction"].get("map_requests").is_none());
+    assert!(item["compaction"].get("reduce_requests").is_none());
     assert_eq!(item["compaction"]["input_tokens"]["known_sum"], 100);
     assert_eq!(item["compaction"]["input_tokens"]["unknown_count"], 1);
     assert_eq!(item["compaction"]["cached_tokens"]["known_sum"], 20);
@@ -652,7 +651,7 @@ fn compaction_without_requests_stays_unknown_and_pagination_scans_bounded_window
             "t1",
             &format!("c{i:05}"),
             "2026-10-31T00:30:00Z",
-            serde_json::json!({"requests":1,"map_requests":1,"reduce_requests":0,"input_tokens":{"known_sum":1,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}}),
+            serde_json::json!({"requests":1,"input_tokens":{"known_sum":1,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":1,"unknown_count":0,"overflow":false}}),
         );
     }
     let mut a = args("thread");
@@ -727,7 +726,7 @@ fn large_compaction_records_are_byte_bounded_and_resume_without_loss() {
             &format!("large{i}"),
             "2026-10-31T00:30:00Z",
             json!({
-                "requests":1,"map_requests":1,"reduce_requests":0,
+                "requests":1,
                 "input_tokens":{"known_sum":1,"unknown_count":0,"overflow":false},
                 "cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},
                 "cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},

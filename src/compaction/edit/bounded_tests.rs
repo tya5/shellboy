@@ -91,26 +91,11 @@ async fn finish(f: Fixture, server: tokio::task::JoinHandle<()>) {
 }
 
 #[tokio::test]
-async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exact_requests() {
+async fn one_request_summary_preserves_latest_state_and_adopts_exact_selected_sources() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
-    let final_text = "# Purpose\nFinish release.\n# Constraints\nMock only.\n# Current state\nLatest: published. Decision: approve after checks. Unresolved: none. Evidence n3; earlier planned state superseded.";
-    let mut responses: Vec<_> = (0..4)
-        .map(|i| {
-            if i == 3 {
-                "Latest: published. Evidence n3. ".repeat(1400)
-            } else {
-                format!("Earlier planned; evidence n{i}. ").repeat(1400)
-            }
-        })
-        .collect();
-    responses.extend(vec![
-        "Intermediate; latest confirmed published, evidence n3."
-            .into();
-        4
-    ]);
-    responses.push(final_text.into());
-    let (f, server) = setup(responses, &log).await;
+    let final_text = "# Purpose\nFinish release.\n# Constraints\nMock only.\n# Current state\nLatest: published. Decision: approve after checks. Unresolved: none. Evidence n3.";
+    let (f, server) = setup(vec![final_text.into()], &log).await;
     for i in 0..4 {
         f.text(
             &format!("n{i}"),
@@ -126,14 +111,15 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
         )
         .await;
     }
-    let before_lines = lines(&log);
-    assert_eq!(before_lines, 0);
-    let r = edit(&f, &args("n3")).await.unwrap();
-    assert_eq!(r.compact.model_requests, Some(9));
-    assert_eq!(lines(&log) - before_lines, 9);
-    assert!(r.after_characters < r.before_characters);
-    assert_eq!(r.compact.source_nodes, 4);
-    assert!(r.compact.summary_characters.unwrap() <= r.compact.summary_limit.unwrap());
+    let before = lines(&log);
+    assert_eq!(before, 0);
+    let result = edit(&f, &args("n3")).await.unwrap();
+    assert_eq!(result.compact.model_requests, Some(1));
+    assert_eq!(lines(&log) - before, 1);
+    assert!(result.after_characters < result.before_characters);
+    assert_eq!(result.compact.source_nodes, 4);
+    assert_eq!(result.compact.original_node_ids, ["n0", "n1", "n2", "n3"]);
+    assert!(result.compact.summary_characters.unwrap() <= result.compact.summary_limit.unwrap());
     let path = f.path().await;
     assert_eq!(path.len(), 1);
     let id = path[0].clone();
@@ -147,139 +133,14 @@ async fn bounded_summary_hierarchical_reduce_keeps_one_latest_state_and_logs_exa
         })
         .await
         .unwrap();
-    let p: Value = serde_json::from_str(&payload).unwrap();
-    assert_eq!(p["item"]["content"][0]["text"], final_text);
-    assert_eq!(final_text.matches("# Purpose").count(), 1);
-    assert_eq!(final_text.matches("# Constraints").count(), 1);
-    // `history get --parts`: map keys then reduce keys, with range, stage and
-    // provider-reported usage (the mock reports none, so usage is null).
-    let node = path[0].clone();
-    let (body, parts) =
-        f.db.call(move |db| {
-            let get = crate::protocol::HistoryGetArgs {
-                end_message_only: false,
-                parts: true,
-                node_id: node,
-                limit_bytes: 200,
-                cursor: None,
-                encoding: "utf-8".into(),
-            };
-            Ok(crate::history::read_node(db, &get))
-        })
-        .await
-        .unwrap()
-        .unwrap();
-    let parts = parts.unwrap();
-    let items = parts["items"].as_array().unwrap();
-    assert_eq!(parts["reduce_keys_recorded"], true);
-    assert_eq!(items.len(), 4 + 5);
-    assert!(
-        items[..4]
-            .iter()
-            .all(|i| i["stage"] == "map" && i["listed_as"] == "map")
-    );
-    assert!(
-        items[4..]
-            .iter()
-            .all(|i| i["stage"] == "reduce" && i["listed_as"] == "reduce")
-    );
-    assert_eq!(items[4]["round"], 1);
-    assert_eq!(items[8]["round"], 2);
-    assert!(
-        items
-            .iter()
-            .all(|i| i["state"] == "retained" && i["reusable"] == true)
-    );
-    assert_eq!(items[0]["sources"]["first"], "n0");
-    assert_eq!(items[0]["sources"]["count"], 1);
-    // The final reduce part covers every source in order.
-    assert_eq!(items[8]["sources"]["first"], "n0");
-    assert_eq!(items[8]["sources"]["last"], "n3");
-    assert_eq!(items[8]["sources"]["count"], 4);
-    assert!(items[0]["usage"].is_null());
-    // The body is paged by limit_bytes; the first page is full and continues.
-    assert_eq!(body.text.len(), 200);
-    assert!(body.next_cursor.is_some());
-    // An identical retry reuses every map and reduce part: no new request.
-    let requests_before = lines(&log);
-    f.db.call(|db| {
-        let tx = db.transaction()?;
-        let revision = tx.query_row(
-            "SELECT selection_revision FROM thread WHERE id='t'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )?;
-        let ids: Vec<String> = (0..4).map(|i| format!("n{i}")).collect();
-        history::select_path(&tx, "t", revision as u64, &ids, "now")?;
-        tx.commit()?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let again = edit(&f, &args("n3")).await.unwrap();
-    assert_eq!(lines(&log), requests_before);
-    assert_eq!(again.compact.model_requests, Some(0));
-    // A cursor from before a part disappears must expire, not misalign.
-    let cursor = body.next_cursor.clone();
-    let key = items[0]["key"].as_str().unwrap().to_owned();
-    let node = path[0].clone();
-    let read = |cursor: Option<String>| {
-        let node = node.clone();
-        f.db.call(move |db| {
-            Ok(crate::history::read_node(
-                db,
-                &crate::protocol::HistoryGetArgs {
-                    end_message_only: false,
-                    parts: true,
-                    node_id: node,
-                    limit_bytes: 200,
-                    cursor,
-                    encoding: "utf-8".into(),
-                },
-            ))
-        })
-    };
-    assert!(read(cursor.clone()).await.unwrap().is_ok());
-    f.db.call(move |db| {
-        db.execute("DELETE FROM app_meta WHERE key=?1", [key])?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let error = read(cursor).await.unwrap().unwrap_err();
-    assert_eq!(error.code, ErrorCode::CursorExpired);
-    let requests: Vec<Value> = std::fs::read_to_string(&log)
-        .unwrap()
-        .lines()
-        .map(|s| serde_json::from_str(s).unwrap())
-        .collect();
-    assert!(
-        requests[4]["input"][0]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("latest confirmed state")
-    );
-    assert!(
-        requests[4]["input"][1]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("n0")
-    );
-    for req in &requests[4..] {
-        assert!(
-            req["input"][1]["content"][0]["text"]
-                .as_str()
-                .unwrap()
-                .chars()
-                .count()
-                <= SEGMENT_CHARS
-        );
-    }
+    let value: Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(value["item"]["content"][0]["text"], final_text);
+    assert_eq!(value["summary_scope"], "selected_range");
     finish(f, server).await;
 }
 
 #[tokio::test]
-async fn bounded_summary_retries_oversize_cache_then_adopts_valid_result() {
+async fn summary_retries_oversize_output_then_adopts_on_later_invocation() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
     let mut replies = vec!["あ".repeat(2001); 5];
@@ -307,8 +168,8 @@ async fn bounded_summary_retries_oversize_cache_then_adopts_valid_result() {
 async fn oversized_retry_is_bounded_across_operations() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
-    let mut replies = vec!["あ".repeat(2001); 9];
-    replies.extend(vec!["short changed selection".into(); 8]);
+    let mut replies = vec!["あ".repeat(2001)];
+    replies.extend(vec!["short changed selection".into(); 2]);
     let (f, server) = setup(replies, &log).await;
     f.text("n0", &"source".repeat(5000)).await;
     let before = f.path().await;
@@ -317,7 +178,7 @@ async fn oversized_retry_is_bounded_across_operations() {
     assert!(edit(&f, &a).await.is_err());
     assert!(edit(&f, &a).await.is_err());
     let count = lines(&log);
-    assert_eq!(count, 9);
+    assert_eq!(count, 1);
     let error = edit(&f, &a).await.unwrap_err();
     assert!(error.message.contains("retry already used"));
     assert_eq!(lines(&log), count);
@@ -329,120 +190,6 @@ async fn oversized_retry_is_bounded_across_operations() {
     assert_ne!(f.path().await, before);
     server.abort();
     f.close().await;
-}
-
-async fn cache_group(f: &Fixture, index: usize, text: &str) {
-    let snapshot = f.compactor.snapshot("t", true).await.unwrap();
-    let sources = snapshot.groups[index].sources.clone();
-    let cache_key = CompactionKeys::summary_part(&summary_key(&snapshot, &sources));
-    let raw = json!({"id":"cached","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":text}]}]});
-    CachedPart {
-        text: text.into(),
-        sources: sources.iter().map(|s| s.id.clone()).collect(),
-        cache_key: Some(cache_key.clone()),
-        raw_response: Some(raw),
-        stage: None,
-        round: None,
-    }
-    .save(&f.db, cache_key)
-    .await
-    .unwrap();
-}
-fn map_limit(f: &mut Fixture, map: usize, reduce: usize) {
-    let mut config = (*f.compactor.config).clone();
-    config.compaction.summary_map_max_requests = map;
-    config.compaction.summary_reduce_max_requests = reduce;
-    f.compactor = Compactor::new(f.db.clone(), Arc::new(config));
-}
-#[tokio::test]
-async fn map_preflight_refuses_without_http_and_cached_groups_do_not_consume_budget() {
-    let root = tempfile::tempdir().unwrap();
-    let log = root.path().join("requests.jsonl");
-    let (mut f, server) = setup(
-        vec!["new n2".into(), "Final; references n0 n1 n2".into()],
-        &log,
-    )
-    .await;
-    for i in 0..3 {
-        f.text(&format!("n{i}"), &"x".repeat(63_000)).await;
-    }
-    map_limit(&mut f, 1, 1);
-    cache_group(&f, 0, "cached n0").await;
-    let before = f.path().await;
-    let e = edit(&f, &args("n2")).await.unwrap_err();
-    let facts = e.details.unwrap();
-    assert_eq!(facts["map_segments"], 3);
-    assert_eq!(facts["uncached_map_segments"], 2);
-    assert_eq!(facts["map_limit"], 1);
-    assert_eq!(facts["model_requests"], 0);
-    assert_eq!(lines(&log), 0);
-    assert_eq!(f.path().await, before);
-    cache_group(&f, 1, "cached n1").await;
-    let r = edit(&f, &args("n2")).await.unwrap();
-    assert_eq!(r.compact.reused_parts, 2);
-    assert_eq!(r.compact.created_parts, 1);
-    assert_eq!(r.compact.model_requests, Some(2));
-    assert_eq!(lines(&log), 2);
-    finish(f, server).await;
-}
-#[tokio::test]
-async fn reduce_budget_is_independent_of_map_budget() {
-    let root = tempfile::tempdir().unwrap();
-    let log = root.path().join("requests.jsonl");
-    let (mut f, server) = setup(vec!["a".repeat(2001); 2], &log).await;
-    f.text("n0", &"x".repeat(30_000)).await;
-    map_limit(&mut f, 1, 1);
-    let mut a = args("n0");
-    a.max_chars = Some(1);
-    let e = edit(&f, &a).await.unwrap_err();
-    let d = e.details.unwrap();
-    assert_eq!(d["map_requests"], 1);
-    assert_eq!(d["reduce_requests"], 1);
-    assert_eq!(d["model_requests"], 2);
-    assert_eq!(lines(&log), 2);
-    assert_eq!(f.path().await, ["n0"]);
-    finish(f, server).await;
-}
-#[tokio::test]
-async fn map_cache_survives_output_limit_changes() {
-    let root = tempfile::tempdir().unwrap();
-    let log = root.path().join("requests.jsonl");
-    let (f, server) = setup(vec!["a".repeat(2001); 5], &log).await;
-    f.text("n0", &"x".repeat(30_000)).await;
-    let mut a = args("n0");
-    a.max_chars = Some(1);
-    edit(&f, &a).await.unwrap_err();
-    assert_eq!(lines(&log), 5);
-    a.max_chars = Some(3000);
-    let r = edit(&f, &a).await.unwrap();
-    assert_eq!(r.compact.model_requests, Some(0));
-    assert_eq!(r.compact.reused_parts, 1);
-    assert_eq!(lines(&log), 5);
-    finish(f, server).await;
-}
-#[tokio::test]
-async fn automatic_second_stage_uses_reduction_limits_and_never_adopts_oversize_text() {
-    let root = tempfile::tempdir().unwrap();
-    let log = root.path().join("requests.jsonl");
-    let (mut f, server) = setup(vec!["a".repeat(2001); 2], &log).await;
-    f.text("n0", &"x".repeat(30_000)).await;
-    map_limit(&mut f, 1, 1);
-    let mut config = (*f.compactor.config).clone();
-    config.compaction.summary_max_chars = Some(1);
-    f.compactor = Compactor::new(f.db.clone(), Arc::new(config));
-    let before = f.path().await;
-    let snapshot = f.compactor.snapshot("t", true).await.unwrap();
-    let e = crate::test_watchdog::watchdog("src/compaction/edit/bounded_tests.rs: automatic_second_stage_uses_reduction_limits_and_never_adopts_oversize_text",
-        f.compactor
-            .summarize_snapshot(snapshot, 0..1, CancellationToken::new(), None, None),
-    )
-    .await
-    .expect("automatic stage watchdog")
-    .unwrap_err();
-    assert_eq!(e.details.unwrap()["reduce_requests"], 1);
-    assert_eq!(f.path().await, before);
-    assert_eq!(lines(&log), 2);
-    finish(f, server).await;
 }
 
 #[tokio::test]
@@ -473,19 +220,21 @@ async fn bounded_summary_override_and_unicode_character_count_and_nonshrinking_r
 }
 
 #[tokio::test]
-async fn default_map_budget_allows_more_than_sixty_four_parts() {
+async fn large_explicit_range_is_sent_as_one_summary_request() {
     let root = tempfile::tempdir().unwrap();
     let log = root.path().join("requests.jsonl");
-    let mut responses = vec!["part".into(); 65];
-    responses.push("Final state; exact sources retained".into());
-    let (f, server) = setup(responses, &log).await;
+    let (f, server) = setup(vec!["Final state; exact sources retained".into()], &log).await;
     for i in 0..65 {
         f.text(&format!("n{i}"), &"x".repeat(63_000)).await;
     }
     let result = edit(&f, &args("n64")).await.unwrap();
-    assert_eq!(result.compact.model_requests, Some(66));
-    assert_eq!(lines(&log), 66);
-    assert_eq!(result.compact.created_parts, 65);
+    assert_eq!(result.compact.model_requests, Some(1));
+    assert_eq!(lines(&log), 1);
+    let request: Value = serde_json::from_str(&std::fs::read_to_string(&log).unwrap()).unwrap();
+    let prompt = request["input"][1]["content"][0]["text"].as_str().unwrap();
+    for i in [0, 32, 64] {
+        assert!(prompt.contains(&format!("n{i}:")));
+    }
     assert!(result.after_characters < result.before_characters);
     finish(f, server).await;
 }

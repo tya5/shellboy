@@ -204,7 +204,7 @@ mod tests {
         attempt(
             "a1",
             "2026-11-01T00:09:30Z",
-            json!({"reason":"proactive_threshold","outcome":"adopted","trigger":{"auto_at_tokens":200000,"input_tokens":205000},"summary":{"summary_node_id":"sum","source_nodes":412,"summary_characters":31000,"created_parts":1,"reused_parts":0}}),
+            json!({"reason":"proactive_threshold","outcome":"adopted","trigger":{"auto_at_tokens":200000,"input_tokens":205000},"summary":{"summary_node_id":"sum","source_nodes":412,"summary_characters":31000,"model_requests":1}}),
         );
         attempt(
             "a2",

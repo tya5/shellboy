@@ -272,9 +272,8 @@ async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoptio
 }
 
 #[tokio::test]
-async fn explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_character_partitioning()
-{
-    let (fixture, mut requests, _release, server) = configured_fixture(3, false).await;
+async fn explicit_tool_span_summary_sends_complete_groups_in_one_request() {
+    let (fixture, mut requests, _release, server) = configured_fixture(1, false).await;
     fixture.text("before", "keep prefix").await;
     fixture.db.call(|db| {
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
@@ -303,22 +302,21 @@ async fn explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_chara
         )
         .await
         .unwrap();
-    assert_eq!(result.compact.created_parts, 2);
+    assert_eq!(result.compact.model_requests, Some(1));
     assert_eq!(result.compact.source_nodes, 4);
     let summary = result.compact.summary_node_id.unwrap();
     assert_eq!(
         fixture.path().await,
         vec!["before".to_owned(), summary, "after".into()]
     );
+    let request = requests.recv().await.unwrap();
+    let text = request["input"][1]["content"][0]["text"].as_str().unwrap();
     for group in ["g-a", "g-b"] {
-        let request = requests.recv().await.unwrap();
-        let text = request["input"][1]["content"][0]["text"].as_str().unwrap();
         assert!(
             text.contains(&format!("{group}-call")) && text.contains(&format!("{group}-result"))
         );
-        assert!(text.chars().count() < SEGMENT_CHARS);
     }
-    assert_eq!(raw_parts(&fixture).await, 3);
+    assert_eq!(raw_parts(&fixture).await, 0);
     assert_eq!(
         crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: explicit_tool_span_summary_reuses_whole_group_sixty_four_thousand_character_partitioning", server)
             .await
@@ -519,7 +517,6 @@ async fn context_trim_summary_projection_does_not_change_exact_restore_or_marker
                 .count()
                 < 4096
         );
-        assert!(segments(&snapshot.groups, snapshot.epoch, SEGMENT_CHARS).is_ok());
         assert_eq!(saved_context_trim_marker(&fixture, &marker).await, original);
         fixture
             .compactor

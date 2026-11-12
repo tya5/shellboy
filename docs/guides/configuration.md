@@ -307,8 +307,6 @@ api_key_env = "SHELLBOY_PROXY_API_KEY"
 # response_retry_partial = true
 # auto_trim_on_disconnect = true
 # auto_at_tokens = 200000   # overrides [compaction] auto_at_tokens; 0 disables
-# segment_chars = 64000     # overrides [compaction] segment_chars (2000..1000000)
-# reduce_rounds = 4         # overrides [compaction] reduce_rounds (1..16)
 
 # Optional. Specify both fields if enabled.
 # [embedding]
@@ -681,8 +679,6 @@ Byte values are integers. KiB/MiB/GiB below mean 1024/1048576/1073741824 bytes; 
 | `connections.<name>` | `prompt_caching=true` | Shellboy-placed cache markers (`anthropic_messages` only; nothing new for other dialects); `false` sends none |
 | `connections.<name>` | `response_header_timeout_ms=120000`, `stream_idle_timeout_ms=600000`, `request_timeout_ms=60000` | Positive Responses header deadline; post-header idle (0 disables); nonstream total deadline (minimum 1000ms) |
 | `connections.<name>` | `auto_at_tokens` = unset (uses `[compaction]`) | Per-connection proactive compaction threshold; 0 disables |
-| `connections.<name>` | `segment_chars`, `reduce_rounds` = unset (uses `[compaction]`) | Per-connection summary part size (2000..1000000 characters) and maximum reduce rounds (1..16) |
-| `compaction` | `segment_chars=64000`, `reduce_rounds=4` | Original characters per summary part (one map request each; also the reduce packing size) and maximum reduce rounds before a still-too-long summary is rejected |
 | `compaction` | `auto_at_tokens=200000` | Proactive compaction when the last reported input reaches this; 0 disables |
 | `connections.<name>` | `auto_trim_on_disconnect=true` | API-free maximum reduction from the second eligible consecutive failure; no preflight |
 | `connections.<name>` | `response_max_retries=8`, `response_retry_max_delay_ms=60000`, `response_retry_partial=true` | Consecutive temporary conversation failure retries (0–20, 0 disables), backoff cap (1–300000ms), and retry after partial reception |
@@ -789,8 +785,6 @@ These prompts are not a guarantee of factual correctness; inspect sources when n
 [compaction]
 summary_max_chars = 20000
 summary_max_percent = 5
-summary_map_max_requests = 128
-summary_reduce_max_requests = 16
 ```
 
 Without this section, both limits above apply. In a present section, specify
@@ -808,21 +802,17 @@ and inspect its resolved values in `result.compaction`, then restart the owner
 to apply changed settings (the proactive threshold can also be changed per Thread
 without a restart; see below). Checking still uses only the model catalog, not a chat.
 
-Map and reduce have independent request budgets: `summary_map_max_requests`
-(default 128) and `summary_reduce_max_requests` (default 16), each in 1..4096.
-Before sending any model request, count the known uncached map segments. If they
-exceed the map budget, refuse with total/uncached/cached segment counts and a hint
-to narrow the range or raise the map budget. Valid cached segments consume no
-map requests, and changing an output-size limit does not change map cache keys.
-Unexpected provider context-limit splits consume the remaining map attempt budget.
-Reduce still has at most four rounds and its own request budget. A section with
-only request-budget settings uses the default 20,000-character/5% size limits. Over-limit summaries are reduced more
-strongly, never truncated to fit. On failure, no replacement is adopted; inspect
-`source_characters`, `summary_characters`, `summary_limit` and `model_requests`
-in the error details. Successful downstream results expose these under `compact`
-in addition to before/after context sizes. Cached successful parts can be reused
-on explicit retry, so model_requests counts requests actually made this time.
-Automatic failure stage 2 and argument-free `compact` use the same bounded
+Closed, manual and active-Turn summary requests use one typed request and one
+transactional adoption path. No map/reduce request budgets, segment-size settings,
+or reduce-round settings are supported. `config check` keeps rejecting unknown
+keys; configurations that still contain retired keys must remove them. A successful
+response that exceeds its output limit or fails the shrink guard is not adopted.
+On failure, inspect `source_characters`, `summary_characters`, `summary_limit` and
+`model_requests` in the error details. Successful results expose these under
+`compact` alongside before/after context sizes. Existing source history is retained
+and restorable. Startup migration 43 archives per-Thread retired segment/reduce
+values for audit, then removes those columns from the runtime schema; migration
+40–42 are unchanged. Proactive failure stage 2 and argument-free `compact` use the same
 summarizer. An over-limit automatic summary is not adopted; existing #50 recovery
 handling enters recovery wait. The prior spill stage may already be saved.
 
@@ -880,32 +870,14 @@ value wins over the configured ones, applies from the next request-boundary chec
 is inherited by child Threads; `thread get` shows it as `auto_compact_at` beside
 the value in use, `effective_auto_compact_at`.
 
-### Summary part size and reduce rounds
+### Retired summary controls
 
-```toml
-[compaction]
-segment_chars = 64000   # default; 2000..=1000000
-reduce_rounds = 4       # default; 1..=16
-
-[connections.proxy]
-segment_chars = 32000   # optional per-connection override
-reduce_rounds = 6       # optional per-connection override
-```
-
-`segment_chars` is how many characters of the original conversation go into one
-summary part (one model request) and the size reduce requests are packed to;
-`reduce_rounds` is the most reduce rounds before a summary that is still over its
-limit is rejected. The value in effect is the first one set of: the single summary's
-`compact --summary --segment-chars N --reduce-rounds N`, the Thread's
-`thread set --segment-chars N --reduce-rounds N` (`''` clears), the connection's,
-then `[compaction]`. Out-of-range values are rejected at every level. A conversation group larger than `segment_chars` cannot be split: the summary stops before any request, so with a small value one long message or unspilled tool result makes every automatic summary for that Thread fail until the value is raised (`compact --dry-run` shows the refusal before any cost). A smaller value also means more reduce requests and rounds, which can reach `summary_reduce_max_requests` or `reduce_rounds` before the map budget. Parts made at
-one size are not reused at another size except where the covered nodes coincide. Each
-`compact list` item records the values it used (`metrics.segment_chars`,
-`metrics.reduce_rounds`, with `metrics.summary_limit`), so a change can be compared
-with the earlier results; see the Agent Guide for the method. Thread values are
-copied by child Threads and forks and survive connection changes; `thread get`
-shows `segment_chars` / `reduce_rounds` beside `effective_segment_chars` /
-`effective_reduce_rounds`.
+The former `segment_chars`, `reduce_rounds`, `summary_map_max_requests` and
+`summary_reduce_max_requests` settings and their Thread/connection/CLI overrides
+are removed. They are not aliases and are not accepted. Configuration parsing
+remains strict: remove these keys from old files; unrelated unknown keys continue
+to be errors. Existing per-Thread values are copied by migration 43 to
+`thread_retired_summary_settings` and are never used by runtime summary behavior.
 
 ### Unknown shell arguments
 
