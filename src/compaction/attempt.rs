@@ -165,8 +165,8 @@ mod tests {
     #[test]
     fn actual_terminal_cas_manual_order_duplicate_and_rollback() {
         for manual_first in [true, false] {
-            let mut db = rusqlite::Connection::open_in_memory().unwrap();
-            db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE model_attempt(id TEXT PRIMARY KEY,error_json TEXT,state TEXT);INSERT INTO model_attempt VALUES('trial','{}','completed');").unwrap();
+            let mut db =
+                crate::control::test_support::terminal_attempt_fixture("trial", "completed");
             let start = super::super::a_state::scope_tx(&db, "t", "c", "m")
                 .unwrap()
                 .token();

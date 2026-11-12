@@ -37,6 +37,8 @@ pub(crate) mod reply;
 pub(crate) mod revisit;
 pub(crate) mod run_action;
 pub(crate) mod state;
+#[cfg(test)]
+mod test_support;
 mod wait;
 
 use crate::{

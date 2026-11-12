@@ -612,10 +612,7 @@ mod tests {
     use serde_json::json;
 
     fn fixture(state: &str) -> Connection {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE run(id TEXT PRIMARY KEY,state TEXT); CREATE TABLE turn(id TEXT PRIMARY KEY,run_id TEXT,state TEXT,generation INTEGER); CREATE TABLE model_attempt(id TEXT PRIMARY KEY,turn_id TEXT,state TEXT,generation INTEGER,error_json TEXT,response_id TEXT,usage_json TEXT,ended_at TEXT,input_manifest_json TEXT NOT NULL DEFAULT '{}'); INSERT INTO run VALUES('run','live'); INSERT INTO turn VALUES('turn','run','running',1);").unwrap();
-        db.execute("INSERT INTO model_attempt VALUES('attempt','turn',?1,1,'{\"original\":true}','original','{}','original','{}')", [state]).unwrap();
-        db
+        crate::control::test_support::terminal_attempt_fixture("attempt", state)
     }
     fn saved(db: &Connection) -> (String, String, String) {
         db.query_row(
