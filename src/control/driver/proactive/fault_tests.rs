@@ -45,6 +45,28 @@ impl Fault {
 /// threshold 200; only the separate first-known A comparison selects spill-only
 /// versus spill-then-summary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ObservationPhase {
+    AtCommittedCheckpoint,
+    AfterRejectedStageTransaction,
+    AfterShutdownAndRestart,
+}
+
+fn expected_outcome(fault: Fault, phase: ObservationPhase) -> &'static str {
+    match phase {
+        ObservationPhase::AtCommittedCheckpoint => "unknown",
+        ObservationPhase::AfterRejectedStageTransaction => "failed",
+        ObservationPhase::AfterShutdownAndRestart => match fault {
+            Fault::Cancellation => "adopted",
+            Fault::Persistent
+            | Fault::RejectFinal
+            | Fault::Storage
+            | Fault::RetiredWritesAbsent => "unknown",
+            Fault::Remeasurement | Fault::RejectFact => "failed",
+        },
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scenario {
     ClosedSpill,
     ClosedSummary,
@@ -240,6 +262,8 @@ async fn prepare_with_thread_override(
     // live with the ordinary tool continuation; the summary POST, if selected,
     // is separately required to carry tools=[].
     let reached = Arc::new(AtomicBool::new(false));
+    let checkpoint_reached = Arc::new(AtomicBool::new(false));
+    let release_checkpoint = Arc::new(tokio::sync::Notify::new());
     let stage = scenario.stage();
     *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
         stage,
@@ -253,6 +277,8 @@ async fn prepare_with_thread_override(
             Fault::RetiredWritesAbsent => 9,
         },
         reached: reached.clone(),
+        checkpoint_reached: checkpoint_reached.clone(),
+        release_checkpoint: release_checkpoint.clone(),
     });
     let kind = if scenario.summary() {
         "summary"
@@ -336,7 +362,11 @@ async fn prepare_with_thread_override(
             .send((200, answer("Short adopted summary.")))
             .unwrap();
     }
-    while !reached.load(Ordering::SeqCst) {
+    while if fault == Fault::RejectFact {
+        !reached.load(Ordering::SeqCst)
+    } else {
+        !checkpoint_reached.load(Ordering::SeqCst)
+    } {
         if let Ok(unexpected) = receive.try_recv() {
             let body = unexpected.body.clone();
             let trigger = control.store.database.call(move |db| {
@@ -367,6 +397,17 @@ async fn prepare_with_thread_override(
         }
         tokio::task::yield_now().await;
     }
+    if fault == Fault::RejectFact {
+        crate::test_watchdog::watchdog("rejected stage fact terminal record", async {
+            loop {
+                let outcome = control.store.database.call(|db| Ok(db.query_row(
+                    "SELECT json_extract(error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
+                    [], |row| row.get::<_, Option<String>>(0))?)).await.unwrap();
+                if outcome.as_deref() == Some("failed") { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+    }
     let saved = control.store.database.call(|db| Ok(db.query_row(
         "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
         [], |row| row.get::<_, String>(0))?)).await.unwrap();
@@ -375,7 +416,12 @@ async fn prepare_with_thread_override(
     // This read occurs at the committed stage checkpoint, before owner shutdown
     // can write terminal state. Every injected postcommit interruption is still
     // provisional at this exact lifecycle boundary.
-    let expected_outcome = "unknown";
+    let phase = if fault == Fault::RejectFact {
+        ObservationPhase::AfterRejectedStageTransaction
+    } else {
+        ObservationPhase::AtCommittedCheckpoint
+    };
+    let expected_outcome = expected_outcome(fault, phase);
     assert_eq!(
         saved["outcome"], expected_outcome,
         "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
@@ -391,23 +437,10 @@ async fn prepare_with_thread_override(
             "selected stage fact is persisted: {saved}"
         );
     }
-    // Persistent attempt-write denial deliberately makes orderly shutdown
-    // report unsaved source data; the record is inspected before close and then
-    // byte-compared after the independent owner restart in record_tests.
-    let shutdown = control.shutdown().await;
-    if matches!(
-        fault,
-        Fault::Persistent | Fault::RejectFinal | Fault::Remeasurement
-    ) {
-        assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
-    } else {
-        shutdown.unwrap();
-    }
     assert!(
         receive.try_recv().is_err(),
-        "no provider continuation after failure"
+        "no provider continuation before the selected checkpoint"
     );
-    assert!(!control.compactor.fail_remeasurement.load(Ordering::SeqCst));
     Fx {
         root,
         url,
@@ -418,6 +451,9 @@ async fn prepare_with_thread_override(
         receive,
         server,
         guard_before,
+        reached,
+        checkpoint_reached,
+        release_checkpoint,
     }
 }
 
@@ -431,6 +467,9 @@ struct Fx {
     receive: mpsc::Receiver<Incoming>,
     server: tokio::task::JoinHandle<()>,
     guard_before: Vec<(String, String)>,
+    reached: Arc<AtomicBool>,
+    checkpoint_reached: Arc<AtomicBool>,
+    release_checkpoint: Arc<tokio::sync::Notify>,
 }
 
 /// Persisted #180 guard and status rows, byte-exact.
@@ -456,7 +495,34 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
         mut receive,
         server,
         guard_before: _,
+        reached,
+        checkpoint_reached,
+        release_checkpoint,
     } = prepare_with_thread_override(fault, scenario, set_thread_percent).await;
+    if fault != Fault::RejectFact {
+        assert!(
+            checkpoint_reached.load(Ordering::SeqCst),
+            "postcommit barrier reached"
+        );
+        assert_boundary(&control, &target, scenario, fault, "checkpoint").await;
+        release_checkpoint.notify_one();
+    }
+    let shutdown = control.shutdown().await;
+    if matches!(
+        fault,
+        Fault::Persistent | Fault::RejectFinal | Fault::Remeasurement
+    ) {
+        assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
+    } else {
+        shutdown.unwrap();
+    }
+    if fault != Fault::RejectFact {
+        assert!(
+            reached.load(Ordering::SeqCst),
+            "fault hook actually reached its intended write/operation"
+        );
+    }
+    assert!(!control.compactor.fail_remeasurement.load(Ordering::SeqCst));
     assert_boundary(&control, &target, scenario, fault, "shutdown").await;
     control
         .store
@@ -734,6 +800,10 @@ pub(super) async fn checkpoint(
     }
     if !matches!(injection.kind, 6..=8) {
         injection.reached.store(true, Ordering::SeqCst);
+    }
+    if injection.kind != 8 {
+        injection.checkpoint_reached.store(true, Ordering::SeqCst);
+        injection.release_checkpoint.notified().await;
     }
     result
 }

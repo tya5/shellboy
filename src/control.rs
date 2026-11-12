@@ -117,6 +117,8 @@ struct AutomaticFault {
     stage: &'static str,
     kind: u8,
     reached: Arc<AtomicBool>,
+    checkpoint_reached: Arc<AtomicBool>,
+    release_checkpoint: Arc<tokio::sync::Notify>,
 }
 
 pub struct Control {

@@ -87,7 +87,19 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         mut receive,
         server,
         guard_before,
+        reached,
+        checkpoint_reached,
+        release_checkpoint,
     } = prepare(fault, scenario).await;
+    if fault != Fault::RejectFact {
+        crate::test_watchdog::watchdog("record boundary postcommit barrier", async {
+            while !checkpoint_reached.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
     let live = assert_record(
         &control,
         &target,
@@ -98,6 +110,30 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         true,
     )
     .await;
+    if fault != Fault::RejectFact {
+        assert!(checkpoint_reached.load(Ordering::SeqCst));
+        assert_boundary(&control, &target, scenario, fault, "checkpoint").await;
+        release_checkpoint.notify_one();
+    }
+    let shutdown = control.shutdown().await;
+    if matches!(
+        fault,
+        Fault::Persistent | Fault::RejectFinal | Fault::Remeasurement
+    ) {
+        assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
+    } else {
+        shutdown.unwrap();
+    }
+    if fault != Fault::RejectFact {
+        assert!(
+            reached.load(Ordering::SeqCst),
+            "intended injector reached before shutdown"
+        );
+    }
+    assert!(
+        receive.try_recv().is_err(),
+        "no extra provider POST after checkpoint release and shutdown"
+    );
     drop_fault_triggers(&control).await;
     drop(control);
     owner.shutdown().await.unwrap();
@@ -284,13 +320,16 @@ async fn assert_record(
     }
     // This record is read after shutdown/reopen, so terminal writers that
     // succeeded are reflected; final-record write denials remain provisional.
-    let outcome = match fault {
-        Fault::Cancellation => "adopted",
-        Fault::Persistent | Fault::RejectFinal | Fault::Storage | Fault::RetiredWritesAbsent => {
-            "unknown"
+    let phase = if live {
+        if fault == Fault::RejectFact {
+            ObservationPhase::AfterRejectedStageTransaction
+        } else {
+            ObservationPhase::AtCommittedCheckpoint
         }
-        Fault::Remeasurement | Fault::RejectFact => "failed",
+    } else {
+        ObservationPhase::AfterShutdownAndRestart
     };
+    let outcome = expected_outcome(fault, phase);
     assert_eq!(record["outcome"], outcome, "{fault:?} {stage} {record}");
     assert_eq!(
         record["provisional"].as_bool().unwrap_or(false),
@@ -590,6 +629,14 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         stage,
         kind: if fault == Fault::Persistent { 4 } else { 1 },
         reached: reached.clone(),
+        checkpoint_reached: Arc::new(AtomicBool::new(false)),
+        release_checkpoint: Arc::new({
+            let notify = tokio::sync::Notify::new();
+            // This standalone retry-stage test consumes its own post-commit
+            // failure before the test reads the attempt record below.
+            notify.notify_one();
+            notify
+        }),
     });
     let slot = DriverSlot {
         id: "site".into(),
