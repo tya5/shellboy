@@ -777,54 +777,6 @@ impl Compactor {
         .map_err(|error| usage::annotate(error, ledger.usage()))
     }
     #[cfg(test)]
-    pub(crate) async fn summarize_target_active(
-        &self,
-        thread: &str,
-        target: u64,
-        cancel: CancellationToken,
-    ) -> Result<(CompactResult, u64), ApiError> {
-        self.summarize_target_active_guarded(thread, target, cancel, None, None)
-            .await
-    }
-    pub(crate) async fn summarize_target_active_guarded(
-        &self,
-        thread: &str,
-        target: u64,
-        cancel: CancellationToken,
-        boundary: Option<&mut boundary::Boundary<'_>>,
-        automatic: Option<AutomaticStage>,
-    ) -> Result<(CompactResult, u64), ApiError> {
-        let snapshot = self.snapshot(thread, true).await?;
-        let Some((range, shortfall)) =
-            policy::target_active_range(&snapshot, target, &self.config.compaction)
-        else {
-            return Ok((
-                CompactResult {
-                    no_target: true,
-                    ..Default::default()
-                },
-                target,
-            ));
-        };
-        let mut ledger = usage::UsageLedger::new(&snapshot);
-        let policy = self.policy_for(&snapshot);
-        let result = self
-            .summarize_recorded(
-                snapshot,
-                range,
-                cancel,
-                policy,
-                &mut ledger,
-                None,
-                true,
-                boundary,
-                automatic,
-            )
-            .await
-            .map_err(|error| usage::annotate(error, ledger.usage()))?;
-        Ok((result, shortfall))
-    }
-    /// Exact replay projection, used only to measure a completed local edit.
     pub(crate) async fn proactive_history_characters(&self, thread: &str) -> Result<u64, ApiError> {
         #[cfg(test)]
         if self
@@ -869,34 +821,6 @@ impl Compactor {
         self.summarize_snapshot(snapshot, range, cancel, boundary, automatic)
             .await
     }
-    pub(crate) async fn summarize_target_prefix_guarded(
-        &self,
-        thread: &str,
-        target: u64,
-        cancel: CancellationToken,
-        boundary: Option<&mut boundary::Boundary<'_>>,
-        automatic: Option<AutomaticStage>,
-    ) -> Result<(CompactResult, u64), ApiError> {
-        let snapshot = self.snapshot(thread, true).await?;
-        let Some((range, shortfall)) =
-            policy::target_prefix(&snapshot, target, &self.config.compaction)
-        else {
-            return Ok((
-                CompactResult {
-                    no_target: true,
-                    ..Default::default()
-                },
-                target,
-            ));
-        };
-        let result = self
-            .summarize_snapshot(snapshot, range, cancel, boundary, automatic)
-            .await?;
-        Ok((result, shortfall))
-    }
-    /// #182: whether the provider tool loop is open on the selected path (the
-    /// latest assistant output requested a tool). Selective automatic edits
-    /// are deferred while it is.
     pub(crate) async fn tool_loop_open(&self, thread: &str) -> Result<bool, ApiError> {
         let thread = thread.to_owned();
         self.database
@@ -2909,7 +2833,7 @@ mod tests {
         }).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
         let (result, shortfall) = compactor
-            .summarize_target_active("t", 4_000, CancellationToken::new())
+            .summarize_active_turn("t", CancellationToken::new())
             .await
             .unwrap();
         assert!(!result.no_target);
