@@ -656,7 +656,7 @@ async fn owner_pid_and_owner_group_death_close_independent_lifelines() {
                         .await
                         .unwrap()
                         .expect("fixture exited before ready");
-                    if let Some(json) = line.strip_prefix("LIFELINES_READY ") {
+                    if let Some(json) = line.split_once("LIFELINES_READY ").map(|(_, rest)| rest) {
                         break serde_json::from_str(json).unwrap();
                     }
                 }

@@ -246,7 +246,10 @@ async fn summary_forecast_does_not_predict_a_refusal_and_makes_no_request_or_ado
     // request, so the forecast reports the single request and stays silent.
     assert!(p["predicted_failure"].is_null(), "{p}");
     assert_eq!(p["summary"]["single_request"], true);
-    assert_eq!(p["summary"]["model_output_and_provider_errors_unknown"], true);
+    assert_eq!(
+        p["summary"]["model_output_and_provider_errors_unknown"],
+        true
+    );
     assert_eq!(p["target_nodes"]["count"], 1);
     assert!(p["after_characters"].is_null());
     assert_eq!(counts(&f).await, before);

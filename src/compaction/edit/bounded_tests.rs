@@ -157,12 +157,13 @@ async fn oversized_but_shrinking_summary_is_adopted_once_and_records_the_exceede
     assert_eq!(lines(&log), 1);
     assert_ne!(f.path().await, before);
     let id = f.path().await[0].clone();
-    let payload = f
-        .db
-        .call(move |db| {
-            Ok(db.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| {
-                r.get::<_, String>(0)
-            })?)
+    let payload =
+        f.db.call(move |db| {
+            Ok(
+                db.query_row("SELECT payload_json FROM node WHERE id=?1", [id], |r| {
+                    r.get::<_, String>(0)
+                })?,
+            )
         })
         .await
         .unwrap();

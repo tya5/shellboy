@@ -1595,8 +1595,11 @@ async fn issue_160_auto_compaction_detached_attachment_and_retry() {
             .as_str()
             .unwrap()
             .to_owned();
+        // #303 §2.6/§7: this first known report is #A. Above the target
+        // (threshold 100 x 20% = 20) the automatic attempt summarizes;
+        // at or below it the attempt would only spill.
         let mut reply = answer("first answer");
-        reply["usage"] = json!({"input_tokens":10,"output_tokens":1});
+        reply["usage"] = json!({"input_tokens":50,"output_tokens":1});
         first.reply.send((200, reply)).unwrap();
         settled(&control, &thread).await;
         if mode == "removed" {

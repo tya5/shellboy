@@ -584,7 +584,19 @@ async fn overflow_without_any_target_in_an_open_tool_loop_recovers_without_resen
     // no active-Turn target and no earlier Turn: no summary and no unchanged
     // resend; the Turn waits for recovery.
     pending.reply.send((400, overflow)).unwrap();
-    settled(&control, &thread).await;
+    // #303 §10: the final-stage summary range stops before the last group, so
+    // with only the latest round left there is no summary target at all.
+    tokio::select! {
+        _ = settled(&control, &thread) => {}
+        next = receive.recv() => {
+            let next = next.unwrap();
+            panic!(
+                "§10: no request may follow when only the latest round remains; got tools={} input={}",
+                next.body["tools"].as_array().map_or(0, Vec::len),
+                next.body["input"].to_string().chars().take(600).collect::<String>()
+            );
+        }
+    }
     control
         .store
         .database
@@ -2683,8 +2695,8 @@ async fn failed_response_usage_is_saved_without_provider_appendices_or_audit_los
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend() {
-    crate::test_watchdog::watchdog("tests/runtime_features.rs: automatic_summary_limit_failure_enters_recovery_without_adoption_or_resend",async {
+async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_resend() {
+    crate::test_watchdog::watchdog("tests/runtime_features.rs: automatic_nonshrinking_summary_enters_recovery_without_adoption_or_resend",async {
         let root=tempfile::tempdir().unwrap();let (url,mut receive,server)=proxy().await;
         let config=root.path().join("config.toml");
         std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=8\n[compaction]\nsummary_max_chars=2000\n")).unwrap();
@@ -2705,12 +2717,13 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
         }).await.unwrap();
         pending.reply.send((400,json!({"error":{"code":"context_length_exceeded","message":"fixture pressure"}}))).unwrap();
         let log=root.path().join("summary-requests.jsonl");std::fs::write(&log,"").unwrap();
-        for _ in 0..2 {
-            let request=receive.recv().await.unwrap();assert_eq!(request.body["tools"],json!([]));
-            use std::io::Write;
-            writeln!(std::fs::OpenOptions::new().append(true).open(&log).unwrap(),"{}",request.body).unwrap();
-            request.reply.send((200,answer(&"x".repeat(2001)))).unwrap();
-        }
+        // #303 §4.2/§4.3: one summary request; an output that does not shrink
+        // the source (here far over both the cap and the source) is rejected
+        // deterministically, with no second request and no adoption.
+        let request=receive.recv().await.unwrap();assert_eq!(request.body["tools"],json!([]));
+        use std::io::Write;
+        writeln!(std::fs::OpenOptions::new().append(true).open(&log).unwrap(),"{}",request.body).unwrap();
+        request.reply.send((200,answer(&"x".repeat(20_000)))).unwrap();
         loop {
             let ready=control.store.database.call(|db|Ok(db.query_row("SELECT EXISTS(SELECT 1 FROM turn WHERE state='recovery_wait')",[],|r|r.get::<_,bool>(0))?)).await.unwrap();
             if ready {break;}tokio::task::yield_now().await;
@@ -2720,9 +2733,10 @@ async fn automatic_summary_limit_failure_enters_recovery_without_adoption_or_res
             assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,3);
             let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
             let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
-            assert_eq!(facts["summary_limit"],2000);assert_eq!(facts["summary_usage"]["requests"],1);Ok(())
+            assert_eq!(facts["compaction_discard_reason"],"summary_not_shrinking","{value:#}");assert_eq!(facts["summary_usage"]["requests"],1,"{value:#}");Ok(())
         }).await.unwrap();
-        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),2);
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
+        assert!(receive.try_recv().is_err(),"no resend and no second summary request");
         control.shutdown().await.unwrap();owner.shutdown().await.unwrap();server.abort();
     }).await.expect("automatic summary recovery fixture watchdog");
 }
@@ -3505,6 +3519,12 @@ async fn proactive_active_spill_then_cancelled_summary_preserves_adoption() {
     proactive_partial_spill_fixture(true, Some(true)).await;
 }
 
+/// #303 automatic attempt over a Turn with two large older tool groups.
+/// `oversized` adds a large protected request message; `cancel_active` stops
+/// the Run at the summary HTTP boundary of the closed (`Some(false)`) or the
+/// active (`Some(true)`) region. The first known provider report (#A, §7) is
+/// 100 for the summary branch and, for the spill-only variant, exactly the
+/// target 40 (`#A <= target`, §2.6).
 async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<bool>) {
     crate::test_watchdog::watchdog("proactive partial spill adoption", async move {
         let root = tempfile::tempdir().unwrap();
@@ -3514,6 +3534,8 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         } else {
             "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
         };
+        // Threshold 200 x default 20% = target 40.
+        let first_known_a = if oversized { 100 } else { 40 };
         let owner = proactive_owner(root.path(), &url, options).await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
@@ -3528,7 +3550,7 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         let large_command = if cfg!(windows) { "'0' * 50000" } else { "printf '%050000d' 0" };
         for index in 0..2 {
             let current = incoming(&control, &mut receive).await;
-            current.reply.send((200, json!({"id":format!("large-{index}"),"status":"completed", "usage":{"input_tokens":100,"output_tokens":1}, "output":[{
+            current.reply.send((200, json!({"id":format!("large-{index}"),"status":"completed", "usage":{"input_tokens":first_known_a,"output_tokens":1}, "output":[{
                 "type":"function_call","call_id":format!("large-{index}"),"name":"shell",
                 "arguments":json!({"command":large_command}).to_string()
             }]}))).unwrap();
@@ -3538,17 +3560,25 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         assert!(before_size > 30_000, "fixture must contain both large tool outputs: {before_size}");
         // Active cancellation triggers at this tool boundary; the other cases
         // report the threshold on the final answer for a closed-Turn attempt.
-        before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { 100 }))).unwrap();
+        before.reply.send((200, tool_response(2, if cancel_active == Some(true) { 200 } else { first_known_a }))).unwrap();
         if cancel_active != Some(true) {
             incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("long turn done", 200))).unwrap();
             settled(&control, &target).await;
             send(&control, &target, "next turn").await;
         }
         let summary = incoming(&control, &mut receive).await;
+        let attempt_record = |control: &Arc<Control>, attempt: String| {
+            let control = control.clone();
+            async move {
+                let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
+                serde_json::from_str::<Value>(&record).unwrap()
+            }
+        };
         if let Some(active) = cancel_active {
             assert_eq!(summary.body["tools"], json!([]), "cancel at the summary HTTP boundary, after spill commit");
             let details = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await;
             let run = details["run_id"].as_str().unwrap().to_owned();
+            // §3 summary branch: spill inside the selected region, then summarize it.
             let stage = if active { "active_spill" } else { "closed_spill" };
             let summary_stage = if active { "active_summary" } else { "closed_summary" };
             let path_target = target.clone();
@@ -3570,16 +3600,19 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 }
                 tokio::task::yield_now().await;
             };
-            assert_eq!(record["outcome"], "adopted", "{record:#?}");
-            assert_eq!(record["cancelled"], true);
-            assert_eq!(record["summary"]["summary_rejected"], true);
-            assert_eq!(record["summary_error"]["code"], "io_failed");
-            assert!(record["summary_error"]["message"].as_str().unwrap().to_lowercase().contains("cancel"));
-            assert_eq!(record["stages"][stage]["outcome"], "adopted");
-            assert_eq!(record["stages"][summary_stage]["outcome"], "cancelled");
+            // The attempt outcome is the cancelled summary; the spill committed
+            // before it stays adopted with its own stage fact (#226, §5).
+            assert_eq!(record["outcome"], "cancelled", "{record:#?}");
+            assert_eq!(record["trigger"]["a_input_tokens"], first_known_a);
+            assert_eq!(record["trigger"]["target_tokens"], 40);
+            assert!(record["error"]["message"].as_str().unwrap().to_lowercase().contains("cancel"), "{record:#?}");
+            assert_eq!(record["discard"]["phase"], summary_stage, "{record:#?}");
+            assert_eq!(record["discard"]["reason"], "cancelled", "{record:#?}");
+            assert_eq!(record["committed_stages"][stage]["spilled_groups"], adopted_ids.len(), "{record:#?}");
+            assert!(record["committed_stages"][summary_stage].is_null(), "{record:#?}");
+            assert_eq!(record["committed_stages"].as_object().unwrap().len(), 1, "{record:#?}");
+            assert_eq!(record["summary"]["summary_rejected"], true, "{record:#?}");
             assert_eq!(record["summary"]["spilled_groups"], adopted_ids.len());
-            assert_eq!(record["spill_counts"]["spilled"], adopted_ids.len());
-            assert_eq!(record["stages"][stage]["adopted_groups"], adopted_ids.len());
             assert_eq!(record["summary"]["source_nodes"], record["summary"]["original_node_ids"].as_array().unwrap().len());
             assert!(record["summary"]["source_nodes"].as_u64().unwrap() > 0);
             let path_target = target.clone();
@@ -3589,65 +3622,69 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 assert!(!path.iter().any(|(_, kind)| kind == "summary"));
                 let sources = db.prepare("SELECT s.source_node_id FROM thread_path p JOIN replacement r ON r.output_node_id=p.node_id JOIN replacement_source s ON s.replacement_id=r.id WHERE p.thread_id=?1 AND r.format_version='spill-v1' ORDER BY p.ordinal,s.ordinal")?.query_map([&path_target], |row| row.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
                 assert_eq!(record["summary"]["original_node_ids"], json!(sources), "audit provenance must match only the adopted spill sources");
-                for kind in ["automatic_target", "automatic_guard"] {
+                // §9: no pending target, guard or activity witness is left behind.
+                for kind in ["automatic_target", "automatic_guard", "automatic_active"] {
                     let key = format!("compact.{kind}.{path_target}");
-                    let value: String = db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
-                    let saved: Value = serde_json::from_str(&value).unwrap();
-                    assert!(saved.is_object());
-                    if kind == "automatic_target" {
-                        assert_eq!(saved["target_tokens"], 160);
-                        assert_eq!(saved["scope"], if active { "active_turn" } else { "prefix" });
-                        assert!(saved["verified"].is_null(), "retain verification for the next fresh provider report");
-                    }
+                    let left: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
+                    assert_eq!(left, 0, "{kind}");
                 }
-                let active: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [format!("compact.automatic_active.{path_target}")], |row| row.get(0))?;
-                assert_eq!(active, 0);
+                // §6.4: a cancellation is transient, never a deterministic failure record.
+                for region in ["closed", "active"] {
+                    let key = format!("compact.deterministic_range_failure.{region}.{path_target}");
+                    let left: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
+                    assert_eq!(left, 0, "{region}");
+                }
                 Ok(())
             }).await.unwrap();
             settled(&control, &target).await;
             assert_eq!(request(&control, Command::RunGet(RunTarget { run_id: run })).await["state"], "stopped");
             let _ = summary.reply.send((200, answer("late cancelled summary")));
             assert!(receive.try_recv().is_err(), "cancel must not continue to a conversation request");
+            // §2.1/§2.3: the triggering report is consumed and pre-spill usage is
+            // stale, so the resumed Turn starts with an ordinary request.
             send(&control, &target, "resume after cancelled summary").await;
             let resumed = incoming(&control, &mut receive).await;
             assert_ne!(resumed.body["tools"], json!([]), "no summary retry from stale pre-spill usage");
-            resumed.reply.send((200, answer_with_usage("fresh post-spill measurement", 100))).unwrap();
+            resumed.reply.send((200, answer_with_usage("fresh post-spill measurement", 200))).unwrap();
             settled(&control, &target).await;
+            // §6.4: the next eligible fresh report retries the cancelled summary.
+            // #A is the first report after the cancelled attempt (200 > 40).
             send(&control, &target, "verify partial adoption").await;
+            let retried = incoming(&control, &mut receive).await;
+            assert_eq!(retried.body["tools"], json!([]), "a cancelled summary is retried on the next eligible report");
+            retried.reply.send((200, answer("## Goal\nResumed work summarized"))).unwrap();
             let verified = incoming(&control, &mut receive).await;
             assert_ne!(verified.body["tools"], json!([]));
-            let path_target = target.clone();
-            control.store.database.call(move |db| {
-                let verification: String = db.query_row("SELECT json_extract(a.error_json,'$.automatic_trim_attempt.target_verification') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.cancelled')=1", [&path_target], |row| row.get(0))?;
-                let verification: Value = serde_json::from_str(&verification).unwrap();
-                assert_eq!(verification["outcome"], "met");
-                assert_eq!(verification["input_tokens"], 100);
-                assert_eq!(verification["target_tokens"], 160);
-                let pending: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [format!("compact.automatic_target.{path_target}")], |row| row.get(0))?;
-                assert_eq!(pending, 0, "the resumed fresh measurement consumed the saved target");
-                Ok(())
-            }).await.unwrap();
             verified.reply.send((200, answer_with_usage("verified", 100))).unwrap();
             settled(&control, &target).await;
+            let events = proactive_events(&control, &target).await;
+            assert_eq!(events.len(), 2, "{events:#?}");
+            let retry = events.iter().find(|event| event["state"] == "adopted").expect("adopted retry");
+            assert!(retry["metrics"]["summary_node_id"].is_string(), "{retry:#?}");
+            let retry_record = attempt_record(&control, retry["attempt_id"].as_str().unwrap().to_owned()).await;
+            assert_eq!(retry_record["trigger"]["a_input_tokens"], 200, "{retry_record:#?}");
+            assert!(retry_record["committed_stages"]["closed_summary"].is_object(), "{retry_record:#?}");
+            let path_target = target.clone();
+            let spills = control.store.database.call(move |db| Ok(db.query_row("SELECT count(*) FROM node WHERE kind='spill' AND id IN (SELECT r.output_node_id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1)", [path_target], |r| r.get::<_, i64>(0))?)).await.unwrap();
+            assert_eq!(spills, 2, "the spill adopted before cancellation is kept, not redone");
             control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
             return;
         }
         if !oversized {
-            assert_ne!(summary.body["tools"], json!([]), "spill alone meets the calibrated target; no summary request");
+            // §2.6 #A <= target: spill only, closed region only (§3).
+            assert_ne!(summary.body["tools"], json!([]), "#A at the target spills only; no summary request");
             let after_size = summary.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
             assert!(after_size < before_size, "spill must shrink replay: {before_size} -> {after_size}");
             let events = proactive_events(&control, &target).await;
             assert_eq!(events.len(), 1, "{events:#?}");
             assert_eq!(events[0]["state"], "adopted");
-            assert!(events[0]["metrics"]["spilled_groups"].as_u64().unwrap() > 0);
-            let attempt = events[0]["attempt_id"].as_str().unwrap().to_owned();
-            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
-            let record: Value = serde_json::from_str(&record).unwrap();
-            assert_eq!(record["stages"]["closed_spill"]["outcome"], "adopted");
-            assert_eq!(record["stages"]["closed_spill"]["remaining_after"], 0);
-            assert_eq!(record["stages"]["closed_summary"]["skipped"], "target_met");
-            assert_eq!(record["stages"]["active_spill"]["skipped"], "target_met");
-            assert_eq!(record["stages"]["active_summary"]["skipped"], "target_met");
+            assert_eq!(events[0]["metrics"]["spilled_groups"], 2, "{events:#?}");
+            assert!(events[0]["metrics"]["summary_node_id"].is_null(), "{events:#?}");
+            let record = attempt_record(&control, events[0]["attempt_id"].as_str().unwrap().to_owned()).await;
+            assert_eq!(record["trigger"]["a_input_tokens"], 40, "{record:#?}");
+            assert_eq!(record["trigger"]["target_tokens"], 40, "{record:#?}");
+            assert_eq!(record["committed_stages"]["closed_spill"]["spilled_groups"], 2, "{record:#?}");
+            assert_eq!(record["committed_stages"].as_object().unwrap().len(), 1, "only the closed spill stage: {record:#?}");
             summary.reply.send((200, answer("finished"))).unwrap();
             settled(&control, &target).await;
             control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
@@ -3656,12 +3693,12 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         assert_eq!(summary.body["tools"], json!([]));
         let first_summary_input = summary.body["input"].to_string();
         assert!(!first_summary_input.contains("large-0"), "earlier Turns first; the latest completed Turn stays");
-        // An empty summary is rejected without a reduce request.
+        // An empty summary is a deterministic failure (§6.3), with one request.
         let mut rejected = answer(" ");
         rejected["usage"] = json!({"input_tokens":321,"output_tokens":123,"total_tokens":444});
         summary.reply.send((200, rejected)).unwrap();
         let after = incoming(&control, &mut receive).await;
-        assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not a summary reduce request");
+        assert_ne!(after.body["tools"], json!([]), "the measured request must be an ordinary conversation request, not another summary request");
         let context = current_context(&control, &target).await;
         assert_current_context_once(&after.body, &context, "after proactive spill");
         let after_size = after.body["input"].as_array().unwrap().iter().filter_map(|item| item.get("output").and_then(Value::as_str)).map(str::len).sum::<usize>();
@@ -3675,41 +3712,36 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
         assert_eq!(first_events.len(), 1, "{first_events:#?}");
         assert_eq!(first_events[0]["metrics"]["summary_rejected"], true, "{first_events:#?}");
         assert_eq!(first_events[0]["metrics"]["summary_usage"]["requests"], 1);
-        if oversized {
-            // The oversized request exceeds the exact forecast bounds; #180
-            // re-evaluates a coverage-limited candidate on a new tool frontier,
-            // so this variant ends the Turn without one.
-            after.reply.send((200, answer("finished"))).unwrap();
-        } else {
-            after.reply.send((200, tool_response(3, 205))).unwrap();
-            let gated = incoming(&control, &mut receive).await;
-            assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
-            gated.reply.send((200, answer("finished"))).unwrap();
-        }
+        // A fresh report at the threshold in the same Turn: same closed range
+        // and settings, so the deterministic failure is not repeated (§6.3).
+        after.reply.send((200, tool_response(3, 205))).unwrap();
+        let gated = incoming(&control, &mut receive).await;
+        assert_ne!(gated.body["tools"], json!([]), "the same sources must not trigger another summary");
+        gated.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 1, "the rejected summary must not be reissued: {events:#?}");
-        let item = &events[0];
-        assert_eq!(item["state"], "adopted");
+        let item = events.iter().find(|event| event["attempt_id"] == first_events[0]["attempt_id"]).unwrap();
+        assert!(events.iter().all(|event| event["metrics"]["summary_usage"]["requests"].as_u64().unwrap_or(0) == 0 || event["attempt_id"] == item["attempt_id"]), "the rejected summary must not be reissued: {events:#?}");
         assert_eq!(item["metrics"]["summary_rejected"], true);
-        assert!(item["metrics"]["spilled_groups"].as_u64().unwrap() >= 2);
+        assert_eq!(item["metrics"]["spilled_groups"], 2, "{item:#?}");
         assert_eq!(item["metrics"]["summary_usage"]["input_tokens"]["known_sum"], 321);
         assert_eq!(item["metrics"]["summary_usage"]["output_tokens"]["known_sum"], 123);
-        let attempt_id = item["attempt_id"].as_str().unwrap().to_owned();
-        let saved: String = control.store.database.call(move |db| Ok(db.query_row(
-            "SELECT error_json FROM model_attempt WHERE id=?1", [attempt_id], |r| r.get(0)
-        )?)).await.unwrap();
-        let saved: Value = serde_json::from_str(&saved).unwrap();
-        assert!(saved["automatic_trim_attempt"]["summary_error"]["code"].is_string());
-        eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123");
+        let saved = attempt_record(&control, item["attempt_id"].as_str().unwrap().to_owned()).await;
+        assert_eq!(saved["outcome"], "failed", "{saved:#?}");
+        assert!(saved["error"]["code"].is_string(), "{saved:#?}");
+        assert_eq!(saved["committed_stages"]["closed_spill"]["spilled_groups"], 2, "{saved:#?}");
+        assert!(saved["committed_stages"]["closed_summary"].is_null(), "{saved:#?}");
+        eprintln!("partial-spill replay bytes {before_size} -> {after_size}; summary input=321 output=123; events={events:#?}");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
 }
 
-/// #182 order and shape: at the threshold the ordinary summary of earlier Turns
-/// runs first (its edit precedes kept output, so all earlier reasoning stops);
-/// when a fresh measurement is still at or above the threshold, the active-Turn
-/// summary replaces every tool round (③ summarized, ④ as text) while the
+/// #182 order and shape, #303 §4.1: at the threshold (#A = 100 > target 40)
+/// the closed summary of earlier Turns runs first (its edit precedes kept
+/// output, so all earlier reasoning stops); on the next fresh report at or
+/// above the threshold the closed region has no unsummarized node, so the
+/// active-Turn summary covers every tool round through the latest complete
+/// one (③ and ④ are summary input, ④ is also carried as text) while the
 /// prefix through the request stays item-for-item identical.
 #[tokio::test]
 async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
@@ -3766,8 +3798,10 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
             return;
         }
         let material = second.body["input"].to_string();
+        // §4.1: nothing unsafe precedes the latest complete tool group, so the
+        // range includes it; the summarizer sees the whole range.
         assert!(material.contains("STEP0") && material.contains("STEP2"), "③ is summary input");
-        assert!(!material.contains("STEP3"), "④ is carried as text, not summarized");
+        assert!(material.contains("STEP3"), "④ (latest complete group) is in the selected range");
         assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
         second.reply.send((200, answer("## Goal\nRun steps\n## Current state\nSTEP0-2 ran"))).unwrap();
         let after = incoming(&control, &mut receive).await;
@@ -3788,19 +3822,28 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         assert_eq!(events.len(), 2, "{events:#?}");
         let ids: Vec<String> = events.iter().map(|e| e["attempt_id"].as_str().unwrap().to_owned()).collect();
         let (records, executions): (Vec<String>, i64) = control.store.database.call(move |db| Ok((
-            ids.iter().map(|id| db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.midturn') FROM model_attempt WHERE id=?1", [id], |r| r.get(0))).collect::<Result<Vec<_>, _>>()?,
+            ids.iter().map(|id| db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.committed_stages') FROM model_attempt WHERE id=?1", [id], |r| r.get(0))).collect::<Result<Vec<_>, _>>()?,
             db.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get(0))?,
         ))).await.unwrap();
-        let mut records: Vec<Value> = records.iter().map(|r| serde_json::from_str(r).unwrap()).collect();
-        records.sort_by_key(|r| r.to_string());
-        assert_eq!(records, [json!({"scope":"active_turn"}), json!({"skipped":"prefix_first"})]);
+        // One summary operation per attempt (§4.1): closed first, then active.
+        let mut summarized: Vec<String> = records.iter().map(|r| {
+            let stages: Value = serde_json::from_str(r).unwrap();
+            let summaries: Vec<&String> = stages.as_object().unwrap().keys().filter(|stage| stage.ends_with("_summary")).collect();
+            assert_eq!(summaries.len(), 1, "{stages:#?}");
+            assert!(stages[summaries[0].as_str()]["summary_node_id"].is_string(), "{stages:#?}");
+            summaries[0].clone()
+        }).collect();
+        summarized.sort();
+        assert_eq!(summarized, ["active_summary", "closed_summary"]);
         assert_eq!(executions, 4, "no saved tool is executed again");
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
     }).await.unwrap();
 }
 
+/// #303 §2.6: a first known report (#A) equal to the target selects the
+/// spill-only branch: closed groups are spilled, no summary is requested.
 #[tokio::test]
-async fn proactive_spill_alone_meets_calibrated_target() {
+async fn proactive_first_known_a_at_target_spills_closed_groups_only() {
     proactive_partial_spill_fixture(false, None).await;
 }
 
@@ -3809,45 +3852,74 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
     proactive_partial_spill_fixture(true, None).await;
 }
 
-/// #248: with an oversized (coverage-limited) current Turn and tool calls whose
-/// short error output cannot shrink, every summary stage that fails is tried
-/// once in the Turn, however long the Turn keeps growing above the threshold.
+/// #248 / #303 §6.3: with an oversized current Turn and tool calls whose short
+/// error output cannot shrink, an empty closed summary is a deterministic
+/// failure. While the Turn keeps growing above the threshold, the closed range
+/// (its original endpoints) and the settings stay the same, so the failed
+/// summary is not requested again; the closed region keeps precedence (§4.1),
+/// so no active summary is attempted either.
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
-    let counts = growing_turn_with_failing_summaries(true, false, || (200, answer(" "))).await;
-    assert_eq!(
-        counts,
-        (1, 1, 2),
-        "empty summaries: closed, active, requests"
+    let (summaries, records) = ax_growing_turn_summary_requests(|| (200, answer(" "))).await;
+    assert_eq!(summaries, 1, "one closed summary request: {records:#?}");
+    let failed: Vec<&Value> = records
+        .iter()
+        .filter(|record| {
+            record["summary"]["summary_usage"]["requests"] == 1
+                || record["error"]["details"]["summary_usage"]["requests"] == 1
+        })
+        .collect();
+    assert_eq!(failed.len(), 1, "{records:#?}");
+    assert_eq!(failed[0]["outcome"], "failed", "{records:#?}");
+    assert!(
+        records.iter().all(|record| record["committed_stages"]
+            .as_object()
+            .is_none_or(|stages| stages.keys().all(|stage| !stage.ends_with("_summary")))),
+        "no summary adopted: {records:#?}"
     );
 }
 
-/// A provider 400 on every summary request is a non-cancelled failure too; it
-/// must not turn into one real request per tool round.
+/// #303 §6.4 / R12: a provider 400 that is neither a refusal nor a context
+/// rejection is transient, so it is retried on the next eligible report, but
+/// never more than once per reported value (§2.3): one summary request per
+/// fresh report at or above the threshold, never a hidden same-report repeat.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
-    let counts = growing_turn_with_failing_summaries(true, false, || {
+    let (summaries, records) = ax_growing_turn_summary_requests(|| {
         (
             400,
             json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
         )
     })
     .await;
-    assert!(
-        counts.0 <= 1 && counts.1 <= 1 && counts.2 <= 2,
-        "{counts:?}"
+    // Tool reports 2..=18 are at or above the threshold (200 + index).
+    let eligible_reports = (0..19).filter(|index| *index >= 2).count();
+    assert_eq!(summaries, eligible_reports, "{records:#?}");
+    assert_eq!(
+        records.len(),
+        eligible_reports,
+        "one attempt per report: {records:#?}"
     );
+    for record in &records {
+        let usage = if record["summary"].is_object() {
+            &record["summary"]["summary_usage"]
+        } else {
+            &record["error"]["details"]["summary_usage"]
+        };
+        assert_eq!(usage["requests"], 1, "{record:#?}");
+    }
 }
 
-/// Returns rejected closed summaries, rejected active summaries and summary
-/// (tool-free) requests over 16 rounds. Also checks that an explicit compact
-/// is not subject to the proactive block.
-async fn growing_turn_with_failing_summaries(
-    oversized: bool,
-    spilling: bool,
+/// #303 variant of the growing-Turn fixture: an oversized protected request,
+/// unknown-tool rounds whose short error output cannot shrink, the first
+/// known report (#A) 100 over target 40, then 17 reports at or above the
+/// threshold 200. Returns the summary (tool-free) request count and every
+/// proactive attempt record. An explicit compact afterwards is not subject
+/// to the automatic failure record.
+async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
-) -> (u32, u32, u32) {
-    crate::test_watchdog::watchdog("proactive rejected summary gate", async move {
+) -> (usize, Vec<Value>) {
+    crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let options = "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
@@ -3859,50 +3931,35 @@ async fn growing_turn_with_failing_summaries(
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, &"protected current ".repeat(if oversized {70_000}else{1})).await;
-        // An unknown tool name returns a short error, so no spill can shrink it.
-        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
+        send(&control, &target, &"protected current ".repeat(70_000)).await;
+        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"nope","arguments":"{}"}]});
         let mut summaries = 0;
         for index in 0..=19 {
-            let ordinary=loop {
-                let request=incoming(&control,&mut receive).await;
-                if request.body["tools"]!=json!([]) {break request;}
-                summaries+=1;
-                assert!(summaries<80,"unbounded automatic summary loop");
+            let ordinary = loop {
+                let request = incoming(&control, &mut receive).await;
+                if request.body["tools"] != json!([]) { break request; }
+                summaries += 1;
+                assert!(summaries < 80, "unbounded automatic summary loop");
                 request.reply.send(summary_reply()).unwrap();
             };
-            if index==19 { ordinary.reply.send((200,answer("finished"))).unwrap(); }
-            else { ordinary.reply.send((200,tool(index,if index<2 {100}else{200+index}))).unwrap(); }
+            if index == 19 { ordinary.reply.send((200, answer("finished"))).unwrap(); }
+            else { ordinary.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap(); }
         }
         settled(&control, &target).await;
-        let events = proactive_events(&control, &target).await;
-        let (mut closed, mut active) = (0, 0);
-        let mut met_spills=0;
-        for event in &events {
+        let mut records = Vec::new();
+        for event in proactive_events(&control, &target).await {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
             let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
-            let record: Value = serde_json::from_str(&record).unwrap();
-            for stage in ["closed_spill","active_spill"] { met_spills += (record["stages"][stage]["outcome"]=="adopted" && record["stages"][stage]["remaining_after"]==0) as u32; }
-            closed += (record["stages"]["closed_summary"]["outcome"] == "rejected") as u32;
-            active += (record["stages"]["active_summary"]["outcome"] == "rejected") as u32;
+            records.push(serde_json::from_str::<Value>(&record).unwrap());
         }
-        if spilling {assert!(met_spills>1,"fixture must repeatedly meet target through spill");}
-        eprintln!("known={} spilling={spilling} rejected closed={closed} active={active} summary_requests={summaries} met_spills={met_spills}",!oversized);
-        // A later attempt's stage record names the block (compact list).
-        let blocked = events.len() > 2 && {
-            let attempt = events[0]["attempt_id"].as_str().unwrap().to_owned();
-            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
-            let record: Value = serde_json::from_str(&record).unwrap();
-            record["stages"]["closed_summary"]["skipped"] == "blocked_by_earlier_rejection"
-        };
-        if oversized { assert!(blocked, "the stage record must say it was blocked: {events:#?}"); }
-        // The block is proactive-only: an explicit compact still issues a summary.
+        eprintln!("summary_requests={summaries} records={records:#?}");
+        // The failure record is automatic-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
         let explicit = incoming(&control, &mut receive).await;
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        (closed, active, summaries)
+        (summaries, records)
     }).await.unwrap()
 }
 
@@ -4044,24 +4101,22 @@ async fn proactive_threshold_does_not_fire_below_threshold_or_when_disabled() {
             proactive_events(&control, &thread).await.is_empty(),
             "{extra}"
         );
+        // #303 §2.2: below the threshold (or disabled) nothing happens: no
+        // attempt record on any report, so no #A boundary is consumed either.
+        let records: i64 = control
+            .store
+            .database
+            .call(|db| Ok(db.query_row("SELECT count(*) FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL", [], |r| r.get(0))?))
+            .await
+            .unwrap();
+        assert_eq!(records, 0, "{extra}");
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         let log = std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
-        let below = log
-            .lines()
-            .filter(|line| line.contains("\"event\":\"automatic_compaction_below_threshold\""))
-            .count();
-        if second == 99 {
-            assert!(
-                (1..=2).contains(&below),
-                "below threshold must be observable once per Turn: {below}"
-            );
-        } else {
-            assert_eq!(
-                below, 0,
-                "disabled compaction is not a measured below-threshold event"
-            );
-        }
+        assert!(
+            !log.contains("\"event\":\"automatic_compaction_started\""),
+            "{extra}"
+        );
         assert!(!log.contains("saved answer"));
         assert!(!log.contains("current task"));
         server.abort();
@@ -4226,85 +4281,210 @@ async fn thread_auto_compact_change_waits_for_the_next_boundary_and_never_alters
     server.abort();
 }
 
+/// #303 §6.3: an empty summary is a deterministic failure. Its original closed
+/// range and settings are remembered, so a later report that only adds tokens
+/// in the current Turn starts one attempt but sends no second summary request.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
-    let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
-    let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
-    let control = Control::new(&owner, root.path().into());
-    let thread = thread(&control).await;
-    for (n, tokens) in [(0, 50), (1, 150)] {
-        send(&control, &thread, &format!("task {n}")).await;
-        incoming(&control, &mut receive)
-            .await
-            .reply
-            .send((200, answer_with_usage("saved answer", tokens)))
-            .unwrap();
-        settled(&control, &thread).await;
-    }
-    send(&control, &thread, "current task").await;
-    let mut summaries = 0;
-    // A large token increase in the current protected Turn is not a new
-    // summarizable source and must not restart the rejected attempt.
-    let mut ordinary = vec![answer_with_usage("done", 150), {
-        let mut body = json!({"id":"tool","status":"completed","output":[{"type":"function_call","call_id":"proactive-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]});
-        body["usage"] = json!({"input_tokens":9999,"output_tokens":1});
-        body
-    }];
-    while let Some(reply) = ordinary.last().cloned() {
-        let next = incoming(&control, &mut receive).await;
-        if next.body["tools"] == json!([]) {
-            summaries += 1;
-            assert!(summaries <= 4, "bounded summary requests");
-            next.reply
-                .send((400, json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}})))
-                .unwrap();
-            continue;
-        }
-        ordinary.pop();
-        next.reply.send((200, reply)).unwrap();
-    }
-    settled(&control, &thread).await;
+    let (summaries, _, slots) = bx_token_growth((200, answer(" "))).await;
     assert_eq!(
         summaries, 1,
-        "token growth alone must not retry the same source"
+        "token growth alone must not retry the same deterministic failure"
     );
-    assert!(receive.try_recv().is_err());
-    let events = proactive_events(&control, &thread).await;
-    assert_eq!(events.len(), 1, "{events:?}");
-    assert_eq!(events[0]["state"], "rejected");
-    assert_eq!(events[0]["trigger"]["input_tokens"], 150);
-    let usage = &events[0]["metrics"]["summary_usage"];
-    assert_eq!(usage["requests"], 1);
-    assert_eq!(usage["input_tokens"]["unknown_count"], 1);
-    assert_eq!(usage["output_tokens"]["unknown_count"], 1);
-    let (summary_nodes, turn_state) = control
-        .store
-        .database
-        .call(|db| {
-            Ok((
-                db.query_row("SELECT count(*) FROM node WHERE kind='summary'", [], |r| {
-                    r.get::<_, i64>(0)
-                })?,
-                db.query_row(
-                    "SELECT state FROM turn ORDER BY rowid DESC LIMIT 1",
-                    [],
-                    |r| r.get::<_, String>(0),
-                )?,
-            ))
-        })
-        .await
-        .unwrap();
-    assert_eq!(summary_nodes, 0);
-    assert_eq!(
-        turn_state, "completed",
-        "a failed proactive attempt never blocks the Turn"
-    );
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
+    assert!(slots.0.is_some(), "the closed failure slot is recorded");
+    assert!(slots.1.is_none(), "no active summary was attempted");
 }
 
+/// #303 §6.4: an `invalid_request_error` without refusal or context-limit
+/// classification is transient. It records no failed range, so the one new
+/// eligible report retries once (§2.3: one attempt per reported value).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_transient_summary_failure_retries_once_per_new_report() {
+    let (summaries, _, slots) = bx_token_growth((
+        400,
+        json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}}),
+    ))
+    .await;
+    assert_eq!(summaries, 2, "one summary request per eligible report");
+    assert_eq!(slots, (None, None), "a transient failure records no range");
+}
+
+/// Two completed Turns (first known report 50 > target 20, then 150 >= the
+/// threshold 100), then a Turn whose only tool round reports 9999. Both
+/// eligible reports select the same closed range (the first Turn).
+async fn bx_token_growth(
+    summary_reply: (u16, Value),
+) -> (u32, Vec<Value>, (Option<String>, Option<String>)) {
+    crate::test_watchdog::watchdog("bx token growth", async move {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
+        let control = Control::new(&owner, root.path().into());
+        let thread = thread(&control).await;
+        for (n, tokens) in [(0, 50), (1, 150)] {
+            send(&control, &thread, &format!("task {n}")).await;
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, answer_with_usage("saved answer", tokens)))
+                .unwrap();
+            settled(&control, &thread).await;
+        }
+        send(&control, &thread, "current task").await;
+        let mut summaries = 0;
+        let mut ordinary = vec![
+            answer_with_usage("done", 150),
+            bx_tool("proactive-tool", 9999, "echo synthetic"),
+        ];
+        while let Some(reply) = ordinary.last().cloned() {
+            let next = incoming(&control, &mut receive).await;
+            if next.body["tools"] == json!([]) {
+                summaries += 1;
+                assert!(summaries <= 4, "bounded summary requests");
+                let input = next.body["input"].to_string();
+                assert!(input.contains("task 0"), "closed range: the older Turn");
+                assert!(!input.contains("task 1"), "the latest completed Turn stays");
+                next.reply.send(summary_reply.clone()).unwrap();
+                continue;
+            }
+            ordinary.pop();
+            next.reply.send((200, reply)).unwrap();
+        }
+        settled(&control, &thread).await;
+        assert!(receive.try_recv().is_err());
+        let attempts = bx_attempts(&control, &thread).await;
+        assert_eq!(
+            attempts.len(),
+            2,
+            "one attempt per eligible report: {attempts:#?}"
+        );
+        let triggers: Vec<_> = attempts
+            .iter()
+            .map(|a| {
+                (
+                    a["trigger"]["input_tokens"].clone(),
+                    a["trigger"]["a_input_tokens"].clone(),
+                )
+            })
+            .collect();
+        // #A is the first known report after the most recent attempt (§1, §7).
+        assert_eq!(
+            triggers,
+            [(json!(150), json!(50)), (json!(9999), json!(9999))]
+        );
+        for attempt in &attempts {
+            assert_eq!(attempt["outcome"], "failed", "{attempt:#?}");
+            assert_eq!(attempt["trigger"]["target_tokens"], 20);
+            assert!(attempt["committed_stages"]["closed_summary"].is_null());
+        }
+        let events = proactive_events(&control, &thread).await;
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert!(
+            events.iter().all(|event| event["state"] == "failed"),
+            "{events:?}"
+        );
+        let first = events
+            .iter()
+            .find(|event| event["trigger"]["input_tokens"] == 150)
+            .unwrap();
+        let usage = &first["metrics"]["summary_usage"];
+        assert_eq!(usage["requests"], 1, "{first:#?}");
+        assert_eq!(usage["input_tokens"]["unknown_count"], 1);
+        assert_eq!(usage["output_tokens"]["unknown_count"], 1);
+        let (summary_nodes, turn_state) = control
+            .store
+            .database
+            .call(|db| {
+                Ok((
+                    db.query_row("SELECT count(*) FROM node WHERE kind='summary'", [], |r| {
+                        r.get::<_, i64>(0)
+                    })?,
+                    db.query_row(
+                        "SELECT state FROM turn ORDER BY rowid DESC LIMIT 1",
+                        [],
+                        |r| r.get::<_, String>(0),
+                    )?,
+                ))
+            })
+            .await
+            .unwrap();
+        assert_eq!(summary_nodes, 0);
+        assert_eq!(
+            turn_state, "completed",
+            "a failed proactive attempt never blocks the Turn"
+        );
+        let slots = bx_failure_slots(&control, &thread).await;
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+        (summaries, attempts, slots)
+    })
+    .await
+    .unwrap()
+}
+
+// #303 test helpers (bx_ prefix): automatic attempt records in triggering order,
+// the two deterministic-failure slots (§6.3) and a tool response with usage.
+async fn bx_attempts(control: &Arc<Control>, thread: &str) -> Vec<Value> {
+    let thread = thread.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let mut statement = db.prepare("SELECT json_extract(a.error_json,'$.automatic_trim_attempt') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid")?;
+            let rows = statement
+                .query_map([thread], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap()
+        .iter()
+        .map(|text| serde_json::from_str(text).unwrap())
+        .collect()
+}
+async fn bx_failure_slots(
+    control: &Arc<Control>,
+    thread: &str,
+) -> (Option<String>, Option<String>) {
+    let thread = thread.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            let slot = |kind: &str| {
+                db.query_row(
+                    "SELECT value FROM app_meta WHERE key=?1",
+                    [format!(
+                        "compact.deterministic_range_failure.{kind}.{thread}"
+                    )],
+                    |r| r.get::<_, String>(0),
+                )
+                .optional()
+            };
+            Ok((slot("closed")?, slot("active")?))
+        })
+        .await
+        .unwrap()
+}
+fn bx_tool(id: &str, tokens: u64, command: &str) -> Value {
+    json!({"id":format!("response-{id}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":id,"name":"shell","arguments":json!({"command":command}).to_string()}]})
+}
+/// Function-call outputs replayed in `body` that are spill replacements.
+fn bx_omitted_outputs(body: &Value) -> usize {
+    body["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item.get("output").and_then(Value::as_str))
+        .filter_map(|output| serde_json::from_str::<Value>(output).ok())
+        .filter(|output| output["omitted"] == true)
+        .count()
+}
+
+/// #303 §6.3: a deterministic closed failure blocks only its own original
+/// endpoints. When a new older Turn becomes eligible, the closed range ends
+/// later, so the next eligible report sends a summary again and adopts it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
     let root = tempfile::tempdir().unwrap();
@@ -4324,13 +4504,9 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
     send(&control, &thread, "third task").await;
     let first = incoming(&control, &mut receive).await;
     assert_eq!(first.body["tools"], json!([]));
-    first
-        .reply
-        .send((
-            400,
-            json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
-        ))
-        .unwrap();
+    let input = first.body["input"].to_string();
+    assert!(input.contains("task 0") && !input.contains("task 1"));
+    first.reply.send((200, answer(" "))).unwrap();
     let ordinary = incoming(&control, &mut receive).await;
     assert_ne!(ordinary.body["tools"], json!([]));
     ordinary
@@ -4338,12 +4514,23 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
         .send((200, answer_with_usage("third answer", 150)))
         .unwrap();
     settled(&control, &thread).await;
+    let (closed, active) = bx_failure_slots(&control, &thread).await;
+    assert!(
+        closed.is_some() && active.is_none(),
+        "empty summary is deterministic"
+    );
     send(&control, &thread, "fourth task").await;
     let second = incoming(&control, &mut receive).await;
     assert_eq!(
         second.body["tools"],
         json!([]),
-        "the newly unprotected older Turn is eligible"
+        "the newly unprotected older Turn changes the closed range"
+    );
+    let input = second.body["input"].to_string();
+    assert!(input.contains("task 0") && input.contains("task 1"));
+    assert!(
+        !input.contains("third task"),
+        "the latest completed Turn stays"
     );
     second.reply.send((200, answer("short summary"))).unwrap();
     let ordinary = incoming(&control, &mut receive).await;
@@ -4353,30 +4540,36 @@ async fn proactive_retries_when_a_new_older_turn_becomes_eligible() {
         .send((200, answer_with_usage("finished", 10)))
         .unwrap();
     settled(&control, &thread).await;
+    let attempts = bx_attempts(&control, &thread).await;
+    let outcomes: Vec<_> = attempts.iter().map(|a| a["outcome"].clone()).collect();
+    assert_eq!(
+        outcomes,
+        [json!("failed"), json!("adopted")],
+        "{attempts:#?}"
+    );
+    assert!(attempts[1]["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 2, "{events:?}");
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event["state"] == "rejected")
-            .count(),
-        1,
-        "{events:?}"
-    );
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event["state"] == "adopted")
-            .count(),
-        1,
-        "{events:?}"
-    );
+    for state in ["failed", "adopted"] {
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event["state"] == state)
+                .count(),
+            1,
+            "{events:?}"
+        );
+    }
     assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
 }
 
+/// #303 §3/§4.1: in the summary branch (#A > target) the active region is
+/// spilled and then summarized in the same attempt. An older complete tool
+/// group of the open loop is spilled once a newer group exists; the active
+/// summary then covers it through the latest round, which is kept as text.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible() {
     let root = tempfile::tempdir().unwrap();
@@ -4397,28 +4590,41 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     } else {
         "head -c 50000 /dev/zero | tr '\\0' x"
     };
-    for index in 0..2 {
-        let request = incoming(&control, &mut receive).await;
-        assert_ne!(
-            request.body["tools"],
-            json!([]),
-            "there is no older Turn eligible for a summary"
-        );
-        request.reply.send((200, json!({"id":format!("response-{index}"),"status":"completed","usage":{"input_tokens":200,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("call-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
-    }
-    let mut next = incoming(&control, &mut receive).await;
-    if next.body["tools"] == json!([]) {
-        let input = next.body["input"].to_string();
-        assert!(input.contains("call-0"));
-        assert!(
-            !input.contains("call-1"),
-            "the latest group stays protected"
-        );
-        next.reply
-            .send((200, answer("short middle summary")))
-            .unwrap();
-        next = incoming(&control, &mut receive).await;
-    }
+    // The report 150 is eligible, but the only completed Turn is the latest
+    // and the current Turn has no work yet: a local no-target attempt (§6.2).
+    let first = incoming(&control, &mut receive).await;
+    assert_ne!(first.body["tools"], json!([]), "no target sends no summary");
+    first
+        .reply
+        .send((200, bx_tool("call-0", 50, command)))
+        .unwrap();
+    let second = incoming(&control, &mut receive).await;
+    assert_ne!(
+        second.body["tools"],
+        json!([]),
+        "below threshold nothing happens"
+    );
+    assert_strict_append(&first.body, &second.body, "below threshold");
+    second
+        .reply
+        .send((200, bx_tool("call-1", 200, command)))
+        .unwrap();
+    let summary = incoming(&control, &mut receive).await;
+    assert_eq!(
+        summary.body["tools"],
+        json!([]),
+        "spill then the active summary"
+    );
+    let input = summary.body["input"].to_string();
+    assert!(
+        input.contains("call-0") && input.contains("call-1"),
+        "whole active range"
+    );
+    summary
+        .reply
+        .send((200, answer("short middle summary")))
+        .unwrap();
+    let next = incoming(&control, &mut receive).await;
     assert_ne!(
         next.body["tools"],
         json!([]),
@@ -4426,25 +4632,23 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     );
     assert!(
         next.body["input"].to_string().contains("call-1"),
-        "the newest group must remain replayable"
+        "the latest round remains in the replay as plain text"
     );
     next.reply
         .send((200, answer_with_usage("done", 10)))
         .unwrap();
     settled(&control, &thread).await;
-    let events = proactive_events(&control, &thread).await;
-    assert_eq!(
-        events.len(),
-        1,
-        "one actual attempt follows the new eligible group: {events:?}"
-    );
-    assert_eq!(events[0]["state"], "adopted");
-    // #215 allows the older complete group to spill during the open loop;
-    // the latest complete group stays replayable and no summary is needed.
-    assert_eq!(events[0]["metrics"]["spilled_groups"], 1, "{events:?}");
+    let attempts = bx_attempts(&control, &thread).await;
+    assert_eq!(attempts.len(), 2, "{attempts:#?}");
+    assert_eq!(attempts[0]["outcome"], "no_target");
+    assert_eq!(attempts[0]["committed_stages"], json!({}));
+    assert_eq!(attempts[1]["outcome"], "adopted");
+    assert_eq!(attempts[1]["trigger"]["a_input_tokens"], 50);
+    let stages = &attempts[1]["committed_stages"];
+    assert_eq!(stages["active_spill"]["spilled_groups"], 1, "{stages:#?}");
     assert!(
-        events[0]["metrics"]["summary_node_id"].is_null(),
-        "{events:?}"
+        stages["active_summary"]["summary_node_id"].is_string(),
+        "{stages:#?}"
     );
     assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
@@ -4452,8 +4656,11 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     server.abort();
 }
 
+/// #303 §6.2 (replaces the #180 bounded no-target proof): with only a
+/// protected latest completed Turn and a large protected current request,
+/// the eligible report starts one attempt that ends `no_target` locally.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_large_protected_turn_uses_bounded_no_target_proof() {
+async fn proactive_large_protected_turn_is_a_local_no_target_attempt() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = proactive_owner(
@@ -4487,27 +4694,32 @@ async fn proactive_large_protected_turn_uses_bounded_no_target_proof() {
         .call(move |db| shellboy::frontend::activity::project(db, &id))
         .await
         .unwrap();
-    assert_eq!(
-        projected.snapshot.automatic_compaction_skip,
-        Some(shellboy::ui::activity::AutomaticCompactionSkip::NoTarget)
+    assert!(
+        projected.snapshot.automatic_compaction.is_none(),
+        "a finished no-target attempt is not shown as active"
     );
-    assert!(projected.snapshot.automatic_compaction.is_none());
     next.reply
         .send((200, answer_with_usage("done", 10)))
         .unwrap();
     settled(&control, &thread).await;
-    assert!(
-        proactive_events(&control, &thread).await.is_empty(),
-        "proof must precede any compaction attempt"
-    );
+    let attempts = bx_attempts(&control, &thread).await;
+    assert_eq!(attempts.len(), 1, "{attempts:#?}");
+    assert_eq!(attempts[0]["outcome"], "no_target");
+    assert_eq!(attempts[0]["trigger"]["input_tokens"], 150);
+    assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 150);
+    assert_eq!(attempts[0]["committed_stages"], json!({}));
     assert!(receive.try_recv().is_err());
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
 }
 
+/// #303 §2.6/§3: #A <= target selects spill only, and that branch touches only
+/// the closed region. With no closed tool group it ends `no_target` without a
+/// model request, and the current Turn's older tool group stays unchanged.
+/// Thread deletion removes #A state, both failure slots and kept reasoning.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_no_safe_reduction_is_not_started_or_retried() {
+async fn proactive_spill_only_without_closed_candidates_leaves_current_turn() {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=100\n").await;
@@ -4517,20 +4729,37 @@ async fn proactive_no_safe_reduction_is_not_started_or_retried() {
     incoming(&control, &mut receive)
         .await
         .reply
-        .send((200, answer_with_usage("saved", 150)))
+        .send((200, answer_with_usage("saved", 10)))
         .unwrap();
     settled(&control, &thread).await;
     send(&control, &thread, "current task").await;
-    // The only completed Turn and the latest complete tool group remain
-    // protected. One tool call is a hard cap, not a usage-dependent loop.
-    let next = incoming(&control, &mut receive).await;
-    assert_ne!(next.body["tools"], json!([]));
-    next.reply.send((200, json!({"id":"single-tool","status":"completed","usage":{"input_tokens":9999,"output_tokens":1},"output":[{"type":"function_call","call_id":"single-tool","name":"shell","arguments":json!({"command":"echo synthetic"}).to_string()}]}))).unwrap();
-    let next = incoming(&control, &mut receive).await;
+    let command = if cfg!(windows) {
+        "powershell -NoProfile -Command \"[Console]::Write(('x' * 50000))\""
+    } else {
+        "head -c 50000 /dev/zero | tr '\\0' x"
+    };
+    let first = incoming(&control, &mut receive).await;
+    assert_ne!(first.body["tools"], json!([]));
+    first
+        .reply
+        .send((200, bx_tool("older-tool", 50, command)))
+        .unwrap();
+    let second = incoming(&control, &mut receive).await;
+    assert_ne!(second.body["tools"], json!([]));
+    second
+        .reply
+        .send((200, bx_tool("single-tool", 9999, "echo synthetic")))
+        .unwrap();
+    let third = incoming(&control, &mut receive).await;
     assert_ne!(
-        next.body["tools"],
+        third.body["tools"],
         json!([]),
-        "no summary source is eligible"
+        "spill only sends no summary"
+    );
+    assert_strict_append(
+        &second.body,
+        &third.body,
+        "the spill-only branch leaves the current Turn unchanged",
     );
     let projected_thread = thread.clone();
     let projected = control
@@ -4539,54 +4768,70 @@ async fn proactive_no_safe_reduction_is_not_started_or_retried() {
         .call(move |db| shellboy::frontend::activity::project(db, &projected_thread))
         .await
         .unwrap();
-    assert_eq!(
-        projected.snapshot.automatic_compaction_skip,
-        Some(shellboy::ui::activity::AutomaticCompactionSkip::NoTarget)
-    );
     assert!(
         projected.snapshot.automatic_compaction.is_none(),
-        "skipped work must not appear active"
+        "finished work must not appear active"
     );
-    next.reply
+    third
+        .reply
         .send((200, answer_with_usage("done", 10)))
         .unwrap();
     settled(&control, &thread).await;
-    let events = proactive_events(&control, &thread).await;
-    assert!(events.is_empty(), "no compaction was started: {events:?}");
-    let key = format!("compact.automatic_guard.{thread}");
-    let saved: String = control
-        .store
-        .database
-        .call(move |db| {
-            Ok(
-                db.query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| {
-                    row.get(0)
-                })?,
-            )
-        })
-        .await
-        .unwrap();
-    let saved: Value = serde_json::from_str(&saved).unwrap();
-    assert_eq!(saved["reason"], "no_target");
-    assert!(saved["marks"].as_array().unwrap().is_empty());
-    assert_eq!(saved["invalid_state"], 0);
-    assert_eq!(saved["other_rejections"], 0);
-    assert!(!saved.to_string().contains("only completed task"));
+    let attempts = bx_attempts(&control, &thread).await;
+    assert_eq!(attempts.len(), 1, "{attempts:#?}");
+    assert_eq!(attempts[0]["outcome"], "no_target");
+    assert_eq!(attempts[0]["trigger"]["input_tokens"], 9999);
+    assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 10);
+    assert_eq!(attempts[0]["trigger"]["target_tokens"], 20);
+    assert_eq!(attempts[0]["committed_stages"], json!({}));
+    assert_eq!(bx_failure_slots(&control, &thread).await, (None, None));
     assert!(receive.try_recv().is_err());
-    // #182: a synthetic kept-reasoning set must end with its Thread too.
-    let keep = format!("reasoning.keep.{thread}");
+    let keys = [
+        format!("compact.a_state.{thread}"),
+        format!("compact.deterministic_range_failure.closed.{thread}"),
+        format!("compact.deterministic_range_failure.active.{thread}"),
+        format!("reasoning.keep.{thread}"),
+    ];
+    let count_keys = |keys: [String; 4]| async {
+        control
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key IN (?1,?2,?3,?4)",
+                    [&keys[0], &keys[1], &keys[2], &keys[3]],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap()
+    };
+    assert_eq!(
+        count_keys(keys.clone()).await,
+        1,
+        "#A state exists before deletion"
+    );
+    // Synthetic slot and kept-reasoning rows: deletion must end them all.
+    let synthetic = keys.clone();
     control
         .store
         .database
         .call(move |db| {
+            for key in &synthetic[1..3] {
+                db.execute(
+                    "INSERT INTO app_meta(key,value) VALUES(?1,'synthetic')",
+                    [key],
+                )?;
+            }
             db.execute(
                 "INSERT INTO app_meta(key,value) VALUES(?1,'{\"epoch\":1,\"nodes\":[]}')",
-                [keep],
+                [&synthetic[3]],
             )?;
             Ok(())
         })
         .await
         .unwrap();
+    assert_eq!(count_keys(keys.clone()).await, 4);
     request(
         &control,
         Command::ThreadDelete(ThreadDeleteArgs {
@@ -4596,26 +4841,10 @@ async fn proactive_no_safe_reduction_is_not_started_or_retried() {
         }),
     )
     .await;
-    let keys = [
-        format!("compact.automatic_guard.{thread}"),
-        format!("compact.automatic_status.{thread}"),
-        format!("reasoning.keep.{thread}"),
-    ];
-    let remaining = control
-        .store
-        .database
-        .call(move |db| {
-            Ok(db.query_row(
-                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2,?3)",
-                [&keys[0], &keys[1], &keys[2]],
-                |row| row.get::<_, i64>(0),
-            )?)
-        })
-        .await
-        .unwrap();
     assert_eq!(
-        remaining, 0,
-        "Thread deletion removes the bounded witnesses and the kept-reasoning set"
+        count_keys(keys).await,
+        0,
+        "Thread deletion removes #A state, failure slots and the kept-reasoning set"
     );
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -5050,49 +5279,124 @@ async fn mid_turn_omission_reemits_the_current_context_once() {
     server.abort();
 }
 
+/// #271 under #303 §2.2/§3: below the threshold nothing happens, so every
+/// request strictly appends. When a report recrosses it with #A <= target, the
+/// spill-only branch spills every eligible closed tool group at once (no
+/// stop at a target) and keeps the latest complete tool group.
 #[tokio::test]
 async fn issue_271_spill_shortfall_waits_until_threshold_recrossing() {
     crate::test_watchdog::watchdog("issue 271 repeated spill", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let owner =
+            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
-        send(&control, &target, "synthetic repeated spill").await;
-        let command = if cfg!(windows) { "[string]::new([char]48, 20000)" } else { "printf %020000d 0" };
-        let mut last_epoch = None;
-        let mut uncached = 0usize;
-        let mut prior = Vec::new();
-        let mut epochs = Vec::new();
-        for n in 0..7 {
-            let request = incoming(&control, &mut receive).await;
-            let id = target.clone();
-            let epoch: i64 = control.store.database.call(move |db| Ok(db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [id], |r| r.get(0))?)).await.unwrap();
-            let bytes = request.body["input"].to_string().into_bytes();
-            let common = if last_epoch == Some(epoch) { prior.iter().zip(&bytes).take_while(|(a,b)| a == b).count() } else { 0 };
-            uncached += bytes.len() - common;
-            prior = bytes;
-            last_epoch = Some(epoch);
-            epochs.push(epoch);
-            request.reply.send((200, json!({"id":format!("issue271-{n}"),"status":"completed","usage":{"input_tokens":if n < 2 {200001} else {190000},"output_tokens":1},"output":[{"type":"function_call","call_id":format!("issue271-{n}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
-        }
-        eprintln!("issue271 modeled_uncached_bytes={uncached} epochs={epochs:?}");
-        let crossing = incoming(&control, &mut receive).await;
-        crossing.reply.send((200, json!({"id":"cross", "status":"completed", "usage":{"input_tokens":200001,"output_tokens":1}, "output":[{"type":"function_call","call_id":"cross","name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
-        let after_crossing = incoming(&control, &mut receive).await;
-        let id = target.clone();
-        let recross_epoch: i64 = control.store.database.call(move |db| Ok(db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [id], |r| r.get(0))?)).await.unwrap();
-        assert!(recross_epoch > *epochs.last().unwrap(), "spill must resume after threshold recrossing");
-        after_crossing.reply.send((200, answer("finished"))).unwrap();
+        send(&control, &target, "seed").await;
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("seed answer", 100)))
+            .unwrap();
         settled(&control, &target).await;
-        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        assert_eq!(epochs, [0, 0, 1, 1, 1, 1, 1], "below-threshold shortfall must not rewrite each request");
-    }).await.unwrap();
+        send(&control, &target, "synthetic repeated spill").await;
+        let command = if cfg!(windows) {
+            "[string]::new([char]48, 20000)"
+        } else {
+            "printf %020000d 0"
+        };
+        let mut previous: Option<Value> = None;
+        let mut epochs = Vec::new();
+        for n in 0..8 {
+            let request = incoming(&control, &mut receive).await;
+            assert_ne!(request.body["tools"], json!([]));
+            if let Some(previous) = &previous {
+                assert_strict_append(
+                    previous,
+                    &request.body,
+                    "below-threshold requests are not rewritten",
+                );
+            }
+            let id = target.clone();
+            epochs.push(
+                control
+                    .store
+                    .database
+                    .call(move |db| {
+                        Ok(db.query_row(
+                            "SELECT reasoning_epoch FROM thread WHERE id=?1",
+                            [id],
+                            |r| r.get::<_, i64>(0),
+                        )?)
+                    })
+                    .await
+                    .unwrap(),
+            );
+            previous = Some(request.body.clone());
+            let reply = if n < 7 {
+                bx_tool(&format!("issue271-{n}"), 190_000, command)
+            } else {
+                answer_with_usage("crossing", 200_001)
+            };
+            request.reply.send((200, reply)).unwrap();
+        }
+        settled(&control, &target).await;
+        assert!(
+            epochs.windows(2).all(|pair| pair[0] == pair[1]),
+            "{epochs:?}"
+        );
+        send(&control, &target, "after crossing").await;
+        let after = incoming(&control, &mut receive).await;
+        assert_ne!(
+            after.body["tools"],
+            json!([]),
+            "#A <= target sends no summary"
+        );
+        assert_eq!(
+            bx_omitted_outputs(&after.body),
+            6,
+            "every older closed tool group is spilled"
+        );
+        let latest = |body: &Value| {
+            body["input"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["call_id"] == "issue271-6" && item.get("output").is_some())
+                .cloned()
+                .unwrap()
+        };
+        assert_eq!(
+            latest(&after.body),
+            latest(previous.as_ref().unwrap()),
+            "the latest complete tool group stays"
+        );
+        after.reply.send((200, answer("finished"))).unwrap();
+        settled(&control, &target).await;
+        let attempts = bx_attempts(&control, &target).await;
+        assert_eq!(attempts.len(), 1, "{attempts:#?}");
+        assert_eq!(attempts[0]["outcome"], "adopted");
+        assert_eq!(attempts[0]["trigger"]["input_tokens"], 200_001);
+        assert_eq!(attempts[0]["trigger"]["a_input_tokens"], 100);
+        assert_eq!(
+            attempts[0]["committed_stages"]["closed_spill"]["spilled_groups"],
+            6
+        );
+        assert!(receive.try_recv().is_err());
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
 }
 
+/// #303 §2.2 (replaces #209 target escalation): after a shallow closed
+/// summary, a report below the threshold starts nothing, so the next request
+/// strictly appends; the old target-unmet continuation is retired (§9).
 #[tokio::test]
-async fn proactive_target_escalates_before_threshold_recrossing() {
-    crate::test_watchdog::watchdog("proactive calibrated shortfall", async {
+async fn proactive_shallow_summary_does_not_continue_below_threshold() {
+    crate::test_watchdog::watchdog("proactive below threshold after summary", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let owner =
@@ -5109,72 +5413,47 @@ async fn proactive_target_escalates_before_threshold_recrossing() {
             settled(&control, &target).await;
         }
         send(&control, &target, "current work").await;
-        let step = |n: u32, usage: u64| {
-            json!({"id":format!("step-{n}"),"status":"completed",
-            "usage":{"input_tokens":usage,"output_tokens":1},"output":[
-                {"type":"function_call","call_id":format!("step-{n}"),"name":"shell",
-                 "arguments":json!({"command":format!("echo STEP{n}")}).to_string()}
-            ]})
-        };
         incoming(&control, &mut receive)
             .await
             .reply
-            .send((200, step(0, 201_061)))
+            .send((200, bx_tool("step-0", 201_061, "echo STEP0")))
             .unwrap();
         let prefix = incoming(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
+        let input = prefix.body["input"].to_string();
+        assert!(input.contains("old-0") && !input.contains("old-1"));
         prefix
             .reply
             .send((200, answer("## Goal\nOld work retained")))
             .unwrap();
         let first_after = incoming(&control, &mut receive).await;
         assert_ne!(first_after.body["tools"], json!([]));
-        first_after.reply.send((200, step(1, 184_622))).unwrap();
-        let widened = incoming(&control, &mut receive).await;
-        assert_eq!(
-            widened.body["tools"],
-            json!([]),
-            "shortfall must widen before 200K is recrossed"
-        );
-        assert!(widened.body["input"].to_string().contains("STEP0"));
-        widened
+        first_after
             .reply
-            .send((200, answer("## Goal\nWork completed")))
+            .send((200, bx_tool("step-1", 184_622, "echo STEP1")))
             .unwrap();
-        incoming(&control, &mut receive)
-            .await
+        let below = incoming(&control, &mut receive).await;
+        assert_ne!(
+            below.body["tools"],
+            json!([]),
+            "no summary below the threshold"
+        );
+        assert_strict_append(&first_after.body, &below.body, "below threshold");
+        below
             .reply
             .send((200, answer_with_usage("done", 140_000)))
             .unwrap();
         settled(&control, &target).await;
-        let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 2, "{events:#?}");
-        let ids: Vec<String> = events
-            .iter()
-            .map(|e| e["attempt_id"].as_str().unwrap().to_owned())
-            .collect();
-        let records: Vec<String> = control
-            .store
-            .database
-            .call(move |db| {
-                ids.iter()
-                    .map(|id| {
-                        db.query_row(
-                            "SELECT error_json FROM model_attempt WHERE id=?1",
-                            [id],
-                            |r| r.get(0),
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(Into::into)
-            })
-            .await
-            .unwrap();
-        assert!(records.iter().any(|record| {
-            let v: Value = serde_json::from_str(record).unwrap();
-            v["automatic_trim_attempt"]["target_verification"]["outcome"] == "insufficient"
-                && v["automatic_trim_attempt"]["target_verification"]["input_tokens"] == 184_622
-        }));
+        let attempts = bx_attempts(&control, &target).await;
+        assert_eq!(attempts.len(), 1, "{attempts:#?}");
+        let attempt = &attempts[0];
+        assert_eq!(attempt["outcome"], "adopted");
+        assert_eq!(attempt["trigger"]["input_tokens"], 201_061);
+        assert_eq!(attempt["trigger"]["a_input_tokens"], 50_000);
+        assert_eq!(attempt["trigger"]["target_tokens"], 40_000);
+        assert!(attempt["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
+        assert!(attempt.get("target_verification").is_none(), "{attempt:#?}");
+        assert!(receive.try_recv().is_err());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -5183,51 +5462,114 @@ async fn proactive_target_escalates_before_threshold_recrossing() {
     .unwrap();
 }
 
+/// #303 §2.2/§4.2 (replaces #209 prefix shortfall): a newly eligible older
+/// Turn waits for the next report at the threshold; that closed summary then
+/// summarizes the earlier summary together with the new older Turn.
 #[tokio::test]
-async fn proactive_prefix_shortfall_reconsiders_older_turn() {
-    crate::test_watchdog::watchdog("proactive prefix shortfall across turns", async {
+async fn proactive_next_closed_summary_resummarizes_prior_summary_with_new_older_turn() {
+    crate::test_watchdog::watchdog("proactive closed resummary across turns", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
+        let owner =
+            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200000\n").await;
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         for n in 0..2 {
             send(&control, &target, &format!("old-{n} {}", "a".repeat(4000))).await;
-            incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("old answer", 50_000))).unwrap();
+            incoming(&control, &mut receive)
+                .await
+                .reply
+                .send((200, answer_with_usage("old answer", 50_000)))
+                .unwrap();
             settled(&control, &target).await;
         }
-        send(&control, &target, &format!("TURN_A_MARKER {}", "b".repeat(4000))).await;
-        incoming(&control, &mut receive).await.reply.send((200, json!({"id":"step-a","status":"completed", "usage":{"input_tokens":201_061,"output_tokens":1},"output":[{"type":"function_call","call_id":"step-a","name":"shell","arguments":json!({"command":"echo A"}).to_string()}]}))).unwrap();
+        send(
+            &control,
+            &target,
+            &format!("TURN_A_MARKER {}", "b".repeat(4000)),
+        )
+        .await;
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, bx_tool("step-a", 201_061, "echo A")))
+            .unwrap();
         let prefix = incoming(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
-        prefix.reply.send((200, answer("## Goal\nOld work retained"))).unwrap();
-        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage("turn A finished", 184_622))).unwrap();
+        assert!(!prefix.body["input"].to_string().contains("old-1"));
+        prefix
+            .reply
+            .send((200, answer("## Goal\nOld work retained")))
+            .unwrap();
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("turn A finished", 184_622)))
+            .unwrap();
         settled(&control, &target).await;
         send(&control, &target, "TURN_B_MARKER").await;
-        let mut saw_new_older = false;
-        let mut next = incoming(&control, &mut receive).await;
-        assert_eq!(next.body["tools"], json!([]), "newly eligible older context must be summarized despite the prior shortfall");
-        for _ in 0..20 {
-            if next.body["tools"] != json!([]) {
-                break;
-            }
-            saw_new_older |= next.body["input"].to_string().contains("old-1");
-            next.reply.send((200, answer("## Goal\nOlder work retained"))).unwrap();
-            next = incoming(&control, &mut receive).await;
-        }
-        assert!(saw_new_older, "summary must include the newly eligible older Turn");
-        assert_ne!(next.body["tools"], json!([]), "summary requests must terminate");
-        next.reply.send((200, answer_with_usage("turn B finished", 140_000))).unwrap();
+        let first = incoming(&control, &mut receive).await;
+        assert_ne!(
+            first.body["tools"],
+            json!([]),
+            "below the threshold nothing happens"
+        );
+        first
+            .reply
+            .send((200, bx_tool("step-b", 200_500, "echo B")))
+            .unwrap();
+        let resummary = incoming(&control, &mut receive).await;
+        assert_eq!(
+            resummary.body["tools"],
+            json!([]),
+            "the next eligible report summarizes the closed region"
+        );
+        let input = resummary.body["input"].to_string();
+        assert!(
+            input.contains("Old work retained"),
+            "the earlier summary is summarized again"
+        );
+        assert!(
+            input.contains("old-1"),
+            "the newly eligible older Turn is included"
+        );
+        assert!(
+            !input.contains("TURN_A_MARKER"),
+            "the latest completed Turn stays"
+        );
+        resummary
+            .reply
+            .send((200, answer("## Goal\nOlder work retained")))
+            .unwrap();
+        let next = incoming(&control, &mut receive).await;
+        assert_ne!(next.body["tools"], json!([]), "one summary per attempt");
+        next.reply
+            .send((200, answer_with_usage("turn B finished", 140_000)))
+            .unwrap();
         settled(&control, &target).await;
+        let attempts = bx_attempts(&control, &target).await;
+        assert_eq!(attempts.len(), 2, "{attempts:#?}");
+        for attempt in &attempts {
+            assert_eq!(attempt["outcome"], "adopted", "{attempt:#?}");
+            assert!(attempt["committed_stages"]["closed_summary"]["summary_node_id"].is_string());
+        }
+        assert_eq!(attempts[1]["trigger"]["a_input_tokens"], 184_622);
+        assert!(receive.try_recv().is_err());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
 }
 
+/// #303 §4.1/§4.2 (replaces #209 same-attempt widening): one attempt performs
+/// one summary operation. The closed summary ends the attempt; the active
+/// rounds are not summarized before the next ordinary request, and the stage
+/// keeps the one request's actual usage.
 #[tokio::test]
-async fn proactive_target_widens_in_one_attempt_and_keeps_usage() {
-    crate::test_watchdog::watchdog("proactive target same-attempt widening", async {
+async fn proactive_attempt_runs_one_summary_operation_and_keeps_its_usage() {
+    crate::test_watchdog::watchdog("proactive one summary per attempt", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let owner =
@@ -5250,48 +5592,45 @@ async fn proactive_target_widens_in_one_attempt_and_keeps_usage() {
         )
         .await;
         for (n, tokens) in [(0, 50_000), (1, 50_000), (2, 201_061)] {
-            let response = json!({"id":format!("widen-{n}"),"status":"completed",
-            "usage":{"input_tokens":tokens,"output_tokens":1},"output":[
-                {"type":"function_call","call_id":format!("widen-{n}"),"name":"shell",
-                 "arguments":json!({"command":format!("echo WIDEN{n}")}).to_string()}
-            ]});
             incoming(&control, &mut receive)
                 .await
                 .reply
-                .send((200, response))
+                .send((
+                    200,
+                    bx_tool(&format!("widen-{n}"), tokens, &format!("echo WIDEN{n}")),
+                ))
                 .unwrap();
         }
         let prefix = incoming(&control, &mut receive).await;
         assert_eq!(prefix.body["tools"], json!([]));
+        assert!(
+            !prefix.body["input"].to_string().contains("WIDEN0"),
+            "closed region first"
+        );
         prefix
             .reply
             .send((200, answer_with_usage("## Goal\nOld work", 11)))
             .unwrap();
-        let middle = incoming(&control, &mut receive).await;
-        assert_eq!(
-            middle.body["tools"],
-            json!([]),
-            "widen before the next ordinary request"
-        );
-        assert!(middle.body["input"].to_string().contains("WIDEN0"));
-        middle
-            .reply
-            .send((200, answer_with_usage("## Goal\nWork done", 13)))
-            .unwrap();
         let after = incoming(&control, &mut receive).await;
-        assert_ne!(after.body["tools"], json!([]));
+        assert_ne!(
+            after.body["tools"],
+            json!([]),
+            "no second summary in the same attempt"
+        );
         after
             .reply
             .send((200, answer_with_usage("done", 100_000)))
             .unwrap();
         settled(&control, &target).await;
-        let events = proactive_events(&control, &target).await;
-        assert_eq!(events.len(), 1, "{events:#?}");
-        assert_eq!(events[0]["metrics"]["summary_usage"]["requests"], 2);
-        assert_eq!(
-            events[0]["metrics"]["summary_usage"]["input_tokens"]["known_sum"],
-            24
-        );
+        let attempts = bx_attempts(&control, &target).await;
+        assert_eq!(attempts.len(), 1, "{attempts:#?}");
+        assert_eq!(attempts[0]["outcome"], "adopted");
+        let stages = &attempts[0]["committed_stages"];
+        assert!(stages["active_summary"].is_null(), "{stages:#?}");
+        let usage = &stages["closed_summary"]["summary_usage"];
+        assert_eq!(usage["requests"], 1, "{stages:#?}");
+        assert_eq!(usage["input_tokens"]["known_sum"], 11);
+        assert!(receive.try_recv().is_err());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
         server.abort();
@@ -5344,12 +5683,15 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         let id = target.clone();
         let after = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
         assert_eq!(after, changed, "cancelled admission preserves selected spills, the changed-model epoch, and ordered provenance");
-        let id = target.clone();
-        let record: String = control.store.database.call(move |db| Ok(db.query_row(
-            "SELECT a.error_json FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.cancelled')=1 ORDER BY a.rowid DESC LIMIT 1", [id], |r| r.get(0))?)).await.unwrap();
-        let record: Value = serde_json::from_str(&record).unwrap();
-        assert_eq!(record["automatic_trim_attempt"]["outcome"], "adopted");
-        assert_eq!(record["automatic_trim_attempt"]["summary"]["spilled_groups"], 2);
+        // #303 record: the summary stage was cancelled, so the attempt outcome is
+        // `cancelled`; the active spill committed before it stays a stage fact.
+        let attempts = bx_attempts(&control, &target).await;
+        assert_eq!(attempts.len(), 1, "{attempts:#?}");
+        let record = &attempts[0];
+        assert_eq!(record["outcome"], "cancelled", "{record:#?}");
+        assert_eq!(record["trigger"]["a_input_tokens"], 100);
+        assert_eq!(record["committed_stages"]["active_spill"]["spilled_groups"], 2, "{record:#?}");
+        assert!(record["committed_stages"]["active_summary"].is_null(), "{record:#?}");
         assert!(receive.try_recv().is_err());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
@@ -5444,21 +5786,99 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
     server.abort();
 }
 
+/// #303 §4.1/§6.3: while the closed region still has an unsummarized node it
+/// is the attempt's summary region. Its deterministic failure is remembered by
+/// original endpoints, which the growing current Turn does not change, so only
+/// the first eligible report sends a summary. The active region is neither
+/// spilled nor summarized by those attempts (§3).
 #[tokio::test]
-async fn proactive_known_closed_rejection_survives_every_spill_reaching_target() {
-    let counts = growing_turn_with_failing_summaries(false, true, || (200, answer(" "))).await;
+async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_grows() {
+    let (summaries, most, attempts, slots, spills) = bx_growing_turn(true, true).await;
+    assert_eq!(summaries, 1, "{attempts:#?}");
+    assert_eq!(most, 1);
+    assert_eq!(attempts.len(), 17, "one attempt per eligible report");
+    assert!(
+        attempts.iter().all(|a| a["outcome"] == "failed"),
+        "{attempts:#?}"
+    );
+    assert!(slots.0.is_some() && slots.1.is_none(), "{slots:?}");
     assert_eq!(
-        counts.0, 1,
-        "closed rejection repeated after spill: {counts:?}"
+        spills, 0,
+        "the active region is not spilled for a closed summary"
     );
 }
 
+/// #303 §6.3: an active range's identity is its original first/last node, so
+/// each new tool group gives a new range; with no closed target, every
+/// eligible report retries the active summary exactly once.
 #[tokio::test]
-async fn proactive_known_new_middle_sources_still_allow_active_summary() {
-    let counts = growing_turn_with_failing_summaries(false, false, || (200, answer(" "))).await;
-    assert_eq!(counts.0, 1, "closed rejection repeated: {counts:?}");
+async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
+    let (summaries, most, attempts, slots, _) = bx_growing_turn(false, false).await;
+    assert_eq!(summaries, 17, "{attempts:#?}");
+    assert_eq!(most, 1, "at most one summary request per reported value");
+    assert_eq!(attempts.len(), 17);
     assert!(
-        counts.1 > 1,
-        "new eligible active sources must permit retries: {counts:?}"
+        attempts.iter().all(|a| a["outcome"] == "failed"),
+        "{attempts:#?}"
     );
+    assert!(slots.0.is_none() && slots.1.is_some(), "{slots:?}");
+}
+
+/// A current Turn of 20 tool rounds: reports 100, 100, then 202..=218 (17
+/// eligible reports at threshold 200; the first known report 100 is #A > 40).
+/// Every summary reply is empty. With `prior_turns`, two earlier Turns give a
+/// closed target. Returns summary requests, the most summary requests between
+/// two ordinary requests, attempt records, failure slots and path spills.
+async fn bx_growing_turn(
+    prior_turns: bool,
+    spilling: bool,
+) -> (
+    u32,
+    u32,
+    Vec<Value>,
+    (Option<String>, Option<String>),
+    usize,
+) {
+    crate::test_watchdog::watchdog("bx growing turn", async move {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let options = "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
+        let owner = proactive_owner(root.path(), &url, options).await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        if prior_turns {
+            for text in ["hi", "yo"] {
+                send(&control, &target, text).await;
+                incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
+                settled(&control, &target).await;
+            }
+        }
+        send(&control, &target, "protected current").await;
+        // An unknown tool name returns a short error, so no spill can shrink it.
+        let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
+        let (mut summaries, mut most) = (0, 0);
+        for index in 0..=19 {
+            let mut run = 0;
+            let ordinary = loop {
+                let request = incoming(&control, &mut receive).await;
+                if request.body["tools"] != json!([]) { break request; }
+                summaries += 1;
+                run += 1;
+                assert!(summaries < 80, "unbounded automatic summary loop");
+                request.reply.send((200, answer(" "))).unwrap();
+            };
+            most = most.max(run);
+            if index == 19 { ordinary.reply.send((200, answer("finished"))).unwrap(); }
+            else { ordinary.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap(); }
+        }
+        settled(&control, &target).await;
+        assert!(receive.try_recv().is_err());
+        let attempts = bx_attempts(&control, &target).await;
+        let slots = bx_failure_slots(&control, &target).await;
+        let id = target.clone();
+        let spills = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap().0.len();
+        eprintln!("prior_turns={prior_turns} spilling={spilling} summaries={summaries} most={most} attempts={}", attempts.len());
+        control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
+        (summaries, most, attempts, slots, spills)
+    }).await.unwrap()
 }

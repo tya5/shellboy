@@ -597,12 +597,13 @@ async fn assert_record(
             "{stage}"
         );
     }
-    // The approved redesign supersedes historical D-226 W0 prose: no persistent
-    // activity witness is written. Persistent attempt-record faults are evidenced
-    // by the provisional record and exact stage facts, not a retired W0 marker.
-    assert_eq!(
-        witness, 0,
-        "no legacy activity witness {fault:?} live={live}"
+    // The TUI activity witness (#165, effective-spec "activity") is shown while
+    // an attempt runs and is removed at its end; after shutdown/reopen it must
+    // survive only while writes keep failing (a stale witness is removed at the
+    // next owner start; the reopen check asserts that).
+    assert!(
+        witness == 0 || live || fault == Fault::Persistent,
+        "activity witness must not outlive the attempt {fault:?} live={live}"
     );
     if fault == Fault::RetiredWritesAbsent {
         let hits: i64 = control
@@ -615,7 +616,7 @@ async fn assert_record(
             .unwrap();
         assert_eq!(
             hits, 0,
-            "no retired W0/W2/W3 production write through {live} observation"
+            "no retired W2/W3 production write through {live} observation"
         );
     }
     assert!(

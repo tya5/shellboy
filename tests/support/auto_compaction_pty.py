@@ -52,7 +52,9 @@ def main():
                     text, tokens = 'Synthetic prior conversation summary.', 120
                 else:
                     index = requests.count('ordinary')
-                    text, tokens = 'a' * 1024 + f' fixture answer {index}', (50 if index == 1 else 203000 if index == 2 else 10)
+                    # #303 #A: the first known report (50000) exceeds the default
+                    # target (200000 x 20%), so the third task summarizes.
+                    text, tokens = 'a' * 1024 + f' fixture answer {index}', (50000 if index == 1 else 203000 if index == 2 else 10)
                 response = {'id': f'fixture-{len(requests)}', 'status': 'completed',
                             'output': [{'type': 'message', 'role': 'assistant', 'status': 'completed',
                                         'content': [{'type': 'output_text', 'text': text}]}],
@@ -116,18 +118,12 @@ def main():
             recorded = [entry for entry in entries if entry['event'].startswith('automatic_compaction_')]
             events = [entry['event'] for entry in recorded]
             if not args.baseline:
-                assert events[:3] == ['automatic_compaction_below_threshold', 'automatic_compaction_started', 'automatic_compaction_finished'], events
-                if args.summary_error:
-                    assert events[3:] == ['automatic_compaction_rejected_other', 'automatic_compaction_skipped_no_new_target'], events
-                elif args.cancel:
-                    # Cancellation can be observed by the model request or
-                    # by a pre-adoption fence; both leave the source path intact.
-                    assert events[3:] in (["automatic_compaction_rejected_other"],
-                                          ["automatic_compaction_rejected_invalid_state"]), events
-                else:
-                    assert events[3:] == [], events
-                assert recorded[1]['ids'] == recorded[2]['ids'], recorded
-                assert all(recorded[1]['ids'].get(key) for key in ('thread_id', 'run_id', 'turn_id')), recorded
+                # #303: the "below threshold" diagnostic and the guard-reason
+                # rejected/skipped diagnostics are retired with the old guard.
+                assert events[:2] == ['automatic_compaction_started', 'automatic_compaction_finished'], events
+                assert events[2:] == [], events
+                assert recorded[0]['ids'] == recorded[1]['ids'], recorded
+                assert all(recorded[0]['ids'].get(key) for key in ('thread_id', 'run_id', 'turn_id')), recorded
                 assert all('synthetic context' not in json.dumps(entry) for entry in recorded), recorded
             args.out.write_text(json.dumps({'requests': requests, 'gated_screen': screen, 'ended_screen': ended, 'events': events, 'failures': failures}, ensure_ascii=False, indent=2))
         finally:

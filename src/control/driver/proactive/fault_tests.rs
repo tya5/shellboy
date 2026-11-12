@@ -19,7 +19,7 @@ enum Fault {
     /// #226: after the checkpoint every attempt-record and automatic app_meta
     /// write is rejected, so only the stage facts and provisional target remain.
     Persistent,
-    /// #303: observe the current failed-attempt path and prove legacy W0/W2/W3
+    /// #303: observe the current failed-attempt path and prove legacy W2/W3 (the activity witness is restored for the TUI indicator, #165)
     /// writes are absent rather than injecting faults into removed write sites.
     RetiredWritesAbsent,
     /// #226: the real final write (W4) is rejected; the attempt runs to its end.
@@ -853,12 +853,6 @@ pub(super) async fn checkpoint(
                 db.execute_batch("CREATE TEMP TRIGGER retired_exception_write BEFORE UPDATE OF error_json ON model_attempt
                     WHEN json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome')='exception'
                     BEGIN INSERT INTO retired_write_hits VALUES('W2_exception'); SELECT retired_write_hit(1); END;
-                    CREATE TEMP TRIGGER retired_active_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_active.*'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W0_insert'); SELECT retired_write_hit(1); END;
-                    CREATE TEMP TRIGGER retired_active_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_active.*'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W0_update'); SELECT retired_write_hit(1); END;
-                    CREATE TEMP TRIGGER retired_active_delete BEFORE DELETE ON app_meta WHEN OLD.key GLOB 'compact.automatic_active.*'
-                    BEGIN INSERT INTO retired_write_hits VALUES('W0_delete'); SELECT retired_write_hit(1); END;
                     CREATE TEMP TRIGGER retired_guard_insert BEFORE INSERT ON app_meta WHEN NEW.key GLOB 'compact.automatic_guard.*' OR NEW.key GLOB 'compact.automatic_status.*'
                     BEGIN INSERT INTO retired_write_hits VALUES('W3_insert'); SELECT retired_write_hit(1); END;
                     CREATE TEMP TRIGGER retired_guard_update BEFORE UPDATE ON app_meta WHEN OLD.key GLOB 'compact.automatic_guard.*' OR OLD.key GLOB 'compact.automatic_status.*'

@@ -1364,7 +1364,8 @@ mod tests {
         assert_eq!(prefix_count(&empty, true), 0);
     }
     #[test]
-    fn explicit_overflow_without_completed_turn_progress_releases_every_safe_group_but_the_latest() {
+    fn explicit_overflow_without_completed_turn_progress_releases_every_safe_group_but_the_latest()
+    {
         let mut s = staged_snapshot();
         s.groups.drain(..2);
         for group in &mut s.groups {

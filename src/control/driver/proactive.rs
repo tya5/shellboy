@@ -229,11 +229,25 @@ pub(super) async fn maybe_compact(
         snapshot.thread.clone(),
     );
     let trigger = json!({"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a,"run_id":snapshot.run});
+    // The TUI activity indicator (#165) reads this witness while the attempt runs.
+    let active_key = crate::compaction::CompactionKeys::new(&snapshot.thread).automatic_active();
+    let witness = json!({"run_id": snapshot.run, "turn_id": snapshot.turn,
+        "input_tokens": input, "threshold": threshold,
+        "started_at": chrono::Utc::now().to_rfc3339()})
+    .to_string();
+    let (saved_key, saved_witness) = (active_key.clone(), witness.clone());
+    let ids = crate::diagnostics::DiagnosticIds {
+        thread_id: Some(snapshot.thread.clone()),
+        run_id: Some(snapshot.run.clone()),
+        turn_id: Some(snapshot.turn.clone()),
+        ..Default::default()
+    };
     let can_run=control.store.database.call(move |db| {
         let tx=db.transaction()?;
         let consumed:bool=tx.query_row("SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",[&id],|r|r.get(0))?;
         if consumed {return Ok(false);}
         crate::compaction::attempt_begin_tx(&tx,&id,&token,REASON,&trigger,&Value::Null)?;
+        tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
         // Retire old target/guard metadata, never the historical attempt record.
         for key in [crate::compaction::CompactionKeys::new(&thread).automatic_target(),crate::compaction::CompactionKeys::new(&thread).automatic_guard(),crate::compaction::CompactionKeys::new(&thread).automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
         tx.commit()?;Ok(true)
@@ -241,7 +255,15 @@ pub(super) async fn maybe_compact(
     if !can_run {
         return Ok(false);
     }
+    control.diagnostics.record(
+        crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
+        ids.clone(),
+    );
+    control.changed(&snapshot.thread);
     snapshot.input.take();
+    // The spill committed before this attempt's summary stage, if any. The
+    // terminal record aggregates it with the summary (compact list reads it).
+    let mut committed_spill: Option<crate::compaction::CompactResult> = None;
     let result: Result<crate::compaction::CompactResult, ApiError> = async {
         if a <= target {
             let spilled = automatic
@@ -289,7 +311,9 @@ pub(super) async fn maybe_compact(
         if !spilled.no_target {
             fault_tests::checkpoint(control, slot, spill_phase).await?;
         }
-        let _ = spilled;
+        if !spilled.no_target {
+            committed_spill = Some(spilled);
+        }
         summary_stage(
             control,
             &compactor,
@@ -302,6 +326,25 @@ pub(super) async fn maybe_compact(
         .await
     }
     .await;
+    // A retiring owner must not remove a newer owner's witness.
+    let cleanup = control
+        .store
+        .database
+        .call(move |db| {
+            db.execute(
+                "DELETE FROM app_meta WHERE key=?1 AND value=?2",
+                params![active_key, witness],
+            )?;
+            Ok(())
+        })
+        .await
+        .map_err(storage_error);
+    control.diagnostics.record(
+        crate::diagnostics::DiagnosticEvent::AutomaticCompactionFinished,
+        ids,
+    );
+    control.changed(&snapshot.thread);
+    cleanup?;
     let result = match result {
         Ok(compacted) => compactor
             .proactive_history_characters(&snapshot.thread)
@@ -309,7 +352,46 @@ pub(super) async fn maybe_compact(
             .map(|_| compacted),
         Err(error) => Err(error),
     };
-    let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(e) if slot.stop.is_cancelled() && !e.is_storage_failure()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
+    // Aggregate of every stage this attempt adopted: the committed spill plus
+    // the summary. A spill committed before a failed summary stays adopted.
+    let summary = match (&result, committed_spill) {
+        (Ok(result), spill) => {
+            let mut summary = result.clone();
+            if let Some(spill) = spill {
+                summary.spilled_groups += spill.spilled_groups;
+                summary.source_nodes += spill.source_nodes;
+                summary.original_node_ids.extend(spill.original_node_ids);
+                summary.no_target = summary.no_target && spill.no_target;
+            }
+            Some(json!(summary))
+        }
+        (Err(error), Some(spill)) => {
+            let mut summary = json!(spill);
+            summary["summary_rejected"] = json!(true);
+            if let Some(details) = error.details.as_ref().and_then(Value::as_object) {
+                for field in [
+                    "summary_usage",
+                    "source_characters",
+                    "summary_characters",
+                    "summary_limit",
+                    "model_requests",
+                ] {
+                    if let Some(value) = details.get(field) {
+                        summary[field] = value.clone();
+                    }
+                }
+            }
+            Some(summary)
+        }
+        (Err(_), None) => None,
+    };
+    let no_target = summary
+        .as_ref()
+        .is_some_and(|summary| summary["no_target"] == true);
+    let mut record = json!({"outcome":match &result {Ok(_) if no_target=>"no_target",Ok(_)=>"adopted",Err(e) if slot.stop.is_cancelled() && !e.is_storage_failure()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
+    if let Some(summary) = summary {
+        record["summary"] = summary;
+    }
     if let Err(error) = &result {
         record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);
     }

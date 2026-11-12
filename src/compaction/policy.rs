@@ -134,7 +134,11 @@ pub(super) fn active_turn_plan(s: &Snapshot) -> Option<ActiveTurnPlan> {
     let end = (first..s.groups.len())
         .find(|&i| !super::range::group_is_safe(s, i))
         .unwrap_or(s.groups.len());
-    if end <= first || !s.groups[first..end].iter().any(spill_or_tool) {
+    // The latest complete tool group is appended to the summary as plain text,
+    // so a range holding only that group can never shrink: no target (§10).
+    let latest_tool = s.groups.iter().rposition(|g| g.complete && g.tool);
+    if end <= first || !(first..end).any(|i| spill_or_tool(&s.groups[i]) && Some(i) != latest_tool)
+    {
         return None;
     }
     let messages = s.groups[first..end]
@@ -279,12 +283,12 @@ mod tests {
         s.groups[5].tool = false;
         s.groups[5].sources[0].payload = json!({"item":{"role":"developer","content":[]}});
         assert_eq!(active_turn_plan(&s), None);
-        // A single complete tool group is the whole unified prefix (§4.1); with
-        // no work group after the request, or no active Turn, there is no target.
+        // The latest complete tool group alone is never a target: it is carried
+        // as text, so the summary could not shrink it (§10). Without any work
+        // group after the request, or without an active Turn, there is none.
         let mut s = staged_snapshot();
         s.groups.truncate(4);
-        let single = active_turn_plan(&s).unwrap();
-        assert_eq!((single.start, single.latest), (3, 3));
+        assert_eq!(active_turn_plan(&s), None);
         let mut s = staged_snapshot();
         s.groups.truncate(3);
         assert_eq!(active_turn_plan(&s), None);
