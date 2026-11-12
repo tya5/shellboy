@@ -93,7 +93,7 @@ fn rollback_metadata_and_overflow_fail_closed() {
 #[test]
 fn migration_matches_fresh_schema_and_rolls_back_transactionally() {
     let fresh = db();
-    let (prefix, _) = CURRENT_SCHEMA
+    let (prefix, _) = include_str!("../../tests/fixtures/storage-current-schema42.sql")
         .split_once("-- A revision writer must never")
         .unwrap();
     let previous=prefix.replace(", selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0)","");

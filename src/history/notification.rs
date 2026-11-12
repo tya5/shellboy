@@ -182,7 +182,7 @@ mod tests {
     }
     #[test]
     fn actual_schema_upgrade_converges_and_marker_fk_preserves_event() {
-        let schema = include_str!("../storage/current.sql");
+        let schema = include_str!("../../tests/fixtures/storage-current-schema42.sql");
         let predecessor = schema
             .split("ALTER TABLE event ADD COLUMN semantic_json TEXT;")
             .next()

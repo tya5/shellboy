@@ -243,29 +243,21 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         drop_fault_triggers(&control).await;
         drop(control);
         owner.shutdown().await.unwrap();
-        let restarted = crate::app::DataOwner::start(
-            None,
-            Some(root.path().to_path_buf()),
-            root.path().to_path_buf(),
-        )
-        .await
-        .unwrap();
-        let response = crate::ipc::call(
-            root.path(),
-            Command::CompactList(CompactListArgs {
-                thread_id: Some(target.clone()),
-                since: None,
-                until: None,
-                limit: 50,
-            }),
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        let list = response
-            .result
-            .expect("restarted public CompactList succeeds");
+        let restarted = proactive_owner(root.path(), &url, &limits).await;
+        let restarted_control = Control::new(&restarted, root.path().into());
+        let response = restarted_control
+            .request(crate::protocol::Request::new(
+                format!("compact-list-restart:{}", after.attempt),
+                Command::CompactList(CompactListArgs {
+                    thread_id: Some(target.clone()),
+                    since: None,
+                    until: None,
+                    limit: 50,
+                }),
+            ))
+            .await;
+        assert!(response.ok, "restarted in-process CompactList: {:?}", response.error);
+        let list = response.result.unwrap();
         let item = list["items"]
             .as_array()
             .unwrap()
@@ -274,6 +266,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
             .unwrap_or_else(|| panic!("reopened CompactList omitted persisted attempt: {list}"));
         assert_eq!(item["kind"], "automatic_reduction");
         assert_eq!(item["state"], "unknown");
+        restarted_control.shutdown().await;
         restarted.shutdown().await.unwrap();
         return;
     }
