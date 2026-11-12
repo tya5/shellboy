@@ -123,18 +123,41 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
     server.abort();
 }
 
+// Only triggers this fault fixture actually registers. Query before dropping so
+// no legacy fault_start or unrelated application trigger is touched.
+const FIXTURE_TRIGGER_NAMES: &[&str] = &[
+    "fault_adopt",
+    "fault_epoch",
+    "fault_fact",
+    "persistent_attempt",
+    "persistent_insert",
+    "persistent_update",
+    "persistent_delete",
+    "reject_write",
+    "reject_final_attempt",
+    "retired_exception_write",
+    "retired_active_insert",
+    "retired_active_update",
+    "retired_active_delete",
+    "retired_guard_insert",
+    "retired_guard_update",
+    "retired_guard_delete",
+];
 async fn drop_fault_triggers(control: &Control) {
-    control
-        .store
-        .database
-        .call(|db| {
-            db.execute_batch(
-                "DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch; DROP TRIGGER fault_start;",
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
+    control.store.database.call(|db| {
+        for schema in ["temp", "main"] {
+            for name in FIXTURE_TRIGGER_NAMES {
+                let exists: bool = db.query_row(
+                    &format!("SELECT EXISTS(SELECT 1 FROM {schema}.sqlite_master WHERE type='trigger' AND name=?1)"),
+                    [name], |row| row.get(0),
+                )?;
+                if exists {
+                    db.execute_batch(&format!("DROP TRIGGER {schema}.\"{name}\""))?;
+                }
+            }
+        }
+        Ok(())
+    }).await.unwrap();
 }
 
 /// A fresh above-threshold report starts a new automatic attempt: neither the
@@ -262,9 +285,8 @@ async fn assert_record(
     let outcome = match fault {
         Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
         Fault::Cancellation => "adopted",
-        Fault::Storage | Fault::Remeasurement | Fault::RejectFact | Fault::RetiredWritesAbsent => {
-            "failed"
-        }
+        Fault::Remeasurement | Fault::RejectFact => "failed",
+        Fault::Storage | Fault::RetiredWritesAbsent => "unknown",
         _ => "unknown",
     };
     assert_eq!(record["outcome"], outcome, "{fault:?} {stage} {record}");

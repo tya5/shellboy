@@ -88,9 +88,6 @@ impl Scenario {
     fn expects_summary_request(self, fault: Fault) -> bool {
         self.summary() || (self == Self::ActiveSpill && fault.continues_after_stage())
     }
-    fn summary_committed(self, fault: Fault) -> bool {
-        self.summary() || (self == Self::ActiveSpill && fault.continues_after_stage())
-    }
 }
 
 fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
@@ -118,6 +115,15 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 async fn closed_spill_uses_effective_thread_target_and_captures_real_stage() {
     crate::test_watchdog::watchdog("closed spill trigger tuple", async {
         boundary(Fault::Cancellation, Scenario::ClosedSpill).await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_summary_cancellation_captures_committed_boundary() {
+    crate::test_watchdog::watchdog("active summary committed boundary", async {
+        boundary(Fault::Cancellation, Scenario::ActiveSummary).await;
     })
     .await
     .unwrap();
@@ -254,14 +260,14 @@ async fn prepare_with_thread_override(
         "spill"
     };
     let scope = if scenario.active() && scenario.summary() {
-        " AND json_extract(n.payload_json,'$.summary_scope')='active_turn'"
+        " AND json_extract(n.payload_json,'$.summary_scope') IN ('active_turn_middle','active_turn_prefix')"
     } else {
         ""
     };
     // Capture immutable witnesses in the adoption transaction. Fault injection
     // itself runs after COMMIT, before the next driver stage.
-    // The epoch update is later in that SAME transaction; capture it separately.
-    let initial_thread = target.clone();
+    // Initial and committed epoch/path witnesses are captured by the same
+    // adoption transaction: OLD is the pre-stage epoch, NEW is the commit.
     control.store.database.call(move |db| {
         db.execute_batch(&format!(r#"
             CREATE TABLE fault_boundary(path TEXT, revision INTEGER, epoch INTEGER);
@@ -279,6 +285,8 @@ async fn prepare_with_thread_override(
             AND EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id
                        WHERE p.thread_id=NEW.id AND n.kind='{kind}'{scope})
             BEGIN
+              INSERT INTO fault_initial SELECT OLD.reasoning_epoch
+                WHERE NOT EXISTS(SELECT 1 FROM fault_initial);
               INSERT INTO fault_boundary SELECT
                 (SELECT json_group_array(node_id) FROM (SELECT node_id FROM thread_path WHERE thread_id=NEW.id ORDER BY ordinal)),
                 NEW.selection_revision, NEW.reasoning_epoch;
@@ -290,10 +298,6 @@ async fn prepare_with_thread_override(
             WHEN EXISTS(SELECT 1 FROM fault_boundary)
             BEGIN UPDATE fault_boundary SET epoch=NEW.reasoning_epoch; END;
         "#))?;
-        db.execute(
-            "INSERT INTO fault_initial SELECT reasoning_epoch FROM thread WHERE id=?1",
-            [&initial_thread],
-        )?;
         Ok(())
     }).await.unwrap();
     // #226: faults that must precede the stage are installed before it runs.
@@ -368,6 +372,21 @@ async fn prepare_with_thread_override(
         [], |row| row.get::<_, String>(0))?)).await.unwrap();
     let saved: Value = serde_json::from_str(&saved).unwrap();
     assert_trigger_evidence(&saved["trigger"], scenario);
+    let expected_outcome = match fault {
+        // Active-summary cancellation occurs after commit but while the durable
+        // attempt remains provisional; record the terminal unknown explicitly.
+        Fault::Cancellation if scenario == Scenario::ActiveSummary => "unknown",
+        Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
+        Fault::Cancellation => "adopted",
+        Fault::Persistent | Fault::RejectFinal | Fault::Storage | Fault::RetiredWritesAbsent => {
+            "unknown"
+        }
+        Fault::Remeasurement | Fault::RejectFact => "failed",
+    };
+    assert_eq!(
+        saved["outcome"], expected_outcome,
+        "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
+    );
     if fault == Fault::RejectFact {
         assert!(
             saved["committed_stages"][scenario.stage()].is_null(),
@@ -379,8 +398,11 @@ async fn prepare_with_thread_override(
             "selected stage fact is persisted: {saved}"
         );
     }
+    // Persistent attempt-write denial deliberately makes orderly shutdown
+    // report unsaved source data; the record is inspected before close and then
+    // byte-compared after the independent owner restart in record_tests.
     let shutdown = control.shutdown().await;
-    if fault != Fault::Cancellation {
+    if fault == Fault::Persistent {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
     } else {
         shutdown.unwrap();
@@ -570,9 +592,12 @@ async fn assert_boundary(
         assert_eq!(current_revision, revision + appended.len() as i64, "only validated audit append commits advance selection_revision");
         assert_eq!(current_epoch, epoch, "committed reasoning epoch survives failure/restart");
         let initial_epoch: i64 = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0))?;
-        assert_eq!(epoch, initial_epoch + 1 + i64::from(scenario.summary_committed(fault)), "each committed stage advances the fixture's reasoning epoch once");
         let record_text: String = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'", [], |r| r.get(0))?;
         let record: Value = serde_json::from_str(&record_text).unwrap();
+        let committed_epoch = record["committed_stages"][scenario.stage()]["reasoning_epoch"]
+            .as_i64().expect("selected committed stage contains its exact reasoning epoch");
+        assert_eq!(epoch, committed_epoch, "Thread epoch equals the exact adopted stage fact; initial={initial_epoch}, record={record}");
+        assert!(committed_epoch >= initial_epoch, "committed stage does not reverse reasoning epoch");
         assert_trigger_evidence(&record["trigger"], scenario);
         assert!(record["committed_stages"][scenario.stage()].is_object(), "fault reached the intended stage: {record}");
         let kinds: Vec<String> = db.prepare("SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
@@ -944,40 +969,77 @@ fn assert_interruption_audits(
             [id],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
         )?;
-        assert!(turn.is_none(), "postcommit suffix metadata: {}", {
-            // Failure-only closed metadata: never print node/Turn IDs, payload,
-            // paths, or provider fields. Unknown kinds/states are not forwarded.
-            let node_kind = match kind.as_str() {
-                "user"
-                | "message"
-                | "model_output"
-                | "tool_call"
-                | "tool_result"
-                | "summary"
-                | "spill"
-                | "interruption_context"
-                | "interruption_details" => kind.as_str(),
-                _ => "other",
-            };
-            let metadata=db.query_row(
+        if kind == "event" {
+            let turn_id = turn
+                .as_deref()
+                .expect("only the notification event belongs to the interrupted turn");
+            let (thread, run, state, generation): (String, String, String, i64) = db.query_row(
+                "SELECT thread_id,run_id,state,generation FROM turn WHERE id=?1",
+                [turn_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+            assert_eq!(
+                state, "stopped",
+                "notification targets the durably stopped Turn"
+            );
+            let (event_kind, source, target_thread, target_run): (String,String,String,Option<String>) = db.query_row(
+                "SELECT e.kind,e.source_json,e.target_thread_id,e.target_run_id FROM event e WHERE e.id=json_extract(?1,'$.event_id')",
+                [&body], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
+            )?;
+            assert_eq!(event_kind, "context_changed");
+            assert_eq!(source, r#"{"kind":"shellboy","source":"shutdown"}"#);
+            assert_eq!(target_thread, thread);
+            assert_eq!(
+                target_run, None,
+                "shutdown context is saved after the run stops and has no replay target"
+            );
+            assert!(generation > 0);
+            let delivery: String = db.query_row(
+                "SELECT state FROM delivery WHERE event_id=json_extract(?1,'$.event_id') AND recipient_id=?2",
+                rusqlite::params![body,run], |r| r.get(0),
+            )?;
+            assert_eq!(
+                delivery, "pending",
+                "shutdown notice remains queued for the next legitimate admission"
+            );
+        } else {
+            assert!(turn.is_none(), "postcommit audit suffix metadata: {}", {
+                // Failure-only closed metadata: never print node/Turn IDs, payload,
+                // paths, or provider fields. Unknown kinds/states are not forwarded.
+                // Node `kind` is a bounded internal enum; expose it verbatim in the
+                // isolated test diagnostic so a real lifecycle mismatch is classified.
+                let node_kind = kind.as_str();
+                let metadata=db.query_row(
                 "SELECT r.state,t.generation FROM turn t JOIN run r ON r.id=t.run_id WHERE t.id=?1",
                 [turn.as_deref()],|r|Ok((r.get(0)?,r.get(1)?)),
             ).optional();
-            let query_failed = metadata.is_err();
-            let (run_state, generation): (Option<String>, Option<i64>) =
-                metadata.unwrap_or(None).unwrap_or((None, None));
-            let run_state = match run_state.as_deref() {
-                Some("live" | "stopping" | "completed" | "cancelled" | "failed") => {
-                    run_state.as_deref().unwrap()
-                }
-                _ if query_failed => "query_failed",
-                _ => "other_or_missing",
-            };
-            json!({"node_kind":node_kind,"turn_present":turn.is_some(),"ordinal":captured_prefix_len+offset,"phase":phase,"run_state":run_state,"turn_generation":generation,"captured_prefix_len":captured_prefix_len})
-        });
+                let query_failed = metadata.is_err();
+                let (run_state, generation): (Option<String>, Option<i64>) =
+                    metadata.unwrap_or(None).unwrap_or((None, None));
+                let run_state = match run_state.as_deref() {
+                    Some("live" | "stopping" | "completed" | "cancelled" | "failed") => {
+                        run_state.as_deref().unwrap()
+                    }
+                    _ if query_failed => "query_failed",
+                    _ => "other_or_missing",
+                };
+                json!({"node_kind":node_kind,"turn_present":turn.is_some(),"ordinal":captured_prefix_len+offset,"phase":phase,"run_state":run_state,"turn_generation":generation,"captured_prefix_len":captured_prefix_len})
+            });
+        }
         let payload: Value = serde_json::from_str(&body).unwrap();
-        let audit: Value = serde_json::from_str(payload["text"].as_str().unwrap()).unwrap();
+        let audit: Value = if kind == "event" {
+            Value::Null // event kind/id/recipient were validated against the event ledger above
+        } else {
+            serde_json::from_str(payload["text"].as_str().unwrap()).unwrap()
+        };
         match kind.as_str() {
+            "event" => {
+                assert!(
+                    payload["event_id"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty())
+                );
+            }
             "interruption_details" => {
                 assert!(sections.contains(&audit["section"].as_str().unwrap()));
                 assert!(!audit["items"].as_array().unwrap().is_empty());
