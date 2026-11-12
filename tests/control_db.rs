@@ -1027,7 +1027,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let thread = create(&store, None).await;
     let changed = execute(
         &store,
-        Command::ThreadSet(Box::new(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,
@@ -1045,7 +1045,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     assert_eq!(changed.result["effort"], "high");
     let changed = execute(
         &store,
-        Command::ThreadSet(Box::new(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,
@@ -1063,7 +1063,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     assert_eq!(changed.result["effort"], "high");
     let cleared = execute(
         &store,
-        Command::ThreadSet(Box::new(ThreadSetArgs {
+        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,

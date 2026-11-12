@@ -27,7 +27,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
     ui.insert("keep the current draft", false);
     let draft_revision = ui.view().draft.revision;
     let mut events = control.subscribe();
-    let settings = |title: Option<&str>, model: Option<&str>, cwd: Option<String>| ThreadSetArgs {
+    let settings = |title: Option<&str>, model: Option<&str>, cwd: Option<String>| ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
         agents: None,
         thread_id: Some("thread".into()),
         title: title.map(str::to_owned),

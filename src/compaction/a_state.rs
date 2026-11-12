@@ -185,3 +185,32 @@ mod tests {
     }
 
 }
+
+#[cfg(test)]
+mod transactional_reset_tests {
+    use super::*;
+    #[test]
+    fn provider_report_and_terminal_cas_rollback_share_atomic_state() {
+        let mut db=rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);CREATE TABLE terminal(id TEXT PRIMARY KEY,done INTEGER NOT NULL);INSERT INTO terminal VALUES('trial',0);").unwrap();
+        let (initial,boundary)={let tx=db.transaction().unwrap();let state=scope_tx(&tx,"t","c","m").unwrap();let token=state.token();save(&tx,"t",&state).unwrap();tx.commit().unwrap();(state,token)};
+        {
+            let tx=db.transaction().unwrap();
+            assert_eq!(tx.execute("UPDATE terminal SET done=1 WHERE id='trial' AND done=0",[]).unwrap(),1);
+            reset_tx(&tx,"t",boundary,"trial").unwrap();
+            // Explicit transaction drop rolls back terminal ownership AND #A.
+        }
+        assert_eq!(read(&db,"t").unwrap().unwrap(),initial);
+        let tx=db.transaction().unwrap();
+        assert_eq!(tx.execute("UPDATE terminal SET done=1 WHERE id='trial' AND done=0",[]).unwrap(),1);
+        reset_tx(&tx,"t",boundary,"trial").unwrap();
+        complete_report_tx(&tx,"t","c","m","first",Some(boundary.scope),None).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(read(&db,"t").unwrap().unwrap().reading(),Reading::Unknown);
+        let tx=db.transaction().unwrap();
+        assert_eq!(tx.execute("UPDATE terminal SET done=1 WHERE id='trial' AND done=0",[]).unwrap(),0);
+        complete_report_tx(&tx,"t","c","m","later",Some(boundary.scope),Some(9)).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(read(&db,"t").unwrap().unwrap().reading(),Reading::Unknown);
+    }
+}

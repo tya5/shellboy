@@ -223,7 +223,7 @@ async fn stream_input_layout_and_db_fairness() {
                     let response = c
                         .request(Request::new(
                             format!("{}:{}", c.store.instance_id, uuid::Uuid::new_v4()),
-                            Command::ThreadSet(Box::new(ThreadSetArgs {
+                            Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
                                 agents: None,
                                 thread_id: Some(thread),
                                 connection: None,

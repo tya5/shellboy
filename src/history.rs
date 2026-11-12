@@ -95,7 +95,7 @@ impl History {
                     "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails { instruction_sources: None, archived_at: None, tags: Vec::new(), auto_compact_at: None, effective_auto_compact_at: None, segment_chars: None, effective_segment_chars: None, reduce_rounds: None, effective_reduce_rounds: None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
+                        Ok(ThreadDetails { instruction_sources: None, archived_at: None, tags: Vec::new(), auto_compact_at: None, effective_auto_compact_at: None, auto_compact_target_percent:None,summary_max_chars:None,effective_auto_compact_target_percent:None,effective_summary_max_chars:None, segment_chars: None, effective_segment_chars: None, reduce_rounds: None, effective_reduce_rounds: None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),

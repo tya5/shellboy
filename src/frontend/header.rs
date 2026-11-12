@@ -153,7 +153,7 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         archived_at: None,
         tags: Vec::new(),
         auto_compact_at: row.get::<_, Option<i64>>(14)?.map(|v| v as u64),
-        effective_auto_compact_at: None,
+        effective_auto_compact_at: None, auto_compact_target_percent:None,summary_max_chars:None,effective_auto_compact_target_percent:None,effective_summary_max_chars:None,
         segment_chars: None,
         effective_segment_chars: None,
         reduce_rounds: None,
