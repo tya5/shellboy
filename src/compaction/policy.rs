@@ -131,34 +131,14 @@ pub(super) fn turn_message(source: &Source, turn: &str) -> bool {
 /// active Turn from its first tool round through the latest complete tool
 /// group. No target unless ③ holds a tool group or spill marker (a previous
 /// summary alone never re-fires, #180), or if any covered group is incomplete.
-pub(super) fn active_turn_plan(s: &Snapshot) -> Option<ActiveTurnPlan> {
-    let turn = s.current_turn.as_deref()?;
-    let request = request_boundary(s, Some(turn))?;
-    let latest = s.groups.iter().rposition(|g| g.complete && g.tool)?;
-    let start = (request + 1..latest).find(|&i| work_group(&s.groups[i]))?;
-    let span = &s.groups[start..=latest];
-    // Protected nodes (pending receipts, revisit events) keep their own
-    // lifecycle; a span holding one is not a target.
-    if span.iter().any(|g| !g.complete)
-        || span
-            .iter()
-            .flat_map(|g| &g.sources)
-            .any(|n| s.protected.contains(&n.id))
-        || !span[..span.len() - 1].iter().any(spill_or_tool)
-    {
-        return None;
-    }
-    let messages = span
-        .iter()
-        .flat_map(|g| &g.sources)
-        .filter(|source| turn_message(source, turn))
-        .map(|source| source.id.clone())
-        .collect();
-    Some(ActiveTurnPlan {
-        start,
-        latest,
-        messages,
-    })
+pub(super) fn active_turn_plan(s:&Snapshot)->Option<ActiveTurnPlan> {
+    let turn=s.current_turn.as_deref()?;
+    let request=request_boundary(s,Some(turn))?;
+    let first=(request+1..s.groups.len()).find(|&i|work_group(&s.groups[i]))?;
+    let end=(first..s.groups.len()).find(|&i|!super::range::group_is_safe(s,i)).unwrap_or(s.groups.len());
+    if end<=first || !s.groups[first..end].iter().any(spill_or_tool) {return None;}
+    let messages=s.groups[first..end].iter().flat_map(|g|&g.sources).filter(|source|turn_message(source,turn)).map(|source|source.id.clone()).collect();
+    Some(ActiveTurnPlan{start:first,latest:end-1,messages})
 }
 /// Oldest safe active-Turn work groups, stopping at the calibrated need.
 pub(super) fn target_active_range(

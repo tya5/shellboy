@@ -137,7 +137,7 @@ impl Compactor {
         let originals:Vec<String>=sources.iter().map(|s|s.id.clone()).collect();
         let text_chars=dispatched.response.text.chars().count();
         let source_chars=sources.iter().map(|s|edit::projection_characters(&s.payload,snapshot.epoch)).sum::<u64>();
-        let reaches_latest=active.as_ref().is_some_and(|plan|selected.end==plan.end());
+        let reaches_latest=active.is_some() && snapshot.groups.iter().rposition(|g|g.complete&&g.tool).is_some_and(|latest|selected.end==latest+1);
         let summary_text=if reaches_latest {
             let plan=active.as_ref().unwrap();
             format!("{}\n\n[The latest tool round (plain, kept verbatim)]\n{}",dispatched.response.text,snapshot.groups[plan.latest].sources.iter().map(|s|render(s,snapshot.epoch)).collect::<Vec<_>>().join("\n\n"))
