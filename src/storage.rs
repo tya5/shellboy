@@ -13,6 +13,10 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+#[cfg(test)]
+#[path = "../tests/support/schema42_fixture.rs"]
+mod schema42_test_fixture;
+
 use rusqlite::{Connection, OpenFlags};
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 
@@ -1755,6 +1759,7 @@ mod schema_validation_tests {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
+        super::schema42_test_fixture::downgrade_current_schema_to_schema42(&db);
         db.execute_batch("DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=10; DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=9;")
             .unwrap();
         assert!(
@@ -1775,7 +1780,7 @@ mod readback_migration_tests {
         crate::test_watchdog::watchdog("schema14 derived index upgrade",async {
             let root=tempfile::tempdir().unwrap();let path=root.path().join("db");
             {
-                let c=rusqlite::Connection::open(&path).unwrap();c.execute_batch(super::CURRENT_SCHEMA).unwrap();
+                let c=super::schema42_test_fixture::open_schema42_fixture(&path);
                 c.execute_batch("DROP INDEX thread_parent;DROP INDEX wait_run_state;DROP INDEX wait_recovery_thread;DROP INDEX thread_answer_latest;DROP INDEX receipt_thread_order;DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=16;DROP INDEX shell_started_readback;DROP INDEX shell_owner_started_readback;DROP INDEX compact_operation_thread;DROP INDEX automatic_compaction_turn;DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DELETE FROM schema_migration WHERE version=15;DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=14;PRAGMA ignore_check_constraints=ON;INSERT INTO operation_receipt(operation_id,instance_id,origin_json,request_hash,state,result_ref_json,created_at)VALUES('corrupt','fixture','{}','hash','failed','malformed','2026-10-31T00:00:00Z');PRAGMA ignore_check_constraints=OFF;").unwrap();
                 c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('keep','/','','p','m','2026-10-31T00:00:00Z')",[]).unwrap();
             }
@@ -1797,7 +1802,7 @@ mod thread_observation_migration_tests {
         crate::test_watchdog::watchdog("schema15 Thread observation upgrade",async {
             let root=tempfile::tempdir().unwrap();let path=root.path().join("db");
             {
-                let db=rusqlite::Connection::open(&path).unwrap();db.execute_batch(super::CURRENT_SCHEMA).unwrap();
+                let db=super::schema42_test_fixture::open_schema42_fixture(&path);
                 db.execute_batch(r#"DROP INDEX thread_parent;DROP INDEX wait_run_state;DROP INDEX wait_recovery_thread;DROP INDEX thread_answer_latest;DROP INDEX receipt_thread_order;DROP INDEX IF EXISTS node_event_retention; DROP INDEX IF EXISTS delivery_event_state; DROP INDEX IF EXISTS receipt_run_completion; DROP INDEX IF EXISTS attempts_completed_scope; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX IF EXISTS history_tool_group_attempt; DROP INDEX IF EXISTS jobs_running_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=16;DROP INDEX IF EXISTS receipt_human_reply_pending; PRAGMA user_version=15;INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','now');INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES('r','t','completed','2000','2001');INSERT INTO event(id,kind,source_json,target_thread_id,payload_ref_json,created_at)VALUES('e','child_recovery_wait','{}','t','{"thread_id":"t","run_id":"r","turn_id":"u"}','2000');"#).unwrap();
             }
             for _ in 0..2 {
