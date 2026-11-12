@@ -322,11 +322,15 @@ async fn deltas_arrive_in_order_with_offsets_then_the_attempt_ends_and_saved_out
             assert_eq!(tail["coverage_v1"]["attempt_id"], attempt);
             let pieces = tail["deltas"].as_array().unwrap();
             assert_eq!(pieces.len(), 2);
-            for (index, (offset, text)) in [(0, "hello"), (5, " こんに😀")].into_iter().enumerate() {
+            for (index, (offset, text)) in [(0, "hello"), (5, " こんに😀")].into_iter().enumerate()
+            {
                 assert_eq!(pieces[index]["text"], text);
                 assert_eq!(pieces[index]["offset"], offset);
                 assert_eq!(pieces[index]["coverage_v1"]["sequence"], index.to_string());
-                assert_eq!(pieces[index]["coverage_v1"]["scalar_offset"], offset.to_string());
+                assert_eq!(
+                    pieces[index]["coverage_v1"]["scalar_offset"],
+                    offset.to_string()
+                );
                 assert_eq!(pieces[index]["coverage_v1"]["stream_kind"], "text");
             }
             assert_eq!(joined(tail), "hello こんに😀");
