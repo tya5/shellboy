@@ -116,7 +116,7 @@ impl SummaryAdoption {
         if self.automatic.is_none() {
             let mut state=super::a_state::scope_tx(tx,&self.snapshot.thread,&self.snapshot.profile,&self.snapshot.model)?;
             let expected=state.token();
-            state.finish_boundary(expected,&self.replacement)?;
+            state.finish_boundary(expected,&node)?;
             super::a_state::save(tx,&self.snapshot.thread,&state)?;
         }
         // A partial active summary drops all earlier reasoning regardless of suffix.

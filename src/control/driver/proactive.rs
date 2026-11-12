@@ -210,14 +210,14 @@ pub(super) async fn maybe_compact(
     // One decision per fresh provider report; no character forecast or marks.
     let thread=snapshot.thread.clone();
     let data=control.store.database.call(move |db| {
-        let settings:(Option<u64>,Option<u64>)=db.query_row("SELECT auto_compact_at,auto_compact_target_percent FROM thread WHERE id=?1",[&thread],|r|Ok((r.get(0)?,r.get(1)?)))?;
+        let settings:(Option<i64>,Option<i64>)=db.query_row("SELECT auto_compact_at,auto_compact_target_percent FROM thread WHERE id=?1",[&thread],|r|Ok((r.get(0)?,r.get(1)?)))?;
         let (usage,_)=crate::compaction::context_usage::prepare_context_usage(crate::compaction::context_usage::read_context_usage_tx(db,&thread,None)?);
         let state=crate::compaction::a_state::read(db,&thread)?;
         Ok((settings,usage,crate::compaction::a_state::reading(state.as_ref())))
     }).await.map_err(storage_error)?;
     let connection=snapshot.clients.connections.get(&snapshot.profile);
-    let threshold=control.store.config.compaction.auto_at_tokens_for(data.0.0,connection);
-    let percent=crate::config::target_percent_for(data.0.1,connection);
+    let threshold=control.store.config.compaction.auto_at_tokens_for(data.0.0.map(|n|u64::try_from(n).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid automatic threshold"))).transpose()?,connection);
+    let percent=crate::config::target_percent_for(data.0.1.map(|n|u64::try_from(n).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid automatic percentage"))).transpose()?,connection);
     if threshold==0 {return Ok(false);}
     let report=&data.1["last_successful_attempt"];
     let (Some(input),Some(attempt))=(report["input_tokens"].as_u64(),report["attempt_id"].as_str()) else {return Ok(false);};

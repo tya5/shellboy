@@ -168,8 +168,8 @@ impl Compactor {
             result:CompactResult {source_characters:Some(source_chars as u64),summary_characters:Some(text_chars as u64),summary_limit:Some(limit.0),model_requests:Some(ledger.usage().requests as usize),source_nodes:originals.len(),original_node_ids:originals,summary_usage:Some(ledger.usage().clone()),..Default::default()}
         };
         let config=self.config.clone();
-        self.database.call(move |db| {let tx=db.transaction()?;let result=adoption.adopt_tx(&tx,&config,&cancel)?;
-            if reaches_latest {tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![history::reasoning_keep_key(&adoption.snapshot.thread),json!({"epoch":adoption.snapshot.epoch,"nodes":kept_reasoning}).to_string()])?;}
+        self.database.call(move |db| {let tx=db.transaction()?;let keep_thread=adoption.snapshot.thread.clone();let keep_epoch=adoption.snapshot.epoch;let result=adoption.adopt_tx(&tx,&config,&cancel)?;
+            if reaches_latest {tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![history::reasoning_keep_key(&keep_thread),json!({"epoch":keep_epoch,"nodes":kept_reasoning}).to_string()])?;}
             tx.commit()?;Ok(result)}).await.map_err(storage_error)
     }
 
