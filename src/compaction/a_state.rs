@@ -8,7 +8,7 @@ const MAX_ID_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct State {
+pub(crate) struct State {
     version: u8,
     scope_generation: u64,
     boundary_generation: u64,
@@ -21,15 +21,15 @@ pub(super) struct State {
 #[serde(deny_unknown_fields)]
 struct Report { attempt: String, input_tokens: Option<u64> }
 #[derive(Clone, Copy)]
-pub(super) struct Token { scope: u64, boundary: u64 }
+pub(crate) struct Token { scope: u64, boundary: u64 }
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum Reading { LegacyAbsent, AwaitingFirst, Known(u64), Unknown }
+pub(crate) enum Reading { LegacyAbsent, AwaitingFirst, Known(u64), Unknown }
 
 fn bad() -> ApiError { invalid("Invalid bounded automatic compaction fact state") }
 fn id_ok(value: &str) -> bool { !value.is_empty() && value.len() <= MAX_ID_BYTES }
 fn next(value: u64) -> Result<u64,ApiError> { value.checked_add(1).ok_or_else(bad) }
 impl State {
-    pub(super) fn new(connection: &str, model: &str) -> Result<Self,ApiError> {
+    pub(crate) fn new(connection: &str, model: &str) -> Result<Self,ApiError> {
         let state=Self { version:1,scope_generation:0,boundary_generation:0,connection:connection.into(),model:model.into(),last_reset_origin:None,first:None };
         state.validate()?;Ok(state)
     }
@@ -39,11 +39,11 @@ impl State {
             || self.first.as_ref().is_some_and(|v|!id_ok(&v.attempt)) { return Err(bad()); }
         Ok(())
     }
-    pub(super) fn token(&self) -> Token { Token {scope:self.scope_generation,boundary:self.boundary_generation} }
-    pub(super) fn reading(&self) -> Reading {
+    pub(crate) fn token(&self) -> Token { Token {scope:self.scope_generation,boundary:self.boundary_generation} }
+    pub(crate) fn reading(&self) -> Reading {
         match &self.first { None=>Reading::AwaitingFirst,Some(Report{input_tokens:Some(n),..})=>Reading::Known(*n),Some(_)=>Reading::Unknown }
     }
-    pub(super) fn change_scope(&mut self, connection:&str, model:&str) -> Result<bool,ApiError> {
+    pub(crate) fn change_scope(&mut self, connection:&str, model:&str) -> Result<bool,ApiError> {
         if !id_ok(connection)||!id_ok(model) { return Err(bad()); }
         if self.connection==connection && self.model==model {return Ok(false);}
         let generation=next(self.scope_generation)?;
@@ -53,7 +53,7 @@ impl State {
         Ok(true)
     }
     /// Call only after owning the terminal row CAS in this same transaction.
-    pub(super) fn finish_boundary(&mut self, expected:Token, origin:&str) -> Result<bool,ApiError> {
+    pub(crate) fn finish_boundary(&mut self, expected:Token, origin:&str) -> Result<bool,ApiError> {
         if !id_ok(origin) {return Err(bad());}
         if expected.scope!=self.scope_generation || expected.boundary!=self.boundary_generation
             || self.last_reset_origin.as_deref()==Some(origin) {return Ok(false);}
@@ -63,7 +63,7 @@ impl State {
     }
     /// Completion order is transaction order. An older boundary token is valid;
     /// an older SCOPE token is not, even after connection/model ABA.
-    pub(super) fn completed(&mut self, started:Token, connection:&str, model:&str, attempt:&str, input_tokens:Option<u64>) -> Result<bool,ApiError> {
+    pub(crate) fn completed(&mut self, started:Token, connection:&str, model:&str, attempt:&str, input_tokens:Option<u64>) -> Result<bool,ApiError> {
         if !id_ok(attempt) {return Err(bad());}
         if started.scope!=self.scope_generation || connection!=self.connection || model!=self.model || self.first.is_some() {return Ok(false);}
         self.first=Some(Report{attempt:attempt.into(),input_tokens});Ok(true)
@@ -72,7 +72,7 @@ impl State {
 fn key(thread:&str) -> Result<String,ApiError> {
     if !id_ok(thread) {return Err(bad());}Ok(format!("compact.a_state.{thread}"))
 }
-pub(super) fn read(db:&rusqlite::Connection, thread:&str) -> Result<Option<State>,StorageError> {
+pub(crate) fn read(db:&rusqlite::Connection, thread:&str) -> Result<Option<State>,StorageError> {
     // length check occurs in SQLite, so oversized JSON is not copied into Rust.
     let row:Option<Option<String>>=db.query_row(
         "SELECT CASE WHEN length(CAST(value AS BLOB))<=?2 THEN value END FROM app_meta WHERE key=?1",
@@ -86,14 +86,34 @@ pub(super) fn read(db:&rusqlite::Connection, thread:&str) -> Result<Option<State
         }
     }
 }
-pub(super) fn save(tx:&rusqlite::Transaction<'_>, thread:&str, state:&State) -> Result<(),StorageError> {
+pub(crate) fn save(tx:&rusqlite::Connection, thread:&str, state:&State) -> Result<(),StorageError> {
     state.validate()?;
     let text=serde_json::to_string(state).map_err(|_|StorageError::from(bad()))?;
     if text.len()>MAX_BYTES {return Err(bad().into());}
     tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",params![key(thread)?,text])?;
     Ok(())
 }
-pub(super) fn reading(state:Option<&State>) -> Reading { state.map(State::reading).unwrap_or(Reading::LegacyAbsent) }
+pub(crate) fn reading(state:Option<&State>) -> Reading { state.map(State::reading).unwrap_or(Reading::LegacyAbsent) }
+
+pub(crate) fn scope_tx(db:&rusqlite::Connection, thread:&str, connection:&str, model:&str) -> Result<State,StorageError> {
+    let mut state=read(db,thread)?.unwrap_or(State::new(connection,model)?);
+    state.change_scope(connection,model)?;save(db,thread,&state)?;Ok(state)
+}
+pub(crate) fn begin_report_tx(db:&rusqlite::Connection, thread:&str, connection:&str, model:&str) -> Result<u64,StorageError> {
+    Ok(scope_tx(db,thread,connection,model)?.scope_generation)
+}
+pub(crate) fn complete_report_tx(db:&rusqlite::Connection, thread:&str, connection:&str, model:&str, attempt:&str, generation:Option<u64>, input:Option<u64>) -> Result<(),StorageError> {
+    let Some(generation)=generation else {return Ok(());}; // Legacy inflight attempt has no causal scope token.
+    let Some(mut state)=read(db,thread)? else {return Ok(());};
+    if state.completed(Token{scope:generation,boundary:0},connection,model,attempt,input)? {save(db,thread,&state)?;}
+    Ok(())
+}
+pub(crate) fn cleanup_tx(db:&rusqlite::Connection, thread:&str) -> Result<(),StorageError> {
+    for key in [key(thread)?,format!("compact.deterministic_range_failure.closed.{thread}"),format!("compact.deterministic_range_failure.active.{thread}")] {
+        db.execute("DELETE FROM app_meta WHERE key=?1",[key])?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
