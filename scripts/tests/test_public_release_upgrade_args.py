@@ -17,6 +17,9 @@ class PublicUpgradeArguments(unittest.TestCase):
     base = ['--old', 'synthetic-old', '--new', 'synthetic-new', '--root', 'synthetic-not-created']
 
     def test_public_011_same_schema_patch(self):
+        args = upgrade.parse_args(self.base + ['--old-version', '0.11.0', '--expected-version', '0.12.0', '--start-schema', '42'])
+        self.assertEqual(args.expected_new_schema,43)
+        self.assertEqual(args.start_schema,42)
         args = upgrade.parse_args(self.base + ['--old-version', '0.11.0', '--expected-version', '0.11.1', '--expected-new-schema', '39'])
         self.assertEqual((args.old_version, args.start_schema, args.expected_new_schema, args.expected_version), ('0.11.0', 39, 39, '0.11.1'))
 

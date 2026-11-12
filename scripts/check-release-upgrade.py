@@ -227,7 +227,7 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         apply_migration(db, version)
