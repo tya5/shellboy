@@ -1196,19 +1196,17 @@ async fn schema_thirteen_records_positive_admission_evidence_and_keeps_uncertain
 async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("legacy.sqlite");
-    let db = DbWorker::open(&path).await.unwrap();
-    db.call(|db| {
-        seed_thread(db,"parent")?; seed_thread(db,"child")?;
-        db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('parent-run','parent','completed','now'),('child-run','child','live','now');
+    let db = crate::schema42_fixture::open_schema42_fixture(&path);
+    seed_thread(&db, "parent").unwrap();
+    seed_thread(&db, "child").unwrap();
+    db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('parent-run','parent','completed','now'),('child-run','child','live','now');
           INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('child-turn','child','child-run','running','now');
           INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('owned-shell','child-run','child-turn','owned-shell','running','/','{}','UTF-8','UTF-8','open','now');
           INSERT INTO node(id,kind,created_at,payload_json) VALUES('pending-request','user','now','{}');
           INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at,result_json) VALUES('pending-request','pending-request','{}','child','pending-request','held','now','{\"expect_reply\":true,\"reply\":{\"state\":\"pending\"}}');
-          INSERT INTO app_meta(key,value) VALUES('reply-migration-witness','preserve');")?;
-        Ok(())
-    }).await.unwrap();
-    db.shutdown().await.unwrap();
-    let legacy = Connection::open(&path).unwrap();
+          INSERT INTO app_meta(key,value) VALUES('reply-migration-witness','preserve');").unwrap();
+    crate::schema42_fixture::downgrade_schema42_to_schema39(&db);
+    let legacy = db;
     legacy
         .execute_batch(
             "DROP INDEX receipt_reply_run_pending; ALTER TABLE run ADD COLUMN owner_run_id TEXT REFERENCES run(id);
@@ -1217,7 +1215,7 @@ async fn schema_thirty_nine_detaches_runs_preserving_shells_turns_and_metadata()
         DROP INDEX wait_recovery_thread;
         CREATE INDEX wait_recovery_thread ON event(json_extract(payload_ref_json,'$.thread_id')) WHERE kind='child_recovery_wait';
         INSERT INTO event(id,target_thread_id,kind,payload_ref_json,source_json,created_at) VALUES('legacy-recovery','child','child_recovery_wait','{\"thread_id\":\"child\",\"saved\":true}','{}','now');
-        DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=39; PRAGMA user_version=38;",
+        DELETE FROM schema_migration WHERE version>=39; PRAGMA user_version=38;",
         )
         .unwrap();
     let plans=legacy.prepare("EXPLAIN QUERY PLAN UPDATE event SET kind='recovery_wait' WHERE kind='child_recovery_wait'").unwrap().query_map([],|r|r.get::<_,String>(3)).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
