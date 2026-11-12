@@ -477,7 +477,7 @@ impl Control {
                 .encode();
                 encode_result(
                     EventsWaitResult {
-                        coverage_seals_v1: Vec::new(),
+                        coverage_seals_v1: if include_text {self.change_clock.coverage_seals(seq,&args.thread_ids)} else {Vec::new()},
                         status,
                         cursor,
                         changes: changes

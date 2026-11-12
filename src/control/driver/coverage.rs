@@ -1,21 +1,21 @@
 //! Ordinary projection transcript foundation; not yet connected to live publication.
 use sha2::{Digest, Sha256};
 
-pub(super) struct Producer {
+pub(in crate::control) struct Producer {
     hash: Sha256,
     unknown: bool,
     sequence: u64,
     scalars: u64,
     bytes: u64,
 }
-pub(super) struct FrozenSeal {
-    pub(super) digest: [u8; 32],
-    pub(super) next_sequence: u64,
-    pub(super) scalar_end: u64,
-    pub(super) utf8_bytes: u64,
+pub(in crate::control) struct FrozenSeal {
+    pub(in crate::control) digest: [u8; 32],
+    pub(in crate::control) next_sequence: u64,
+    pub(in crate::control) scalar_end: u64,
+    pub(in crate::control) utf8_bytes: u64,
 }
 impl Producer {
-    pub(super) fn begin(incarnation: [u8; 16]) -> Self {
+    pub(in crate::control) fn begin(incarnation: [u8; 16]) -> Self {
         let mut hash = Sha256::new();
         hash.update(b"shellboy-preview-ordinary-v1\0");
         hash.update(incarnation);
@@ -27,7 +27,7 @@ impl Producer {
             bytes: 0,
         }
     }
-    pub(super) fn admit_ordinary(&mut self, offset: u64, text: &str) -> Result<(), ()> {
+    pub(in crate::control) fn admit_ordinary(&mut self, offset: u64, text: &str) -> Result<(), ()> {
         if self.unknown {
             return Err(());
         }
@@ -57,7 +57,7 @@ impl Producer {
         self.bytes = bytes;
         Ok(())
     }
-    pub(super) fn freeze(mut self) -> Result<FrozenSeal, ()> {
+    pub(in crate::control) fn freeze(mut self) -> Result<FrozenSeal, ()> {
         if self.unknown {
             return Err(());
         }

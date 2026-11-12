@@ -328,7 +328,7 @@ pub(super) async fn stream_response(
     tokio::pin!(response);
     loop {
         tokio::select! {
-            result=&mut response=>break result,
+            result=&mut response=>{live_text.freeze();break result},
             Some(event)=receive.recv()=>{
                 let (event, observed_at) = match event {
                     model::http::ObservedEvent::Received(at) => (None, at),
