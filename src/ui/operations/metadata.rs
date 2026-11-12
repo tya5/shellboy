@@ -77,6 +77,8 @@ impl Form {
             "model" => FieldId::Model,
             "effort" => FieldId::Effort,
             "auto_compact_at" => FieldId::AutoCompactAt,
+            "auto_compact_target_percent" => FieldId::AutoCompactTargetPercent,
+            "summary_max_chars" => FieldId::SummaryMaxChars,
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "archived" => FieldId::Archived,
@@ -426,11 +428,6 @@ impl Form {
                     language,
                     "0以上の整数（操作の上限に従います）",
                     "Non-negative integer, subject to operation limits"
-                ),
-                FieldType::Decimal => local!(
-                    language,
-                    "有限の数値（操作ごとの範囲に従います）",
-                    "Finite number, subject to operation limits"
                 ),
                 FieldType::Boolean => local!(language, "はい／いいえ", "Yes or no"),
                 FieldType::Choice => local!(language, "候補から選択", "Choose from the options"),
@@ -1145,6 +1142,13 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
         FieldId::Model => local!(language, "モデル名", "Model name"),
         FieldId::Effort => local!(language, "推論設定", "Reasoning effort"),
         FieldId::AutoCompactAt => local!(language, "自動要約の閾値", "Auto-compaction threshold"),
+        FieldId::AutoCompactTargetPercent => {
+            local!(
+                language,
+                "自動要約の目標割合",
+                "Proactive compaction target percentage"
+            )
+        }
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
@@ -1453,6 +1457,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
             "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
+        ),
+        FieldId::AutoCompactTargetPercent => local!(
+            language,
+            "このThreadの自動要約目標圧縮割合（1〜100の整数）です。CLIの空文字は接続または[compaction]の値へ戻します。手動summaryの絶対文字数上限とは別です。",
+            "Target percentage of original characters for proactive compaction only (integer 1–100). An empty CLI value returns to the connection or [compaction] value. Separate from the absolute manual summary character cap."
         ),
         FieldId::Title => local!(
             language,

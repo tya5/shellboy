@@ -221,6 +221,11 @@ const MEANINGS: &[Meaning] = &[
             ("model", FieldId::Model),
             ("effort", FieldId::Effort),
             ("auto_compact_at", FieldId::AutoCompactAt),
+            (
+                "auto_compact_target_percent",
+                FieldId::AutoCompactTargetPercent,
+            ),
+            ("summary_max_chars", FieldId::SummaryMaxChars),
             ("parent_id", FieldId::Parent),
             ("agents", FieldId::Agents),
         ],
