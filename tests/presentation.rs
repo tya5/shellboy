@@ -605,7 +605,7 @@ fn attention_event_keeps_title_short_and_preserves_error_details_as_separate_pla
 fn each_tool_result_keeps_its_own_identity_state_reason_and_partial_source_span() {
     let payload = json!({"output":[
         {"type":"function_call_output","call_id":"one","output":json!({"command":"echo one","status":"exited","exit_code":0,"output":"one"}).to_string()},
-        {"type":"function_call_output","call_id":"two","output":json!({"command":"sleep 30","status":"running","reason":"human_backgrounded","execution_id":"execution-two"}).to_string()},
+        {"type":"function_call_output","call_id":"two","output":json!({"command":"tail -f /dev/null","status":"running","reason":"human_backgrounded","execution_id":"execution-two"}).to_string()},
         {"type":"function_call_output","call_id":"three","output":json!({"status":"cancelled","reason":"Previous tool failed or foreground wait was interrupted"}).to_string()}
     ]});
     let original = payload.clone();

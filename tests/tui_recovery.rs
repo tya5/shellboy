@@ -449,7 +449,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     let actions = enter(&mut ui);
     deliver(&sender, actions);
     let first = request_with_ui(&mut requests, &incoming, &mut ui, &sender).await;
-    let calls=[("one","printf one"),("two","sleep 30"),("three","printf MUST_NOT_RUN")].into_iter().map(|(id,command)|json!({"type":"function_call","id":format!("item-{id}"),"call_id":id,"name":"shell","arguments":json!({"command":command}).to_string()})).collect::<Vec<_>>();
+    let calls=[("one","printf one"),("two","tail -f /dev/null"),("three","printf MUST_NOT_RUN")].into_iter().map(|(id,command)|json!({"type":"function_call","id":format!("item-{id}"),"call_id":id,"name":"shell","arguments":json!({"command":command}).to_string()})).collect::<Vec<_>>();
     first
         .reply
         .send((
@@ -680,7 +680,7 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     }
     for wanted in [
         "printf one",
-        "⏵ sleep 30",
+        "⏵ tail -f /dev/null",
         "背景（利用者）",
         "⊘ printf MUST_NOT_RUN",
         "利用者が先行する呼出しを背景へ移したため未実行",
@@ -689,10 +689,10 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
     }
     let running_row = shown
         .lines()
-        .find(|line| line.contains("⏵ sleep 30"))
+        .find(|line| line.contains("⏵ tail -f /dev/null"))
         .unwrap();
     assert!(running_row.contains("背景（利用者）"), "{running_row}");
-    assert!(running_row.find("sleep 30").unwrap() < running_row.find("背景（利用者）").unwrap());
+    assert!(running_row.find("tail -f /dev/null").unwrap() < running_row.find("背景（利用者）").unwrap());
     // The background-process panel (`\-[1] $ cmd`) may or may not be on screen
     // when the frame is drawn; only conversation items count here.
     let conversation: String = shown
@@ -700,15 +700,15 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         .filter(|line| !line.trim_start().starts_with("\\-["))
         .map(|line| format!("{line}\n"))
         .collect();
-    for command in ["printf one", "sleep 30", "printf MUST_NOT_RUN"] {
+    for command in ["printf one", "tail -f /dev/null", "printf MUST_NOT_RUN"] {
         assert_eq!(
             conversation.matches(command).count(),
             1,
             "call/result merge must emit one item per stable identity: {shown}"
         );
     }
-    assert!(shown.find("printf one").unwrap() < shown.find("sleep 30").unwrap());
-    assert!(shown.find("sleep 30").unwrap() < shown.find("printf MUST_NOT_RUN").unwrap());
+    assert!(shown.find("printf one").unwrap() < shown.find("tail -f /dev/null").unwrap());
+    assert!(shown.find("tail -f /dev/null").unwrap() < shown.find("printf MUST_NOT_RUN").unwrap());
     assert!(!shown.contains("#1") && !shown.contains("#2") && !shown.contains("#3"));
     assert_eq!(identities.len(), 3);
     assert!(identities.iter().all(|(group, _)| group.is_some()));

@@ -8710,7 +8710,7 @@ mod recovery_context_tests {
 mod tool_refresh_tests {
     use super::*;
     fn tool(state: &str) -> UiNode {
-        let payload = serde_json::json!({"output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"sleep 30\"}"}]});
+        let payload = serde_json::json!({"output":[{"type":"function_call","name":"shell","call_id":"call","arguments":"{\"command\":\"tail -f /dev/null\"}"}]});
         let text = crate::history::text_of_payload(&payload);
         let mut node = UiNode {
             node_id: "call-node".into(),
@@ -8972,7 +8972,7 @@ mod tool_refresh_tests {
         assert_eq!(records[1]["ui_history"]["reason"], "stale_window");
         assert_eq!(records[1]["ui_history"]["read_revision"], 9);
         assert!(
-            !body.contains("sleep 30"),
+            !body.contains("tail -f /dev/null"),
             "source content must never enter history traces"
         );
     }

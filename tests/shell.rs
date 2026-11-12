@@ -223,7 +223,7 @@ async fn encoding_failure_happens_before_os_spawn_and_before_any_partial_stdin()
 async fn stop_is_idempotent_and_independent_of_a_blocked_stdin_writer() {
     let mut cfg = config();
     cfg.io.shell_write_timeout_ms = 10_000;
-    let mut input = args("trap '' TERM; printf ready; sleep 30");
+    let mut input = args("trap '' TERM; printf ready; tail -f /dev/null");
     input.stdin_open = true;
     let mut execution = spawn(&cfg, input).await;
     let ShellEvent::Output(ready) = crate::test_watchdog::watchdog(
@@ -265,7 +265,7 @@ async fn stop_is_idempotent_and_independent_of_a_blocked_stdin_writer() {
 async fn write_deadline_reports_partial_bytes_without_retrying_or_stopping_target() {
     let mut cfg = config();
     cfg.io.shell_write_timeout_ms = 50;
-    let mut input = args("sleep 30");
+    let mut input = args("tail -f /dev/null");
     input.stdin_open = true;
     let execution = spawn(&cfg, input).await;
     let written = execution
@@ -284,7 +284,7 @@ async fn write_deadline_reports_partial_bytes_without_retrying_or_stopping_targe
 #[cfg(unix)]
 #[tokio::test]
 async fn shell_natural_exit_cleans_descendants_that_keep_pipes_open() {
-    let execution = spawn(&config(), args("sleep 30 & printf '%s' \"$!\"; exit 0")).await;
+    let execution = spawn(&config(), args("tail -f /dev/null & printf '%s' \"$!\"; exit 0")).await;
     let (chunks, done) = collect(execution).await;
     let pid: i32 = String::from_utf8(joined(&chunks, OutputStream::Stdout))
         .unwrap()
@@ -380,7 +380,7 @@ async fn environment_overrides_are_injected_without_removing_bash_env() {
 #[cfg(unix)]
 #[tokio::test]
 async fn last_handle_drop_requests_cleanup_and_natural_exit_kills_term_ignoring_child() {
-    let execution = spawn(&config(), args("sleep 30")).await;
+    let execution = spawn(&config(), args("tail -f /dev/null")).await;
     let ShellExecution {
         handle,
         mut events,
@@ -401,7 +401,7 @@ async fn last_handle_drop_requests_cleanup_and_natural_exit_kills_term_ignoring_
     .unwrap();
     let execution = spawn(
         &config(),
-        args("trap '' TERM; sleep 30 & printf '%s' \"$!\"; exit 0"),
+        args("trap '' TERM; tail -f /dev/null & printf '%s' \"$!\"; exit 0"),
     )
     .await;
     let (chunks, done) = collect(execution).await;
