@@ -283,11 +283,12 @@ async fn assert_record(
         );
     }
     let outcome = match fault {
-        Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
-        Fault::Cancellation => "adopted",
-        Fault::Remeasurement | Fault::RejectFact => "failed",
-        Fault::Storage | Fault::RetiredWritesAbsent => "unknown",
-        _ => "unknown",
+        Fault::Cancellation
+        | Fault::Persistent
+        | Fault::RejectFinal
+        | Fault::Remeasurement
+        | Fault::RejectFact => "unknown",
+        Fault::Storage | Fault::RetiredWritesAbsent => "failed",
     };
     assert_eq!(record["outcome"], outcome, "{fault:?} {stage} {record}");
     assert_eq!(

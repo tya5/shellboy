@@ -373,15 +373,15 @@ async fn prepare_with_thread_override(
     let saved: Value = serde_json::from_str(&saved).unwrap();
     assert_trigger_evidence(&saved["trigger"], scenario);
     let expected_outcome = match fault {
-        // Active-summary cancellation occurs after commit but while the durable
-        // attempt remains provisional; record the terminal unknown explicitly.
-        Fault::Cancellation if scenario == Scenario::ActiveSummary => "unknown",
-        Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
-        Fault::Cancellation => "adopted",
-        Fault::Persistent | Fault::RejectFinal | Fault::Storage | Fault::RetiredWritesAbsent => {
-            "unknown"
-        }
-        Fault::Remeasurement | Fault::RejectFact => "failed",
+        // Cancellation, final-record denial, remeasurement and rejected stage
+        // fact leave a provisional attempt: no terminal outcome was committed.
+        Fault::Cancellation
+        | Fault::Persistent
+        | Fault::RejectFinal
+        | Fault::Remeasurement
+        | Fault::RejectFact => "unknown",
+        // Independent postcommit storage failures are recorded as terminal failures.
+        Fault::Storage | Fault::RetiredWritesAbsent => "failed",
     };
     assert_eq!(
         saved["outcome"], expected_outcome,
@@ -402,7 +402,7 @@ async fn prepare_with_thread_override(
     // report unsaved source data; the record is inspected before close and then
     // byte-compared after the independent owner restart in record_tests.
     let shutdown = control.shutdown().await;
-    if fault == Fault::Persistent {
+    if matches!(fault, Fault::Persistent | Fault::RejectFinal) {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
     } else {
         shutdown.unwrap();
