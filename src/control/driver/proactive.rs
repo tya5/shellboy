@@ -290,6 +290,13 @@ pub(super) async fn maybe_compact(
         .await
     }
     .await;
+    let result = match result {
+        Ok(compacted) => compactor
+            .proactive_history_characters(&snapshot.thread)
+            .await
+            .map(|_| compacted),
+        Err(error) => Err(error),
+    };
     let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(_) if slot.stop.is_cancelled()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
     if let Err(error) = &result {
         record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);

@@ -712,12 +712,11 @@ fn apply_runtime(
         )
         .details(json!({"config_path":path,"written":false})));
     }
-    if written {
-        if let Some(warning) =
+    if written
+        && let Some(warning) =
             replace_atomically(path, &state, edited.as_bytes(), before_replace, replace)?
-        {
-            result["warning"] = json!(warning);
-        }
+    {
+        result["warning"] = json!(warning);
     }
     if let Some((loaded, clients)) = runtime {
         clients.adopt(&after, loaded.embedding.connection.as_deref());

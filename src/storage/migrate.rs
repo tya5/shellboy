@@ -461,7 +461,7 @@ mod activity_migration_tests {
             let retired:Vec<(String,i64)>=db.prepare("SELECT setting_name,setting_value FROM thread_retired_summary_settings WHERE thread_id='old' ORDER BY setting_name")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
             assert_eq!(retired,[("reduce_rounds".to_owned(),3),("segment_chars".to_owned(),48000)]);
             let archived_keys:Vec<String>=db.prepare("SELECT record_key FROM summary_usage_stage_archive ORDER BY record_key")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(archived_keys,["attempt:attempt-nested","attempt:attempt-old","node:summary-old","summary.usage.old.saved","summary.usage.orphan.saved"]);
+            assert_eq!(archived_keys,["attempt:attempt-nested","node:summary-old","summary.usage.old.saved","summary.usage.orphan.saved"]);
             let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
             let legacy:serde_json::Value=serde_json::from_str(&legacy).unwrap();
             assert_eq!(legacy["map_requests"],2);assert_eq!(legacy["reduce_requests"],1);assert_eq!(legacy["oversized_reduce_parts"],4);
@@ -472,6 +472,8 @@ mod activity_migration_tests {
             let orphan:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.orphan.saved'",[],|r|r.get(0))?;
             assert!(orphan.contains("missing"));
             assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
+            let malformed_attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-old'",[],|r|r.get(0))?;
+            assert!(malformed_attempt.contains("}}}}")&&!malformed_attempt.contains("attempt:attempt-old"));
             let stage_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='attempt:attempt-nested'",[],|r|r.get(0))?;
             assert!(stage_archive.contains("map_requests")&&stage_archive.contains("3"));
             let attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-nested'",[],|r|r.get(0))?;
@@ -496,7 +498,7 @@ mod activity_migration_tests {
             assert_eq!(archived,[("reduce_rounds".into(),3),("segment_chars".into(),48000)]);
             let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
             assert!(legacy.contains("map_requests"));
-            assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive",[],|r|r.get::<_,i64>(0))?,5);
+            assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive",[],|r|r.get::<_,i64>(0))?,4);
             assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
             Ok(())
         }).await.unwrap();
