@@ -95,7 +95,9 @@ fn summary_args(from: &str, to: &str) -> ContextEditArgs {
         from_node_id: Some(from.into()),
         to_node_id: Some(to.into()),
     }
-e-a", "middle-b", "after"] {
+}
+async fn omit_middle(fixture: &Fixture) -> String {
+    for id in ["before", "middle-a", "middle-b", "after"] {
         fixture.text(id, &format!("original text {id}")).await;
     }
     let snapshot = fixture.compactor.snapshot("t", true).await.unwrap();
