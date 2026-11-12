@@ -274,10 +274,19 @@ mod tests {
         s.groups[3].sources[0].payload =
             json!({"summary_scope":"active_turn","item":{"role":"developer","content":[]}});
         s.groups[4].sources[0].payload = json!({"item":{"role":"developer","content":[]}});
+        // The latest tool group belongs to the unified prefix (§4.1), so a
+        // summary alone means the latest group is not a tool group either.
+        s.groups[5].tool = false;
+        s.groups[5].sources[0].payload = json!({"item":{"role":"developer","content":[]}});
         assert_eq!(active_turn_plan(&s), None);
-        // No active Turn or no complete tool round after the request.
+        // A single complete tool group is the whole unified prefix (§4.1); with
+        // no work group after the request, or no active Turn, there is no target.
         let mut s = staged_snapshot();
         s.groups.truncate(4);
+        let single = active_turn_plan(&s).unwrap();
+        assert_eq!((single.start, single.latest), (3, 3));
+        let mut s = staged_snapshot();
+        s.groups.truncate(3);
         assert_eq!(active_turn_plan(&s), None);
         let mut s = staged_snapshot();
         s.current_turn = None;
@@ -296,7 +305,7 @@ mod tests {
     fn manual_and_overflow_policy_tables_keep_existing_group_ranges() {
         let mut snapshot = staged_snapshot();
         assert_eq!(summary_range(&snapshot, false), Some(0..1));
-        assert_eq!(summary_range(&snapshot, true), Some(0..4));
+        assert_eq!(summary_range(&snapshot, true), Some(0..5));
         for (latest, expected) in [
             (false, std::iter::once(3..4).collect()),
             (true, vec![3..4, 5..6]),

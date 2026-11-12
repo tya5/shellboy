@@ -246,15 +246,15 @@ mod tests {
         let event = adopted("automatic_reduction");
         assert_eq!(
             render(&event, UiLanguage::Ja, true),
-            "自動要約：205K で発動 · 412 ノード → 要約 1 件（31K 字） · 退避 8 件 · 費用 in 30K / out 2K · 要約後の入力 32K"
+            "自動要約：205K で発動 · 412 ノード → 要約（31K 字） · 退避 8 件 · 費用 in 30K / out 2K · 要約後の入力 32K"
         );
         assert_eq!(
             render(&event, UiLanguage::En, true),
-            "Auto summary: triggered at 205K · 412 nodes → 1 summary (31K chars) · 8 spilled · cost in 30K / out 2K · input after 32K"
+            "Auto summary: triggered at 205K · 412 nodes → summary (31K chars) · 8 spilled · cost in 30K / out 2K · input after 32K"
         );
         assert_eq!(
             render(&event, UiLanguage::En, false),
-            "Auto summary: triggered at 205K | 412 nodes > 1 summary (31K chars) | 8 spilled | cost in 30K / out 2K | input after 32K"
+            "Auto summary: triggered at 205K | 412 nodes > summary (31K chars) | 8 spilled | cost in 30K / out 2K | input after 32K"
         );
     }
     #[test]
@@ -264,14 +264,14 @@ mod tests {
         event["post_compaction_input_tokens"] = Value::Null;
         assert_eq!(
             render(&event, UiLanguage::Ja, true),
-            "手動要約：ノード数不明 → 要約 件数不明（字数不明） · 費用 不明 · 要約後の入力 未報告または未完了"
+            "手動要約：ノード数不明 → 要約（字数不明） · 費用 不明 · 要約後の入力 未報告または未完了"
         );
         event["post_compaction_attempt_id"] = Value::Null;
         event["metrics"]["summary_usage"] = json!({"input_tokens":{"known_sum":30000,"unknown_count":1,"overflow":false},
             "output_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}});
         assert_eq!(
             render(&event, UiLanguage::En, true),
-            "Manual summary: node count unknown → summary count unknown (size unknown) · cost in 30K+ / out unknown · input after: awaiting next request"
+            "Manual summary: node count unknown → summary (size unknown) · cost in 30K+ / out unknown · input after: awaiting next request"
         );
     }
     #[test]
