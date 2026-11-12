@@ -2339,6 +2339,9 @@ mod tests {
         db.call(|db| {
             let output = json!({"stdout":"x".repeat(20_000)}).to_string();
             db.execute("UPDATE node SET payload_json=json_set(payload_json, '$.item.output', ?1) WHERE id='g1-result'", [output])?;
+            // g2 is still running, so the unified range (§4.1) stops before it:
+            // only g1 is summarized and the later rounds stay on the path.
+            db.execute("UPDATE tool_call SET state='running' WHERE group_id='g2'", [])?;
             Ok(())
         }).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
@@ -2352,7 +2355,7 @@ mod tests {
             assert!(path.contains(&"current-user".to_owned()));
             assert!(!path.contains(&"g1-call".to_owned()));
             for node in ["g2-call", "g2-result", "g3-call", "g3-result"] {
-                assert!(path.contains(&node.to_owned()));
+                assert!(path.contains(&node.to_owned()), "{node} {path:?}");
             }
             let epoch: i64 =
                 db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| {
@@ -2489,7 +2492,7 @@ mod tests {
             for (id, turn, text) in [("old-user","old","old".into()),("last-user","last","last".into()),("current-user","current","u".repeat(32_000)),("current-answer","current","a".repeat(32_000))] {
                 history::append_node(&tx,"t",id,Some(turn),"message",&json!({"role":"user","content":text}),"now")?;
             }
-            for group in ["g1","g2"] {
+            for group in ["g1","g2","g3"] {
                 tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','current','completed','now')",[group])?;
                 tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?1,0,'shell','{}','completed')",[group])?;
                 let call=format!("{group}-call");
@@ -2507,7 +2510,24 @@ mod tests {
             .await
             .unwrap();
         assert!(first.original_node_ids.contains(&"current-user".to_owned()));
-        assert_eq!(compactor.spill("t", true).await.unwrap().spilled_groups, 2);
+        // The overflow range stops before the latest group (g3, kept as is).
+        assert!(!first.original_node_ids.contains(&"g3-call".to_owned()));
+        // Two more rounds arrive; the explicit overflow spill releases all three.
+        db.call(|db| {
+            let tx = db.transaction()?;
+            for group in ["g4", "g5"] {
+                tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,'attempt','current','completed','now')",[group])?;
+                tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?1,0,'shell','{}','completed')",[group])?;
+                let call=format!("{group}-call");
+                let result=format!("{group}-result");
+                history::append_node(&tx,"t",&call,Some("current"),"tool_call",&json!({"group_id":group,"output":[{"type":"function_call","call_id":group,"name":"shell","arguments":"{}"}]}),"now")?;
+                history::append_node(&tx,"t",&result,Some("current"),"tool_result",&json!({"group_id":group,"item":{"type":"function_call_output","call_id":group,"output":"{}"}}),"now")?;
+                tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?1,?2,'completed')",params![group,result])?;
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        assert_eq!(compactor.spill("t", true).await.unwrap().spilled_groups, 3);
         let second = compactor
             .summarize("t", true, CancellationToken::new())
             .await
@@ -2517,8 +2537,9 @@ mod tests {
                 .original_node_ids
                 .contains(first.summary_node_id.as_ref().unwrap())
         );
+        // current-answer reaches the second summary only through the first.
         assert!(
-            second
+            !second
                 .original_node_ids
                 .contains(&"current-answer".to_owned())
         );
@@ -2927,8 +2948,9 @@ mod tests {
                 .iter()
                 .find(|item| item["event_id"] == node)
                 .unwrap();
-            assert_eq!(event["metrics"]["summary_usage"]["requests"], 1);
-            assert_eq!(event["metrics"]["model_requests"], 1);
+            assert_eq!(event["metrics"]["summary_usage"]["requests"], 1, "{event}");
+            // One request is the whole summary (§4.2): the actual provider
+            // count is `summary_usage.requests`, not a separate budget figure.
             Ok(())
         })
         .await
