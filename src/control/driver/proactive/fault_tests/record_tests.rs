@@ -282,13 +282,14 @@ async fn assert_record(
             "the #180 guard is exactly the pre-attempt value"
         );
     }
+    // This record is read after shutdown/reopen, so terminal writers that
+    // succeeded are reflected; final-record write denials remain provisional.
     let outcome = match fault {
-        Fault::Cancellation
-        | Fault::Persistent
-        | Fault::RejectFinal
-        | Fault::Remeasurement
-        | Fault::RejectFact => "unknown",
-        Fault::Storage | Fault::RetiredWritesAbsent => "failed",
+        Fault::Cancellation => "adopted",
+        Fault::Persistent | Fault::RejectFinal | Fault::Storage | Fault::RetiredWritesAbsent => {
+            "unknown"
+        }
+        Fault::Remeasurement | Fault::RejectFact => "failed",
     };
     assert_eq!(record["outcome"], outcome, "{fault:?} {stage} {record}");
     assert_eq!(

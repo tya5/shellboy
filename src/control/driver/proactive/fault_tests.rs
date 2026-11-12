@@ -372,17 +372,10 @@ async fn prepare_with_thread_override(
         [], |row| row.get::<_, String>(0))?)).await.unwrap();
     let saved: Value = serde_json::from_str(&saved).unwrap();
     assert_trigger_evidence(&saved["trigger"], scenario);
-    let expected_outcome = match fault {
-        // Cancellation, final-record denial, remeasurement and rejected stage
-        // fact leave a provisional attempt: no terminal outcome was committed.
-        Fault::Cancellation
-        | Fault::Persistent
-        | Fault::RejectFinal
-        | Fault::Remeasurement
-        | Fault::RejectFact => "unknown",
-        // Independent postcommit storage failures are recorded as terminal failures.
-        Fault::Storage | Fault::RetiredWritesAbsent => "failed",
-    };
+    // This read occurs at the committed stage checkpoint, before owner shutdown
+    // can write terminal state. Every injected postcommit interruption is still
+    // provisional at this exact lifecycle boundary.
+    let expected_outcome = "unknown";
     assert_eq!(
         saved["outcome"], expected_outcome,
         "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
@@ -402,7 +395,10 @@ async fn prepare_with_thread_override(
     // report unsaved source data; the record is inspected before close and then
     // byte-compared after the independent owner restart in record_tests.
     let shutdown = control.shutdown().await;
-    if matches!(fault, Fault::Persistent | Fault::RejectFinal) {
+    if matches!(
+        fault,
+        Fault::Persistent | Fault::RejectFinal | Fault::Remeasurement
+    ) {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
     } else {
         shutdown.unwrap();
