@@ -115,6 +115,15 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closed_spill_uses_effective_thread_target_and_captures_real_stage() {
+    crate::test_watchdog::watchdog("closed spill trigger tuple", async {
+        boundary(Fault::Cancellation, Scenario::ClosedSpill).await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_postcommit_storage_boundaries() {
     boundaries(Fault::Storage).await;
 }
@@ -143,6 +152,14 @@ async fn boundaries(fault: Fault) {
 }
 
 async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
+    prepare_with_thread_override(fault, scenario, true).await
+}
+
+async fn prepare_with_thread_override(
+    fault: Fault,
+    scenario: Scenario,
+    set_thread_percent: bool,
+) -> Fx {
     eprintln!(
         "automatic boundary {fault:?} scenario={scenario:?} T=200 P={} A=100 input=200 target={}",
         scenario.target_percent(),
@@ -157,6 +174,37 @@ async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
     let owner = proactive_owner(root.path(), &url, &limits).await;
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;
+    if set_thread_percent {
+        request(
+            &control,
+            Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(
+                target.clone(),
+                Some(scenario.target_percent().to_string()),
+                None,
+            ))),
+        )
+        .await;
+    }
+    let stored_percent: Option<i64> = control
+        .store
+        .database
+        .call({
+            let target = target.clone();
+            move |db| {
+                Ok(db.query_row(
+                    "SELECT auto_compact_target_percent FROM thread WHERE id=?1",
+                    [target],
+                    |row| row.get(0),
+                )?)
+            }
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        stored_percent,
+        set_thread_percent.then_some(scenario.target_percent() as i64),
+        "per-Thread policy override is explicit; inherited case remains NULL"
+    );
     if !scenario.active() {
         for text in ["hi", "yo"] {
             send(&control, &target, text).await;
@@ -213,21 +261,21 @@ async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
     // Capture immutable witnesses in the adoption transaction. Fault injection
     // itself runs after COMMIT, before the next driver stage.
     // The epoch update is later in that SAME transaction; capture it separately.
+    let initial_thread = target.clone();
     control.store.database.call(move |db| {
         db.execute_batch(&format!(r#"
             CREATE TABLE fault_boundary(path TEXT, revision INTEGER, epoch INTEGER);
             CREATE TABLE fault_initial(epoch INTEGER);
-            CREATE TRIGGER fault_start AFTER INSERT ON app_meta
-            WHEN NEW.key GLOB 'compact.automatic_active.*' AND NOT EXISTS(SELECT 1 FROM fault_initial)
-            BEGIN INSERT INTO fault_initial SELECT reasoning_epoch FROM thread
-              WHERE 'compact.automatic_active.'||id=NEW.key; END;
             CREATE TABLE fault_originals AS SELECT * FROM node;
             CREATE TABLE fault_nodes AS SELECT * FROM node WHERE 0;
             CREATE TABLE fault_replacements AS SELECT * FROM replacement WHERE 0;
             CREATE TABLE fault_sources AS SELECT * FROM replacement_source WHERE 0;
             CREATE TRIGGER fault_adopt AFTER UPDATE OF selection_revision ON thread
             WHEN NOT EXISTS(SELECT 1 FROM fault_boundary)
-            AND EXISTS(SELECT 1 FROM app_meta WHERE key='compact.automatic_active.'||NEW.id)
+            AND EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id
+                       WHERE u.thread_id=NEW.id
+                       AND json_type(a.error_json,'$.automatic_trim_attempt')='object'
+                       AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1)
             AND EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id
                        WHERE p.thread_id=NEW.id AND n.kind='{kind}'{scope})
             BEGIN
@@ -242,6 +290,10 @@ async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
             WHEN EXISTS(SELECT 1 FROM fault_boundary)
             BEGIN UPDATE fault_boundary SET epoch=NEW.reasoning_epoch; END;
         "#))?;
+        db.execute(
+            "INSERT INTO fault_initial SELECT reasoning_epoch FROM thread WHERE id=?1",
+            [&initial_thread],
+        )?;
         Ok(())
     }).await.unwrap();
     // #226: faults that must precede the stage are installed before it runs.
@@ -282,18 +334,50 @@ async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
     }
     while !reached.load(Ordering::SeqCst) {
         if let Ok(unexpected) = receive.try_recv() {
+            let body = unexpected.body.clone();
+            let trigger = control.store.database.call(move |db| {
+                Ok(db.query_row(
+                    "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                ).optional()?)
+            }).await.unwrap().and_then(|text| serde_json::from_str::<Value>(&text).ok());
+            let tools = body["tools"].as_array().map_or(0, Vec::len);
+            let excerpt = body["input"]
+                .as_array()
+                .and_then(|input| {
+                    input.iter().find_map(|message| {
+                        message["content"]
+                            .as_array()
+                            .and_then(|parts| parts.iter().find_map(|part| part["text"].as_str()))
+                    })
+                })
+                .unwrap_or("")
+                .chars()
+                .take(120)
+                .collect::<String>();
             panic!(
-                "unexpected extra provider request after intended {:?} stage: {}",
+                "unexpected POST before selected {:?} checkpoint: tools_count={tools}, trigger={trigger:?}, excerpt={excerpt:?}",
                 scenario,
-                unexpected
-                    .body
-                    .to_string()
-                    .chars()
-                    .take(600)
-                    .collect::<String>()
             );
         }
         tokio::task::yield_now().await;
+    }
+    let saved = control.store.database.call(|db| Ok(db.query_row(
+        "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
+        [], |row| row.get::<_, String>(0))?)).await.unwrap();
+    let saved: Value = serde_json::from_str(&saved).unwrap();
+    assert_trigger_evidence(&saved["trigger"], scenario);
+    if fault == Fault::RejectFact {
+        assert!(
+            saved["committed_stages"][scenario.stage()].is_null(),
+            "rejected stage leaves no stage fact: {saved}"
+        );
+    } else {
+        assert!(
+            saved["committed_stages"][scenario.stage()].is_object(),
+            "selected stage fact is persisted: {saved}"
+        );
     }
     let shutdown = control.shutdown().await;
     if fault != Fault::Cancellation {
@@ -340,6 +424,10 @@ async fn guard_rows(control: &Control) -> Vec<(String, String)> {
 }
 
 async fn boundary(fault: Fault, scenario: Scenario) {
+    boundary_with_thread_override(fault, scenario, true).await;
+}
+
+async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thread_percent: bool) {
     let Fx {
         root,
         url,
@@ -350,15 +438,13 @@ async fn boundary(fault: Fault, scenario: Scenario) {
         mut receive,
         server,
         guard_before: _,
-    } = prepare(fault, scenario).await;
+    } = prepare_with_thread_override(fault, scenario, set_thread_percent).await;
     assert_boundary(&control, &target, scenario, fault, "shutdown").await;
     control
         .store
         .database
         .call(|db| {
-            db.execute_batch(
-                "DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch; DROP TRIGGER fault_start;",
-            )?;
+            db.execute_batch("DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch;")?;
             Ok(())
         })
         .await
@@ -597,6 +683,19 @@ pub(super) async fn checkpoint(
                     CREATE TEMP TRIGGER reject_write BEFORE INSERT ON rejected_write
                     BEGIN SELECT RAISE(ABORT,'injected independent postcommit storage write failure'); END;")?;
                 db.execute("INSERT INTO rejected_write VALUES(1)", [])?;
+                Ok(())
+            }).await.map_err(storage_error)
+        }
+        6 => {
+            let hit = injection.reached.clone();
+            control.store.database.call(move |db| {
+                db.create_scalar_function("fault_final_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
+                    hit.store(true, Ordering::SeqCst);
+                    Ok(1i64)
+                })?;
+                db.execute_batch("CREATE TEMP TRIGGER reject_final_attempt BEFORE UPDATE OF error_json ON model_attempt
+                    WHEN json_extract(NEW.error_json,'$.automatic_trim_attempt.outcome') NOT IN ('unknown','exception')
+                    BEGIN SELECT fault_final_hit(); SELECT RAISE(ABORT,'injected final attempt record rejection'); END;")?;
                 Ok(())
             }).await.map_err(storage_error)
         }

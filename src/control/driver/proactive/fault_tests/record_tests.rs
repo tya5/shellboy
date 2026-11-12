@@ -18,6 +18,10 @@ macro_rules! record_test {
     };
 }
 record_test!(record_after_storage_fault, Fault::Storage);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn connection_target_percent_is_inherited_when_thread_is_unset() {
+    boundary_with_thread_override(Fault::Storage, Scenario::ClosedSpill, false).await;
+}
 record_test!(record_after_cancellation, Fault::Cancellation);
 record_test!(record_after_remeasurement_fault, Fault::Remeasurement);
 // The two longest faults run each boundary as its own test with its own watchdog.
@@ -234,11 +238,21 @@ async fn assert_record(
     // The guard is untouched whenever the attempt's own guard write is not
     // reached or is rejected. A healthy W3 (cancellation, rejected final
     // write) legitimately saves its normal result before the failure.
-    let guard_expected = guard_before.to_vec();
-    if !matches!(
-        fault,
-        Fault::Cancellation | Fault::RejectFinal | Fault::RetiredWritesAbsent
-    ) {
+    let mut guard_expected = guard_before.to_vec();
+    if fault == Fault::RetiredWritesAbsent {
+        guard_expected.extend([
+            (
+                "compact.automatic_guard.retired-write-test".into(),
+                "seed-guard".into(),
+            ),
+            (
+                "compact.automatic_status.retired-write-test".into(),
+                "seed-status".into(),
+            ),
+        ]);
+        guard_expected.sort();
+    }
+    if !matches!(fault, Fault::RetiredWritesAbsent) {
         assert_eq!(
             guard_rows(control).await,
             guard_expected,
@@ -246,6 +260,7 @@ async fn assert_record(
         );
     }
     let outcome = match fault {
+        Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
         Fault::Cancellation => "adopted",
         Fault::Storage | Fault::Remeasurement | Fault::RejectFact | Fault::RetiredWritesAbsent => {
             "failed"
@@ -275,6 +290,7 @@ async fn assert_record(
     );
     let expected: Vec<&str> = match (stage, fault) {
         (_, Fault::RejectFinal) => keys.clone(),
+        (_, Fault::Cancellation | Fault::RetiredWritesAbsent) => keys.clone(),
         _ => {
             let upto = ORDER.iter().position(|n| *n == stage).unwrap();
             let base: &[&str] = match stage {
@@ -385,24 +401,18 @@ async fn assert_record(
         "no legacy activity witness {fault:?} live={live}"
     );
     if fault == Fault::RetiredWritesAbsent {
-        let rows = guard_rows(control).await;
+        let rows: Vec<(String, String)> = control.store.database.call(|db| {
+            Ok(db.prepare("SELECT key,value FROM app_meta WHERE key='compact.automatic_active.retired-write-test' ORDER BY key")?
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?)
+        }).await.unwrap();
         assert_eq!(
             rows,
-            [
-                (
-                    format!("compact.automatic_active.retired-write-test"),
-                    "seed-active".into()
-                ),
-                (
-                    format!("compact.automatic_guard.retired-write-test"),
-                    "seed-guard".into()
-                ),
-                (
-                    format!("compact.automatic_status.retired-write-test"),
-                    "seed-status".into()
-                ),
-            ],
-            "legacy W0/W3 rows remain byte-exact"
+            [(
+                "compact.automatic_active.retired-write-test".into(),
+                "seed-active".into()
+            )],
+            "legacy W0 row remains byte-exact"
         );
         if live {
             let hits: i64 = control
@@ -419,27 +429,10 @@ async fn assert_record(
             );
         }
     }
-    // Pending target: provisional until a final write replaces it.
-    if !facts.is_empty() {
-        let pending: Value = serde_json::from_str(&pending.expect("pending target")).unwrap();
-        assert_eq!(pending["attempt"], attempt.as_str());
-        let last = keys.last().unwrap();
-        let scope = match *last {
-            "closed_spill" => "spill",
-            "closed_summary" => "prefix",
-            _ => "active_turn",
-        };
-        if fault == Fault::Cancellation {
-            assert!(
-                pending.get("provisional").is_none(),
-                "final write replaced the provisional target"
-            );
-        } else {
-            assert_eq!(pending["provisional"], true);
-            assert_eq!(pending["scope"], scope);
-            assert!(pending["marks"].is_null());
-        }
-    }
+    assert!(
+        pending.is_none(),
+        "no retired automatic_target marks are written: {fault:?} {record}"
+    );
     if outcome == "unknown" && !live {
         let list = request(
             control,

@@ -244,7 +244,7 @@ pub(super) async fn maybe_compact(
     snapshot.input.take();
     let result: Result<crate::compaction::CompactResult, ApiError> = async {
         if a <= target {
-            return automatic
+            let spilled = automatic
                 .observed(
                     control,
                     "closed_spill",
@@ -256,7 +256,14 @@ pub(super) async fn maybe_compact(
                         Some(automatic.stage("closed_spill")),
                     ),
                 )
-                .await;
+                .await?;
+            #[cfg(test)]
+            if !spilled.no_target {
+                // Keep the fault hook at every real postcommit stage boundary;
+                // closed-spill-only attempts do not pass through summary_stage.
+                fault_tests::checkpoint(control, slot, "closed_spill").await?;
+            }
+            return Ok(spilled);
         }
         // Choose the summary region once, then spill only inside that region.
         let active = !compactor.has_closed_summary(&snapshot.thread).await?;
@@ -265,7 +272,7 @@ pub(super) async fn maybe_compact(
         } else {
             "closed_spill"
         };
-        automatic
+        let spilled = automatic
             .observed(
                 control,
                 spill_phase,
@@ -278,6 +285,11 @@ pub(super) async fn maybe_compact(
                 ),
             )
             .await?;
+        #[cfg(test)]
+        if !spilled.no_target {
+            fault_tests::checkpoint(control, slot, spill_phase).await?;
+        }
+        let _ = spilled;
         summary_stage(
             control,
             &compactor,
