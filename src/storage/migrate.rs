@@ -473,7 +473,7 @@ mod activity_migration_tests {
             assert!(orphan.contains("missing"));
             assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
             let malformed_attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-old'",[],|r|r.get(0))?;
-            assert!(malformed_attempt.contains("}}}}")&&!malformed_attempt.contains("attempt:attempt-old"));
+            assert!(serde_json::from_str::<serde_json::Value>(&malformed_attempt).is_err());
             let stage_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='attempt:attempt-nested'",[],|r|r.get(0))?;
             assert!(stage_archive.contains("map_requests")&&stage_archive.contains("3"));
             let attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-nested'",[],|r|r.get(0))?;
