@@ -692,7 +692,10 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         .find(|line| line.contains("⏵ tail -f /dev/null"))
         .unwrap();
     assert!(running_row.contains("背景（利用者）"), "{running_row}");
-    assert!(running_row.find("tail -f /dev/null").unwrap() < running_row.find("背景（利用者）").unwrap());
+    assert!(
+        running_row.find("tail -f /dev/null").unwrap()
+            < running_row.find("背景（利用者）").unwrap()
+    );
     // The background-process panel (`\-[1] $ cmd`) may or may not be on screen
     // when the frame is drawn; only conversation items count here.
     let conversation: String = shown

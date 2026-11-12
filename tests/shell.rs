@@ -284,7 +284,11 @@ async fn write_deadline_reports_partial_bytes_without_retrying_or_stopping_targe
 #[cfg(unix)]
 #[tokio::test]
 async fn shell_natural_exit_cleans_descendants_that_keep_pipes_open() {
-    let execution = spawn(&config(), args("tail -f /dev/null & printf '%s' \"$!\"; exit 0")).await;
+    let execution = spawn(
+        &config(),
+        args("tail -f /dev/null & printf '%s' \"$!\"; exit 0"),
+    )
+    .await;
     let (chunks, done) = collect(execution).await;
     let pid: i32 = String::from_utf8(joined(&chunks, OutputStream::Stdout))
         .unwrap()

@@ -2262,7 +2262,11 @@ async fn missing_attachment_and_deleted_draft_targets_leave_other_work_alive() {
     let serving = tokio::spawn(control.clone().serve(receive));
     let accepted = start(&control).await;
     let first = incoming(&mut requests).await;
-    first.reply.send(tool("tail -f /dev/null", true)).ok().unwrap();
+    first
+        .reply
+        .send(tool("tail -f /dev/null", true))
+        .ok()
+        .unwrap();
     // The next model request proves that the background shell has been admitted.
     let next = incoming(&mut requests).await;
     let execution: String = control
