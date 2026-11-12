@@ -433,6 +433,21 @@ mod activity_migration_tests {
             );
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,segment_chars,reduce_rounds) VALUES('old','/','','p','m','now',48000,3)",[]).unwrap();
             db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.old.saved',?1)",[r#"{"id":"saved","thread_id":"old","requests":3,"map_requests":2,"reduce_requests":1,"oversized_reduce_parts":4,"input_tokens":{"known_sum":10,"unknown_count":0,"overflow":false}}"#]).unwrap();
+            db.execute("INSERT INTO app_meta(key,value) VALUES('summary.usage.orphan.saved',?1)",[r#"{"id":"orphan","thread_id":"missing","requests":2,"map_requests":1,"input_tokens":{"known_sum":null,"unknown_count":1,"overflow":false}}"#]).unwrap();
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES('summary.usage.malformed.saved','{')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES('summary.usage.nested.saved',?1)",
+                [format!("{{\"nested\":{{\"{}\":1}}}}", "x".repeat(100_000))],
+            )
+            .unwrap();
+            db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('run-old','old','completed','now')",[]).unwrap();
+            db.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('turn-old','old','run-old','completed','now')",[]).unwrap();
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at) VALUES('attempt-old','turn-old',0,0,'p','m',0,'completed','{}',?1,'now')",[r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1,"reduce_requests":2,"oversized_reduce_parts":3},"kept":"safe"}}}"#]).unwrap();
+            db.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('summary-old','summary','now',?1)",[r#"{"summary_usage":{"map_requests":4,"reduce_requests":5,"oversized_reduce_parts":6},"kept":"safe"}"#]).unwrap();
         }
         // open_connection is the actual startup migration path. Keep this
         // connection open while the foreground DbWorker owns a second handle.
@@ -444,6 +459,8 @@ mod activity_migration_tests {
             assert_eq!(old,(None,None));
             let retired:Vec<(String,i64)>=db.prepare("SELECT setting_name,setting_value FROM thread_retired_summary_settings WHERE thread_id='old' ORDER BY setting_name")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
             assert_eq!(retired,[("reduce_rounds".to_owned(),3),("segment_chars".to_owned(),48000)]);
+            let archived_keys:Vec<String>=db.prepare("SELECT record_key FROM summary_usage_stage_archive ORDER BY record_key")?.query_map([],|r|r.get(0))?.collect::<rusqlite::Result<_>>()?;
+            assert_eq!(archived_keys,["attempt:attempt-old","node:summary-old","summary.usage.old.saved","summary.usage.orphan.saved"]);
             let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
             let legacy:serde_json::Value=serde_json::from_str(&legacy).unwrap();
             assert_eq!(legacy["map_requests"],2);assert_eq!(legacy["reduce_requests"],1);assert_eq!(legacy["oversized_reduce_parts"],4);
@@ -451,6 +468,17 @@ mod activity_migration_tests {
             let current:serde_json::Value=serde_json::from_str(&current).unwrap();
             for key in ["map_requests","reduce_requests","oversized_reduce_parts"] {assert!(current.get(key).is_none());}
             assert_eq!(current["input_tokens"]["known_sum"],10);
+            let orphan:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.orphan.saved'",[],|r|r.get(0))?;
+            assert!(orphan.contains("missing"));
+            assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
+            let stage_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='attempt:attempt-old'",[],|r|r.get(0))?;
+            assert!(stage_archive.contains("map_requests")&&stage_archive.contains("3"));
+            let attempt:String=db.query_row("SELECT error_json FROM model_attempt WHERE id='attempt-old'",[],|r|r.get(0))?;
+            assert!(!attempt.contains("map_requests")&&attempt.contains("kept"));
+            let node_archive:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='node:summary-old'",[],|r|r.get(0))?;
+            assert!(node_archive.contains("reduce_requests")&&node_archive.contains("5"));
+            let summary:String=db.query_row("SELECT payload_json FROM node WHERE id='summary-old'",[],|r|r.get(0))?;
+            assert!(!summary.contains("map_requests")&&summary.contains("kept"));
             let columns:Vec<String>=db.prepare("PRAGMA table_info(thread)")?.query_map([],|r|r.get(1))?.collect::<rusqlite::Result<_>>()?;
             assert!(!columns.iter().any(|name|matches!(name.as_str(),"segment_chars"|"reduce_rounds")));
             assert!(db.prepare("PRAGMA foreign_key_check").unwrap().query([])?.next()?.is_none());
@@ -467,6 +495,8 @@ mod activity_migration_tests {
             assert_eq!(archived,[("reduce_rounds".into(),3),("segment_chars".into(),48000)]);
             let legacy:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.old.saved'",[],|r|r.get(0))?;
             assert!(legacy.contains("map_requests"));
+            assert_eq!(db.query_row("SELECT count(*) FROM summary_usage_stage_archive",[],|r|r.get::<_,i64>(0))?,4);
+            assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
             Ok(())
         }).await.unwrap();
         reopened.shutdown().await.unwrap();

@@ -1,6 +1,7 @@
 //! The owned summary transaction shared by closed, overflow, and active-Turn
 //! entry points. Request trials end here; adoption performs atomic revalidation.
 use super::*;
+use crate::model;
 
 /// Request construction consumes an already-resolved output policy.
 pub(super) struct SummaryRequest<'a, 'boundary> {
@@ -128,6 +129,20 @@ pub(super) fn adoption_size(
 ) -> Option<AdoptionSize> {
     (summary < original).then_some(AdoptionSize {
         exceeded_output_limit: summary > limit.0,
+    })
+}
+
+pub(super) fn is_typed_refusal(output: &[Value]) -> bool {
+    output.iter().any(|item| {
+        item.get("type").and_then(Value::as_str) == Some("message")
+            && item
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(|parts| {
+                    parts
+                        .iter()
+                        .any(|part| part.get("type").and_then(Value::as_str) == Some("refusal"))
+                })
     })
 }
 
@@ -451,7 +466,7 @@ impl Compactor {
                     }
                 }
             };
-            if summary_refused(&response.output) {
+            if is_typed_refusal(&response.output) {
                 return Err(discard::rejected(
                     discard::DiscardReason::SummaryRefused,
                     "Summary was refused; original path retained",
@@ -533,6 +548,8 @@ pub(super) struct Trial {
 impl Trial {
     pub(super) fn new(original: Range<usize>) -> Option<Self> {
         (!original.is_empty()).then_some(Self {
+            #[cfg(test)]
+            identity: FailureIdentity(String::new()),
             selected: original,
             terminal: false,
         })
@@ -851,6 +868,15 @@ mod tests {
             failed.identity.0, original,
             "terminal one-group failure belongs to original request range"
         );
+    }
+    #[test]
+    fn typed_refusal_is_rejected_even_when_output_also_contains_text() {
+        assert!(is_typed_refusal(&[json!({"type":"message","content":[
+            {"type":"output_text","text":"partial"},{"type":"refusal","refusal":"no"}
+        ]})]));
+        assert!(!is_typed_refusal(&[json!({"type":"message","content":[
+            {"type":"output_text","text":"summary"}
+        ]})]));
     }
     #[test]
     fn owner_connection_thread_and_manual_limits_share_one_resolver() {

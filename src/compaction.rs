@@ -45,7 +45,6 @@ pub(crate) use usage::{
     UsageRecord as SummaryUsageRecord,
 };
 
-#[cfg(test)]
 // A graph-work bound, independent of provider context capacity.
 const TURN_BOUNDARY_IDS: usize = 65_536;
 // Assigned nodes carry their Turn directly. Held unassigned messages receive
@@ -3082,11 +3081,12 @@ mod tests {
                 .map(|n| (&n.id, n.revision, &n.hash, &n.attachments))
                 .collect::<Vec<_>>(),
         ));
+        let stored_part_key = format!("summary.part.{legacy}");
         db.call(move |db| {
             db.execute(
                 "INSERT INTO app_meta(key,value)VALUES(?1,?2)",
                 params![
-                    format!("summary.part.{legacy}"),
+                    stored_part_key,
                     json!({"text":"OLD-REASONING-CONTAMINATION","sources":["one","two"]})
                         .to_string()
                 ],

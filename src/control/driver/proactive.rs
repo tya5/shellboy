@@ -214,7 +214,6 @@ pub(super) async fn maybe_compact(
     let a = match data.2 {
         Reading::LegacyAbsent | Reading::AwaitingFirst => 0,
         Reading::Known(n) => n,
-        Reading::Unknown => return Ok(false),
     };
     let target = ((threshold as u128 * percent as u128) / 100) as u64;
     let compactor = control.compactor.pinned(snapshot.clients.clone());
