@@ -62,43 +62,8 @@ pub(super) fn completed_prefix(s: &Snapshot) -> usize {
         .min(safe_prefix(s))
         .min(s.groups.len().saturating_sub(1))
 }
-pub(super) fn overflow_prefix(s: &Snapshot, completed: usize) -> usize {
-    // This is the existing summary segment sizing baseline, not an estimate of
-    // provider context capacity. Release only the oldest whole groups needed
-    // to bring the remaining suffix below it, without crossing a hard fence.
-    let safe = safe_prefix(s).min(s.groups.len().saturating_sub(1));
-    if completed >= safe {
-        return completed;
-    }
-    let sizes: Vec<_> = s.groups[completed..]
-        .iter()
-        .map(|g| {
-            g.sources
-                .iter()
-                .map(|n| render(n, s.epoch).chars().count())
-                .sum::<usize>()
-        })
-        .collect();
-    let mut remaining = sizes.iter().sum::<usize>();
-    let mut count = completed;
-    if completed <= normal_prefix(s) && completed < safe {
-        // Explicit overflow still requires progress below the segment size: provider limits
-        // may be smaller. Do not count summarizing just the origin user as
-        // progress when an older complete tool group (or its spill) is eligible.
-        let first_tool = s.groups[completed..safe].iter().position(|g| {
-            g.tool
-                || g.sources
-                    .iter()
-                    .any(|n| n.payload.get("spill_version").is_some())
-        });
-        count += first_tool.map_or(1, |index| index + 1);
-        remaining = remaining.saturating_sub(sizes[..count - completed].iter().sum());
-    }
-    while count < safe && remaining > s.segment_chars {
-        remaining = remaining.saturating_sub(sizes[count - completed]);
-        count += 1;
-    }
-    count
+pub(super) fn overflow_prefix(s:&Snapshot,_completed:usize)->usize {
+    super::single_request::overflow_prefix(s).end
 }
 /// Whether a group holds a user message of Turn `id` (its request or a message
 /// delivered later in it).
