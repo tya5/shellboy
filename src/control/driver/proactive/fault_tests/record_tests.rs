@@ -547,30 +547,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     };
     let mutex = tokio::sync::Mutex::new(());
     let mut boundary = crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await);
-    let order = Order {
-        prefer_active: !active,
-        middle_new: active,
-        active_spill_new: false,
-        ordinary_new: !active,
-    };
-    let (mut midturn, mut scope, mut shortfall) = (Value::Null, "", None);
-    let mut stages = json!({"closed_spill":{"ran":false,"skipped":"not_reached"},"closed_summary":{"ran":false,"skipped":"not_reached"},"active_spill":{"ran":false,"skipped":"not_reached"},"active_summary":{"ran":false,"skipped":"not_reached"}});
-    let mut committed = Vec::new();
-    let work = summarize_once(
-        &control,
-        &control.compactor,
-        &thread_id,
-        &slot,
-        order,
-        &mut midturn,
-        &mut scope,
-        None,
-        &mut shortfall,
-        &mut stages,
-        &mut committed,
-        &mut boundary,
-        &automatic,
-    );
+    let work=summary_stage(&control,&control.compactor,&thread_id,&slot,active,&mut boundary,&automatic);
     let answer_summary = async {
         let request = incoming(&control, &mut receive).await;
         assert_eq!(request.body["tools"], json!([]));
@@ -586,12 +563,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         "the checkpoint fault follows the commit"
     );
     assert!(reached.load(Ordering::SeqCst));
-    assert_eq!(
-        committed.len(),
-        1,
-        "the committed stage is kept for the cancellation record"
-    );
-    assert_eq!(stages[stage]["outcome"], "adopted");
     drop(boundary);
     let facts: Value = control.store.database.call({
         let attempt = attempt.clone();

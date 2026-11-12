@@ -207,6 +207,8 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
             &store,
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_at: None,
+                auto_compact_target_percent:None,
+                summary_max_chars:None,
                 segment_chars: None,
                 reduce_rounds: None,
                 agents: None,

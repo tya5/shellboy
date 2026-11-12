@@ -66,6 +66,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Prepare source
         run: |
+          set -euo pipefail
           mkdir -p source-artifacts
           git rev-parse HEAD > source-artifacts/source-sha.txt
           git rev-parse HEAD^{tree} > source-artifacts/source-tree.txt

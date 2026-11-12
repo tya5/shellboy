@@ -2839,12 +2839,11 @@ mod tests {
             Ok(())
         }).await.unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
-        let (result, shortfall) = compactor
+        let result = compactor
             .summarize_active_turn("t", CancellationToken::new())
             .await
             .unwrap();
         assert!(!result.no_target);
-        assert_eq!(shortfall, 0);
         db.call(|db| {
             let path = selected_path(db, "t")?;
             assert!(path.contains(&"current-user".to_owned()));

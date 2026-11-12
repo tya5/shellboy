@@ -204,13 +204,7 @@ mod tests {
             {
                 let tx = db.transaction().unwrap();
                 assert!(
-                    finish_tx(
-                        &tx,
-                        "trial",
-                        "token",
-                        &json!({"outcome":"noop","trigger":trigger}),
-                        &[]
-                    )
+                    finish_tx(&tx,&json!({"outcome":"noop","trigger":trigger}).to_string(),"trial","token")
                     .unwrap()
                 );
                 tx.commit().unwrap();
@@ -244,13 +238,7 @@ mod tests {
             {
                 let tx = db.transaction().unwrap();
                 assert!(
-                    !finish_tx(
-                        &tx,
-                        "trial",
-                        "token",
-                        &json!({"outcome":"noop","trigger":trigger}),
-                        &[]
-                    )
+                    !finish_tx(&tx,&json!({"outcome":"noop","trigger":trigger}).to_string(),"trial","token")
                     .unwrap()
                 );
                 tx.commit().unwrap();
@@ -271,13 +259,7 @@ mod tests {
                 )
                 .unwrap();
                 assert!(
-                    finish_tx(
-                        &tx,
-                        "trial",
-                        "rollback",
-                        &json!({"outcome":"failed","trigger":{"a_boundary_token":before.token()}}),
-                        &[]
-                    )
+                    finish_tx(&tx,&json!({"outcome":"failed","trigger":{"a_boundary_token":before.token()}}).to_string(),"trial","rollback")
                     .unwrap()
                 );
             }

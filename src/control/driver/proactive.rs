@@ -178,6 +178,19 @@ impl Automatic {
     }
 }
 
+// Shared real stage boundary, including fault-only postcommit observation.
+async fn summary_stage(control:&Control,compactor:&crate::compaction::Compactor,thread:&str,slot:&DriverSlot,active:bool,boundary:&mut crate::compaction::boundary::Boundary<'_>,automatic:&Automatic)->Result<crate::compaction::CompactResult,ApiError> {
+    let stage=if active {"active_summary"}else{"closed_summary"};
+    let result=if active {
+        automatic.observed(control,stage,compactor.summarize_active_guarded(thread,slot.stop.clone(),Some(boundary),Some(automatic.stage(stage)))).await?
+    }else{
+        automatic.observed(control,stage,compactor.summarize_prefix_guarded(thread,slot.stop.clone(),Some(boundary),Some(automatic.stage(stage)))).await?
+    };
+    #[cfg(test)]
+    if !result.no_target {fault_tests::checkpoint(control,slot,stage).await?;}
+    Ok(result)
+}
+
 enum Measurement {
     BelowThreshold,
     Ready(Evidence),
@@ -334,33 +347,7 @@ pub(super) async fn maybe_compact(
                 ),
             )
             .await?;
-        if active {
-            automatic
-                .observed(
-                    control,
-                    "active_summary",
-                    compactor.summarize_active_guarded(
-                        &snapshot.thread,
-                        slot.stop.clone(),
-                        Some(&mut *boundary),
-                        Some(automatic.stage("active_summary")),
-                    ),
-                )
-                .await
-        } else {
-            automatic
-                .observed(
-                    control,
-                    "closed_summary",
-                    compactor.summarize_prefix_guarded(
-                        &snapshot.thread,
-                        slot.stop.clone(),
-                        Some(&mut *boundary),
-                        Some(automatic.stage("closed_summary")),
-                    ),
-                )
-                .await
-        }
+        summary_stage(control,compactor,&snapshot.thread,slot,active,boundary,&automatic).await
     }
     .await;
     let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(_) if slot.stop.is_cancelled()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
