@@ -15,6 +15,10 @@ impl OutputLimit {
     }
 }
 
+fn resolved_limit(manual:Option<u64>,thread:Option<u64>,connection:Option<&crate::config::Connection>)->OutputLimit {
+    OutputLimit(manual.unwrap_or_else(||crate::config::summary_chars_for(thread,connection)))
+}
+
 pub(super) fn request(snapshot: &Snapshot, selected: Range<usize>, limit: OutputLimit) -> Value {
     let text = snapshot.groups[selected]
         .iter()
@@ -178,10 +182,7 @@ impl Compactor {
         let max_chars = max_chars
             .map(|n| u64::try_from(n).map_err(|_| invalid("Invalid saved summary character limit")))
             .transpose()?;
-        let limit = OutputLimit(requested_limit.unwrap_or(crate::config::summary_chars_for(
-            max_chars,
-            self.config.connections.get(&snapshot.profile),
-        )));
+        let limit=resolved_limit(requested_limit,max_chars,self.config.connections.get(&snapshot.profile));
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
         let thread = snapshot.thread.clone();
@@ -807,4 +808,16 @@ mod tests {
             "terminal one-group failure belongs to original request range"
         );
     }
+    #[test]
+    fn only_explicit_manual_limit_overrides_thread_connection_defaults() {
+        let mut connection=crate::config::Connection::default();connection.summary_max_chars=Some(4000);
+        assert_eq!(resolved_limit(None,None,None),OutputLimit(20000));
+        assert_eq!(resolved_limit(None,None,Some(&connection)),OutputLimit(4000));
+        assert_eq!(resolved_limit(None,Some(3000),Some(&connection)),OutputLimit(3000));
+        assert_eq!(resolved_limit(Some(1000),Some(3000),Some(&connection)),OutputLimit(1000));
+        for key in ["segment_chars","reduce_rounds"] {
+            assert!(toml::from_str::<crate::config::Connection>(&format!("{key}=4")).is_err());
+        }
+    }
+
 }
