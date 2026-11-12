@@ -132,7 +132,11 @@ impl Compactor {
         let source_chars=sources.iter().map(|s|edit::projection_characters(&s.payload,snapshot.epoch)).sum::<usize>();
         let payload=json!({"item":{"role":"developer","content":[{"type":"input_text","text":dispatched.response.text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
         let projected=edit::projection_characters(&payload,snapshot.epoch);
-        if projected>=source_chars {return Err(discard::rejected(discard::DiscardReason::SummaryNotShrinking,"Summary does not shrink its original source projection; original path retained"));}
+        if projected>=source_chars {
+            let thread=snapshot.thread.clone();let proof=snapshot.clone();
+            self.database.call(move |db| {let tx=db.transaction()?;validate(&tx,&proof)?;remember_failure(&tx,&thread,Region::Closed,&identity)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+            return Err(discard::rejected(discard::DiscardReason::SummaryNotShrinking,"Summary does not shrink its original source projection; original path retained"));
+        }
         let adoption=SummaryAdoption {
             automatic,removed_characters:(source_chars-projected) as u64,drop_all_reasoning,snapshot,
             sources,payload,start:selected.start,count:selected.end,
@@ -188,10 +192,10 @@ impl Compactor {
             };
             if summary_refused(&response.output) {return Err(discard::rejected(discard::DiscardReason::SummaryRefused,"Summary was refused; original path retained"));}
             if response.text.trim().is_empty() {return Err(discard::rejected(discard::DiscardReason::SummaryEmpty,"Summary was empty; original path retained"));}
-            let original=snapshot.groups[selected.clone()].iter().flat_map(|g|g.sources.iter())
-                .map(|source|edit::projection_characters(&source.payload,snapshot.epoch)).sum::<usize>() as u64;
-            let size=adoption_size(original,response.text.chars().count() as u64,limit)
-                .ok_or_else(||discard::rejected(discard::DiscardReason::SummaryNotShrinking,"Summary does not shrink its original source projection; original path retained"))?;
+            // The adoption caller checks the final saved projection, including
+            // fixed sources and metadata, against the actual replaced sources.
+            // Raw response text length is not a second, different shrink gate.
+            let size=AdoptionSize { exceeded_output_limit:response.text.chars().count() as u64>limit.0 };
             trial.finish_request(snapshot,Ok(()),&eligible);
             return Ok(Dispatched{selected,response,size});
         }
