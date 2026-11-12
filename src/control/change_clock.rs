@@ -433,9 +433,7 @@ impl ChangeClock {
             if start > 0 {
                 c.lost = true;
             }
-            if !reasoning
-                && let Some(producer) = c.producer.as_mut()
-            {
+            if !reasoning && let Some(producer) = c.producer.as_mut() {
                 if producer.admit_ordinary(c.scalars, text).is_ok() {
                     metadata = Some(crate::protocol::CoverageFragmentV1 {
                         sequence: c.next.to_string(),
