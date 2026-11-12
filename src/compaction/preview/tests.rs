@@ -195,7 +195,8 @@ async fn default_applies_virtual_spill_before_summary_and_does_not_request_model
     assert!(p["predicted_failure"].is_null(), "{p}");
     assert_eq!(p["spilled_groups"], 1);
     assert!(p["after_characters"].is_null());
-    assert!(p["summary"]["segments"].as_u64().unwrap() > 0);
+    assert_eq!(p["summary"]["single_request"], true);
+    assert!(p["summary"]["source_characters"].as_u64().unwrap() > 0);
     assert_eq!(p["provider_requests"], 0);
     assert_eq!(counts(&f).await, before);
     let original = f.compactor.snapshot("t", true).await.unwrap();
@@ -228,7 +229,7 @@ async fn default_applies_virtual_spill_before_summary_and_does_not_request_model
     f.close().await;
 }
 #[tokio::test]
-async fn summary_forecasts_real_indivisible_refusal_without_http_or_adoption() {
+async fn summary_forecast_does_not_predict_a_refusal_and_makes_no_request_or_adoption() {
     let f = Fixture::new().await;
     f.text("large", &"x".repeat(70_000)).await;
     f.text("tail", "current").await;
@@ -241,15 +242,13 @@ async fn summary_forecasts_real_indivisible_refusal_without_http_or_adoption() {
             Some("large"),
         ),
     );
-    assert!(
-        p["predicted_failure"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("indivisible"),
-        "{p}"
-    );
+    // §6/R8: whether the provider refuses or errors is unknowable without a
+    // request, so the forecast reports the single request and stays silent.
+    assert!(p["predicted_failure"].is_null(), "{p}");
+    assert_eq!(p["summary"]["single_request"], true);
+    assert_eq!(p["summary"]["model_output_and_provider_errors_unknown"], true);
     assert_eq!(p["target_nodes"]["count"], 1);
-    assert_eq!(p["after_characters"], p["before_characters"]);
+    assert!(p["after_characters"].is_null());
     assert_eq!(counts(&f).await, before);
     f.close().await;
 }
@@ -396,10 +395,10 @@ async fn summary_forecast_reports_single_request_limit_and_stopping_errors() {
     assert!(p["predicted_failure"].is_null());
     assert_eq!(p["summary"]["summary_character_limit"], 12_000);
     assert!(p["summary"]["single_request"] == true);
-    assert_eq!(p["after_characters"], p["before_characters"]);
+    assert!(p["after_characters"].is_null());
     assert_eq!(
         p["removed_original_messages"],
-        json!({"user":0,"assistant":0})
+        json!({"user":2,"assistant":0})
     );
     f.db.call(|db| {
         db.execute(
@@ -467,7 +466,7 @@ async fn cli_modes_map_to_read_only_preview_and_reject_restore_or_list() {
 }
 
 #[tokio::test]
-async fn summary_source_count_and_cached_preflight_match_real_loopback_execution() {
+async fn summary_source_count_matches_real_loopback_execution() {
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::TcpListener,
@@ -517,7 +516,7 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
         &c,
     )
     .unwrap();
-    assert_eq!(p["summary"]["uncached_segments"], 1);
+    assert_eq!(p["summary"]["single_request"], true);
     assert!(p["after_characters"].is_null());
     let original_path = f.path().await;
     f.compactor = Compactor::new(f.db.clone(), Arc::new(c));
@@ -558,21 +557,11 @@ async fn summary_source_count_and_cached_preflight_match_real_loopback_execution
     .await
     .unwrap();
     let request = args(Some(ContextEditAction::Summary), Some("a"), Some("b"));
-    let cached = forecast_config(&f, &request, &f.compactor.config).unwrap();
-    assert_eq!(cached["summary"]["cached_segments"], 1);
-    assert_eq!(cached["summary"]["uncached_segments"], 0);
-    f.db.call(|db| {
-        db.execute(
-            "UPDATE app_meta SET value='malformed cache' WHERE key LIKE 'summary.part.%'",
-            [],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let missing = forecast_config(&f, &request, &f.compactor.config).unwrap();
-    assert_eq!(missing["summary"]["cached_segments"], 0);
-    assert_eq!(missing["summary"]["uncached_segments"], 1);
+    // The per-part cache is retired (§9): repeating the forecast stays a
+    // read-only single-request description with no provider call.
+    let again = forecast_config(&f, &request, &f.compactor.config).unwrap();
+    assert_eq!(again["summary"]["single_request"], true);
+    assert_eq!(again["summary"]["provider_requests"], 0);
     f.close().await;
 }
 
