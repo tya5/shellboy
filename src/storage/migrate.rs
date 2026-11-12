@@ -472,7 +472,7 @@ mod activity_migration_tests {
             }
             let unsupported_attempts = [
                 ("attempt-bad-root", "{"),
-                ("attempt-scalar-stage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"bad"}}}"#),
+                ("attempt-scalar-stage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"legacy"}}}"#),
                 ("attempt-array-stages", r#"{"automatic_trim_attempt":{"committed_stages":[{"summary_usage":{"map_requests":1}}]}}"#),
                 ("attempt-array-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":[{"map_requests":1}]}}}}"#),
                 ("attempt-scalar-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":"legacy"}}}}"#),
@@ -535,7 +535,7 @@ mod activity_migration_tests {
             }
             let unsupported_attempts = [
                 ("attempt-bad-root", "{"),
-                ("attempt-scalar-stage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"bad"}}}"#),
+                ("attempt-scalar-stage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":{"map_requests":1}},"later":"legacy"}}}"#),
                 ("attempt-array-stages", r#"{"automatic_trim_attempt":{"committed_stages":[{"summary_usage":{"map_requests":1}}]}}"#),
                 ("attempt-array-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":[{"map_requests":1}]}}}}"#),
                 ("attempt-scalar-usage", r#"{"automatic_trim_attempt":{"committed_stages":{"closed":{"summary_usage":"legacy"}}}}"#),
