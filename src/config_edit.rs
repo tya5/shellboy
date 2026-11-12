@@ -201,8 +201,11 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
     out.plain(&at("response_retry_partial"), response_retry_partial);
     out.plain(&at("auto_trim_on_disconnect"), auto_trim_on_disconnect);
     out.plain(&at("auto_at_tokens"), auto_at_tokens);
-    out.plain(&at("auto_compact_target_percent"),auto_compact_target_percent);
-    out.plain(&at("summary_max_chars"),summary_max_chars);
+    out.plain(
+        &at("auto_compact_target_percent"),
+        auto_compact_target_percent,
+    );
+    out.plain(&at("summary_max_chars"), summary_max_chars);
     out.plain(&at("segment_chars"), segment_chars);
     out.plain(&at("reduce_rounds"), reduce_rounds);
 }

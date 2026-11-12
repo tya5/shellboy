@@ -1366,8 +1366,10 @@ impl Store {
                     self.fill_effective(&mut details);
                     result.result["effective_auto_compact_at"] =
                         serde_json::json!(details.effective_auto_compact_at);
-                    result.result["effective_auto_compact_target_percent"]=serde_json::json!(details.effective_auto_compact_target_percent);
-                    result.result["effective_summary_max_chars"]=serde_json::json!(details.effective_summary_max_chars);
+                    result.result["effective_auto_compact_target_percent"] =
+                        serde_json::json!(details.effective_auto_compact_target_percent);
+                    result.result["effective_summary_max_chars"] =
+                        serde_json::json!(details.effective_summary_max_chars);
                     result.result["segment_chars"] = serde_json::json!(details.segment_chars);
                     result.result["effective_segment_chars"] =
                         serde_json::json!(details.effective_segment_chars);
@@ -1734,8 +1736,14 @@ impl Store {
         let compaction = &config.compaction;
         details.effective_auto_compact_at =
             Some(compaction.auto_at_tokens_for(details.auto_compact_at, connection));
-        details.effective_auto_compact_target_percent=Some(crate::config::target_percent_for(details.auto_compact_target_percent,connection));
-        details.effective_summary_max_chars=Some(crate::config::summary_chars_for(details.summary_max_chars,connection));
+        details.effective_auto_compact_target_percent = Some(crate::config::target_percent_for(
+            details.auto_compact_target_percent,
+            connection,
+        ));
+        details.effective_summary_max_chars = Some(crate::config::summary_chars_for(
+            details.summary_max_chars,
+            connection,
+        ));
         details.effective_segment_chars = Some(
             compaction.segment_chars_for(details.segment_chars.map(|v| v as usize), connection)
                 as u64,
@@ -1762,13 +1770,21 @@ impl Store {
             Some(requested) => reparent::apply(tx, &id, requested, caller, now)?,
             None => None,
         };
-        if let Some(value)=&args.auto_compact_target_percent {
-            let value=crate::protocol::validation::parse_target_percent(value)?;
-            tx.execute("UPDATE thread SET auto_compact_target_percent=?2 WHERE id=?1",params![id,value]).map_err(sql_error)?;
+        if let Some(value) = &args.auto_compact_target_percent {
+            let value = crate::protocol::validation::parse_target_percent(value)?;
+            tx.execute(
+                "UPDATE thread SET auto_compact_target_percent=?2 WHERE id=?1",
+                params![id, value],
+            )
+            .map_err(sql_error)?;
         }
-        if let Some(value)=&args.summary_max_chars {
-            let value=crate::protocol::validation::parse_summary_chars(value)?;
-            tx.execute("UPDATE thread SET summary_max_chars=?2 WHERE id=?1",params![id,value]).map_err(sql_error)?;
+        if let Some(value) = &args.summary_max_chars {
+            let value = crate::protocol::validation::parse_summary_chars(value)?;
+            tx.execute(
+                "UPDATE thread SET summary_max_chars=?2 WHERE id=?1",
+                params![id, value],
+            )
+            .map_err(sql_error)?;
         }
         if let Some(value) = &args.auto_compact_at {
             let value = crate::protocol::validation::parse_auto_compact_at(value)?;
@@ -1851,7 +1867,9 @@ impl Store {
             None => current.effort.as_deref(),
         };
         let changed = profile != current.connection || model != current.model;
-        if changed {crate::compaction::a_state::scope_tx(tx,&id,profile,model).map_err(storage_error)?;}
+        if changed {
+            crate::compaction::a_state::scope_tx(tx, &id, profile, model).map_err(storage_error)?;
+        }
         tx.execute("UPDATE thread SET cwd=?2,profile_id=?3,model_id=?4,effort=?5,revision=revision+1,profile_revision=profile_revision+1,reasoning_epoch=reasoning_epoch+?6,updated_at=?7,title=COALESCE(?8,title) WHERE id=?1",params![id,cwd.to_string_lossy(),profile,model,effort,i64::from(changed),now,title]).map_err(sql_error)?;
         if let Some(path) = &args.agents {
             self.set_agents_tx(tx, &id, path, caller, now)?;
@@ -3028,7 +3046,7 @@ fn delete_thread(
     }
     for id in &targets {
         tx.execute("UPDATE thread SET deleted_at=?2,revision=revision+1,selection_revision=selection_revision+1,cursor_node_id=NULL,updated_at=?2 WHERE id=?1",params![id,now]).map_err(sql_error)?;
-        crate::compaction::a_state::cleanup_tx(tx,id).map_err(storage_error)?;
+        crate::compaction::a_state::cleanup_tx(tx, id).map_err(storage_error)?;
         // Retain the last path/replacement as ownership evidence until payload
         // GC. Deleted Threads are not roots or public selection targets. Removing
         // these rows now makes turn-less summaries/legacy nodes look ownerless.

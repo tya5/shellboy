@@ -1483,7 +1483,9 @@ impl Form {
                     ),
                 ],
                 |form, cwd| {
-                    Ok(Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
+                    Ok(Command::ThreadSet(Box::new(ThreadSetArgs {
+                        auto_compact_target_percent: None,
+                        summary_max_chars: None,
                         agents: form.optional("agents")?,
                         title: match form.value("title_mode")? {
                             "set" => Some(form.owned("title")?),

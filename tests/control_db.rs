@@ -1027,7 +1027,9 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     let thread = create(&store, None).await;
     let changed = execute(
         &store,
-        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            auto_compact_target_percent: None,
+            summary_max_chars: None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,
@@ -1045,7 +1047,9 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     assert_eq!(changed.result["effort"], "high");
     let changed = execute(
         &store,
-        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            auto_compact_target_percent: None,
+            summary_max_chars: None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,
@@ -1063,7 +1067,9 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
     assert_eq!(changed.result["effort"], "high");
     let cleared = execute(
         &store,
-        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            auto_compact_target_percent: None,
+            summary_max_chars: None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,
@@ -2744,24 +2750,47 @@ async fn retry_has_no_authority_check_and_is_safe_when_raced() {
 
 #[tokio::test]
 async fn single_summary_settings_inherit_clear_and_reopen() {
-    let (root,store)=store().await;
-    let parent=create(&store,None).await;
-    let set=ThreadSetArgs {thread_id:Some(parent.thread_id.clone()),auto_compact_target_percent:Some("80".into()),summary_max_chars:Some("12345".into()),..Default::default()};
-    let result=execute(&store,Command::ThreadSet(Box::new(set))).await;
-    assert_eq!(result.result["effective_summary_max_chars"],12345);
-    let child=create(&store,Some(parent.thread_id.clone())).await;
-    assert_eq!(child.auto_compact_target_percent,Some(80));
-    assert_eq!(child.summary_max_chars,Some(12345));
-    let clear=ThreadSetArgs {thread_id:Some(parent.thread_id.clone()),auto_compact_at:Some("0".into()),auto_compact_target_percent:Some(String::new()),summary_max_chars:Some(String::new()),..Default::default()};
-    let result=execute(&store,Command::ThreadSet(Box::new(clear))).await;
+    let (root, store) = store().await;
+    let parent = create(&store, None).await;
+    let set = ThreadSetArgs {
+        thread_id: Some(parent.thread_id.clone()),
+        auto_compact_target_percent: Some("80".into()),
+        summary_max_chars: Some("12345".into()),
+        ..Default::default()
+    };
+    let result = execute(&store, Command::ThreadSet(Box::new(set))).await;
+    assert_eq!(result.result["effective_summary_max_chars"], 12345);
+    let child = create(&store, Some(parent.thread_id.clone())).await;
+    assert_eq!(child.auto_compact_target_percent, Some(80));
+    assert_eq!(child.summary_max_chars, Some(12345));
+    let clear = ThreadSetArgs {
+        thread_id: Some(parent.thread_id.clone()),
+        auto_compact_at: Some("0".into()),
+        auto_compact_target_percent: Some(String::new()),
+        summary_max_chars: Some(String::new()),
+        ..Default::default()
+    };
+    let result = execute(&store, Command::ThreadSet(Box::new(clear))).await;
     assert!(result.result["summary_max_chars"].is_null());
-    assert_eq!(result.result["effective_summary_max_chars"],20000);
-    assert_eq!(result.result["effective_auto_compact_target_percent"],20);
-    assert_eq!(result.result["effective_auto_compact_at"],0);
-    let config=store.config.clone();store.database.shutdown().await.unwrap();
-    let reopened=Store::new(DbWorker::open(root.path().join("db")).await.unwrap(),config,root.path().join("project"),"reopen".into());
-    let result=execute(&reopened,Command::ThreadGet(ThreadTarget{thread_id:Some(child.thread_id)})).await;
-    assert_eq!(result.result["auto_compact_target_percent"],80);
-    assert_eq!(result.result["summary_max_chars"],12345);
+    assert_eq!(result.result["effective_summary_max_chars"], 20000);
+    assert_eq!(result.result["effective_auto_compact_target_percent"], 20);
+    assert_eq!(result.result["effective_auto_compact_at"], 0);
+    let config = store.config.clone();
+    store.database.shutdown().await.unwrap();
+    let reopened = Store::new(
+        DbWorker::open(root.path().join("db")).await.unwrap(),
+        config,
+        root.path().join("project"),
+        "reopen".into(),
+    );
+    let result = execute(
+        &reopened,
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(child.thread_id),
+        }),
+    )
+    .await;
+    assert_eq!(result.result["auto_compact_target_percent"], 80);
+    assert_eq!(result.result["summary_max_chars"], 12345);
     reopened.database.shutdown().await.unwrap();
 }

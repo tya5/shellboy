@@ -61,7 +61,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (40, "0040_selection_nonappend_generation"),
     (41, "0041_receipt_reply_node_lookup"),
     (42, "0042_notification_semantic_descriptor"),
-    (43,"0043_thread_single_summary_settings"),
+    (43, "0043_thread_single_summary_settings"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;

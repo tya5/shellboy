@@ -7475,6 +7475,15 @@
             "null"
           ]
         },
+        "auto_compact_target_percent": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "awaiting_replies": {
           "default": [],
           "items": true,
@@ -7505,6 +7514,14 @@
             "null"
           ]
         },
+        "effective_auto_compact_target_percent": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "effective_reduce_rounds": {
           "format": "uint64",
           "minimum": 0,
@@ -7514,6 +7531,14 @@
           ]
         },
         "effective_segment_chars": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -7588,6 +7613,15 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "summary_max_chars": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "tags": {
           "items": {
@@ -7759,6 +7793,12 @@
             "null"
           ]
         },
+        "auto_compact_target_percent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "connection": {
           "default": null,
           "type": [
@@ -7800,6 +7840,12 @@
           ]
         },
         "segment_chars": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary_max_chars": {
           "type": [
             "string",
             "null"
@@ -10672,6 +10718,15 @@
             "null"
           ]
         },
+        "auto_compact_target_percent": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "awaiting_replies": {
           "default": [],
           "items": true,
@@ -10702,6 +10757,14 @@
             "null"
           ]
         },
+        "effective_auto_compact_target_percent": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "effective_reduce_rounds": {
           "format": "uint64",
           "minimum": 0,
@@ -10711,6 +10774,14 @@
           ]
         },
         "effective_segment_chars": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -10785,6 +10856,15 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "summary_max_chars": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "tags": {
           "items": {
@@ -10863,6 +10943,15 @@
             "null"
           ]
         },
+        "auto_compact_target_percent": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "awaiting_replies": {
           "default": [],
           "items": true,
@@ -10893,6 +10982,14 @@
             "null"
           ]
         },
+        "effective_auto_compact_target_percent": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "effective_reduce_rounds": {
           "format": "uint64",
           "minimum": 0,
@@ -10902,6 +10999,14 @@
           ]
         },
         "effective_segment_chars": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
           "type": [
@@ -10976,6 +11081,15 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "summary_max_chars": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "tags": {
           "items": {

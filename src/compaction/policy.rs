@@ -62,7 +62,7 @@ pub(super) fn completed_prefix(s: &Snapshot) -> usize {
         .min(safe_prefix(s))
         .min(s.groups.len().saturating_sub(1))
 }
-pub(super) fn overflow_prefix(s:&Snapshot,_completed:usize)->usize {
+pub(super) fn overflow_prefix(s: &Snapshot, _completed: usize) -> usize {
     super::single_request::overflow_prefix(s).end
 }
 /// Whether a group holds a user message of Turn `id` (its request or a message
@@ -127,16 +127,28 @@ pub(super) fn turn_message(source: &Source, turn: &str) -> bool {
 }
 /// One active prefix from first work to first unsafe group. Prefix must contain
 /// a tool group or spill marker; a summary alone cannot re-trigger it.
-pub(super) fn active_turn_plan(s:&Snapshot)->Option<ActiveTurnPlan> {
-    let turn=s.current_turn.as_deref()?;
-    let request=request_boundary(s,Some(turn))?;
-    let first=(request+1..s.groups.len()).find(|&i|work_group(&s.groups[i]))?;
-    let end=(first..s.groups.len()).find(|&i|!super::range::group_is_safe(s,i)).unwrap_or(s.groups.len());
-    if end<=first || !s.groups[first..end].iter().any(spill_or_tool) {return None;}
-    let messages=s.groups[first..end].iter().flat_map(|g|&g.sources).filter(|source|turn_message(source,turn)).map(|source|source.id.clone()).collect();
-    Some(ActiveTurnPlan{start:first,latest:end-1,messages})
+pub(super) fn active_turn_plan(s: &Snapshot) -> Option<ActiveTurnPlan> {
+    let turn = s.current_turn.as_deref()?;
+    let request = request_boundary(s, Some(turn))?;
+    let first = (request + 1..s.groups.len()).find(|&i| work_group(&s.groups[i]))?;
+    let end = (first..s.groups.len())
+        .find(|&i| !super::range::group_is_safe(s, i))
+        .unwrap_or(s.groups.len());
+    if end <= first || !s.groups[first..end].iter().any(spill_or_tool) {
+        return None;
+    }
+    let messages = s.groups[first..end]
+        .iter()
+        .flat_map(|g| &g.sources)
+        .filter(|source| turn_message(source, turn))
+        .map(|source| source.id.clone())
+        .collect();
+    Some(ActiveTurnPlan {
+        start: first,
+        latest: end - 1,
+        messages,
+    })
 }
-
 
 /// Ordinary prefix target for the proactive order (#182): `None` when the
 /// prefix holds only earlier summaries, so a summary is never re-summarized
@@ -180,8 +192,6 @@ mod tests {
     use super::*;
     use crate::compaction::tests::staged_snapshot;
 
-
-
     #[test]
     fn staged_spill_keeps_turn_and_group_fences() {
         let mut s = staged_snapshot();
@@ -194,8 +204,6 @@ mod tests {
         s.protected.insert("a-result".into());
         assert!(staged_spill_ranges(&s, true).is_empty());
     }
-
-
 
     #[test]
     fn a_same_turn_marker_cannot_replace_the_selected_user_request_fence() {
@@ -249,10 +257,12 @@ mod tests {
         let mut s = staged_snapshot();
         s.protected.insert("a-result".into());
         assert_eq!(active_turn_plan(&s), None);
-        let mut later=staged_snapshot();
-        later.protected.insert(later.groups[5].sources[0].id.clone());
-        let prefix=active_turn_plan(&later).unwrap();
-        assert_eq!(prefix.start..prefix.end(),3..5);
+        let mut later = staged_snapshot();
+        later
+            .protected
+            .insert(later.groups[5].sources[0].id.clone());
+        let prefix = active_turn_plan(&later).unwrap();
+        assert_eq!(prefix.start..prefix.end(), 3..5);
         // Incomplete groups: no target. ③ without a tool group or spill (a
         // previous summary alone) is no target.
         let mut s = staged_snapshot();

@@ -28,11 +28,12 @@ pub(crate) fn begin_tx(
     trigger: &Value,
     target_plan: &Value,
 ) -> Result<(), StorageError> {
-    let mut trigger=trigger.clone();
+    let mut trigger = trigger.clone();
     let scope:Option<(String,String,String)>=tx.query_row("SELECT t.thread_id,a.profile_id,a.model_id FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",[attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-    if let Some((thread,connection,model))=scope {
-        let state=super::a_state::scope_tx(tx,&thread,&connection,&model)?;
-        trigger["a_boundary"]=serde_json::to_value(state.token()).map_err(|e|StorageError::Schema(e.to_string()))?;
+    if let Some((thread, connection, model)) = scope {
+        let state = super::a_state::scope_tx(tx, &thread, &connection, &model)?;
+        trigger["a_boundary"] =
+            serde_json::to_value(state.token()).map_err(|e| StorageError::Schema(e.to_string()))?;
     }
     let body = json!({"outcome":"unknown","provisional":true,"token":token,"reason":reason,
         "trigger":trigger,"target_plan":target_plan,"committed_stages":{}})
@@ -44,17 +45,25 @@ pub(crate) fn begin_tx(
     Ok(())
 }
 
-pub(crate) fn finish_tx(tx:&rusqlite::Transaction<'_>,body:&str,attempt:&str,token:&str)->Result<bool,StorageError> {
+pub(crate) fn finish_tx(
+    tx: &rusqlite::Transaction<'_>,
+    body: &str,
+    attempt: &str,
+    token: &str,
+) -> Result<bool, StorageError> {
     let row:Option<(String,Option<String>)>=tx.query_row("SELECT t.thread_id,json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1",params![attempt,token],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-    let Some((thread,boundary))=row else {return Ok(false);};
-    let changed=tx.execute(FINISH_SQL,params![body,attempt,token])?;
-    if changed==1 {
-        if let Some(boundary)=boundary {
-            let expected=serde_json::from_str(&boundary).map_err(|e|StorageError::Schema(e.to_string()))?;
-            super::a_state::reset_tx(tx,&thread,expected,token)?;
+    let Some((thread, boundary)) = row else {
+        return Ok(false);
+    };
+    let changed = tx.execute(FINISH_SQL, params![body, attempt, token])?;
+    if changed == 1 {
+        if let Some(boundary) = boundary {
+            let expected =
+                serde_json::from_str(&boundary).map_err(|e| StorageError::Schema(e.to_string()))?;
+            super::a_state::reset_tx(tx, &thread, expected, token)?;
         }
     }
-    Ok(changed==1)
+    Ok(changed == 1)
 }
 
 /// Fixed-size measurements of one adopted stage. `removed_characters` is the
@@ -163,31 +172,119 @@ mod tests {
     }
     #[test]
     fn actual_terminal_cas_manual_order_duplicate_and_rollback() {
-        for manual_first in [true,false] {
-            let mut db=rusqlite::Connection::open_in_memory().unwrap();
+        for manual_first in [true, false] {
+            let mut db = rusqlite::Connection::open_in_memory().unwrap();
             db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE model_attempt(id TEXT PRIMARY KEY,error_json TEXT,state TEXT);INSERT INTO model_attempt VALUES('trial','{}','completed');").unwrap();
-            let start=super::super::a_state::scope_tx(&db,"t","c","m").unwrap().token();
-            super::super::a_state::complete_report_tx(&db,"t","c","m","old",Some(0),Some(111)).unwrap();
-            let trigger=json!({"a_boundary_token":start});
-            {let tx=db.transaction().unwrap();begin_tx(&tx,"trial","token","test",&trigger,&json!({})).unwrap();tx.commit().unwrap();}
-            let reset=|db:&rusqlite::Connection| {
-                let state=super::super::a_state::read(db,"t").unwrap().unwrap();
-                super::super::a_state::reset_tx(db,"t",state.token(),"manual").unwrap();
+            let start = super::super::a_state::scope_tx(&db, "t", "c", "m")
+                .unwrap()
+                .token();
+            super::super::a_state::complete_report_tx(
+                &db,
+                "t",
+                "c",
+                "m",
+                "old",
+                Some(0),
+                Some(111),
+            )
+            .unwrap();
+            let trigger = json!({"a_boundary_token":start});
+            {
+                let tx = db.transaction().unwrap();
+                begin_tx(&tx, "trial", "token", "test", &trigger, &json!({})).unwrap();
+                tx.commit().unwrap();
+            }
+            let reset = |db: &rusqlite::Connection| {
+                let state = super::super::a_state::read(db, "t").unwrap().unwrap();
+                super::super::a_state::reset_tx(db, "t", state.token(), "manual").unwrap();
             };
-            if manual_first {reset(&db);}
-            {let tx=db.transaction().unwrap();assert!(finish_tx(&tx,"trial","token",&json!({"outcome":"noop","trigger":trigger}),&[]).unwrap());tx.commit().unwrap();}
-            if !manual_first {reset(&db);}
-            let after_resets=super::super::a_state::read(&db,"t").unwrap().unwrap();
-            assert_eq!(serde_json::to_value(after_resets.token()).unwrap()["boundary"],if manual_first {1}else{2},"both commit orders have explicit expected reset counts");
-            assert_eq!(after_resets.reading(),super::super::a_state::Reading::AwaitingFirst,"successful reset clears the previous first");
-            let generation=super::super::a_state::begin_report_tx(&db,"t","c","m").unwrap();
-            super::super::a_state::complete_report_tx(&db,"t","c","m","report",Some(generation),Some(321)).unwrap();
-            let before=super::super::a_state::read(&db,"t").unwrap().unwrap();
-            {let tx=db.transaction().unwrap();assert!(!finish_tx(&tx,"trial","token",&json!({"outcome":"noop","trigger":trigger}),&[]).unwrap());tx.commit().unwrap();}
-            assert_eq!(super::super::a_state::read(&db,"t").unwrap().unwrap(),before);
-            {let tx=db.transaction().unwrap();begin_tx(&tx,"trial","rollback","test",&json!({"a_boundary_token":before.token()}),&json!({})).unwrap();assert!(finish_tx(&tx,"trial","rollback",&json!({"outcome":"failed","trigger":{"a_boundary_token":before.token()}}),&[]).unwrap());}
-            assert_eq!(super::super::a_state::read(&db,"t").unwrap().unwrap(),before);
+            if manual_first {
+                reset(&db);
+            }
+            {
+                let tx = db.transaction().unwrap();
+                assert!(
+                    finish_tx(
+                        &tx,
+                        "trial",
+                        "token",
+                        &json!({"outcome":"noop","trigger":trigger}),
+                        &[]
+                    )
+                    .unwrap()
+                );
+                tx.commit().unwrap();
+            }
+            if !manual_first {
+                reset(&db);
+            }
+            let after_resets = super::super::a_state::read(&db, "t").unwrap().unwrap();
+            assert_eq!(
+                serde_json::to_value(after_resets.token()).unwrap()["boundary"],
+                if manual_first { 1 } else { 2 },
+                "both commit orders have explicit expected reset counts"
+            );
+            assert_eq!(
+                after_resets.reading(),
+                super::super::a_state::Reading::AwaitingFirst,
+                "successful reset clears the previous first"
+            );
+            let generation = super::super::a_state::begin_report_tx(&db, "t", "c", "m").unwrap();
+            super::super::a_state::complete_report_tx(
+                &db,
+                "t",
+                "c",
+                "m",
+                "report",
+                Some(generation),
+                Some(321),
+            )
+            .unwrap();
+            let before = super::super::a_state::read(&db, "t").unwrap().unwrap();
+            {
+                let tx = db.transaction().unwrap();
+                assert!(
+                    !finish_tx(
+                        &tx,
+                        "trial",
+                        "token",
+                        &json!({"outcome":"noop","trigger":trigger}),
+                        &[]
+                    )
+                    .unwrap()
+                );
+                tx.commit().unwrap();
+            }
+            assert_eq!(
+                super::super::a_state::read(&db, "t").unwrap().unwrap(),
+                before
+            );
+            {
+                let tx = db.transaction().unwrap();
+                begin_tx(
+                    &tx,
+                    "trial",
+                    "rollback",
+                    "test",
+                    &json!({"a_boundary_token":before.token()}),
+                    &json!({}),
+                )
+                .unwrap();
+                assert!(
+                    finish_tx(
+                        &tx,
+                        "trial",
+                        "rollback",
+                        &json!({"outcome":"failed","trigger":{"a_boundary_token":before.token()}}),
+                        &[]
+                    )
+                    .unwrap()
+                );
+            }
+            assert_eq!(
+                super::super::a_state::read(&db, "t").unwrap().unwrap(),
+                before
+            );
         }
     }
-
 }

@@ -16,23 +16,24 @@ use std::{
 };
 use tokio_util::sync::CancellationToken;
 
+mod attempt;
 pub(crate) mod boundary;
 pub(crate) mod context_usage;
-mod retry;
-mod attempt;
 pub mod discard;
-pub(crate) use attempt::{finish_tx as attempt_finish_tx,
+mod retry;
+pub(crate) use attempt::{
     AutomaticStage, FINISH_SQL as ATTEMPT_FINISH_SQL, begin_tx as attempt_begin_tx,
+    finish_tx as attempt_finish_tx,
 };
 mod edit;
 mod keys;
 pub(crate) mod preview;
 pub use edit::ContextEditResult;
+pub(crate) mod a_state;
 mod policy;
 mod range;
-mod summary;
 mod single_request;
-pub(crate) mod a_state;
+mod summary;
 mod usage;
 pub(crate) use keys::CompactionKeys;
 #[cfg(test)]
@@ -795,8 +796,8 @@ impl Compactor {
     }
     /// #182 proactive order: the ordinary prefix summary only when the prefix
     /// holds something other than earlier summaries.
-    pub(crate) async fn has_closed_summary(&self,thread:&str)->Result<bool,ApiError> {
-        let snapshot=self.snapshot(thread,true).await?;
+    pub(crate) async fn has_closed_summary(&self, thread: &str) -> Result<bool, ApiError> {
+        let snapshot = self.snapshot(thread, true).await?;
         Ok(policy::unsummarized_prefix(&snapshot).is_some())
     }
     pub(crate) async fn summarize_prefix_guarded(
@@ -887,19 +888,20 @@ impl Compactor {
         cancel: CancellationToken,
         (admission, elapsed): (crate::model::http::RateAdmission, u64),
     ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
-        let mut response: Result<crate::model::ModelResponse,crate::model::http::AttemptFailure> = match &admission {
-            _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
-                "cancelled",
-                "Model request was cancelled",
-            )
-            .into()),
-            crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
-            crate::model::http::RateAdmission::Lease(_) => {
-                client
-                    .response_for_thread_pre_admitted(thread, request, cancel)
-                    .await
-            }
-        };
+        let mut response: Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> =
+            match &admission {
+                _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
+                    "cancelled",
+                    "Model request was cancelled",
+                )
+                .into()),
+                crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
+                crate::model::http::RateAdmission::Lease(_) => {
+                    client
+                        .response_for_thread_pre_admitted(thread, request, cancel)
+                        .await
+                }
+            };
         match &mut response {
             Ok(response) => response.response_facts.admission_wait_ms = Some(elapsed),
             Err(failure) => failure.facts.admission_wait_ms = Some(elapsed),
@@ -978,7 +980,17 @@ impl Compactor {
         mut boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
-        self.summarize_single(snapshot,range,cancel,ledger,boundary,automatic,drop_all_reasoning,active).await
+        self.summarize_single(
+            snapshot,
+            range,
+            cancel,
+            ledger,
+            boundary,
+            automatic,
+            drop_all_reasoning,
+            active,
+        )
+        .await
     }
 }
 

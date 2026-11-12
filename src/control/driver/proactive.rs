@@ -206,27 +206,85 @@ pub(super) async fn maybe_compact(
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
 ) -> Result<bool, ApiError> {
     // One decision per fresh provider report; no character forecast or marks.
-    let thread=snapshot.thread.clone();
-    let data=control.store.database.call(move |db| {
-        let settings:(Option<i64>,Option<i64>)=db.query_row("SELECT auto_compact_at,auto_compact_target_percent FROM thread WHERE id=?1",[&thread],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        let (usage,_)=crate::compaction::context_usage::prepare_context_usage(crate::compaction::context_usage::read_context_usage_tx(db,&thread,None)?);
-        let state=crate::compaction::a_state::read(db,&thread)?;
-        Ok((settings,usage,crate::compaction::a_state::reading(state.as_ref())))
-    }).await.map_err(storage_error)?;
-    let connection=snapshot.clients.connections.get(&snapshot.profile);
-    let threshold=control.store.config.compaction.auto_at_tokens_for(data.0.0.map(|n|u64::try_from(n).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid automatic threshold"))).transpose()?,connection);
-    let percent=crate::config::target_percent_for(data.0.1.map(|n|u64::try_from(n).map_err(|_|ApiError::new(ErrorCode::InvalidState,"Invalid automatic percentage"))).transpose()?,connection);
-    if threshold==0 {return Ok(false);}
-    let report=&data.1["last_successful_attempt"];
-    let (Some(input),Some(attempt))=(report["input_tokens"].as_u64(),report["attempt_id"].as_str()) else {return Ok(false);};
-    if input<threshold || report["next_request_pending"]==true {return Ok(false);}
+    let thread = snapshot.thread.clone();
+    let data = control
+        .store
+        .database
+        .call(move |db| {
+            let settings: (Option<i64>, Option<i64>) = db.query_row(
+                "SELECT auto_compact_at,auto_compact_target_percent FROM thread WHERE id=?1",
+                [&thread],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
+                crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?,
+            );
+            let state = crate::compaction::a_state::read(db, &thread)?;
+            Ok((
+                settings,
+                usage,
+                crate::compaction::a_state::reading(state.as_ref()),
+            ))
+        })
+        .await
+        .map_err(storage_error)?;
+    let connection = snapshot.clients.connections.get(&snapshot.profile);
+    let threshold = control.store.config.compaction.auto_at_tokens_for(
+        data.0
+            .0
+            .map(|n| {
+                u64::try_from(n).map_err(|_| {
+                    ApiError::new(ErrorCode::InvalidState, "Invalid automatic threshold")
+                })
+            })
+            .transpose()?,
+        connection,
+    );
+    let percent = crate::config::target_percent_for(
+        data.0
+            .1
+            .map(|n| {
+                u64::try_from(n).map_err(|_| {
+                    ApiError::new(ErrorCode::InvalidState, "Invalid automatic percentage")
+                })
+            })
+            .transpose()?,
+        connection,
+    );
+    if threshold == 0 {
+        return Ok(false);
+    }
+    let report = &data.1["last_successful_attempt"];
+    let (Some(input), Some(attempt)) = (
+        report["input_tokens"].as_u64(),
+        report["attempt_id"].as_str(),
+    ) else {
+        return Ok(false);
+    };
+    if input < threshold || report["next_request_pending"] == true {
+        return Ok(false);
+    }
     use crate::compaction::a_state::Reading;
-    let a=match data.2 {Reading::LegacyAbsent|Reading::AwaitingFirst=>0,Reading::Known(n)=>n,Reading::Unknown=>return Ok(false)};
-    let target=((threshold as u128*percent as u128)/100) as u64;
-    let compactor=control.compactor.pinned(snapshot.clients.clone());
-    let automatic=Automatic {attempt:attempt.into(),token:uuid::Uuid::new_v4().to_string(),thread:snapshot.thread.clone(),turn:snapshot.turn.clone(),target_tokens:None};
-    let (id,token,thread)=(automatic.attempt.clone(),automatic.token.clone(),snapshot.thread.clone());
-    let trigger=json!({"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a,"run_id":snapshot.run});
+    let a = match data.2 {
+        Reading::LegacyAbsent | Reading::AwaitingFirst => 0,
+        Reading::Known(n) => n,
+        Reading::Unknown => return Ok(false),
+    };
+    let target = ((threshold as u128 * percent as u128) / 100) as u64;
+    let compactor = control.compactor.pinned(snapshot.clients.clone());
+    let automatic = Automatic {
+        attempt: attempt.into(),
+        token: uuid::Uuid::new_v4().to_string(),
+        thread: snapshot.thread.clone(),
+        turn: snapshot.turn.clone(),
+        target_tokens: None,
+    };
+    let (id, token, thread) = (
+        automatic.attempt.clone(),
+        automatic.token.clone(),
+        snapshot.thread.clone(),
+    );
+    let trigger = json!({"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a,"run_id":snapshot.run});
     let can_run=control.store.database.call(move |db| {
         let tx=db.transaction()?;
         let consumed:bool=tx.query_row("SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",[&id],|r|r.get(0))?;
@@ -236,28 +294,97 @@ pub(super) async fn maybe_compact(
         for key in [crate::compaction::CompactionKeys::new(&thread).automatic_target(),crate::compaction::CompactionKeys::new(&thread).automatic_guard(),crate::compaction::CompactionKeys::new(&thread).automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
         tx.commit()?;Ok(true)
     }).await.map_err(storage_error)?;
-    if !can_run {return Ok(false);}
+    if !can_run {
+        return Ok(false);
+    }
     snapshot.input.take();
-    let result:Result<crate::compaction::CompactResult,ApiError>=async {
-        if a<=target {
-            return automatic.observed(control,"closed_spill",compactor.spill_staged_cancellable(&snapshot.thread,false,u64::MAX,slot.stop.clone(),Some(automatic.stage("closed_spill")))).await;
+    let result: Result<crate::compaction::CompactResult, ApiError> = async {
+        if a <= target {
+            return automatic
+                .observed(
+                    control,
+                    "closed_spill",
+                    compactor.spill_staged_cancellable(
+                        &snapshot.thread,
+                        false,
+                        u64::MAX,
+                        slot.stop.clone(),
+                        Some(automatic.stage("closed_spill")),
+                    ),
+                )
+                .await;
         }
         // Choose the summary region once, then spill only inside that region.
-        let active=!compactor.has_closed_summary(&snapshot.thread).await?;
-        let spill_phase=if active {"active_spill"}else{"closed_spill"};
-        automatic.observed(control,spill_phase,compactor.spill_staged_cancellable(&snapshot.thread,active,u64::MAX,slot.stop.clone(),Some(automatic.stage(spill_phase)))).await?;
-        if active {
-            automatic.observed(control,"active_summary",compactor.summarize_active_guarded(&snapshot.thread,slot.stop.clone(),Some(&mut *boundary),Some(automatic.stage("active_summary")))).await
+        let active = !compactor.has_closed_summary(&snapshot.thread).await?;
+        let spill_phase = if active {
+            "active_spill"
         } else {
-            automatic.observed(control,"closed_summary",compactor.summarize_prefix_guarded(&snapshot.thread,slot.stop.clone(),Some(&mut *boundary),Some(automatic.stage("closed_summary")))).await
+            "closed_spill"
+        };
+        automatic
+            .observed(
+                control,
+                spill_phase,
+                compactor.spill_staged_cancellable(
+                    &snapshot.thread,
+                    active,
+                    u64::MAX,
+                    slot.stop.clone(),
+                    Some(automatic.stage(spill_phase)),
+                ),
+            )
+            .await?;
+        if active {
+            automatic
+                .observed(
+                    control,
+                    "active_summary",
+                    compactor.summarize_active_guarded(
+                        &snapshot.thread,
+                        slot.stop.clone(),
+                        Some(&mut *boundary),
+                        Some(automatic.stage("active_summary")),
+                    ),
+                )
+                .await
+        } else {
+            automatic
+                .observed(
+                    control,
+                    "closed_summary",
+                    compactor.summarize_prefix_guarded(
+                        &snapshot.thread,
+                        slot.stop.clone(),
+                        Some(&mut *boundary),
+                        Some(automatic.stage("closed_summary")),
+                    ),
+                )
+                .await
         }
-    }.await;
-    let mut record=json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(_) if slot.stop.is_cancelled()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
-    if let Err(error)=&result {record["error"]=serde_json::to_value(error).unwrap_or(Value::Null);}
-    let (attempt,token)=(automatic.attempt.clone(),automatic.token.clone());
-    control.store.database.call(move |db| {let tx=db.transaction()?;crate::compaction::attempt_finish_tx(&tx,&record.to_string(),&attempt,&token)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+    }
+    .await;
+    let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(_) if slot.stop.is_cancelled()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
+    if let Err(error) = &result {
+        record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);
+    }
+    let (attempt, token) = (automatic.attempt.clone(), automatic.token.clone());
+    control
+        .store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            crate::compaction::attempt_finish_tx(&tx, &record.to_string(), &attempt, &token)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .map_err(storage_error)?;
     control.changed(&snapshot.thread);
-    let _=budget; // Retired progress fields are removed in the API cleanup child.
-    if slot.stop.is_cancelled() {if let Err(error)=result {return Err(error);}}
+    let _ = budget; // Retired progress fields are removed in the API cleanup child.
+    if slot.stop.is_cancelled() {
+        if let Err(error) = result {
+            return Err(error);
+        }
+    }
     Ok(true)
 }

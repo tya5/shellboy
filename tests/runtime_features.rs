@@ -1068,7 +1068,9 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
     settled(&control, &thread).await;
     request(
         &control,
-        Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            auto_compact_target_percent: None,
+            summary_max_chars: None,
             auto_compact_at: None,
             segment_chars: None,
             reduce_rounds: None,
@@ -1136,7 +1138,9 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
         if previous_model != model {
             request(
                 &control,
-                Command::ThreadSet(Box::new(ThreadSetArgs { auto_compact_target_percent:None, summary_max_chars:None,
+                Command::ThreadSet(Box::new(ThreadSetArgs {
+                    auto_compact_target_percent: None,
+                    summary_max_chars: None,
                     auto_compact_at: None,
                     segment_chars: None,
                     reduce_rounds: None,
