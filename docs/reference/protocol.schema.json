@@ -184,6 +184,30 @@
       ],
       "type": "object"
     },
+    "AttemptCoverageV1": {
+      "additionalProperties": false,
+      "properties": {
+        "adoption": {
+          "$ref": "#/definitions/CoverageAdoption"
+        },
+        "answer_member_count": {
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/definitions/CoveragePresentation"
+        },
+        "seal": {
+          "$ref": "#/definitions/CoverageSealV1"
+        }
+      },
+      "required": [
+        "seal",
+        "adoption",
+        "answer_member_count",
+        "presentation"
+      ],
+      "type": "object"
+    },
     "Command": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "oneOf": [
@@ -1752,6 +1776,122 @@
       ],
       "type": "object"
     },
+    "CoverageAdoption": {
+      "enum": [
+        "covered_nonempty",
+        "covered_empty"
+      ],
+      "type": "string"
+    },
+    "CoverageFragmentV1": {
+      "additionalProperties": false,
+      "properties": {
+        "scalar_offset": {
+          "type": "string"
+        },
+        "sequence": {
+          "type": "string"
+        },
+        "stream_kind": {
+          "$ref": "#/definitions/CoverageStreamKind"
+        }
+      },
+      "required": [
+        "sequence",
+        "scalar_offset",
+        "stream_kind"
+      ],
+      "type": "object"
+    },
+    "CoverageIdentityV1": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "type": "string"
+        },
+        "incarnation": {
+          "type": "string"
+        },
+        "projection": {
+          "$ref": "#/definitions/CoverageProjection"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "version": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "projection",
+        "thread_id",
+        "attempt_id",
+        "incarnation"
+      ],
+      "type": "object"
+    },
+    "CoveragePresentation": {
+      "enum": [
+        "canonical_answer",
+        "explicit_no_answer"
+      ],
+      "type": "string"
+    },
+    "CoverageProjection": {
+      "enum": [
+        "ordinary_text_v1"
+      ],
+      "type": "string"
+    },
+    "CoverageSealDisposition": {
+      "enum": [
+        "complete",
+        "unknown"
+      ],
+      "type": "string"
+    },
+    "CoverageSealV1": {
+      "additionalProperties": false,
+      "properties": {
+        "disposition": {
+          "$ref": "#/definitions/CoverageSealDisposition"
+        },
+        "identity": {
+          "$ref": "#/definitions/CoverageIdentityV1"
+        },
+        "next_sequence": {
+          "type": "string"
+        },
+        "scalar_end": {
+          "type": "string"
+        },
+        "transcript_sha256": {
+          "type": "string"
+        },
+        "utf8_bytes": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "next_sequence",
+        "scalar_end",
+        "utf8_bytes",
+        "transcript_sha256",
+        "disposition"
+      ],
+      "type": "object"
+    },
+    "CoverageStreamKind": {
+      "enum": [
+        "text"
+      ],
+      "type": "string"
+    },
     "CredentialsClearArgs": {
       "additionalProperties": false,
       "properties": {
@@ -1979,6 +2119,16 @@
         "attempt_id": {
           "type": "string"
         },
+        "coverage_v1": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageIdentityV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "deltas": {
           "items": {
             "$ref": "#/definitions/EventTextDelta"
@@ -2031,6 +2181,16 @@
     },
     "EventTextDelta": {
       "properties": {
+        "coverage_v1": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CoverageFragmentV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "offset": {
           "format": "uint64",
           "minimum": 0,
@@ -2086,6 +2246,12 @@
         "changes": {
           "items": {
             "$ref": "#/definitions/EventChange"
+          },
+          "type": "array"
+        },
+        "coverage_seals_v1": {
+          "items": {
+            "$ref": "#/definitions/CoverageSealV1"
           },
           "type": "array"
         },
@@ -9094,6 +9260,16 @@
             }
           ]
         },
+        "coverage_v1": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AttemptCoverageV1"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "created_at": {
           "type": [
             "string",
@@ -9451,6 +9627,12 @@
         "changes": {
           "items": {
             "$ref": "#/definitions/EventChange"
+          },
+          "type": "array"
+        },
+        "coverage_seals_v1": {
+          "items": {
+            "$ref": "#/definitions/CoverageSealV1"
           },
           "type": "array"
         },
