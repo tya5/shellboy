@@ -173,6 +173,15 @@ impl CachedPart {
             .optional()?;
         Ok(body.and_then(|body| serde_json::from_str(&body).ok()))
     }
+    #[cfg(test)]
+    fn encode(&self) -> String {
+        serde_json::to_string(self).expect("cached test fixture serializes")
+    }
+    #[cfg(test)]
+    async fn save(&self, database: &DbWorker, lookup: String) -> Result<(), ApiError> {
+        let saved = self.encode();
+        database.call(move|db|{db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![lookup,saved])?;Ok(())}).await.map_err(storage_error)
+    }
     fn reusable(&self) -> bool {
         if self.text.trim().is_empty() {
             return false;
@@ -660,6 +669,7 @@ impl Compactor {
             drop_all_reasoning: false,
             active: Some(plan),
             requested_limit: None,
+            failure_region: single_request::Region::Active,
         })
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
@@ -815,13 +825,14 @@ impl Compactor {
         response
     }
 
-    async fn summarize_snapshot(
+    pub(super) async fn summarize_range(
         &self,
         snapshot: Snapshot,
         range: Range<usize>,
         cancel: CancellationToken,
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
+        requested_limit: Option<u64>,
     ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::UsageLedger::new(&snapshot);
         self.summarize_single(single_request::SummaryRequest {
@@ -833,10 +844,22 @@ impl Compactor {
             automatic,
             drop_all_reasoning: false,
             active: None,
-            requested_limit: None,
+            requested_limit,
+            failure_region: single_request::Region::Closed,
         })
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
+    }
+    async fn summarize_snapshot(
+        &self,
+        snapshot: Snapshot,
+        range: Range<usize>,
+        cancel: CancellationToken,
+        boundary: Option<&mut boundary::Boundary<'_>>,
+        automatic: Option<AutomaticStage>,
+    ) -> Result<CompactResult, ApiError> {
+        self.summarize_range(snapshot, range, cancel, boundary, automatic, None)
+            .await
     }
 }
 

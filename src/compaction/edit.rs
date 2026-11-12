@@ -77,11 +77,6 @@ impl Compactor {
                 ),
             )
             .await?;
-        // [compaction] -> connection -> Thread (resolved in the snapshot) -> this call.
-        let mut limits = self.policy_for(&snapshot);
-        if let Some(value) = args.max_chars {
-            limits.summary_max_chars = Some(value);
-        }
         let before = history_characters(&snapshot);
         match args.action {
             ContextEditAction::Maximal => {
@@ -116,7 +111,13 @@ impl Compactor {
                     Err(error) if matches!(args.action, ContextEditAction::Summary) => {
                         return self
                             .summarize_hidden_marker(
-                                snapshot, from, to, cancel, error, limits, boundary,
+                                snapshot,
+                                from,
+                                to,
+                                cancel,
+                                error,
+                                args.max_chars,
+                                boundary,
                             )
                             .await;
                     }
@@ -134,7 +135,7 @@ impl Compactor {
                             to,
                             cancel,
                             edit_error("Selected marker cannot be summarized"),
-                            limits,
+                            args.max_chars,
                             boundary,
                         )
                         .await;
@@ -144,7 +145,7 @@ impl Compactor {
                     self.spill_snapshot(snapshot, vec![selected], cancel, false, None)
                         .await?
                 } else {
-                    self.summarize_with_policy(snapshot, selected, cancel, limits, boundary, None)
+                    self.summarize_range(snapshot, selected, cancel, boundary, None, args.max_chars)
                         .await?
                 };
                 let after = history_characters(&self.snapshot(thread, false).await?);
@@ -201,7 +202,7 @@ impl Compactor {
         to: &str,
         cancel: CancellationToken,
         original_error: ApiError,
-        limits: crate::config::Compaction,
+        requested_limit: Option<u64>,
         boundary: Option<&mut super::boundary::Boundary<'_>>,
     ) -> Result<ContextEditResult, ApiError> {
         let before = history_characters(&snapshot);
@@ -254,13 +255,13 @@ impl Compactor {
             snapshot.groups.splice(index..index + 1, groups);
             let thread = snapshot.thread.clone();
             let compact = self
-                .summarize_with_policy(
+                .summarize_range(
                     snapshot,
                     index..index + count,
                     cancel,
-                    limits,
                     boundary,
                     None,
+                    requested_limit,
                 )
                 .await?;
             let after = history_characters(&self.snapshot(&thread, false).await?);

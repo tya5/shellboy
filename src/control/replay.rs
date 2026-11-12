@@ -1,7 +1,9 @@
 //! Immutable Responses items with one byte-bounded LRU shared by all Threads.
 use crate::storage::StorageError;
 use rusqlite::Connection;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use std::{
     collections::{HashMap, VecDeque},
     mem::size_of,
@@ -736,18 +738,21 @@ fn decode_frame_checked(
                 .map(str::to_owned);
             let spill = value.get("spill_version").is_some();
             #[cfg(test)]
-            spill_projection_safe = {
+            let (spill_projection_safe, spill_result_item) = {
                 let no_output = value.get("output").and_then(Value::as_array).is_none();
-                !(no_output && value.get("role").is_some() && value.get("item").is_some())
+                let safe =
+                    !(no_output && value.get("role").is_some() && value.get("item").is_some());
+                let result = safe
+                    && no_output
+                    && value
+                        .get("item")
+                        .and_then(|item| item.get("type"))
+                        .and_then(Value::as_str)
+                        == Some("function_call_output");
+                (safe, result)
             };
-            #[cfg(test)]
-            spill_result_item = spill_projection_safe
-                && value.get("output").and_then(Value::as_array).is_none()
-                && value
-                    .get("item")
-                    .and_then(|item| item.get("type"))
-                    .and_then(Value::as_str)
-                    == Some("function_call_output");
+            #[cfg(not(test))]
+            let (spill_projection_safe, spill_result_item) = (true, false);
             let items = convert_kept(value, epoch, keep.contains(&stamp.id));
             (
                 group,

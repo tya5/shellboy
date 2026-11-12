@@ -189,12 +189,13 @@ fn load(
         row.get::<_, i64>(0)?,
         row.get::<_, i64>(1)?,
         row.get::<_, i64>(2)?,
+        row.get::<_, Option<i64>>(6)?,
     );
     let profile = required(row, 3, 4096, budget)?;
     let model = required(row, 4, 4096, budget)?;
     let effort = text(row, 5, 64, budget)?;
-    let thread_summary_chars = row
-        .get::<_, Option<i64>>(6)?
+    let thread_summary_chars = data
+        .3
         .map(|n| u64::try_from(n).map_err(|_| limit()))
         .transpose()?;
     drop(rows);
@@ -391,7 +392,7 @@ fn load(
         turn_boundaries: HashMap::new(),
         turn_fence,
         run_fence: run,
-        summary_max_chars: data.6,
+        summary_max_chars: data.3,
     };
     // Derive the earliest selected replacement for each protected Turn by going
     // backward through indexed provenance, never scanning lifetime Turn seeds.
@@ -929,7 +930,7 @@ pub(crate) fn read_tx(
     }
     let mut budget = TEXT;
     let mut sql = 0;
-    let mut loaded = load(db, thread, args, &mut budget, &mut sql)?;
+    let loaded = load(db, thread, args, &mut budget, &mut sql)?;
     let plan = make_plan(&loaded, args, config);
     if sql > SQL_MAX {
         return Err(limit());

@@ -13,6 +13,7 @@ pub(super) struct SummaryRequest<'a, 'boundary> {
     pub(super) drop_all_reasoning: bool,
     pub(super) active: Option<policy::ActiveTurnPlan>,
     pub(super) requested_limit: Option<u64>,
+    pub(super) failure_region: Region,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -151,12 +152,8 @@ impl Compactor {
             drop_all_reasoning,
             active,
             requested_limit,
+            failure_region: region,
         } = request;
-        let region = if active.is_some() {
-            Region::Active
-        } else {
-            Region::Closed
-        };
         let valid = |span: Range<usize>| {
             if active.is_some() {
                 !span.is_empty()
@@ -511,9 +508,9 @@ pub(super) fn failure_identity(
     )))
 }
 
-/// Pure execution cursor: original failure identity cannot drift while halving.
-/// Dispatch, source adoption and #A transactions remain external/unconnected.
+/// Retry cursor retains the original identity while only its trial range changes.
 pub(super) struct Trial {
+    identity: FailureIdentity,
     selected: Range<usize>,
     terminal: bool,
 }
