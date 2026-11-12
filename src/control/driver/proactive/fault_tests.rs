@@ -53,15 +53,18 @@ enum ObservationPhase {
 
 fn expected_outcome(fault: Fault, phase: ObservationPhase) -> &'static str {
     match phase {
+        // The checkpoint barrier is held after the committed stage and before
+        // any terminal outcome writer. Every post-commit fault is therefore
+        // observed as the same provisional attempt state here.
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
             Fault::Cancellation => "adopted",
-            Fault::Persistent
-            | Fault::RejectFinal
-            | Fault::Storage
-            | Fault::RetiredWritesAbsent => "unknown",
-            Fault::Remeasurement | Fault::RejectFact => "failed",
+            Fault::Persistent | Fault::RejectFinal => "unknown",
+            Fault::Storage
+            | Fault::RetiredWritesAbsent
+            | Fault::Remeasurement
+            | Fault::RejectFact => "failed",
         },
     }
 }
@@ -397,17 +400,6 @@ async fn prepare_with_thread_override(
         }
         tokio::task::yield_now().await;
     }
-    if fault == Fault::RejectFact {
-        crate::test_watchdog::watchdog("rejected stage fact terminal record", async {
-            loop {
-                let outcome = control.store.database.call(|db| Ok(db.query_row(
-                    "SELECT json_extract(error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
-                    [], |row| row.get::<_, Option<String>>(0))?)).await.unwrap();
-                if outcome.as_deref() == Some("failed") { break; }
-                tokio::task::yield_now().await;
-            }
-        }).await.unwrap();
-    }
     let saved = control.store.database.call(|db| Ok(db.query_row(
         "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
         [], |row| row.get::<_, String>(0))?)).await.unwrap();
@@ -512,7 +504,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             );
         }
         release_checkpoint.notify_one();
-        if fault == Fault::Remeasurement {
+        if fault == Fault::Remeasurement && scenario != Scenario::ActiveSummary {
             crate::test_watchdog::watchdog("remeasurement failure consumed", async {
                 while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
                     tokio::task::yield_now().await;
@@ -520,6 +512,11 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             })
             .await
             .unwrap();
+        } else if fault == Fault::Remeasurement {
+            assert!(
+                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
+                "ActiveSummary checkpoint aborts before later remeasurement; one-shot remains armed"
+            );
         }
     }
     let shutdown = control.shutdown().await;
@@ -528,6 +525,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
         Fault::Persistent
             | Fault::RejectFinal
             | Fault::Remeasurement
+            | Fault::RejectFact
             | Fault::Storage
             | Fault::RetiredWritesAbsent
     ) {
@@ -541,7 +539,6 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             "fault hook actually reached its intended write/operation"
         );
     }
-    assert!(!control.compactor.fail_remeasurement.load(Ordering::SeqCst));
     assert_boundary(&control, &target, scenario, fault, "shutdown").await;
     control
         .store

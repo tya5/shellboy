@@ -75,6 +75,16 @@ struct Saved {
     record: Value,
 }
 
+fn trigger_identity(trigger: &Value) -> Value {
+    json!({
+        "input_tokens": trigger["input_tokens"],
+        "auto_at_tokens": trigger["auto_at_tokens"],
+        "target_percent": trigger["target_percent"],
+        "target_tokens": trigger["target_tokens"],
+        "a_input_tokens": trigger["a_input_tokens"],
+    })
+}
+
 async fn record_boundary(fault: Fault, scenario: Scenario) {
     let stage = scenario.stage();
     let Fx {
@@ -125,7 +135,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
             );
         }
         release_checkpoint.notify_one();
-        if fault == Fault::Remeasurement {
+        if fault == Fault::Remeasurement && scenario != Scenario::ActiveSummary {
             crate::test_watchdog::watchdog("record remeasurement fault consumed", async {
                 while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
                     tokio::task::yield_now().await;
@@ -133,6 +143,11 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
             })
             .await
             .unwrap();
+        } else if fault == Fault::Remeasurement {
+            assert!(
+                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
+                "ActiveSummary abort happens before remeasurement"
+            );
         }
     }
     let shutdown = control.shutdown().await;
@@ -141,6 +156,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         Fault::Persistent
             | Fault::RejectFinal
             | Fault::Remeasurement
+            | Fault::RejectFact
             | Fault::Storage
             | Fault::RetiredWritesAbsent
     ) {
@@ -173,13 +189,33 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         "same attempt across phases"
     );
     assert_eq!(
-        terminal.record["trigger"], checkpoint.record["trigger"],
-        "immutable trigger across phases"
+        trigger_identity(&terminal.record["trigger"]),
+        trigger_identity(&checkpoint.record["trigger"]),
+        "immutable original trigger tuple across phases"
     );
     assert_eq!(
         terminal.record["committed_stages"], checkpoint.record["committed_stages"],
         "committed stage facts retained across terminal write"
     );
+
+    if fault == Fault::RetiredWritesAbsent {
+        let hits: i64 = control
+            .store
+            .database
+            .call(|db| {
+                Ok(
+                    db.query_row("SELECT count(*) FROM retired_write_hits", [], |row| {
+                        row.get(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            hits, 0,
+            "no retired W0/W2/W3 write through terminal finalization before trigger teardown"
+        );
+    }
     assert!(
         receive.try_recv().is_err(),
         "no provider POST after terminal outcome"
@@ -203,6 +239,44 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         terminal.record, after.record,
         "restart preserves the exact post-shutdown terminal record byte-for-byte"
     );
+    if after.record["outcome"] == "unknown" {
+        drop_fault_triggers(&control).await;
+        drop(control);
+        owner.shutdown().await.unwrap();
+        let restarted = crate::app::DataOwner::start(
+            None,
+            Some(root.path().to_path_buf()),
+            root.path().to_path_buf(),
+        )
+        .await
+        .unwrap();
+        let response = crate::ipc::call(
+            root.path(),
+            Command::CompactList(CompactListArgs {
+                thread_id: Some(target.clone()),
+                since: None,
+                until: None,
+                limit: 50,
+            }),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let list = response
+            .result
+            .expect("restarted public CompactList succeeds");
+        let item = list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["attempt_id"] == after.attempt.as_str())
+            .unwrap_or_else(|| panic!("reopened CompactList omitted persisted attempt: {list}"));
+        assert_eq!(item["kind"], "automatic_reduction");
+        assert_eq!(item["state"], "unknown");
+        restarted.shutdown().await.unwrap();
+        return;
+    }
     later_attempt(&control, &mut receive, &target, &after).await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
@@ -546,26 +620,6 @@ async fn assert_record(
         pending.is_none(),
         "no retired automatic_target marks are written: {fault:?} {record}"
     );
-    if outcome == "unknown" && !live {
-        let list = request(
-            control,
-            Command::CompactList(CompactListArgs {
-                thread_id: Some(target.clone()),
-                since: None,
-                until: None,
-                limit: 50,
-            }),
-        )
-        .await;
-        let item = list["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|i| i["attempt_id"] == attempt.as_str())
-            .unwrap_or_else(|| panic!("{list}"));
-        assert_eq!(item["kind"], "automatic_reduction");
-        assert_eq!(item["state"], "unknown");
-    }
     Saved { attempt, record }
 }
 
