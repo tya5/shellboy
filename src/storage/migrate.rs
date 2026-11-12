@@ -560,7 +560,12 @@ mod activity_migration_tests {
             for key in ["map_requests","reduce_requests","oversized_reduce_parts"] {assert!(current.get(key).is_none());}
             assert_eq!(current["input_tokens"]["known_sum"],10);
             let orphan:String=db.query_row("SELECT legacy_json FROM summary_usage_stage_archive WHERE record_key='summary.usage.orphan.saved'",[],|r|r.get(0))?;
-            assert!(orphan.contains("missing"));
+            let orphan:serde_json::Value=serde_json::from_str(&orphan).unwrap();
+            assert_eq!(orphan["map_requests"],1);
+            let orphan_current:String=db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.orphan.saved'",[],|r|r.get(0))?;
+            let orphan_current:serde_json::Value=serde_json::from_str(&orphan_current).unwrap();
+            assert_eq!(orphan_current["thread_id"],"missing");
+            assert!(orphan_current.get("map_requests").is_none());
             assert_eq!(db.query_row("SELECT count(*) FROM app_meta WHERE key IN ('summary.usage.malformed.saved','summary.usage.nested.saved')",[],|r|r.get::<_,i64>(0))?,2);
             assert_eq!(db.query_row("SELECT value FROM app_meta WHERE key='summary.usage.malformed.saved'",[],|r|r.get::<_,String>(0))?,"{");
             let unsupported_meta = [
