@@ -179,7 +179,7 @@ impl Automatic {
 }
 
 // Shared real stage boundary, including fault-only postcommit observation.
-async fn summary_stage(control:&Control,compactor:&crate::compaction::Compactor,thread:&str,slot:&DriverSlot,active:bool,boundary:&mut crate::compaction::boundary::Boundary<'_>,automatic:&Automatic)->Result<crate::compaction::CompactResult,ApiError> {
+async fn summary_stage(control:&Arc<Control>,compactor:&crate::compaction::Compactor,thread:&str,slot:&DriverSlot,active:bool,boundary:&mut crate::compaction::boundary::Boundary<'_>,automatic:&Automatic)->Result<crate::compaction::CompactResult,ApiError> {
     let stage=if active {"active_summary"}else{"closed_summary"};
     let result=if active {
         automatic.observed(control,stage,compactor.summarize_active_guarded(thread,slot.stop.clone(),Some(boundary),Some(automatic.stage(stage)))).await?
@@ -347,7 +347,7 @@ pub(super) async fn maybe_compact(
                 ),
             )
             .await?;
-        summary_stage(control,compactor,&snapshot.thread,slot,active,boundary,&automatic).await
+        summary_stage(control,&compactor,&snapshot.thread,slot,active,boundary,&automatic).await
     }
     .await;
     let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(_) if slot.stop.is_cancelled()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
