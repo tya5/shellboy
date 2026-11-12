@@ -593,14 +593,21 @@ async fn assert_record(
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
                 .collect::<rusqlite::Result<_>>()?)
         }).await.unwrap();
-        assert_eq!(
-            rows,
-            [(
-                "compact.automatic_active.retired-write-test".into(),
-                "seed-active".into()
-            )],
-            "legacy W0 row remains byte-exact"
-        );
+        if live {
+            assert_eq!(
+                rows,
+                [(
+                    "compact.automatic_active.retired-write-test".into(),
+                    "seed-active".into()
+                )],
+                "legacy W0 row remains byte-exact through the held checkpoint"
+            );
+        } else {
+            assert!(
+                rows.is_empty(),
+                "normal terminal cleanup removes the retired W0 sentinel row"
+            );
+        }
         if live {
             let hits: i64 = control
                 .store
