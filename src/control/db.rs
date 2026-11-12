@@ -1366,6 +1366,8 @@ impl Store {
                     self.fill_effective(&mut details);
                     result.result["effective_auto_compact_at"] =
                         serde_json::json!(details.effective_auto_compact_at);
+                    result.result["effective_auto_compact_target_percent"]=serde_json::json!(details.effective_auto_compact_target_percent);
+                    result.result["effective_summary_max_chars"]=serde_json::json!(details.effective_summary_max_chars);
                     result.result["segment_chars"] = serde_json::json!(details.segment_chars);
                     result.result["effective_segment_chars"] =
                         serde_json::json!(details.effective_segment_chars);
@@ -1652,7 +1654,7 @@ impl Store {
     ) -> Result<String> {
         let config = &self.config.current();
         let inherited = if let Some(parent) = &args.parent_id {
-            Some(tx.query_row("SELECT cwd,agents_path,profile_id,model_id,effort,auto_compact_at,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",[parent],|row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<i64>>(6)?,row.get::<_,Option<i64>>(7)?))).optional().map_err(sql_error)?.ok_or_else(|| error(ErrorCode::ThreadNotFound,"parent Thread not found"))?)
+            Some(tx.query_row("SELECT cwd,agents_path,profile_id,model_id,effort,auto_compact_at,segment_chars,reduce_rounds,auto_compact_target_percent,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",[parent],|row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,Option<i64>>(5)?,row.get::<_,Option<i64>>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<i64>>(8)?,row.get::<_,Option<i64>>(9)?))).optional().map_err(sql_error)?.ok_or_else(|| error(ErrorCode::ThreadNotFound,"parent Thread not found"))?)
         } else {
             None
         };
@@ -1720,7 +1722,7 @@ impl Store {
             })
             .filter(|value| !value.is_empty());
         let id = uuid::Uuid::new_v4().to_string();
-        tx.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at,auto_compact_at,segment_chars,reduce_rounds) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now,inherited.as_ref().and_then(|p|p.5),inherited.as_ref().and_then(|p|p.6),inherited.as_ref().and_then(|p|p.7)]).map_err(sql_error)?;
+        tx.execute("INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at,auto_compact_at,segment_chars,reduce_rounds,auto_compact_target_percent,summary_max_chars) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now,inherited.as_ref().and_then(|p|p.5),inherited.as_ref().and_then(|p|p.6),inherited.as_ref().and_then(|p|p.7),inherited.as_ref().and_then(|p|p.8),inherited.as_ref().and_then(|p|p.9)]).map_err(sql_error)?;
         bump_roots(tx)?;
         Ok(id)
     }
@@ -1732,6 +1734,8 @@ impl Store {
         let compaction = &config.compaction;
         details.effective_auto_compact_at =
             Some(compaction.auto_at_tokens_for(details.auto_compact_at, connection));
+        details.effective_auto_compact_target_percent=Some(crate::config::target_percent_for(details.auto_compact_target_percent,connection));
+        details.effective_summary_max_chars=Some(crate::config::summary_chars_for(details.summary_max_chars,connection));
         details.effective_segment_chars = Some(
             compaction.segment_chars_for(details.segment_chars.map(|v| v as usize), connection)
                 as u64,
@@ -1758,6 +1762,14 @@ impl Store {
             Some(requested) => reparent::apply(tx, &id, requested, caller, now)?,
             None => None,
         };
+        if let Some(value)=&args.auto_compact_target_percent {
+            let value=crate::protocol::validation::parse_target_percent(value)?;
+            tx.execute("UPDATE thread SET auto_compact_target_percent=?2 WHERE id=?1",params![id,value]).map_err(sql_error)?;
+        }
+        if let Some(value)=&args.summary_max_chars {
+            let value=crate::protocol::validation::parse_summary_chars(value)?;
+            tx.execute("UPDATE thread SET summary_max_chars=?2 WHERE id=?1",params![id,value]).map_err(sql_error)?;
+        }
         if let Some(value) = &args.auto_compact_at {
             let value = crate::protocol::validation::parse_auto_compact_at(value)?;
             tx.execute(
@@ -1791,6 +1803,8 @@ impl Store {
             && args.effort.is_none()
             && args.agents.is_none()
             && args.auto_compact_at.is_none()
+            && args.auto_compact_target_percent.is_none()
+            && args.summary_max_chars.is_none()
             && args.segment_chars.is_none()
             && args.reduce_rounds.is_none();
         if moved_only {
@@ -2306,7 +2320,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at,auto_compact_target_percent,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(11)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(12)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.instruction_sources = connection.query_row(
         "SELECT CASE WHEN s.content_hash GLOB 'instruction-bundle-v1:sha256:*' AND json_valid(substr(s.body,38)) THEN json_extract(substr(s.body,38),'$.extra') ELSE NULL END FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",[id],|r|r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?.flatten().and_then(|body|serde_json::from_str::<Vec<Value>>(&body).ok()).map(|mut files| {for file in &mut files {if let Some(file)=file.as_object_mut() { file.remove("body"); }} json!({"extra":files,"snapshot":"latest_prepared_turn"})});
     details.tags = tags::for_thread(connection, id)?;

@@ -199,6 +199,10 @@ pub struct Connection {
     pub auto_trim_on_disconnect: bool,
     /// Overrides `[compaction] auto_at_tokens` for this connection; 0 disables.
     pub auto_at_tokens: Option<u64>,
+    #[serde(default,deserialize_with="target_percent_option")]
+    pub auto_compact_target_percent: Option<u64>,
+    #[serde(default,deserialize_with="summary_chars_option")]
+    pub summary_max_chars: Option<u64>,
     /// Overrides `[compaction] segment_chars` for this connection.
     pub segment_chars: Option<usize>,
     /// Overrides `[compaction] reduce_rounds` for this connection.
@@ -243,6 +247,8 @@ impl Default for Connection {
             response_retry_partial: true,
             auto_trim_on_disconnect: true,
             auto_at_tokens: None,
+            auto_compact_target_percent:None,
+            summary_max_chars:None,
             segment_chars: None,
             reduce_rounds: None,
             credentials_file: None,
@@ -283,6 +289,8 @@ impl fmt::Debug for Connection {
             .field("response_retry_partial", &self.response_retry_partial)
             .field("auto_trim_on_disconnect", &self.auto_trim_on_disconnect)
             .field("auto_at_tokens", &self.auto_at_tokens)
+            .field("auto_compact_target_percent",&self.auto_compact_target_percent)
+            .field("summary_max_chars",&self.summary_max_chars)
             .field("segment_chars", &self.segment_chars)
             .field("reduce_rounds", &self.reduce_rounds)
             .field("credentials_file", &self.credentials_file)
@@ -1131,6 +1139,18 @@ impl Default for Compaction {
             reduce_rounds: DEFAULT_REDUCE_ROUNDS,
         }
     }
+}
+fn bounded_setting<'de,D:serde::Deserializer<'de>>(d:D,max:u64)->Result<Option<u64>,D::Error> {
+    let value=Option::<u64>::deserialize(d)?;
+    if value.is_some_and(|n|n==0 || n>max) {return Err(serde::de::Error::custom("compaction setting is out of range"));}Ok(value)
+}
+fn target_percent_option<'de,D:serde::Deserializer<'de>>(d:D)->Result<Option<u64>,D::Error> {bounded_setting(d,100)}
+fn summary_chars_option<'de,D:serde::Deserializer<'de>>(d:D)->Result<Option<u64>,D::Error> {bounded_setting(d,i64::MAX as u64)}
+pub fn target_percent_for(thread:Option<u64>,connection:Option<&Connection>)->u64 {
+    thread.or_else(||connection.and_then(|c|c.auto_compact_target_percent)).unwrap_or(20)
+}
+pub fn summary_chars_for(thread:Option<u64>,connection:Option<&Connection>)->u64 {
+    thread.or_else(||connection.and_then(|c|c.summary_max_chars)).unwrap_or(20000)
 }
 pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
 pub const DEFAULT_SEGMENT_CHARS: usize = 64_000;

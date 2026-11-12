@@ -373,6 +373,8 @@ pub(crate) fn parse_bounded_override(
         .map(|v| Some(v as i64))
         .ok_or_else(|| invalid(message()))
 }
+pub(crate) fn parse_target_percent(value:&str)->Result<Option<i64>,ApiError> {parse_bounded_override(value,"auto_compact_target_percent",&(1..=100))}
+pub(crate) fn parse_summary_chars(value:&str)->Result<Option<i64>,ApiError> {parse_bounded_override(value,"summary_max_chars",&(1..=i64::MAX as u64))}
 pub(crate) fn parse_segment_chars(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "segment_chars", &crate::config::SEGMENT_CHARS_RANGE)
 }
@@ -410,6 +412,8 @@ impl ThreadSetArgs {
         if let Some(value) = &self.auto_compact_at {
             parse_auto_compact_at(value)?;
         }
+        if let Some(value)=&self.auto_compact_target_percent {parse_target_percent(value)?;}
+        if let Some(value)=&self.summary_max_chars {parse_summary_chars(value)?;}
         if let Some(value) = &self.segment_chars {
             parse_segment_chars(value)?;
         }
@@ -423,6 +427,8 @@ impl ThreadSetArgs {
             && self.title.is_none()
             && self.agents.is_none()
             && self.auto_compact_at.is_none()
+            && self.auto_compact_target_percent.is_none()
+            && self.summary_max_chars.is_none()
             && self.segment_chars.is_none()
             && self.reduce_rounds.is_none()
             && self.parent_id.is_none()

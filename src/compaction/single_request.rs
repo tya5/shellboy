@@ -102,7 +102,9 @@ impl Compactor {
         automatic:Option<AutomaticStage>, drop_all_reasoning:bool,
     ) -> Result<CompactResult,ApiError> {
         range::validate(&snapshot,std::slice::from_ref(&original),range::RangeMode::Summary)?;
-        let limit=OutputLimit(self.config.compaction.summary_max_chars as u64);
+        let settings_thread=snapshot.thread.clone();
+        let max_chars=self.database.call(move |db|Ok(db.query_row("SELECT summary_max_chars FROM thread WHERE id=?1",[settings_thread],|r|r.get::<_,Option<u64>>(0))?)).await.map_err(storage_error)?;
+        let limit=OutputLimit(crate::config::summary_chars_for(max_chars,self.config.connections.get(&snapshot.profile)));
         let identity=failure_identity(&snapshot.thread,&snapshot,original.clone(),limit)
             .ok_or_else(||invalid("No summary range"))?;
         let thread=snapshot.thread.clone();let lookup=identity.clone();
