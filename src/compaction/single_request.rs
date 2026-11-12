@@ -96,24 +96,28 @@ pub(super) struct Dispatched {
     pub(super) size: AdoptionSize,
 }
 impl Compactor {
-    pub(super) async fn summarize_single_closed(
+    pub(super) async fn summarize_single(
         &self, snapshot:Snapshot, original:Range<usize>, cancel:CancellationToken,
         ledger:&mut usage::UsageLedger, boundary:Option<&mut boundary::Boundary<'_>>,
-        automatic:Option<AutomaticStage>, drop_all_reasoning:bool,
+        automatic:Option<AutomaticStage>, drop_all_reasoning:bool, active:Option<policy::ActiveTurnPlan>,
     ) -> Result<CompactResult,ApiError> {
-        range::validate(&snapshot,std::slice::from_ref(&original),range::RangeMode::Summary)?;
+        let region=if active.is_some() {Region::Active}else{Region::Closed};
+        let valid=|span:Range<usize>| {
+            if active.is_some() {
+                !span.is_empty() && span.clone().all(|i|range::group_is_safe(&snapshot,i))
+                    && snapshot.groups[span].iter().any(|g|g.tool || g.sources.iter().any(|s|s.payload.get("spill_version").is_some()))
+            } else {range::validate(&snapshot,std::slice::from_ref(&span),range::RangeMode::Summary).is_ok()}
+        };
+        if !valid(original.clone()) {return Err(invalid("No safe summary range"));}
         let settings_thread=snapshot.thread.clone();
         let max_chars=self.database.call(move |db|Ok(db.query_row("SELECT summary_max_chars FROM thread WHERE id=?1",[settings_thread],|r|r.get::<_,Option<u64>>(0))?)).await.map_err(storage_error)?;
         let limit=OutputLimit(crate::config::summary_chars_for(max_chars,self.config.connections.get(&snapshot.profile)));
         let identity=failure_identity(&snapshot.thread,&snapshot,original.clone(),limit)
             .ok_or_else(||invalid("No summary range"))?;
         let thread=snapshot.thread.clone();let lookup=identity.clone();
-        let blocked=self.database.call(move |db|same_failed_range(db,&thread,Region::Closed,&lookup)).await.map_err(storage_error)?;
+        let blocked=self.database.call(move |db|same_failed_range(db,&thread,region,&lookup)).await.map_err(storage_error)?;
         if blocked {return Err(invalid("This closed summary range already failed deterministically"));}
-        let dispatched=self.dispatch_single_summary(&snapshot,original,limit,&cancel,ledger,boundary,|prefix| {
-            range::validate(&snapshot,std::slice::from_ref(&prefix),range::RangeMode::Summary).is_ok()
-                && snapshot.groups[prefix].iter().any(|g|g.sources.iter().any(|s|s.payload.get("summary_format").is_none()))
-        }).await;
+        let dispatched=self.dispatch_single_summary(&snapshot,original,limit,&cancel,ledger,boundary,valid).await;
         let dispatched=match dispatched {
             Ok(result)=>result,
             Err(error)=>{
@@ -122,7 +126,7 @@ impl Compactor {
                     || error.details.as_ref().is_some_and(|v|v["single_summary_context_terminal"]==true);
                 if deterministic {
                     let thread=snapshot.thread.clone();let proof=snapshot.clone();
-                    self.database.call(move |db| {let tx=db.transaction()?;validate(&tx,&proof)?;remember_failure(&tx,&thread,Region::Closed,&identity)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+                    self.database.call(move |db| {let tx=db.transaction()?;validate(&tx,&proof)?;remember_failure(&tx,&thread,region,&identity)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
                 }
                 return Err(error);
             }
@@ -132,12 +136,30 @@ impl Compactor {
         let originals:Vec<String>=sources.iter().map(|s|s.id.clone()).collect();
         let text_chars=dispatched.response.text.chars().count();
         let source_chars=sources.iter().map(|s|edit::projection_characters(&s.payload,snapshot.epoch)).sum::<u64>();
-        let payload=json!({"item":{"role":"developer","content":[{"type":"input_text","text":dispatched.response.text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
+        let reaches_latest=active.as_ref().is_some_and(|plan|selected.end==plan.end());
+        let summary_text=if reaches_latest {
+            let plan=active.as_ref().unwrap();
+            format!("{}\n\n[The latest tool round (plain, kept verbatim)]\n{}",dispatched.response.text,snapshot.groups[plan.latest].sources.iter().map(|s|render(s,snapshot.epoch)).collect::<Vec<_>>().join("\n\n"))
+        } else {dispatched.response.text.clone()};
+        let mut payload=json!({"item":{"role":"developer","content":[{"type":"input_text","text":summary_text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
+        let mut kept_reasoning=Vec::new();
+        if let Some(plan)=&active {
+            if reaches_latest {
+                kept_reasoning=history::reasoning_keep_nodes(snapshot.groups[plan.latest].sources.iter().filter(|s|s.payload["type"]=="tool_call").map(|s|(s.id.clone(),s.payload.clone(),s.turn.clone())),snapshot.epoch);
+                payload["summary_scope"]=json!("active_turn_middle");
+                payload["kept_reasoning_node_ids"]=json!(kept_reasoning);
+            } else {payload["summary_scope"]=json!("active_turn_prefix");}
+        }
         let projected=edit::projection_characters(&payload,snapshot.epoch);
         if projected>=source_chars {
             let thread=snapshot.thread.clone();let proof=snapshot.clone();
-            self.database.call(move |db| {let tx=db.transaction()?;validate(&tx,&proof)?;remember_failure(&tx,&thread,Region::Closed,&identity)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
+            self.database.call(move |db| {let tx=db.transaction()?;validate(&tx,&proof)?;remember_failure(&tx,&thread,region,&identity)?;tx.commit()?;Ok(())}).await.map_err(storage_error)?;
             return Err(discard::rejected(discard::DiscardReason::SummaryNotShrinking,"Summary does not shrink its original source projection; original path retained"));
+        }
+        let drop_all_reasoning=drop_all_reasoning || (active.is_some()&&!reaches_latest);
+        if active.is_some()||drop_all_reasoning {
+            let epoch=if drop_all_reasoning {snapshot.epoch+1}else{snapshot.epoch};
+            payload["reasoning_epoch"]=json!(epoch);payload["item"]["reasoning_epoch"]=json!(epoch);
         }
         let adoption=SummaryAdoption {
             automatic,removed_characters:(source_chars-projected) as u64,drop_all_reasoning,snapshot,
@@ -145,7 +167,9 @@ impl Compactor {
             result:CompactResult {source_characters:Some(source_chars as u64),summary_characters:Some(text_chars as u64),summary_limit:Some(limit.0),model_requests:Some(ledger.usage().requests as usize),source_nodes:originals.len(),original_node_ids:originals,summary_usage:Some(ledger.usage().clone()),..Default::default()}
         };
         let config=self.config.clone();
-        self.database.call(move |db| {let tx=db.transaction()?;let result=adoption.adopt_tx(&tx,&config,&cancel)?;tx.commit()?;Ok(result)}).await.map_err(storage_error)
+        self.database.call(move |db| {let tx=db.transaction()?;let result=adoption.adopt_tx(&tx,&config,&cancel)?;
+            if reaches_latest {tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![history::reasoning_keep_key(&adoption.snapshot.thread),json!({"node_ids":kept_reasoning}).to_string()])?;}
+            tx.commit()?;Ok(result)}).await.map_err(storage_error)
     }
 
     pub(super) async fn dispatch_single_summary(
