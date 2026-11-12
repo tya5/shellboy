@@ -12,7 +12,6 @@ pub(crate) struct AutomaticStage {
     pub(crate) token: String,
     /// `closed_spill`, `closed_summary`, `active_spill` or `active_summary`.
     pub(crate) stage: &'static str,
-    /// Calibrated attempts: the pending-target key and its provisional value.
 }
 
 /// Replaces W2/W4 bodies while keeping the stage facts of the same token.
