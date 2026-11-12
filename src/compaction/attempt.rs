@@ -161,4 +161,29 @@ mod tests {
             .unwrap();
         assert_eq!(finish(&db, "cleared_completed", "new"), 0);
     }
+    #[test]
+    fn actual_terminal_cas_manual_order_duplicate_and_rollback() {
+        for manual_first in [true,false] {
+            let mut db=rusqlite::Connection::open_in_memory().unwrap();
+            db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT);CREATE TABLE model_attempt(id TEXT PRIMARY KEY,error_json TEXT,state TEXT);INSERT INTO model_attempt VALUES('trial','{}','completed');").unwrap();
+            let start=super::super::a_state::scope_tx(&db,"t","c","m").unwrap().token();
+            let trigger=json!({"a_boundary_token":start});
+            {let tx=db.transaction().unwrap();begin_tx(&tx,"trial","token","test",&trigger,&json!({})).unwrap();tx.commit().unwrap();}
+            let reset=|db:&rusqlite::Connection| {
+                let state=super::super::a_state::read(db,"t").unwrap().unwrap();
+                super::super::a_state::reset_tx(db,"t",state.token(),"manual").unwrap();
+            };
+            if manual_first {reset(&db);}
+            {let tx=db.transaction().unwrap();assert!(finish_tx(&tx,"trial","token",&json!({"outcome":"noop","trigger":trigger}),&[]).unwrap());tx.commit().unwrap();}
+            if !manual_first {reset(&db);}
+            let generation=super::super::a_state::begin_report_tx(&db,"t","c","m").unwrap();
+            super::super::a_state::complete_report_tx(&db,"t","c","m","report",Some(generation),Some(321)).unwrap();
+            let before=super::super::a_state::read(&db,"t").unwrap().unwrap();
+            {let tx=db.transaction().unwrap();assert!(!finish_tx(&tx,"trial","token",&json!({"outcome":"noop","trigger":trigger}),&[]).unwrap());tx.commit().unwrap();}
+            assert_eq!(super::super::a_state::read(&db,"t").unwrap().unwrap(),before);
+            {let tx=db.transaction().unwrap();begin_tx(&tx,"trial","rollback","test",&json!({"a_boundary_token":before.token()}),&json!({})).unwrap();assert!(finish_tx(&tx,"trial","rollback",&json!({"outcome":"failed","trigger":{"a_boundary_token":before.token()}}),&[]).unwrap());}
+            assert_eq!(super::super::a_state::read(&db,"t").unwrap().unwrap(),before);
+        }
+    }
+
 }
