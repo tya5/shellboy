@@ -421,7 +421,7 @@ async fn assert_record(
     // The guard is untouched whenever the attempt's own guard write is not
     // reached or is rejected. A healthy W3 (cancellation, rejected final
     // write) legitimately saves its normal result before the failure.
-    let mut guard_expected = guard_before.to_vec();
+    let guard_expected = guard_before.to_vec();
     assert_eq!(
         guard_rows(control).await,
         guard_expected,
