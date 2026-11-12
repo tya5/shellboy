@@ -309,7 +309,7 @@ pub(super) async fn maybe_compact(
             .map(|_| compacted),
         Err(error) => Err(error),
     };
-    let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(_) if slot.stop.is_cancelled()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
+    let mut record = json!({"outcome":match &result {Ok(r) if r.no_target=>"no_target",Ok(_)=>"adopted",Err(e) if slot.stop.is_cancelled() && !e.is_storage_failure()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
     if let Err(error) = &result {
         record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);
     }
@@ -326,8 +326,11 @@ pub(super) async fn maybe_compact(
         .await
         .map_err(storage_error)?;
     control.changed(&snapshot.thread);
-    if slot.stop.is_cancelled()
-        && let Err(error) = result
+    // The truthful terminal record is saved first. A storage failure is then
+    // still a driver storage failure (fail_storage, owner shutdown; Control
+    // "アプリ保存障害"), never a recorded failure followed by the next request.
+    if let Err(error) = result
+        && (slot.stop.is_cancelled() || error.is_storage_failure())
     {
         return Err(error);
     }

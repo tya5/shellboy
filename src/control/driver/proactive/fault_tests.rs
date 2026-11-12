@@ -28,10 +28,13 @@ enum Fault {
     RejectFact,
 }
 impl Fault {
-    /// These final-write faults do not stop at the selected stage checkpoint;
-    /// on an active-spill case the driver legitimately proceeds to active summary.
+    /// Faults whose checkpoint returns `Ok` with an uncancelled token: the
+    /// driver legitimately proceeds to the next stage of the same attempt. On
+    /// the summary branch an active spill is always followed by the active
+    /// summary (compaction.md §2.6, §3 "要約の枝"), so these faults enter it and
+    /// the selected request is answered after the checkpoint is released.
     fn continues_after_stage(self) -> bool {
-        matches!(self, Fault::RejectFinal)
+        matches!(self, Fault::RejectFinal | Fault::Remeasurement)
     }
     /// Whether a final record fault allows normal attempt finalization to advance
     /// the reasoning epoch after the selected stage.
@@ -51,7 +54,7 @@ enum ObservationPhase {
     AfterShutdownAndRestart,
 }
 
-fn expected_outcome(fault: Fault, phase: ObservationPhase) -> &'static str {
+fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -> &'static str {
     match phase {
         // The checkpoint barrier is held after the committed stage and before
         // any terminal outcome writer. Every post-commit fault is therefore
@@ -59,6 +62,12 @@ fn expected_outcome(fault: Fault, phase: ObservationPhase) -> &'static str {
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
+            // A cancellation at the active-spill boundary is observed by the
+            // following active summary stage of the same attempt (§3): the
+            // committed spill stays and the attempt ends `cancelled` (§6.4,
+            // typed discard #301A). At every other selected stage the
+            // cancelled boundary is the attempt's last stage, so it adopts.
+            Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
             Fault::Cancellation => "adopted",
             Fault::Persistent | Fault::RejectFinal => "unknown",
             Fault::Storage
@@ -110,8 +119,10 @@ impl Scenario {
             Self::ActiveSummary => "active_summary",
         }
     }
-    fn expects_summary_request(self, fault: Fault) -> bool {
-        self.summary() || (self == Self::ActiveSpill && fault.continues_after_stage())
+    /// Whether the driver enters the active summary after this scenario's
+    /// active-spill checkpoint is released (§3 summary branch).
+    fn continues_to_active_summary(self, fault: Fault) -> bool {
+        self == Self::ActiveSpill && fault.continues_after_stage()
     }
 }
 
@@ -301,6 +312,7 @@ async fn prepare_with_thread_override(
         db.execute_batch(&format!(r#"
             CREATE TABLE fault_boundary(path TEXT, revision INTEGER, epoch INTEGER);
             CREATE TABLE fault_initial(epoch INTEGER);
+            CREATE TABLE fault_begin(epoch INTEGER);
             CREATE TABLE fault_originals AS SELECT * FROM node;
             CREATE TABLE fault_nodes AS SELECT * FROM node WHERE 0;
             CREATE TABLE fault_replacements AS SELECT * FROM replacement WHERE 0;
@@ -323,9 +335,30 @@ async fn prepare_with_thread_override(
               INSERT INTO fault_replacements SELECT * FROM replacement;
               INSERT INTO fault_sources SELECT * FROM replacement_source;
             END;
+            -- Thread epoch when the attempt's provisional record is begun, the
+            -- reference when no stage of the attempt ever commits.
+            CREATE TRIGGER fault_begin AFTER UPDATE OF error_json ON model_attempt
+            WHEN NOT EXISTS(SELECT 1 FROM fault_begin)
+            AND json_extract(NEW.error_json,'$.automatic_trim_attempt.provisional')=1
+            AND json_type(OLD.error_json,'$.automatic_trim_attempt') IS NULL
+            BEGIN INSERT INTO fault_begin SELECT t.reasoning_epoch FROM thread t JOIN turn u ON u.thread_id=t.id WHERE u.id=NEW.turn_id; END;
             CREATE TRIGGER fault_epoch AFTER UPDATE OF reasoning_epoch ON thread
             WHEN EXISTS(SELECT 1 FROM fault_boundary)
             BEGIN UPDATE fault_boundary SET epoch=NEW.reasoning_epoch; END;
+            -- A later stage of the same provisional attempt (active summary after
+            -- the selected active spill) re-captures the boundary inside its own
+            -- adoption transaction, where the stage fact follows path and epoch.
+            CREATE TRIGGER fault_restage AFTER UPDATE OF error_json ON model_attempt
+            WHEN EXISTS(SELECT 1 FROM fault_boundary)
+            AND json_extract(NEW.error_json,'$.automatic_trim_attempt.provisional')=1
+            AND (SELECT count(*) FROM json_each(NEW.error_json,'$.automatic_trim_attempt.committed_stages'))
+              > (SELECT count(*) FROM json_each(OLD.error_json,'$.automatic_trim_attempt.committed_stages'))
+            BEGIN
+              UPDATE fault_boundary SET
+                path=(SELECT json_group_array(node_id) FROM (SELECT p.node_id FROM thread_path p JOIN turn u ON u.thread_id=p.thread_id WHERE u.id=NEW.turn_id ORDER BY p.ordinal)),
+                revision=(SELECT t.selection_revision FROM thread t JOIN turn u ON u.thread_id=t.id WHERE u.id=NEW.turn_id),
+                epoch=(SELECT t.reasoning_epoch FROM thread t JOIN turn u ON u.thread_id=t.id WHERE u.id=NEW.turn_id);
+            END;
         "#))?;
         Ok(())
     }).await.unwrap();
@@ -357,7 +390,7 @@ async fn prepare_with_thread_override(
         settled(&control, &target).await;
         send(&control, &target, "next turn").await;
     }
-    if scenario.expects_summary_request(fault) {
+    if scenario.summary() {
         let summary_request = incoming(&control, &mut receive).await;
         assert_eq!(summary_request.body["tools"], json!([]));
         summary_request
@@ -365,10 +398,13 @@ async fn prepare_with_thread_override(
             .send((200, answer("Short adopted summary.")))
             .unwrap();
     }
-    while if fault == Fault::RejectFact {
-        !reached.load(Ordering::SeqCst)
+    // RejectFact has no checkpoint: the trigger fires inside the stage's
+    // adoption transaction, before the driver's terminal writer runs. The
+    // rejected-stage observation point is after that terminal write.
+    while !if fault == Fault::RejectFact {
+        reached.load(Ordering::SeqCst) && terminal_record_written(&control).await
     } else {
-        !checkpoint_reached.load(Ordering::SeqCst)
+        checkpoint_reached.load(Ordering::SeqCst)
     } {
         if let Ok(unexpected) = receive.try_recv() {
             let body = unexpected.body.clone();
@@ -407,13 +443,14 @@ async fn prepare_with_thread_override(
     assert_trigger_evidence(&saved["trigger"], scenario);
     // This read occurs at the committed stage checkpoint, before owner shutdown
     // can write terminal state. Every injected postcommit interruption is still
-    // provisional at this exact lifecycle boundary.
+    // provisional at this exact lifecycle boundary. A rejected stage fact is
+    // read after the driver's own terminal write for the failed stage.
     let phase = if fault == Fault::RejectFact {
         ObservationPhase::AfterRejectedStageTransaction
     } else {
         ObservationPhase::AtCommittedCheckpoint
     };
-    let expected_outcome = expected_outcome(fault, phase);
+    let expected_outcome = expected_outcome(fault, scenario, phase);
     assert_eq!(
         saved["outcome"], expected_outcome,
         "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
@@ -464,6 +501,64 @@ struct Fx {
     release_checkpoint: Arc<tokio::sync::Notify>,
 }
 
+/// Whether the latest automatic attempt record has left the provisional state,
+/// i.e. the driver's terminal writer for the attempt has committed.
+async fn terminal_record_written(control: &Control) -> bool {
+    control.store.database.call(|db| Ok(db.query_row(
+        "SELECT json_extract(error_json,'$.automatic_trim_attempt.provisional') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
+        [], |row| row.get::<_, Option<i64>>(0)).optional()?.flatten() == Some(0))).await.unwrap()
+}
+
+/// After the checkpoint is released: answer the active summary request the
+/// driver legitimately sends after a continuing active-spill fault (it must be
+/// a summary request, tools=[]), then wait for the continued attempt to reach
+/// the fault's own operation before shutdown can cancel it: the armed
+/// remeasurement is consumed and its failure is recorded, or the rejected
+/// final write is hit.
+async fn after_release(
+    control: &Control,
+    receive: &mut mpsc::Receiver<Incoming>,
+    fault: Fault,
+    scenario: Scenario,
+    reached: &AtomicBool,
+) {
+    if scenario.continues_to_active_summary(fault) {
+        let summary_request = incoming(control, receive).await;
+        assert_eq!(
+            summary_request.body["tools"],
+            json!([]),
+            "only the active summary request follows the released active spill"
+        );
+        summary_request
+            .reply
+            .send((200, answer("Short adopted summary.")))
+            .unwrap();
+    }
+    if fault == Fault::Remeasurement {
+        crate::test_watchdog::watchdog("remeasurement failure consumed", async {
+            while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+            // The failed remeasurement is classified by the driver's own
+            // terminal write; shutdown must not race that classification.
+            while !terminal_record_written(control).await {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    if fault == Fault::RejectFinal {
+        crate::test_watchdog::watchdog("rejected final write reached", async {
+            while !reached.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+}
+
 /// Persisted #180 guard and status rows, byte-exact.
 async fn guard_rows(control: &Control) -> Vec<(String, String)> {
     control.store.database.call(|db| {
@@ -504,20 +599,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             );
         }
         release_checkpoint.notify_one();
-        if fault == Fault::Remeasurement && scenario != Scenario::ActiveSummary {
-            crate::test_watchdog::watchdog("remeasurement failure consumed", async {
-                while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-        } else if fault == Fault::Remeasurement {
-            assert!(
-                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
-                "ActiveSummary checkpoint aborts before later remeasurement; one-shot remains armed"
-            );
-        }
+        after_release(&control, &mut receive, fault, scenario, &reached).await;
     }
     let shutdown = control.shutdown().await;
     if matches!(
@@ -544,7 +626,9 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
         .store
         .database
         .call(|db| {
-            db.execute_batch("DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch;")?;
+            db.execute_batch(
+                "DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch; DROP TRIGGER fault_restage; DROP TRIGGER fault_begin;",
+            )?;
             Ok(())
         })
         .await
@@ -672,7 +756,14 @@ async fn assert_boundary(
         let initial_epoch: i64 = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0))?;
         let record_text: String = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'", [], |r| r.get(0))?;
         let record: Value = serde_json::from_str(&record_text).unwrap();
-        let committed_epoch = record["committed_stages"][scenario.stage()]["reasoning_epoch"]
+        let continued = phase != "checkpoint" && scenario.continues_to_active_summary(fault);
+        // The boundary is the last committed stage: the selected one, or the
+        // active summary the driver entered after a released active spill.
+        let last = if continued { "active_summary" } else { scenario.stage() };
+        assert!(record["committed_stages"][last].is_object(), "the continued stage committed: {record}");
+        let last_fact = &record["committed_stages"][last];
+        assert_eq!(revision, last_fact["selection_revision"].as_i64().unwrap(), "boundary is the last committed stage: {record}");
+        let committed_epoch = last_fact["reasoning_epoch"]
             .as_i64().expect("selected committed stage contains its exact reasoning epoch");
         assert_eq!(epoch, committed_epoch, "Thread epoch equals the exact adopted stage fact; initial={initial_epoch}, record={record}");
         assert!(committed_epoch >= initial_epoch, "committed stage does not reverse reasoning epoch");
@@ -684,10 +775,9 @@ async fn assert_boundary(
             Scenario::ClosedSummary => vec!["summary", "spill", "spill"],
             Scenario::ActiveSummary => vec!["summary"],
         };
-        let mut expected = expected;
-        if scenario == Scenario::ActiveSpill && fault.continues_after_stage() {
-            expected.push("summary");
-        }
+        // The entered active summary replaces the active range from its first
+        // work group, the committed spills included (§4.1 active).
+        let expected = if continued { vec!["summary"] } else { expected };
         assert_eq!(kinds, expected, "all intended replacements, not a partial group");
         let incomplete: i64 = db.query_row("SELECT count(*) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND (r.state!='completed' OR NOT EXISTS(SELECT 1 FROM replacement_source s WHERE s.replacement_id=r.id) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=r.output_node_id AND n.payload_json IS NOT NULL))", [&target], |r| r.get(0))?;
         assert_eq!(incomplete, 0);

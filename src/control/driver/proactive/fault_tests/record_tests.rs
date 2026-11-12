@@ -120,10 +120,17 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         true,
     )
     .await;
+    // A rejected stage fact has no stage barrier: its live observation point
+    // is after the driver's terminal write for the failed stage.
+    let live_phase = if fault == Fault::RejectFact {
+        ObservationPhase::AfterRejectedStageTransaction
+    } else {
+        ObservationPhase::AtCommittedCheckpoint
+    };
     assert_eq!(
         checkpoint.record["outcome"],
-        expected_outcome(fault, ObservationPhase::AtCommittedCheckpoint),
-        "record is observed only while its explicit stage barrier is held"
+        expected_outcome(fault, scenario, live_phase),
+        "record is observed only at its explicit live observation point"
     );
     if fault != Fault::RejectFact {
         assert!(checkpoint_reached.load(Ordering::SeqCst));
@@ -135,20 +142,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
             );
         }
         release_checkpoint.notify_one();
-        if fault == Fault::Remeasurement && scenario != Scenario::ActiveSummary {
-            crate::test_watchdog::watchdog("record remeasurement fault consumed", async {
-                while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-        } else if fault == Fault::Remeasurement {
-            assert!(
-                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
-                "ActiveSummary abort happens before remeasurement"
-            );
-        }
+        after_release(&control, &mut receive, fault, scenario, &reached).await;
     }
     let shutdown = control.shutdown().await;
     if matches!(
@@ -193,10 +187,40 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         trigger_identity(&checkpoint.record["trigger"]),
         "immutable original trigger tuple across phases"
     );
-    assert_eq!(
-        terminal.record["committed_stages"], checkpoint.record["committed_stages"],
-        "committed stage facts retained across terminal write"
-    );
+    if scenario.continues_to_active_summary(fault) {
+        // The checkpoint facts are retained exactly; the entered active summary
+        // adds only its own fact.
+        let mut retained = terminal.record["committed_stages"].clone();
+        assert!(
+            retained
+                .as_object_mut()
+                .unwrap()
+                .remove("active_summary")
+                .is_some(),
+            "{}",
+            terminal.record
+        );
+        assert_eq!(
+            retained, checkpoint.record["committed_stages"],
+            "committed stage facts retained across terminal write"
+        );
+    } else {
+        assert_eq!(
+            terminal.record["committed_stages"], checkpoint.record["committed_stages"],
+            "committed stage facts retained across terminal write"
+        );
+    }
+    if fault == Fault::Cancellation && scenario == Scenario::ActiveSpill {
+        // The cancelled boundary is observed by the real next stage: the active
+        // summary is entered and discarded as cancelled, with no provider POST.
+        let record = &terminal.record;
+        assert_eq!(record["discard"]["phase"], "active_summary", "{record}");
+        assert_eq!(record["discard"]["reason"], "cancelled", "{record}");
+        assert!(
+            record["error"].is_object(),
+            "typed cancellation error: {record}"
+        );
+    }
 
     if fault == Fault::RetiredWritesAbsent {
         let hits: i64 = control
@@ -256,7 +280,11 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
                 }),
             ))
             .await;
-        assert!(response.ok, "restarted in-process CompactList: {:?}", response.error);
+        assert!(
+            response.ok,
+            "restarted in-process CompactList: {:?}",
+            response.error
+        );
         let list = response.result.unwrap();
         let item = list["items"]
             .as_array()
@@ -281,6 +309,8 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
 const FIXTURE_TRIGGER_NAMES: &[&str] = &[
     "fault_adopt",
     "fault_epoch",
+    "fault_restage",
+    "fault_begin",
     "fault_fact",
     "persistent_attempt",
     "persistent_insert",
@@ -379,8 +409,8 @@ async fn assert_record(
     assert_immutable(control).await;
     let target = target.to_owned();
     let guard_before = guard_before.to_vec();
-    let (attempt, record, replacements, witness, pending, boundary, initial, epoch) = {
-        let (attempt, record, replacements, witness, pending, boundary, initial, epoch) = control.store.database.call({
+    let (attempt, record, replacements, witness, pending, boundary, begin, epoch) = {
+        let (attempt, record, replacements, witness, pending, boundary, begin, epoch) = control.store.database.call({
             let target = target.clone();
             move |db| {
                 let (attempt, record): (String, String) = db.query_row(
@@ -392,9 +422,9 @@ async fn assert_record(
                 let witness: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1", [&target], |r| r.get(0))?;
                 let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key='compact.automatic_target.'||?1", [&target], |r| r.get(0)).optional()?;
                 let boundary: Option<(i64, i64)> = db.query_row("SELECT revision,epoch FROM fault_boundary", [], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
-                let initial: Option<i64> = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0)).optional().ok().flatten();
+                let begin: Option<i64> = db.query_row("SELECT epoch FROM fault_begin", [], |r| r.get(0)).optional().ok().flatten();
                 let epoch: i64 = db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [&target], |r| r.get(0))?;
-                Ok((attempt, record, replacements, witness, pending, boundary, initial, epoch))
+                Ok((attempt, record, replacements, witness, pending, boundary, begin, epoch))
             }
         }).await.unwrap();
         (
@@ -404,7 +434,7 @@ async fn assert_record(
             witness,
             pending,
             boundary,
-            initial,
+            begin,
             epoch,
         )
     };
@@ -431,7 +461,7 @@ async fn assert_record(
     } else {
         ObservationPhase::AfterShutdownAndRestart
     };
-    let outcome = expected_outcome(fault, phase);
+    let outcome = expected_outcome(fault, scenario, phase);
     assert_eq!(record["outcome"], outcome, "{fault:?} {stage} {record}");
     assert_eq!(
         record["provisional"].as_bool().unwrap_or(false),
@@ -454,8 +484,7 @@ async fn assert_record(
         "only the four stage names: {record}"
     );
     let expected: Vec<&str> = match (stage, fault) {
-        (_, Fault::RejectFinal) => keys.clone(),
-        (_, Fault::Cancellation | Fault::RetiredWritesAbsent) => keys.clone(),
+        (_, Fault::RetiredWritesAbsent) => keys.clone(),
         _ => {
             let upto = ORDER.iter().position(|n| *n == stage).unwrap();
             let base: &[&str] = match stage {
@@ -467,6 +496,11 @@ async fn assert_record(
             let _ = upto;
             if fault != Fault::RejectFact {
                 set.push(stage);
+            }
+            // After release the driver enters the active summary of the same
+            // attempt (§3 summary branch); it commits its own stage fact.
+            if !live && scenario.continues_to_active_summary(fault) {
+                set.push("active_summary");
             }
             set
         }
@@ -520,20 +554,25 @@ async fn assert_record(
         }
         assert!(fact.to_string().len() < 1024, "fact stays small: {fact}");
     }
+    // The captured boundary is re-taken by each later stage of the same
+    // attempt, so it describes the last committed stage.
+    let last = keys.last().copied().unwrap_or(stage);
     if let (Some((revision, boundary_epoch)), true) = (boundary, facts.contains_key(stage)) {
-        assert_eq!(facts[stage]["selection_revision"], revision);
+        assert_eq!(facts[last]["selection_revision"], revision);
         if fault.continues() {
             // The capture follows later epoch advances of the same attempt.
-            assert!(facts[stage]["reasoning_epoch"].as_i64().unwrap() <= boundary_epoch);
+            assert!(facts[last]["reasoning_epoch"].as_i64().unwrap() <= boundary_epoch);
         } else {
-            assert_eq!(facts[stage]["reasoning_epoch"], boundary_epoch);
+            assert_eq!(facts[last]["reasoning_epoch"], boundary_epoch);
         }
     }
     if fault == Fault::RejectFact {
         // The rejected fact rolled its own adoption back, including the epoch.
-        let expect = keys.last().map_or(initial.unwrap(), |last| {
-            facts[*last]["reasoning_epoch"].as_i64().unwrap()
-        });
+        // With no committed stage the reference is the epoch at attempt begin.
+        let expect = keys.last().map_or_else(
+            || begin.expect("attempt begin epoch captured"),
+            |last| facts[*last]["reasoning_epoch"].as_i64().unwrap(),
+        );
         assert_eq!(
             epoch, expect,
             "the rejected stage left the reasoning epoch alone"
