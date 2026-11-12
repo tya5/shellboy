@@ -228,7 +228,7 @@ impl Compactor {
             return Err(invalid(
                 "This summary range already failed deterministically; original path retained",
             )
-            .hint("Change the range or the output limit (--max-chars), or switch the model or connection, to try again"));
+            .hint("Change the range or the summary output limit, or switch the model or connection, to try again"));
         }
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {

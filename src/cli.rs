@@ -781,7 +781,7 @@ pub struct ThreadSetOptions {
     /// Proactive compaction threshold in tokens for this Thread; 0 disables it, an empty string restores the connection value.
     #[arg(long, allow_hyphen_values = true)]
     pub auto_compact_at: Option<String>,
-    /// Target percentage (1-100) of the proactive threshold that decides whether the previous compaction was deep enough; an empty string restores the default.
+    /// Target percentage (1-100) of the proactive threshold that decides whether the previous compaction was deep enough; an empty string restores the connection or default value.
     #[arg(long, allow_hyphen_values = true)]
     pub auto_compact_target_percent: Option<String>,
     /// Maximum characters requested for one summary (positive integer); an empty string restores the connection or configured value.
