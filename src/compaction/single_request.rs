@@ -288,20 +288,19 @@ impl Compactor {
                 .iter()
                 .rposition(|g| g.complete && g.tool)
                 .is_some_and(|latest| selected.end == latest + 1);
-        let summary_text = if reaches_latest {
-            let plan = active.as_ref().unwrap();
-            format!(
-                "{}\n\n[The latest tool round (plain, kept verbatim)]\n{}",
+        let summary_text = match &active {
+            Some(plan) if reaches_latest => format!(
+                "{}\n\n{}\n\n{}",
+                active_turn_notice(&originals, plan.messages.len(), true),
                 dispatched.response.text,
-                snapshot.groups[plan.latest]
-                    .sources
-                    .iter()
-                    .map(|s| render(s, snapshot.epoch))
-                    .collect::<Vec<_>>()
-                    .join("\n\n")
-            )
-        } else {
-            dispatched.response.text.clone()
+                latest_round_text(&snapshot.groups[plan.latest])
+            ),
+            Some(plan) => format!(
+                "{}\n\n{}",
+                active_turn_notice(&originals, plan.messages.len(), false),
+                dispatched.response.text
+            ),
+            None => dispatched.response.text.clone(),
         };
         let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":summary_text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
         let mut kept_reasoning = Vec::new();
@@ -604,6 +603,92 @@ pub(super) fn same_failed_range(
         )
         .optional()?;
     Ok(saved.as_deref() == Some(identity.0.as_str()))
+}
+
+/// Fixed model-facing notice for an active-Turn summary (#181): covered tools
+/// already ran, so the model must not repeat them blindly.
+fn active_turn_notice(originals: &[String], retained: usize, latest_included: bool) -> String {
+    let first = originals.first().map_or("", String::as_str);
+    let order = if retained > 0 {
+        format!(
+            " {retained} user message(s) delivered during the summarized work are kept under User instructions to keep; their order relative to its steps may differ from the original. When exact order matters, follow the originals with shellboy history relations --node {first} --relation next."
+        )
+    } else {
+        String::new()
+    };
+    let latest = if latest_included {
+        " The latest tool round is included as text at the end."
+    } else {
+        ""
+    };
+    format!(
+        "Shellboy context notice: the tool work below in the active Turn was summarized, replacing {} source nodes ({first} through {}). The tools it describes were already executed and their side effects remain; inspect the current state before repeating an operation.{latest}{order}",
+        originals.len(),
+        originals.last().map_or("", String::as_str),
+    )
+}
+
+/// #182 ④: the latest complete tool round as plain text. Reasoning, signed
+/// thinking and other opaque provider blocks are never included; calls and
+/// results become text, so no tool_use/tool_result block remains.
+fn latest_round_text(group: &Group) -> String {
+    let mut lines = vec!["Latest tool round (already executed; provided as text):".to_owned()];
+    for source in &group.sources {
+        // A message accepted while the round ran is a bare role payload.
+        let items: Vec<Value> = match source.payload.get("output").and_then(Value::as_array) {
+            Some(items) => items.clone(),
+            None => source
+                .payload
+                .get("item")
+                .cloned()
+                .or_else(|| source.payload.get("role").map(|_| source.payload.clone()))
+                .into_iter()
+                .collect(),
+        };
+        for item in items {
+            if item.get("type").and_then(Value::as_str) == Some("reasoning")
+                || crate::model::opaque::is_opaque(&item)
+            {
+                continue;
+            }
+            let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+            match item.get("type").and_then(Value::as_str) {
+                Some("function_call") => lines.push(format!(
+                    "Tool call {} ({}): {}",
+                    text(&item["call_id"]),
+                    text(&item["name"]),
+                    text(&item["arguments"])
+                )),
+                Some("function_call_output") => lines.push(format!(
+                    "Tool result {}: {}",
+                    text(&item["call_id"]),
+                    text(&item["output"])
+                )),
+                _ => {
+                    let content = item
+                        .get("content")
+                        .and_then(|c| {
+                            c.as_str()
+                                .map(|t| vec![json!({"text":t})])
+                                .or_else(|| c.as_array().cloned())
+                        })
+                        .map(|parts| {
+                            parts
+                                .iter()
+                                .filter_map(|p| p.get("text").and_then(Value::as_str))
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        })
+                        .filter(|t| !t.is_empty());
+                    match content {
+                        Some(body) => lines.push(format!("{}: {body}", text(&item["role"]))),
+                        None => lines.push(item.to_string()),
+                    }
+                }
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]

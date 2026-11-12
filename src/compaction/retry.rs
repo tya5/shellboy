@@ -1,5 +1,5 @@
-//! #224 stage 3: summary requests retry transient failures inside the existing
-//! map/reduce request budgets, through the profile gate. Nothing here adopts.
+//! #224 stage 3: summary requests retry transient failures through the profile
+//! gate, at most `response_max_retries` times per request. Nothing here adopts.
 use super::*;
 use crate::model::{
     http::AttemptFailure,
@@ -16,7 +16,10 @@ pub(super) fn retry_delay(
     failure: &AttemptFailure,
     retries: u32,
 ) -> Option<Duration> {
-    if failure.error.usage_limit.is_some() || failure.error.is_context_limit() {
+    if failure.error.usage_limit.is_some()
+        || failure.error.is_context_limit()
+        || retries >= connection.response_max_retries
+    {
         return None;
     }
     let policy = classify_retry(

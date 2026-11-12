@@ -1346,10 +1346,11 @@ mod tests {
         let overflow = overflow_prefix(&s, completed);
         assert_eq!(
             prefix_ids(&s, overflow),
-            ["old", "last", "current", "a-call", "a-result"]
+            ["old", "last", "current", "a-call", "a-result", "spilled-b"]
         );
         assert_eq!(prefix_count(&s, true), overflow);
-        assert_eq!(s.groups[overflow].sources[0].id, "spilled-b");
+        // Overflow releases every safe group but the latest one (§10, R7).
+        assert_eq!(s.groups[overflow].sources[0].id, "latest");
     }
     #[test]
     fn short_current_suffix_releases_no_current_groups_and_empty_path_is_safe() {
@@ -1357,13 +1358,13 @@ mod tests {
         s.groups[3].sources[0].payload = json!({"text":"small"});
         s.groups[3].sources[1].payload = json!({"text":"small"});
         assert_eq!(prefix_count(&s, false), 1);
-        assert_eq!(prefix_count(&s, true), 2);
+        assert_eq!(prefix_count(&s, true), 5);
         let empty = fixture_snapshot(Vec::new());
         assert_eq!(prefix_count(&empty, false), 0);
         assert_eq!(prefix_count(&empty, true), 0);
     }
     #[test]
-    fn explicit_overflow_without_completed_turn_progress_releases_one_oldest_tool_group() {
+    fn explicit_overflow_without_completed_turn_progress_releases_every_safe_group_but_the_latest() {
         let mut s = staged_snapshot();
         s.groups.drain(..2);
         for group in &mut s.groups {
@@ -1375,7 +1376,7 @@ mod tests {
         assert_eq!(completed_prefix(&s), 0);
         assert_eq!(
             prefix_ids(&s, prefix_count(&s, true)),
-            ["current", "a-call", "a-result"]
+            ["current", "a-call", "a-result", "spilled-b"]
         );
         // The same complete group stays one boundary after spilling.
         s.groups[1].tool = false;
@@ -1386,11 +1387,14 @@ mod tests {
         )];
         assert_eq!(
             prefix_ids(&s, prefix_count(&s, true)),
-            ["current", "spilled-a"]
+            ["current", "spilled-a", "spilled-b"]
         );
-        // Without any eligible tool group, the first whole group is enough.
+        // Plain groups are released too: only the latest group stays out.
         s.groups[1].sources[0].payload = json!({"text":"plain"});
-        assert_eq!(prefix_ids(&s, prefix_count(&s, true)), ["current"]);
+        assert_eq!(
+            prefix_ids(&s, prefix_count(&s, true)),
+            ["current", "spilled-a", "spilled-b"]
+        );
         s.protected.insert("current".into());
         assert_eq!(prefix_count(&s, true), 0);
     }
@@ -1407,7 +1411,7 @@ mod tests {
         assert_eq!(prefix_count(&s, true), 3);
         s.groups[3].complete = true;
         s.groups[5].tool = false;
-        assert_eq!(prefix_count(&s, true), 3); // a is now latest complete tool
+        assert_eq!(prefix_count(&s, true), 5); // only the last group stays out
         s.groups[3].tool = false;
         s.groups[5].sources[0].payload = json!({"text":"あ".repeat(80_000)});
         assert_eq!(prefix_count(&s, true), 5); // newest spill/replacement stays
@@ -1894,7 +1898,7 @@ mod tests {
         let mut config = summary_config(format!("http://{address}/v1"));
         config
             .connections
-            .get_mut("proxy")
+            .get_mut("fixture")
             .unwrap()
             .response_max_retries = 0;
         let compactor = Compactor::new(db.clone(), Arc::new(config));
@@ -1903,7 +1907,7 @@ mod tests {
             .summarize_snapshot(snapshot, 0..2, CancellationToken::new(), None, None)
             .await
             .unwrap_err();
-        assert!(error.hint.as_deref().unwrap().contains("budget exhausted"));
+        assert_eq!(error.code, ErrorCode::InvalidState);
         server.await.unwrap();
         let saved: String = db
             .call(|db| {
@@ -2205,7 +2209,7 @@ mod tests {
             assert_eq!(db.query_row("SELECT reasoning_epoch FROM thread WHERE id='t'", [], |r| r.get::<_, i64>(0))?, 0);
             let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&expected], |r| r.get(0))?;
             let payload: Value = serde_json::from_str(&body).unwrap();
-            assert_eq!(payload["summary_scope"], "active_turn");
+            assert_eq!(payload["summary_scope"], "active_turn_middle");
             let text = payload["item"]["content"][0]["text"].as_str().unwrap();
             assert!(text.starts_with("Shellboy context notice: the tool work below in the active Turn was summarized, replacing 6 source nodes (g1-call through g3-result)."), "{text}");
             assert!(!text.contains("user message(s) just before"), "no messages, no order note");
@@ -2316,10 +2320,10 @@ mod tests {
                 && at("Node g2-result") < at("Node user-after-g2"),
             "{input}"
         );
-        assert!(
-            !input.contains("Node g3-call"),
-            "④ is rendered by code, not summarized"
-        );
+        // The unified range (§4.1) reaches the latest complete tool group, so
+        // the summarizer sees it too; the notice's plain-text copy is rendered
+        // by code (checked in the tests above).
+        assert!(input.contains("Node g3-call"), "{input}");
         db.shutdown().await.unwrap();
     }
     /// #182 hard requirement: a mid-Turn summary adds only the summary node,
@@ -2413,7 +2417,7 @@ mod tests {
             let body: String = db.query_row("SELECT payload_json FROM node WHERE id=?1", [&summary], |r| r.get(0))?;
             let payload: Value = serde_json::from_str(&body).unwrap();
             // The ordered replacement sources give the original order.
-            assert_eq!(payload["summary_scope"], "active_turn");
+            assert_eq!(payload["summary_scope"], "active_turn_middle");
             let start = path.iter().position(|id| id == "g1-call").unwrap();
             let sources: Vec<String> = db.prepare("SELECT s.source_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id WHERE r.output_node_id=?1 ORDER BY s.ordinal")?
                 .query_map([&summary], |r| r.get(0))?.collect::<Result<_, _>>()?;
@@ -2427,22 +2431,22 @@ mod tests {
     }
     #[tokio::test]
     async fn rejected_active_turn_summary_keeps_path_and_reasoning_epoch() {
-        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"x".repeat(9_000)}]}]});
+        // An output over the cap is adopted while it shrinks (§4.3); only a
+        // summary larger than its source projection is rejected.
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"x".repeat(200_000)}]}]});
         let (url, server) = summary_proxy(vec![raw]).await;
         let (_root, db) = database().await;
         active_turn_fixture(&db).await;
         let before = db.call(|db| Ok(selected_path(db, "t")?)).await.unwrap();
-        // The oversized summary needs a reduce request that no server answers:
-        // one slot, so the failed request is not retried.
         let mut config = summary_config(url);
         config
             .connections
-            .get_mut("proxy")
+            .get_mut("fixture")
             .unwrap()
             .summary_max_chars = Some(4_000);
         config
             .connections
-            .get_mut("proxy")
+            .get_mut("fixture")
             .unwrap()
             .response_max_retries = 0;
         let compactor = Compactor::new(db.clone(), Arc::new(config));
@@ -3309,6 +3313,33 @@ mod tests {
         .unwrap();
         db.shutdown().await.unwrap();
     }
+    /// A longer closed range changes the §6 failure identity, so it may retry.
+    async fn append_second_source(db: &crate::storage::DbWorker) {
+        db.call(|db| {
+            let tx = db.transaction()?;
+            history::append_node(
+                &tx,
+                "t",
+                "second",
+                None,
+                "message",
+                &json!({"role":"user","content":"more".repeat(100)}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+    fn assert_suppressed(error: &ApiError) {
+        assert_eq!(error.code, ErrorCode::InvalidState);
+        assert!(
+            error.message.contains("already failed deterministically"),
+            "{}",
+            error.message
+        );
+    }
     #[tokio::test]
     async fn reasoning_only_summary_is_not_adopted_and_original_path_remains() {
         let(url,server)=summary_proxy(vec![json!({"id":"empty-summary","status":"completed","output":[{"type":"reasoning","summary":[{"type":"summary_text","text":"AUDIT-ONLY"}]}]}),json!({"id":"valid-summary","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Valid assistant summary"}]}]})]).await;
@@ -3358,6 +3389,14 @@ mod tests {
         })
         .await
         .unwrap();
+        // §6: the same deterministic failure is suppressed without a request;
+        // a changed range is eligible again.
+        let suppressed = compactor
+            .summarize("t", false, CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_suppressed(&suppressed);
+        append_second_source(&db).await;
         let result = compactor
             .summarize("t", false, CancellationToken::new())
             .await
@@ -3426,8 +3465,15 @@ mod tests {
             })
             .await
             .unwrap();
-            // A later invocation may try the configured provider again; the
-            // prior refusal left both history and replacement state untouched.
+            // §6: the same refusal is suppressed without another request; a
+            // changed range may try the provider again. History and
+            // replacement state stay untouched by the refusal.
+            let suppressed = compactor
+                .summarize("t", false, CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert_suppressed(&suppressed);
+            append_second_source(&db).await;
             let result = compactor
                 .summarize("t", false, CancellationToken::new())
                 .await
