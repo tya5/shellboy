@@ -233,8 +233,7 @@ pub(super) async fn maybe_compact(
         if consumed {return Ok(false);}
         crate::compaction::attempt_begin_tx(&tx,&id,&token,REASON,&trigger,&Value::Null)?;
         // Retire old target/guard metadata, never the historical attempt record.
-        let keys=crate::compaction::CompactionKeys::new(&thread);
-        for key in [keys.automatic_target(),keys.automatic_guard(),keys.automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
+        for key in [crate::compaction::CompactionKeys::new(&thread).automatic_target(),crate::compaction::CompactionKeys::new(&thread).automatic_guard(),crate::compaction::CompactionKeys::new(&thread).automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
         tx.commit()?;Ok(true)
     }).await.map_err(storage_error)?;
     if !can_run {return Ok(false);}
