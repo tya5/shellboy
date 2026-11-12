@@ -34,7 +34,6 @@ pub(crate) enum Reading {
     LegacyAbsent,
     AwaitingFirst,
     Known(u64),
-    Unknown,
 }
 
 fn bad() -> ApiError {
@@ -84,7 +83,10 @@ impl State {
                 input_tokens: Some(n),
                 ..
             }) => Reading::Known(*n),
-            Some(_) => Reading::Unknown,
+            // Missing usage is not a known report and never consumes #A.
+            Some(Report {
+                input_tokens: None, ..
+            }) => Reading::AwaitingFirst,
         }
     }
     pub(crate) fn change_scope(&mut self, connection: &str, model: &str) -> Result<bool, ApiError> {
@@ -142,7 +144,9 @@ impl State {
             || started.boundary != self.boundary_generation
             || connection != self.connection
             || model != self.model
-            || self.first.is_some()
+            // No usage is not evidence and leaves the first-known slot available.
+            || input_tokens.is_none()
+            || self.first.as_ref().is_some_and(|first| first.input_tokens.is_some())
         {
             return Ok(false);
         }
@@ -270,10 +274,15 @@ mod tests {
         assert_eq!(s.reading(), Reading::AwaitingFirst);
         let after_boundary = s.token();
         assert!(
-            s.completed(after_boundary, "A", "model", "first", None)
+            !s.completed(after_boundary, "A", "model", "missing", None)
                 .unwrap()
         );
-        assert_eq!(s.reading(), Reading::Unknown);
+        assert_eq!(s.reading(), Reading::AwaitingFirst);
+        assert!(
+            s.completed(after_boundary, "A", "model", "first-known", Some(123))
+                .unwrap()
+        );
+        assert_eq!(s.reading(), Reading::Known(123));
         assert!(
             !s.completed(after_boundary, "A", "model", "later", Some(999))
                 .unwrap()
@@ -290,6 +299,27 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(s.reading(), Reading::Known(123));
+    }
+    #[test]
+    fn missing_input_does_not_consume_first_known_report_slot() {
+        let mut s = State::new("c", "m").unwrap();
+        let token = s.token();
+        assert!(!s.completed(token, "c", "m", "none-1", None).unwrap());
+        assert!(!s.completed(token, "c", "m", "none-2", None).unwrap());
+        assert_eq!(s.reading(), Reading::AwaitingFirst);
+        assert!(s.completed(token, "c", "m", "known", Some(123)).unwrap());
+        assert_eq!(s.reading(), Reading::Known(123));
+        assert!(!s.completed(token, "c", "m", "later", Some(456)).unwrap());
+        assert_eq!(s.reading(), Reading::Known(123));
+    }
+    #[test]
+    fn known_zero_is_a_real_immutable_first_report() {
+        let mut s = State::new("c", "m").unwrap();
+        let token = s.token();
+        assert!(s.completed(token, "c", "m", "zero", Some(0)).unwrap());
+        assert_eq!(s.reading(), Reading::Known(0));
+        assert!(!s.completed(token, "c", "m", "later", Some(123)).unwrap());
+        assert_eq!(s.reading(), Reading::Known(0));
     }
     #[test]
     fn reset_idempotence_and_stale_origin_never_erase_new_first() {
@@ -462,16 +492,34 @@ mod transactional_reset_tests {
         let post_boundary = read(&tx, "t").unwrap().unwrap().token();
         complete_report_tx(&tx, "t", "c", "m", "first", Some(post_boundary), None).unwrap();
         tx.commit().unwrap();
-        assert_eq!(read(&db, "t").unwrap().unwrap().reading(), Reading::Unknown);
+        assert_eq!(
+            read(&db, "t").unwrap().unwrap().reading(),
+            Reading::AwaitingFirst
+        );
         let tx = db.transaction().unwrap();
         assert_eq!(
             tx.execute("UPDATE terminal SET done=1 WHERE id='trial' AND done=0", [])
                 .unwrap(),
             0
         );
-        complete_report_tx(&tx, "t", "c", "m", "later", Some(post_boundary), Some(9)).unwrap();
+        assert_eq!(
+            read(&tx, "t").unwrap().unwrap().reading(),
+            Reading::AwaitingFirst
+        );
         tx.commit().unwrap();
-        assert_eq!(read(&db, "t").unwrap().unwrap().reading(), Reading::Unknown);
+        let current = {
+            let tx = db.transaction().unwrap();
+            let token = begin_report_tx(&tx, "t", "c", "m").unwrap();
+            tx.commit().unwrap();
+            token
+        };
+        let tx = db.transaction().unwrap();
+        complete_report_tx(&tx, "t", "c", "m", "later-request", Some(current), Some(9)).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            read(&db, "t").unwrap().unwrap().reading(),
+            Reading::Known(9)
+        );
     }
     #[test]
     fn pre_boundary_request_completion_cannot_become_post_boundary_a() {

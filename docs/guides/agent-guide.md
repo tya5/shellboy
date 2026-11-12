@@ -525,7 +525,7 @@ Historical `history get --node SUMMARY_NODE --parts` records remain readable
 when old summaries refer to per-part cache entries, but the current request path
 does not create map/reduce parts or consult the old segment-size controls.
 
-Use `summary_max_chars` / `summary_max_percent` for output limits, the model and
+Use `summary_max_chars` for output limits, the model and
 effort for provider behavior, and `auto_at_tokens` to control when proactive
 summaries start. The independent global auto target percentage remains supported.
 Original source nodes remain available through history and restore operations.

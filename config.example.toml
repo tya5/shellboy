@@ -88,11 +88,9 @@ auto_history = true
 # or pick Threads with `shellboy index backfill --kind tool_result --thread ID`.
 auto_kinds = ["user", "summary", "assistant_response"]
 
-# Explicit compact --summary limits; either key may be used alone in this section.
-# The smaller limit wins, with an effective floor of 2000 Unicode characters.
+# Default output-character instruction for summary requests (thread/connection may override).
 # [compaction]
 # summary_max_chars = 20000
-# summary_max_percent = 5
 
 [shell]
 # Model-authored tool-row labels; false removes the parameter from generation tools.

@@ -263,7 +263,6 @@ async fn check_only_gets_catalog_and_preserves_status_and_base_root_hint_without
         if ok {
             assert_eq!(value["result"]["auto_history"], false);
             assert_eq!(value["result"]["compaction"]["summary_max_chars"], 20000);
-            assert_eq!(value["result"]["compaction"]["summary_max_percent"], 5.0);
             assert_eq!(value["result"]["compaction"]["auto_at_tokens"], 200000);
         }
         if ok && !advertised {
@@ -569,13 +568,13 @@ fn non_unicode_setup_paths_return_json_before_io_and_diagnostics_cannot_panic() 
 }
 
 #[test]
-fn config_check_rejects_invalid_summary_limits_before_any_catalog_request() {
+fn config_check_rejects_invalid_summary_limit_before_any_catalog_request() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("config.toml");
     std::fs::write(
         &path,
         format!(
-            "{}\n[compaction]\nsummary_max_percent=101\n",
+            "{}\n[compaction]\nsummary_max_chars=0\n",
             configuration("http://127.0.0.1:1/v1", false)
         ),
     )

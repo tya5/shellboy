@@ -22,6 +22,8 @@ async fn store() -> (TempDir, Store) {
         base_url="http://127.0.0.1:2/v1"
         summary_max_chars=12000
         auto_compact_target_percent=3
+        [compaction]
+        summary_max_chars=10000
     "#,
     )
     .unwrap();
@@ -2524,7 +2526,7 @@ async fn thread_summary_parameters_follow_default_connection_thread_precedence_a
     let thread = create(&store, None).await.thread_id;
     let got = get_thread(&store, &thread).await;
     assert_eq!(got["summary_max_chars"], Value::Null);
-    assert_eq!(got["effective_summary_max_chars"], 20_000);
+    assert_eq!(got["effective_summary_max_chars"], 10_000);
     assert_eq!(got["effective_auto_compact_target_percent"], 20);
     // The connection value replaces [compaction] for a Thread without its own value.
     let moved = execute(

@@ -1735,6 +1735,7 @@ impl Store {
             details.summary_max_chars,
             connection,
             None,
+            &config.compaction,
         );
         details.effective_auto_compact_target_percent = Some(settings.target_percent);
         details.effective_summary_max_chars = Some(settings.output_characters);

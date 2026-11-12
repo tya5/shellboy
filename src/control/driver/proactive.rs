@@ -194,6 +194,7 @@ pub(super) async fn maybe_compact(
         None,
         connection,
         None,
+        &control.store.config.compaction,
     )
     .target_percent;
     if threshold == 0 {

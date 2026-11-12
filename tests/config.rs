@@ -751,44 +751,16 @@ fn embedding_batch_caps_preserve_singleton_defaults_and_reject_invalid_bounds() 
 }
 
 #[test]
-fn explicit_summary_limits_defaults_single_knobs_minimum_and_rejections() {
+fn compaction_summary_absolute_limit_is_live_and_strict() {
     use shellboy::config::Config;
-    let defaults = Config::parse("").unwrap().compaction;
-    assert_eq!(defaults.summary_limit(1_000_000), 20_000);
-    assert_eq!(defaults.summary_limit(100_000), 5000);
-    assert_eq!(defaults.summary_limit(10), 2000);
-    let absolute = Config::parse("[compaction]\nsummary_max_chars=7000")
-        .unwrap()
-        .compaction;
-    assert_eq!(absolute.summary_max_percent, None);
-    assert_eq!(absolute.summary_limit(1_000_000), 7000);
-    let percent = Config::parse("[compaction]\nsummary_max_percent=2.5")
-        .unwrap()
-        .compaction;
-    assert_eq!(percent.summary_max_chars, None);
-    assert_eq!(percent.summary_limit(200_000), 5000);
-    assert_eq!(
-        Config::parse("[compaction]\nsummary_max_chars=1")
-            .unwrap()
-            .compaction
-            .summary_limit(100_000),
-        2000
-    );
-    for body in [
-        "",
-        "summary_max_chars=0",
-        "summary_max_chars=-1",
-        "summary_max_percent=0",
-        "summary_max_percent=101",
-        "summary_max_percent=nan",
-        "summary_max_percent=inf",
-        "summary_max_char=3",
-    ] {
-        assert!(
-            Config::parse(&format!("[compaction]\n{body}")).is_err(),
-            "{body}"
-        );
-    }
+    let defaults = Config::parse("").unwrap();
+    assert_eq!(defaults.compaction.summary_max_chars, Some(20_000));
+    let explicit = Config::parse("[compaction]\nsummary_max_chars=7000").unwrap();
+    assert_eq!(explicit.compaction.summary_max_chars, Some(7_000));
+    assert!(Config::parse("[compaction]\nsummary_max_chars=0").is_err());
+    assert!(Config::parse("[compaction]\nsummary_max_chars=-1").is_err());
+    assert!(Config::parse("[compaction]\nsummary_max_percent=2.5").is_err());
+    assert!(Config::parse("[compaction]\nunknown_summary_setting=1").is_err());
 }
 
 #[test]
@@ -801,13 +773,13 @@ fn retired_summary_configuration_keys_are_rejected_without_weakening_unknown_key
         "[connections.proxy]\nbase_url='https://example.com'\nsegment_chars=32000",
         "[connections.proxy]\nbase_url='https://example.com'\nreduce_rounds=6",
         "[compaction]\nunknown_summary_setting=1",
+        "[compaction]\nsummary_max_percent=2.5",
     ] {
         assert!(Config::parse(body).is_err(), "{body}");
     }
     let current = Config::parse("[compaction]\nauto_at_tokens=0\nsummary_max_chars=12000").unwrap();
     assert_eq!(current.compaction.auto_at_tokens, 0);
     assert_eq!(current.compaction.summary_max_chars, Some(12_000));
-    assert!(Config::parse("[compaction]\nsummary_max_percent=-1").is_err());
     assert!(Config::parse("[compaction]\nauto_at_tokens=-1").is_err());
 }
 

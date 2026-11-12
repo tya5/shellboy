@@ -123,7 +123,12 @@ prevents re-summarizing a summary alone.
   items with their IDs and `encrypted_content`, opaque blocks, call IDs.
 - Off-path queued messages (unchanged #52 behaviour).
 
-## 3. Summary request
+## 3. Summary request (historical proposal; superseded by #303)
+
+The former multi-part path below is retained as design history only. #303 removes
+map/reduce and the percentage output cap; current behavior is the single-request
+contract in `docs/design/compaction.md` and the supported absolute
+`[compaction] summary_max_chars` owner default. This proposal is not current.
 
 Reuse `summarize_recorded` unchanged in its bounds:
 

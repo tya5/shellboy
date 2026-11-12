@@ -21,9 +21,11 @@ fn resolved_limit(
     manual: Option<u64>,
     thread: Option<u64>,
     connection: Option<&crate::config::Connection>,
+    compaction: &crate::config::Compaction,
 ) -> OutputLimit {
     OutputLimit(
-        crate::config::SummarySettings::resolve(None, thread, connection, manual).output_characters,
+        crate::config::SummarySettings::resolve(None, thread, connection, manual, compaction)
+            .output_characters,
     )
 }
 
@@ -196,6 +198,7 @@ impl Compactor {
             requested_limit,
             thread_limit,
             self.config.connections.get(&snapshot.profile),
+            &self.config.compaction,
         );
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
@@ -612,13 +615,28 @@ mod tests {
     #[test]
     fn one_request_contains_whole_selected_range_and_output_instruction() {
         let snapshot = fixture(&[40, 60, 80]);
-        let body = request(&snapshot, 0..2, resolved_limit(None, None, None));
+        let body = request(
+            &snapshot,
+            0..2,
+            resolved_limit(None, None, None, &crate::config::Compaction::default()),
+        );
         let text = body.to_string();
         assert!(text.contains("source0") && text.contains("source1"));
         assert!(!text.contains("source2"));
         assert!(text.contains("20000") && text.contains("User instructions to keep"));
-        assert_eq!(resolved_limit(Some(37), Some(80), None), OutputLimit(37));
-        assert_eq!(resolved_limit(None, Some(80), None), OutputLimit(80));
+        assert_eq!(
+            resolved_limit(
+                Some(37),
+                Some(80),
+                None,
+                &crate::config::Compaction::default()
+            ),
+            OutputLimit(37)
+        );
+        assert_eq!(
+            resolved_limit(None, Some(80), None, &crate::config::Compaction::default()),
+            OutputLimit(80)
+        );
     }
     #[test]
     fn half_is_whole_prefix_strictly_smaller_and_success_never_schedules_remainder() {
@@ -835,23 +853,58 @@ mod tests {
         );
     }
     #[test]
-    fn only_explicit_manual_limit_overrides_thread_connection_defaults() {
+    fn owner_connection_thread_and_manual_limits_share_one_resolver() {
         let connection = crate::config::Connection {
             summary_max_chars: Some(4000),
             ..Default::default()
         };
-        assert_eq!(resolved_limit(None, None, None), OutputLimit(20000));
         assert_eq!(
-            resolved_limit(None, None, Some(&connection)),
+            resolved_limit(None, None, None, &crate::config::Compaction::default()),
+            OutputLimit(20000)
+        );
+        assert_eq!(
+            resolved_limit(
+                None,
+                None,
+                Some(&connection),
+                &crate::config::Compaction::default()
+            ),
             OutputLimit(4000)
         );
         assert_eq!(
-            resolved_limit(None, Some(3000), Some(&connection)),
+            resolved_limit(
+                None,
+                Some(3000),
+                Some(&connection),
+                &crate::config::Compaction::default()
+            ),
             OutputLimit(3000)
         );
         assert_eq!(
-            resolved_limit(Some(1000), Some(3000), Some(&connection)),
+            resolved_limit(
+                Some(1000),
+                Some(3000),
+                Some(&connection),
+                &crate::config::Compaction::default()
+            ),
             OutputLimit(1000)
+        );
+        let owner = crate::config::Compaction {
+            summary_max_chars: Some(2_500),
+            auto_at_tokens: 200_000,
+        };
+        assert_eq!(resolved_limit(None, None, None, &owner), OutputLimit(2_500));
+        assert_eq!(
+            resolved_limit(None, None, Some(&connection), &owner),
+            OutputLimit(4_000)
+        );
+        assert_eq!(
+            resolved_limit(None, Some(3_000), None, &owner),
+            OutputLimit(3_000)
+        );
+        assert_eq!(
+            resolved_limit(Some(1_000), None, None, &owner),
+            OutputLimit(1_000)
         );
         for key in ["segment_chars", "reduce_rounds"] {
             assert!(toml::from_str::<crate::config::Connection>(&format!("{key}=4")).is_err());

@@ -783,24 +783,20 @@ These prompts are not a guarantee of factual correctness; inspect sources when n
 
 ```toml
 [compaction]
-summary_max_chars = 20000
-summary_max_percent = 5
+summary_max_chars = 20000 # default; output instruction for every summary request
 ```
 
-Without this section, both limits above apply. In a present section, specify
-one or both keys: omitted keys impose no additional limit. With both, use the
-smaller of the absolute limit and percentage of the original range's projected
-characters, floored at 2,000 Unicode characters. Character limits must be positive;
-percentages must be finite and in (0, 100], including fractional values. An empty
-section is invalid. This floor does not permit a summary to enlarge its original
-source projection: such a result is rejected too.
+`summary_max_chars` is a positive integer output instruction. Thread, then
+connection, then this owner default are used; a manual `--max-chars` replaces
+that invocation's configured value. A response above the instruction can still
+be adopted if it shrinks the original projection; the over-limit fact is recorded,
+with no resend or truncation. `config check` rejects retired `summary_max_percent`
+and unknown compaction keys. Restart the owner to apply changed settings.
 
-`compact --summary --from FIRST --to LAST --max-chars 6000 --max-percent 2.5`
-replaces the corresponding configured limits for that invocation; unspecified
-limits keep their configured values. Run `config check` to validate the section
-and inspect its resolved values in `result.compaction`, then restart the owner
-to apply changed settings (the proactive threshold can also be changed per Thread
-without a restart; see below). Checking still uses only the model catalog, not a chat.
+`config check` reports the effective configured value; `thread get` reports
+`effective_summary_max_chars`. Dry-run reports `summary_character_limit` for
+the selected source range. These are character-count instructions, not a token
+or provider-side guarantee.
 
 Closed, manual and active-Turn summary requests use one typed request and one
 transactional adoption path. No map/reduce request budgets, segment-size settings,

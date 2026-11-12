@@ -714,6 +714,7 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
             loaded.thread_summary_chars,
             connection,
             args.max_chars,
+            &config.compaction,
         )
         .output_characters;
         plan.summary = Some(Summary {

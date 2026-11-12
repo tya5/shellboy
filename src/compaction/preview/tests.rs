@@ -940,6 +940,12 @@ async fn dry_run_reflects_output_limit_from_each_level_without_map_forecast() {
         forecast_config(&f, &summary, &c).unwrap()["summary"]["summary_character_limit"],
         12000
     );
+    c.connections.get_mut("p").unwrap().summary_max_chars = None;
+    c.compaction.summary_max_chars = Some(9_000);
+    assert_eq!(
+        forecast_config(&f, &summary, &c).unwrap()["summary"]["summary_character_limit"],
+        9_000
+    );
     f.db.call(|db| {
         db.execute("UPDATE thread SET summary_max_chars=6000 WHERE id='t'", [])?;
         Ok(())

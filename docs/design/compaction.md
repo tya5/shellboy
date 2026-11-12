@@ -286,6 +286,10 @@ reader shows the current record. A fork shares node rows and copies the model
 settings, so it computes the same map keys for a shared prefix and reuses the
 parent's parts (tested, S2). Parts are never nodes and are not indexed.
 
+Historical output policy below predates Issue #303 and is superseded by the
+current single-request configuration clarification in §4.3. In particular,
+`summary_max_percent`, `--max-percent`, and the 2,000-character floor are retired.
+
 `[compaction] summary_max_chars` and `summary_max_percent` select the smaller
 limit, floored at 2,000 Unicode characters. An absent section defaults to 20,000
 and 5%; a present section may specify either or both (not neither). Percent is
@@ -1378,6 +1382,11 @@ summary size policy remain separate concerns.
 - 採用の条件は「要約の射影文字数が、元の射影文字数より小さい」（既存の `summary_not_shrinking`）。
 - **上限を超えた出力の扱い：元より小さければ採用し、超過したことを記録に残す。再試行しない。**【Claude 推奨】再試行は範囲全体の再送になり、高くつくため。
 - 「元の 5%」と「下限 2,000」の規則は廃止する。
+- Current #303 configuration clarification: the supported owner-level
+  `[compaction] summary_max_chars` remains a positive absolute request
+  instruction, resolved after Thread and connection values. The retired
+  `summary_max_percent` key is rejected as unknown; no percentage or floor is
+  applied. This does not change the 20,000-character default.
 
 ## 5. 採用と破棄
 

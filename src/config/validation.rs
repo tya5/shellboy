@@ -9,7 +9,7 @@ impl Config {
         if !self.compaction.valid() {
             return Err(invalid(
                 "compaction",
-                "set positive summary_max_chars and/or finite summary_max_percent in (0,100]",
+                "summary_max_chars must be a positive integer when set",
             ));
         }
         if self.extra_instructions.len() > 8

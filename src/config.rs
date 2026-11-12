@@ -1069,10 +1069,7 @@ pub fn resolve_cli_data_dir(
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(from = "CompactionFields")]
 pub struct Compaction {
-    #[serde(skip_serializing)]
     pub summary_max_chars: Option<u64>,
-    #[serde(skip_serializing)]
-    pub summary_max_percent: Option<f64>,
     /// Proactive compaction threshold on the provider-reported input tokens of
     /// the last adopted attempt. 0 disables; connections may override it.
     pub auto_at_tokens: u64,
@@ -1080,13 +1077,15 @@ pub struct Compaction {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct CompactionFields {
+    #[serde(deserialize_with = "summary_chars_option")]
+    summary_max_chars: Option<u64>,
     auto_at_tokens: Option<u64>,
 }
 impl From<CompactionFields> for Compaction {
     fn from(fields: CompactionFields) -> Self {
         Self {
+            summary_max_chars: fields.summary_max_chars.or(Some(20_000)),
             auto_at_tokens: fields.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),
-            ..Default::default()
         }
     }
 }
@@ -1094,7 +1093,6 @@ impl Default for Compaction {
     fn default() -> Self {
         Self {
             summary_max_chars: Some(20_000),
-            summary_max_percent: Some(5.0),
             auto_at_tokens: DEFAULT_AUTO_AT_TOKENS,
         }
     }
@@ -1130,6 +1128,7 @@ impl SummarySettings {
         thread_characters: Option<u64>,
         connection: Option<&Connection>,
         manual_characters: Option<u64>,
+        compaction: &Compaction,
     ) -> Self {
         Self {
             target_percent: thread_percent
@@ -1138,33 +1137,20 @@ impl SummarySettings {
             output_characters: manual_characters
                 .or(thread_characters)
                 .or_else(|| connection.and_then(|c| c.summary_max_chars))
-                .unwrap_or(20000),
+                .or(compaction.summary_max_chars)
+                .unwrap_or(20_000),
         }
     }
 }
 pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
 impl Compaction {
     pub fn valid(&self) -> bool {
-        (self.summary_max_chars.is_some() || self.summary_max_percent.is_some())
-            && self.summary_max_chars != Some(0)
-            && self
-                .summary_max_percent
-                .is_none_or(|p| p.is_finite() && p > 0.0 && p <= 100.0)
+        self.summary_max_chars != Some(0)
     }
     /// The Thread override wins, then the connection; 0 means proactive compaction is off.
     pub fn auto_at_tokens_for(&self, thread: Option<u64>, connection: Option<&Connection>) -> u64 {
         thread
             .or_else(|| connection.and_then(|c| c.auto_at_tokens))
             .unwrap_or(self.auto_at_tokens)
-    }
-    pub fn summary_limit(&self, source: u64) -> u64 {
-        self.summary_max_chars
-            .unwrap_or(u64::MAX)
-            .min(
-                self.summary_max_percent
-                    .map(|p| (source as f64 * (p / 100.0)).floor() as u64)
-                    .unwrap_or(u64::MAX),
-            )
-            .max(2000)
     }
 }
