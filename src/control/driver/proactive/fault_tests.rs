@@ -30,12 +30,92 @@ enum Fault {
     RejectFact,
 }
 impl Fault {
-    /// The attempt continues after the checkpoint instead of failing at it.
+    /// These final-write faults do not stop at the selected stage checkpoint;
+    /// on an active-spill case the driver legitimately proceeds to active summary.
+    fn continues_after_stage(self) -> bool {
+        matches!(self, Fault::RejectFinal | Fault::RejectGuard)
+    }
+    /// Whether a final record fault allows normal attempt finalization to advance
+    /// the reasoning epoch after the selected stage.
     fn continues(self) -> bool {
         matches!(
             self,
             Fault::RejectFinal | Fault::RejectGuard | Fault::RejectFact
         )
+    }
+}
+
+/// A fault is attached to one policy-reachable stage, not an independent pair
+/// of booleans. All scenarios are triggered by latest provider input 200 at
+/// threshold 200; only the separate first-known A comparison selects spill-only
+/// versus spill-then-summary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scenario {
+    ClosedSpill,
+    ClosedSummary,
+    ActiveSpill,
+    ActiveSummary,
+}
+impl Scenario {
+    const ALL: [Self; 4] = [
+        Self::ClosedSpill,
+        Self::ClosedSummary,
+        Self::ActiveSpill,
+        Self::ActiveSummary,
+    ];
+    const THRESHOLD: u64 = 200;
+    const FIRST_KNOWN_A: u64 = 100;
+    const LATEST_PROVIDER_INPUT: u64 = 200;
+
+    fn active(self) -> bool {
+        matches!(self, Self::ActiveSpill | Self::ActiveSummary)
+    }
+    fn summary(self) -> bool {
+        matches!(self, Self::ClosedSummary | Self::ActiveSummary)
+    }
+    fn target_percent(self) -> u64 {
+        match self {
+            Self::ClosedSpill => 50,
+            Self::ClosedSummary | Self::ActiveSpill | Self::ActiveSummary => 20,
+        }
+    }
+    fn target_tokens(self) -> u64 {
+        Self::THRESHOLD * self.target_percent() / 100
+    }
+    fn stage(self) -> &'static str {
+        match self {
+            Self::ClosedSpill => "closed_spill",
+            Self::ClosedSummary => "closed_summary",
+            Self::ActiveSpill => "active_spill",
+            Self::ActiveSummary => "active_summary",
+        }
+    }
+    fn expects_summary_request(self, fault: Fault) -> bool {
+        self.summary() || (self == Self::ActiveSpill && fault.continues_after_stage())
+    }
+    fn summary_committed(self, fault: Fault) -> bool {
+        self.summary() || (self == Self::ActiveSpill && fault.continues_after_stage())
+    }
+}
+
+fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
+    let threshold = Scenario::THRESHOLD;
+    let a = Scenario::FIRST_KNOWN_A;
+    let target = scenario.target_tokens();
+    assert_eq!(trigger["input_tokens"], Scenario::LATEST_PROVIDER_INPUT);
+    assert_eq!(trigger["auto_at_tokens"], threshold);
+    assert_eq!(trigger["target_percent"], scenario.target_percent());
+    assert_eq!(trigger["target_tokens"], target);
+    assert_eq!(trigger["a_input_tokens"], a);
+    assert!(
+        Scenario::LATEST_PROVIDER_INPUT >= threshold,
+        "latest provider report must independently pass the trigger threshold"
+    );
+    match scenario {
+        Scenario::ClosedSpill => assert!(a <= target, "A<=target selects closed spill only"),
+        Scenario::ClosedSummary | Scenario::ActiveSpill | Scenario::ActiveSummary => {
+            assert!(a > target, "A>target enters spill-then-summary policy")
+        }
     }
 }
 
@@ -59,26 +139,30 @@ async fn proactive_postcommit_cleanup_boundaries() {
 
 async fn boundaries(fault: Fault) {
     crate::test_watchdog::watchdog("automatic postcommit data safety", async {
-        for active in [false, true] {
-            for summary in [false, true] {
-                boundary(fault, active, summary).await;
-            }
+        for scenario in Scenario::ALL {
+            boundary(fault, scenario).await;
         }
     })
     .await
     .unwrap();
 }
 
-async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
-    eprintln!("automatic boundary {fault:?} active={active} summary={summary}");
+async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
+    eprintln!(
+        "automatic boundary {fault:?} scenario={scenario:?} T=200 P={} A=100 input=200 target={}",
+        scenario.target_percent(),
+        scenario.target_tokens()
+    );
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
-    let limits =
-        "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
-    let owner = proactive_owner(root.path(), &url, limits).await;
+    let limits = format!(
+        "auto_compact_target_percent={}\n[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n",
+        scenario.target_percent()
+    );
+    let owner = proactive_owner(root.path(), &url, &limits).await;
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;
-    if !active {
+    if !scenario.active() {
         for text in ["hi", "yo"] {
             send(&control, &target, text).await;
             incoming(&control, &mut receive)
@@ -100,12 +184,7 @@ async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
     }
     let request_boundary = incoming(&control, &mut receive).await;
     let reached = Arc::new(AtomicBool::new(false));
-    let stage = match (active, summary) {
-        (false, false) => "closed_spill",
-        (false, true) => "closed_summary",
-        (true, false) => "active_spill",
-        (true, true) => "active_summary",
-    };
+    let stage = scenario.stage();
     *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
         stage,
         kind: match fault {
@@ -121,8 +200,12 @@ async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
         },
         reached: reached.clone(),
     });
-    let kind = if summary { "summary" } else { "spill" };
-    let scope = if active && summary {
+    let kind = if scenario.summary() {
+        "summary"
+    } else {
+        "spill"
+    };
+    let scope = if scenario.active() && scenario.summary() {
         " AND json_extract(n.payload_json,'$.summary_scope')='active_turn'"
     } else {
         ""
@@ -176,17 +259,20 @@ async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
         }).await.unwrap();
     }
     let guard_before = guard_rows(&control).await;
-    request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if active {200} else {100},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
-    if !active {
+    request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
+    if !scenario.active() {
         incoming(&control, &mut receive)
             .await
             .reply
-            .send((200, answer_with_usage("done", 200)))
+            .send((
+                200,
+                answer_with_usage("done", Scenario::LATEST_PROVIDER_INPUT),
+            ))
             .unwrap();
         settled(&control, &target).await;
         send(&control, &target, "next turn").await;
     }
-    if summary {
+    if scenario.expects_summary_request(fault) {
         let summary_request = incoming(&control, &mut receive).await;
         assert_eq!(summary_request.body["tools"], json!([]));
         summary_request
@@ -194,26 +280,18 @@ async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
             .send((200, answer("Short adopted summary.")))
             .unwrap();
     }
-    loop {
-        if reached.load(Ordering::SeqCst) {
-            break;
-        }
-        if let Ok(prefix) = receive.try_recv() {
-            assert!(
-                active || fault.continues(),
-                "closed boundary must fail before another request: {}",
-                prefix
+    while !reached.load(Ordering::SeqCst) {
+        if let Ok(unexpected) = receive.try_recv() {
+            panic!(
+                "unexpected extra provider request after intended {:?} stage: {}",
+                scenario,
+                unexpected
                     .body
                     .to_string()
                     .chars()
                     .take(600)
                     .collect::<String>()
             );
-            assert_eq!(prefix.body["tools"], json!([]));
-            prefix
-                .reply
-                .send((200, answer("Short prefix summary.")))
-                .unwrap();
         }
         tokio::task::yield_now().await;
     }
@@ -244,7 +322,7 @@ async fn prepare(fault: Fault, active: bool, summary: bool) -> Fx {
 struct Fx {
     root: tempfile::TempDir,
     url: String,
-    limits: &'static str,
+    limits: String,
     owner: DataOwner,
     control: Arc<Control>,
     target: String,
@@ -261,7 +339,7 @@ async fn guard_rows(control: &Control) -> Vec<(String, String)> {
     }).await.unwrap()
 }
 
-async fn boundary(fault: Fault, active: bool, summary: bool) {
+async fn boundary(fault: Fault, scenario: Scenario) {
     let Fx {
         root,
         url,
@@ -272,7 +350,7 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
         mut receive,
         server,
         guard_before: _,
-    } = prepare(fault, active, summary).await;
+    } = prepare(fault, scenario).await;
     if fault == Fault::Cleanup {
         let id = target.clone();
         control
@@ -293,7 +371,7 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
             .await
             .unwrap();
     }
-    assert_boundary(&control, &target, active, summary, "shutdown").await;
+    assert_boundary(&control, &target, scenario, fault, "shutdown").await;
     control
         .store
         .database
@@ -309,9 +387,9 @@ async fn boundary(fault: Fault, active: bool, summary: bool) {
     // Reopen through normal startup repair, not by patching run/turn states.
     drop(control);
     owner.shutdown().await.unwrap();
-    let owner = proactive_owner(root.path(), &url, limits).await;
+    let owner = proactive_owner(root.path(), &url, &limits).await;
     let control = Control::new(&owner, root.path().into());
-    assert_boundary(&control, &target, active, summary, "reopen").await;
+    assert_boundary(&control, &target, scenario, fault, "reopen").await;
     let id = target.clone();
     control
         .store
@@ -408,8 +486,8 @@ async fn assert_immutable(control: &Control) {
 async fn assert_boundary(
     control: &Control,
     target: &str,
-    active: bool,
-    summary: bool,
+    scenario: Scenario,
+    fault: Fault,
     phase: &'static str,
 ) {
     assert_immutable(control).await;
@@ -427,13 +505,19 @@ async fn assert_boundary(
         assert_eq!(current_revision, revision + appended.len() as i64, "only validated audit append commits advance selection_revision");
         assert_eq!(current_epoch, epoch, "committed reasoning epoch survives failure/restart");
         let initial_epoch: i64 = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0))?;
-        assert_eq!(epoch, initial_epoch + 1 + i64::from(summary), "each committed stage advances the fixture's reasoning epoch once");
+        assert_eq!(epoch, initial_epoch + 1 + i64::from(scenario.summary_committed(fault)), "each committed stage advances the fixture's reasoning epoch once");
+        let trigger: Value = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.trigger') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'", [], |r| r.get(0))?;
+        assert_trigger_evidence(&trigger, scenario);
         let kinds: Vec<String> = db.prepare("SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        let expected = match (active, summary) {
-            (_, false) => vec!["spill", "spill"],
-            (false, true) => vec!["summary", "spill", "spill"],
-            (true, true) => vec!["summary"],
+        let expected: Vec<&str> = match scenario {
+            Scenario::ClosedSpill | Scenario::ActiveSpill => vec!["spill", "spill"],
+            Scenario::ClosedSummary => vec!["summary", "spill", "spill"],
+            Scenario::ActiveSummary => vec!["summary"],
         };
+        let mut expected = expected;
+        if scenario == Scenario::ActiveSpill && fault.continues_after_stage() {
+            expected.push("summary");
+        }
         assert_eq!(kinds, expected, "all intended replacements, not a partial group");
         let incomplete: i64 = db.query_row("SELECT count(*) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND (r.state!='completed' OR NOT EXISTS(SELECT 1 FROM replacement_source s WHERE s.replacement_id=r.id) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=r.output_node_id AND n.payload_json IS NOT NULL))", [&target], |r| r.get(0))?;
         assert_eq!(incomplete, 0);

@@ -23,19 +23,19 @@ record_test!(record_after_remeasurement_fault, Fault::Remeasurement);
 // The two longest faults run each boundary as its own test with its own watchdog.
 macro_rules! boundary_tests {
     ($fault:expr, $closed_spill:ident, $closed_summary:ident, $active_spill:ident, $active_summary:ident) => {
-        boundary_test!($closed_spill, $fault, false, false);
-        boundary_test!($closed_summary, $fault, false, true);
-        boundary_test!($active_spill, $fault, true, false);
-        boundary_test!($active_summary, $fault, true, true);
+        boundary_test!($closed_spill, $fault, Scenario::ClosedSpill);
+        boundary_test!($closed_summary, $fault, Scenario::ClosedSummary);
+        boundary_test!($active_spill, $fault, Scenario::ActiveSpill);
+        boundary_test!($active_summary, $fault, Scenario::ActiveSummary);
     };
 }
 macro_rules! boundary_test {
-    ($name:ident, $fault:expr, $active:expr, $summary:expr) => {
+    ($name:ident, $fault:expr, $scenario:expr) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn $name() {
             crate::test_watchdog::watchdog(
                 "automatic attempt record boundary",
-                record_boundary($fault, $active, $summary),
+                record_boundary($fault, $scenario),
             )
             .await
             .unwrap();
@@ -66,23 +66,12 @@ record_test!(rejected_stage_fact_prevents_adoption, Fault::RejectFact);
 
 async fn record_boundaries(fault: Fault) {
     crate::test_watchdog::watchdog("automatic attempt record", async {
-        for active in [false, true] {
-            for summary in [false, true] {
-                record_boundary(fault, active, summary).await;
-            }
+        for scenario in Scenario::ALL {
+            record_boundary(fault, scenario).await;
         }
     })
     .await
     .unwrap();
-}
-
-fn boundary_stage(active: bool, summary: bool) -> &'static str {
-    match (active, summary) {
-        (false, false) => "closed_spill",
-        (false, true) => "closed_summary",
-        (true, false) => "active_spill",
-        (true, true) => "active_summary",
-    }
 }
 
 struct Saved {
@@ -90,8 +79,8 @@ struct Saved {
     record: Value,
 }
 
-async fn record_boundary(fault: Fault, active: bool, summary: bool) {
-    let stage = boundary_stage(active, summary);
+async fn record_boundary(fault: Fault, scenario: Scenario) {
+    let stage = scenario.stage();
     let Fx {
         root,
         url,
@@ -102,14 +91,32 @@ async fn record_boundary(fault: Fault, active: bool, summary: bool) {
         mut receive,
         server,
         guard_before,
-    } = prepare(fault, active, summary).await;
-    let live = assert_record(&control, &target, fault, stage, &guard_before, true).await;
+    } = prepare(fault, scenario).await;
+    let live = assert_record(
+        &control,
+        &target,
+        fault,
+        scenario,
+        stage,
+        &guard_before,
+        true,
+    )
+    .await;
     drop_fault_triggers(&control).await;
     drop(control);
     owner.shutdown().await.unwrap();
-    let owner = proactive_owner(root.path(), &url, limits).await;
+    let owner = proactive_owner(root.path(), &url, &limits).await;
     let control = Control::new(&owner, root.path().into());
-    let after = assert_record(&control, &target, fault, stage, &guard_before, false).await;
+    let after = assert_record(
+        &control,
+        &target,
+        fault,
+        scenario,
+        stage,
+        &guard_before,
+        false,
+    )
+    .await;
     assert_eq!(
         live.record, after.record,
         "restart reconciles nothing and rewrites nothing"
@@ -192,6 +199,7 @@ async fn assert_record(
     control: &Arc<Control>,
     target: &str,
     fault: Fault,
+    scenario: Scenario,
     stage: &'static str,
     guard_before: &[(String, String)],
     live: bool,
@@ -230,6 +238,7 @@ async fn assert_record(
     };
     let record: Value = serde_json::from_str(&record).unwrap();
     assert_eq!(record["reason"], REASON);
+    assert_trigger_evidence(&record["trigger"], scenario);
     // The guard is untouched whenever the attempt's own guard write is not
     // reached or is rejected. A healthy W3 (cancellation, rejected final
     // write) legitimately saves its normal result before the failure.
