@@ -698,7 +698,7 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         id: FieldId::AutoCompactTargetPercent,
         default_origin: DefaultOrigin::TargetThreadSettings,
         label: "自動要約の目標割合",
-        help: "自動要約の目標圧縮割合です。1〜100の整数で、CLIの空文字は接続または[compaction]の値へ戻します。手動summary出力上限とは別の設定です。",
+        help: "自動要約後の目標サイズを、このThreadに適用される入力トークン閾値に対する割合（1〜100の整数）で指定します。要約出力の文字数比率ではありません。CLIの空文字は接続または[compaction]の値へ戻します。手動summaryの絶対文字数上限（max_chars）とは別です。",
         kind: FieldType::Unsigned,
         discovery: Discovery::None,
     },

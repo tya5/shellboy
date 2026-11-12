@@ -1458,11 +1458,19 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
             "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
         ),
-        FieldId::AutoCompactTargetPercent => local!(
-            language,
-            "このThreadの自動要約目標圧縮割合（1〜100の整数）です。CLIの空文字は接続または[compaction]の値へ戻します。手動summaryの絶対文字数上限とは別です。",
-            "Target percentage of original characters for proactive compaction only (integer 1–100). An empty CLI value returns to the connection or [compaction] value. Separate from the absolute manual summary character cap."
-        ),
+        FieldId::AutoCompactTargetPercent => match language {
+            crate::config::UiLanguage::Ja => {
+                crate::operations::OperationId::ThreadSet
+                    .spec()
+                    .field(id)
+                    .expect("ThreadSet exposes the proactive target percentage")
+                    .field
+                    .help
+            }
+            crate::config::UiLanguage::En => {
+                "Target size after proactive compaction, as a percentage (integer 1–100) of this Thread's configured input-token threshold. This is not a summary-output character ratio. An empty CLI value returns to the connection or [compaction] value. Separate from the absolute manual summary character cap (max_chars)."
+            }
+        },
         FieldId::Title => local!(
             language,
             "保存タイトルを変更します。空文字は自動タイトルへ戻します。",
@@ -2014,6 +2022,23 @@ mod paired_message_tests {
             assert!(en.starts_with(argument.spelling), "{en}");
             assert!(en.is_ascii(), "{en}");
         }
+    }
+
+    #[test]
+    fn proactive_target_help_shares_cli_canonical_japanese_and_explains_token_threshold() {
+        let field = crate::operations::OperationId::ThreadSet
+            .spec()
+            .field(FieldId::AutoCompactTargetPercent)
+            .expect("thread set proactive target metadata");
+        let japanese = field_help_for(FieldId::AutoCompactTargetPercent, UiLanguage::Ja);
+        assert_eq!(japanese, field.field.help);
+        assert!(japanese.contains("入力トークン閾値"));
+        assert!(japanese.contains("要約出力の文字数比率ではありません"));
+        assert!(japanese.contains("max_chars"));
+        let english = field_help_for(FieldId::AutoCompactTargetPercent, UiLanguage::En);
+        assert!(english.contains("input-token threshold"));
+        assert!(english.contains("not a summary-output character ratio"));
+        assert!(english.contains("max_chars"));
     }
 
     #[test]
