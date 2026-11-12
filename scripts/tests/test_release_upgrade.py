@@ -430,11 +430,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'migration 40 missing'):
             checks.check_migration(db, before, 39, 40)
 
-    def test_arguments_default_to_public_v0100_schema32_and_target40(self):
+    def test_arguments_default_to_public_v0100_schema32_and_current_target43(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.10.0', 32, checks.CARGO_VERSION, 40))
+                         ('0.10.0', 32, checks.CARGO_VERSION, 43))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
