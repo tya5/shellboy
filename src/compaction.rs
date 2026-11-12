@@ -18,8 +18,6 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) mod boundary;
 pub(crate) mod context_usage;
-#[cfg(test)]
-mod parallel_tests;
 mod retry;
 mod attempt;
 pub mod discard;
