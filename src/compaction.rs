@@ -17,13 +17,10 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 pub(crate) mod boundary;
-mod bounded;
 pub(crate) mod context_usage;
-mod parallel;
 #[cfg(test)]
 mod parallel_tests;
 mod retry;
-use bounded::SummaryBudget;
 mod attempt;
 pub mod discard;
 pub(crate) use attempt::{finish_tx as attempt_finish_tx,
