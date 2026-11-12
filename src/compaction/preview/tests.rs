@@ -928,75 +928,23 @@ async fn automatic_candidates_notice_protection_release_without_path_revision_ch
 }
 
 #[tokio::test]
-async fn dry_run_reflects_the_segment_size_from_each_level() {
-    let f = Fixture::new().await;
-    f.text("a", &"a".repeat(5000)).await;
-    f.text("b", &"b".repeat(5000)).await;
-    f.text("tail", "current").await;
-    let summary = args(Some(ContextEditAction::Summary), Some("a"), Some("b"));
-    let p = forecast(&f, &summary);
-    assert_eq!(p["summary"]["segments"], 1);
-    assert_eq!(p["summary"]["uncached_segments"], 1);
-    assert_eq!(p["summary"]["segment_chars"], 64_000);
-    assert_eq!(p["summary"]["reduce_rounds"], 4);
-    // [compaction] level.
-    let mut c = config();
-    c.compaction.segment_chars = 6000;
-    let p = forecast_config(&f, &summary, &c).unwrap();
-    assert_eq!(
-        (
-            p["summary"]["segments"].clone(),
-            p["summary"]["segment_chars"].clone()
-        ),
-        (2.into(), 6000.into())
-    );
-    // The connection beats [compaction].
-    c.connections.get_mut("p").unwrap().segment_chars = Some(12_000);
-    c.connections.get_mut("p").unwrap().reduce_rounds = Some(2);
-    let p = forecast_config(&f, &summary, &c).unwrap();
-    assert_eq!(
-        (
-            p["summary"]["segments"].clone(),
-            p["summary"]["reduce_rounds"].clone()
-        ),
-        (1.into(), 2.into())
-    );
-    // The Thread beats the connection.
-    f.db.call(|db| {
-        db.execute(
-            "UPDATE thread SET segment_chars=6000, reduce_rounds=7 WHERE id='t'",
-            [],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let p = forecast_config(&f, &summary, &c).unwrap();
-    assert_eq!(p["summary"]["segments"], 2);
-    assert_eq!(p["summary"]["uncached_segments"], 2);
-    assert_eq!(
-        (
-            p["summary"]["segment_chars"].clone(),
-            p["summary"]["reduce_rounds"].clone()
-        ),
-        (6000.into(), 7.into())
-    );
-    // This call beats the Thread.
-    let mut once = summary.clone();
-    once.segment_chars = Some(64_000);
-    once.reduce_rounds = Some(5);
-    let p = forecast_config(&f, &once, &c).unwrap();
-    assert_eq!(p["summary"]["segments"], 1);
-    assert_eq!(
-        (
-            p["summary"]["segment_chars"].clone(),
-            p["summary"]["reduce_rounds"].clone()
-        ),
-        (64_000.into(), 5.into())
-    );
-    // A default (no action) preview takes no per-call parameters.
-    let mut default = args(None, None, None);
-    default.segment_chars = Some(6000);
+async fn dry_run_reflects_output_limit_from_each_level_without_map_forecast() {
+    let f=Fixture::new().await;
+    f.text("a",&"a".repeat(5000)).await;
+    f.text("b",&"b".repeat(5000)).await;
+    f.text("tail","current").await;
+    let summary=args(Some(ContextEditAction::Summary),Some("a"),Some("b"));
+    let p=forecast(&f,&summary);
+    assert_eq!(p["summary"]["summary_character_limit"],20000);
+    assert_eq!(p["summary"]["single_request"],true);
+    assert!(p["summary"].get("segments").is_none());
+    let mut c=config();c.connections.get_mut("p").unwrap().summary_max_chars=Some(12000);
+    assert_eq!(forecast_config(&f,&summary,&c).unwrap()["summary"]["summary_character_limit"],12000);
+    f.db.call(|db|{db.execute("UPDATE thread SET summary_max_chars=6000 WHERE id='t'",[])?;Ok(())}).await.unwrap();
+    assert_eq!(forecast_config(&f,&summary,&c).unwrap()["summary"]["summary_character_limit"],6000);
+    let mut once=summary.clone();once.max_chars=Some(3000);
+    assert_eq!(forecast_config(&f,&once,&c).unwrap()["summary"]["summary_character_limit"],3000);
+    let mut default=args(None,None,None);default.max_chars=Some(3000);
     assert!(default.validate().is_err());
     f.close().await;
 }
