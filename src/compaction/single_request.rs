@@ -1,8 +1,20 @@
-//! Shared single-request pipeline: request formatting, Trial state and atomic
-//! adoption remain separate. Settings and #A facts are owned by their modules.
+//! The owned summary transaction shared by closed, overflow, and active-Turn
+//! entry points. Request trials end here; adoption performs atomic revalidation.
 use super::*;
 
 /// Request construction consumes an already-resolved output policy.
+pub(super) struct SummaryRequest<'a, 'boundary> {
+    pub(super) snapshot: Snapshot,
+    pub(super) original: Range<usize>,
+    pub(super) cancel: CancellationToken,
+    pub(super) ledger: &'a mut usage::UsageLedger,
+    pub(super) boundary: Option<&'a mut boundary::Boundary<'boundary>>,
+    pub(super) automatic: Option<AutomaticStage>,
+    pub(super) drop_all_reasoning: bool,
+    pub(super) active: Option<policy::ActiveTurnPlan>,
+    pub(super) requested_limit: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct OutputLimit(pub(super) u64);
 fn resolved_limit(
@@ -106,6 +118,7 @@ pub(super) struct AdoptionSize {
     pub(super) exceeded_output_limit: bool,
 }
 /// Output cap is a request instruction, not a resend/quality gate.
+#[cfg(test)]
 pub(super) fn adoption_size(
     original: u64,
     summary: u64,
@@ -116,26 +129,29 @@ pub(super) fn adoption_size(
     })
 }
 
-/// Real HTTP execution path for the new summarizer. Entry-point/adoption
-/// integration is separate: caller must snapshot/revalidate the selected range.
+/// One real HTTP request loop; the owner derives the retry range and performs adoption.
 pub(super) struct Dispatched {
     pub(super) selected: Range<usize>,
     pub(super) response: model::ModelResponse,
     pub(super) size: AdoptionSize,
+    pub(super) identity: FailureIdentity,
 }
 impl Compactor {
     pub(super) async fn summarize_single(
         &self,
-        snapshot: Snapshot,
-        original: Range<usize>,
-        cancel: CancellationToken,
-        ledger: &mut usage::UsageLedger,
-        boundary: Option<&mut boundary::Boundary<'_>>,
-        automatic: Option<AutomaticStage>,
-        drop_all_reasoning: bool,
-        active: Option<policy::ActiveTurnPlan>,
-        requested_limit: Option<u64>,
+        request: SummaryRequest<'_, '_>,
     ) -> Result<CompactResult, ApiError> {
+        let SummaryRequest {
+            snapshot,
+            original,
+            cancel,
+            ledger,
+            boundary,
+            automatic,
+            drop_all_reasoning,
+            active,
+            requested_limit,
+        } = request;
         let region = if active.is_some() {
             Region::Active
         } else {
@@ -163,24 +179,13 @@ impl Compactor {
         if !valid(original.clone()) {
             return Err(invalid("No safe summary range"));
         }
-        let settings_thread = snapshot.thread.clone();
-        let max_chars = self
-            .database
-            .call(move |db| {
-                Ok(db.query_row(
-                    "SELECT summary_max_chars FROM thread WHERE id=?1",
-                    [settings_thread],
-                    |r| r.get::<_, Option<i64>>(0),
-                )?)
-            })
-            .await
-            .map_err(storage_error)?;
-        let max_chars = max_chars
+        let thread_limit = snapshot
+            .summary_max_chars
             .map(|n| u64::try_from(n).map_err(|_| invalid("Invalid saved summary character limit")))
             .transpose()?;
         let limit = resolved_limit(
             requested_limit,
-            max_chars,
+            thread_limit,
             self.config.connections.get(&snapshot.profile),
         );
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
@@ -198,7 +203,16 @@ impl Compactor {
             ));
         }
         let dispatched = self
-            .dispatch_single_summary(&snapshot, original, limit, &cancel, ledger, boundary, valid)
+            .dispatch_single_summary(
+                &snapshot,
+                original,
+                limit,
+                identity.clone(),
+                &cancel,
+                ledger,
+                boundary,
+                valid,
+            )
             .await;
         let dispatched = match dispatched {
             Ok(result) => result,
@@ -340,6 +354,7 @@ impl Compactor {
         snapshot: &Snapshot,
         selected: Range<usize>,
         limit: OutputLimit,
+        identity: FailureIdentity,
         cancel: &CancellationToken,
         ledger: &mut usage::UsageLedger,
         mut boundary: Option<&mut boundary::Boundary<'_>>,
@@ -354,8 +369,8 @@ impl Compactor {
             .clients
             .get(&snapshot.profile)
             .map_err(|e| invalid(&e.to_string()))?;
-        let mut trial = Trial::new(&snapshot.thread, snapshot, selected, limit)
-            .ok_or_else(|| invalid("No summary range"))?;
+        let mut trial =
+            Trial::new(selected, identity.clone()).ok_or_else(|| invalid("No summary range"))?;
         let mut retries = 0u32;
         loop {
             if cancel.is_cancelled() {
@@ -446,6 +461,7 @@ impl Compactor {
                 selected,
                 response,
                 size,
+                identity: trial.identity.clone(),
             });
         }
     }
@@ -498,19 +514,13 @@ pub(super) fn failure_identity(
 /// Pure execution cursor: original failure identity cannot drift while halving.
 /// Dispatch, source adoption and #A transactions remain external/unconnected.
 pub(super) struct Trial {
-    pub(super) identity: FailureIdentity,
     selected: Range<usize>,
     terminal: bool,
 }
 impl Trial {
-    pub(super) fn new(
-        thread: &str,
-        snapshot: &Snapshot,
-        original: Range<usize>,
-        limit: OutputLimit,
-    ) -> Option<Self> {
-        Some(Self {
-            identity: failure_identity(thread, snapshot, original.clone(), limit)?,
+    pub(super) fn new(original: Range<usize>, identity: FailureIdentity) -> Option<Self> {
+        (!original.is_empty()).then_some(Self {
+            identity,
             selected: original,
             terminal: false,
         })
@@ -772,7 +782,8 @@ mod tests {
     #[test]
     fn trial_keeps_original_identity_across_half_then_success_or_failure() {
         let snapshot = fixture(&[40, 40, 40, 40]);
-        let mut trial = Trial::new("t", &snapshot, 0..4, OutputLimit(20000)).unwrap();
+        let identity = failure_identity("t", &snapshot, 0..4, OutputLimit(20000)).unwrap();
+        let mut trial = Trial::new(0..4, identity).unwrap();
         let original = trial.identity.0.clone();
         let mut error = model::ModelError::new("provider", "synthetic context refusal");
         error.provider_code = Some("context_length_exceeded".into());
@@ -791,7 +802,11 @@ mod tests {
             trial.finish_request(&snapshot, Err(&error), |_| panic!("no remainder retry")),
             Next::Done
         );
-        let mut failed = Trial::new("t", &snapshot, 0..4, OutputLimit(20000)).unwrap();
+        let mut failed = Trial::new(
+            0..4,
+            failure_identity("t", &snapshot, 0..4, OutputLimit(20000)).unwrap(),
+        )
+        .unwrap();
         while matches!(
             failed.finish_request(&snapshot, Err(&error), |_| true),
             Next::RetryPrefix(_)

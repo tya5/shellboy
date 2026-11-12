@@ -163,21 +163,6 @@ impl UsageLedger {
         self.save(database).await?;
         Ok(index)
     }
-    pub(super) async fn record_oversized_parts(
-        &mut self,
-        database: &DbWorker,
-        count: usize,
-    ) -> Result<(), ApiError> {
-        if count != 0 {
-            self.record.usage.oversized_reduce_parts = self
-                .record
-                .usage
-                .oversized_reduce_parts
-                .saturating_add(count as u64);
-            self.save(database).await?;
-        }
-        Ok(())
-    }
     pub(super) async fn observe(
         &mut self,
         database: &DbWorker,

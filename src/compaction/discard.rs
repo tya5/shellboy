@@ -10,6 +10,7 @@ pub enum DiscardReason {
     ThreadUnavailable,
     SelectionChanged,
     ProfileChanged,
+    SummarySettingsChanged,
     EpochChanged,
     RunStarted,
     RunStopped,
@@ -56,19 +57,6 @@ pub struct CompactionDiscard {
     pub reason: DiscardReason,
     pub phase: DiscardPhase,
     pub elapsed_ms: u64,
-}
-
-pub(super) fn with_reason(
-    mut error: crate::protocol::ApiError,
-    reason: DiscardReason,
-) -> crate::protocol::ApiError {
-    let details = error.details.get_or_insert_with(|| serde_json::json!({}));
-    if let Some(fields) = details.as_object_mut() {
-        fields
-            .entry("compaction_discard_reason")
-            .or_insert_with(|| serde_json::json!(reason));
-    }
-    error
 }
 
 pub(super) fn rejected(reason: DiscardReason, message: &str) -> crate::protocol::ApiError {

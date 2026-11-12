@@ -391,8 +391,7 @@ fn load(
         turn_boundaries: HashMap::new(),
         turn_fence,
         run_fence: run,
-        segment_chars: 0,
-        reduce_rounds: 0,
+        summary_max_chars: data.6,
     };
     // Derive the earliest selected replacement for each protected Turn by going
     // backward through indexed provenance, never scanning lifetime Turn seeds.
@@ -740,6 +739,7 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
 /// A bounded, payload-free witness of the sources that automatic compaction
 /// can currently consider. Source hashes, rather than text, are persisted.
 #[derive(Debug, Clone)]
+#[cfg(test)]
 pub(crate) struct AutomaticCandidates {
     pub revision: u64,
     pub marks: Vec<String>,
@@ -749,6 +749,7 @@ pub(crate) struct AutomaticCandidates {
 /// A metadata-only proof for an oversized protected current Turn. It never
 /// concludes "no target" unless the ordinary summary fence begins at the
 /// first selected source and replay proves that no older tool span can shrink.
+#[cfg(test)]
 pub(crate) fn automatic_structural_no_target_tx(
     db: &Connection,
     thread: &str,
@@ -845,6 +846,7 @@ pub(crate) fn automatic_structural_no_target_tx(
     Ok(None)
 }
 
+#[cfg(test)]
 pub(crate) fn automatic_candidates_tx(
     db: &Connection,
     thread: &str,

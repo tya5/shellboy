@@ -22,8 +22,7 @@ pub(crate) mod context_usage;
 pub mod discard;
 mod retry;
 pub(crate) use attempt::{
-    AutomaticStage, FINISH_SQL as ATTEMPT_FINISH_SQL, begin_tx as attempt_begin_tx,
-    finish_tx as attempt_finish_tx,
+    AutomaticStage, begin_tx as attempt_begin_tx, finish_tx as attempt_finish_tx,
 };
 mod edit;
 mod keys;
@@ -112,21 +111,7 @@ struct Snapshot {
     turn_boundaries: HashMap<String, String>,
     turn_fence: Option<(String, i64)>,
     run_fence: Option<String>,
-    /// Summary segment size in effect for this Thread: its override, the
-    /// connection, then `[compaction]` (a single compaction may override it).
-    segment_chars: usize,
-    reduce_rounds: usize,
-}
-#[derive(Clone, Debug, Default, Serialize)]
-pub(crate) struct SpillCounts {
-    candidates: u32,
-    pub(crate) spilled: u32,
-    latest_protected: u32,
-    unsafe_incomplete: u32,
-    already_spilled: u32,
-    non_reducing: u32,
-    open_tool_loop: u32,
-    driver_gate: u32,
+    summary_max_chars: Option<i64>,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CompactResult {
@@ -179,6 +164,7 @@ fn summary_refused(output: &[Value]) -> bool {
         .any(|part| part.get("type").and_then(Value::as_str) == Some("refusal"))
 }
 impl CachedPart {
+    #[cfg(test)]
     fn load(db: &Connection, key: &str) -> Result<Option<Self>, StorageError> {
         let body: Option<String> = db
             .query_row("SELECT value FROM app_meta WHERE key=?1", [key], |row| {
@@ -186,21 +172,6 @@ impl CachedPart {
             })
             .optional()?;
         Ok(body.and_then(|body| serde_json::from_str(&body).ok()))
-    }
-    fn encode(&self) -> String {
-        // Keep potentially large raw-response encoding outside the DB job.
-        let mut part = self.clone();
-        if let Some(raw) = &mut part.raw_response {
-            crate::usage::normalize_response(raw);
-        }
-        serde_json::to_string(&part).expect("summary part")
-    }
-    async fn save(&self, database: &DbWorker, lookup: String) -> Result<(), ApiError> {
-        let saved = self.encode();
-        database.call(move |db| {
-            db.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2)ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![lookup,saved])?;
-            Ok(())
-        }).await.map_err(storage_error)
     }
     fn reusable(&self) -> bool {
         if self.text.trim().is_empty() {
@@ -414,7 +385,7 @@ impl Compactor {
             // Capture revision, selected IDs and the mutation witness from one read view.
             let read = db.transaction()?;
             let db = &read;
-            let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,segment_chars,reduce_rounds FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<i64>>(6)?,r.get::<_,Option<i64>>(7)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
+            let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<i64>>(6)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
             let current_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
             let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
@@ -449,14 +420,8 @@ impl Compactor {
                     }
                 }
             }
-            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),append_witness:Some((generation,selected)),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,segment_chars:0,reduce_rounds:0}).map(|snapshot|(snapshot,data.6,data.7))
-        }).await.map_err(storage_error).map(|(mut snapshot,segment,rounds)|{
-            let config = self.config.current();
-            let connection=config.connections.get(&snapshot.profile);
-            snapshot.segment_chars=self.config.compaction.segment_chars_for(segment.map(|v|v as usize),connection);
-            snapshot.reduce_rounds=self.config.compaction.reduce_rounds_for(rounds.map(|v|v as usize),connection);
-            snapshot
-        })
+            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),append_witness:Some((generation,selected)),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,summary_max_chars:data.6})
+        }).await.map_err(storage_error)
     }
 
     /// Spill whole completed groups, retaining the newest unless the second
@@ -469,78 +434,6 @@ impl Compactor {
         self.spill_cancellable(thread, include_latest, CancellationToken::new())
             .await
     }
-    pub(crate) async fn proactive_spill_counts(
-        &self,
-        thread: &str,
-        open_loop: bool,
-        gate: bool,
-    ) -> Result<SpillCounts, ApiError> {
-        let snapshot = self.snapshot(thread, false).await?;
-        let latest = snapshot.groups.iter().rposition(|g| g.tool && g.complete);
-        let mut counts = SpillCounts::default();
-        for (i, group) in snapshot.groups.iter().enumerate() {
-            let spilled = group
-                .sources
-                .iter()
-                .all(|s| s.payload.get("spill_version").is_some());
-            if !group.tool && !spilled {
-                continue;
-            }
-            counts.candidates = counts.candidates.saturating_add(1);
-            let bucket = if spilled {
-                &mut counts.already_spilled
-            } else if Some(i) == latest {
-                &mut counts.latest_protected
-            } else if !range::group_is_safe(&snapshot, i) {
-                &mut counts.unsafe_incomplete
-            } else {
-                let before = group
-                    .sources
-                    .iter()
-                    .map(|s| edit::projection_characters(&s.payload, snapshot.epoch))
-                    .fold(0u64, u64::saturating_add);
-                if !spill_payload(group)
-                    .is_some_and(|p| edit::projection_characters(&p, snapshot.epoch) < before)
-                {
-                    &mut counts.non_reducing
-                } else if open_loop {
-                    &mut counts.open_tool_loop
-                } else if !gate {
-                    &mut counts.driver_gate
-                } else {
-                    continue;
-                }
-            };
-            *bucket = bucket.saturating_add(1);
-        }
-        Ok(counts)
-    }
-    /// Proactive spill only adopts groups whose actual replay projection shrinks.
-    pub(crate) async fn spill_reducing_cancellable(
-        &self,
-        thread: &str,
-        cancel: CancellationToken,
-        automatic: Option<AutomaticStage>,
-    ) -> Result<CompactResult, ApiError> {
-        let snapshot = self.snapshot(thread, false).await?;
-        let ranges = policy::spill_ranges(&snapshot, false)
-            .into_iter()
-            .filter(|range| {
-                let group = &snapshot.groups[range.start];
-                let before = group
-                    .sources
-                    .iter()
-                    .map(|source| edit::projection_characters(&source.payload, snapshot.epoch))
-                    .fold(0u64, u64::saturating_add);
-                spill_payload(group).is_some_and(|payload| {
-                    edit::projection_characters(&payload, snapshot.epoch) < before
-                })
-            })
-            .collect();
-        self.spill_snapshot(snapshot, ranges, cancel, false, automatic)
-            .await
-    }
-
     pub(crate) async fn spill_staged_cancellable(
         &self,
         thread: &str,
@@ -756,19 +649,18 @@ impl Compactor {
             });
         };
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        let policy = self.policy_for(&snapshot);
         let range = plan.start..plan.end();
-        self.summarize_recorded(
+        self.summarize_single(single_request::SummaryRequest {
             snapshot,
-            range,
+            original: range,
             cancel,
-            policy,
-            &mut ledger,
-            Some(plan),
-            false,
+            ledger: &mut ledger,
             boundary,
             automatic,
-        )
+            drop_all_reasoning: false,
+            active: Some(plan),
+            requested_limit: None,
+        })
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
     }
@@ -931,151 +823,21 @@ impl Compactor {
         boundary: Option<&mut boundary::Boundary<'_>>,
         automatic: Option<AutomaticStage>,
     ) -> Result<CompactResult, ApiError> {
-        let policy = self.policy_for(&snapshot);
-        self.summarize_with_policy(snapshot, range, cancel, policy, boundary, automatic)
-            .await
-    }
-    /// `[compaction]` with this Thread's resolved segment size and reduce rounds.
-    fn policy_for(&self, snapshot: &Snapshot) -> crate::config::Compaction {
-        crate::config::Compaction {
-            // Only an explicit manual --max-chars may occupy this override.
-            summary_max_chars: None,
-            segment_chars: snapshot.segment_chars,
-            reduce_rounds: snapshot.reduce_rounds,
-            ..self.config.compaction.clone()
-        }
-    }
-    async fn summarize_with_policy(
-        &self,
-        snapshot: Snapshot,
-        range: Range<usize>,
-        cancel: CancellationToken,
-        policy: crate::config::Compaction,
-        boundary: Option<&mut boundary::Boundary<'_>>,
-        automatic: Option<AutomaticStage>,
-    ) -> Result<CompactResult, ApiError> {
         let mut ledger = usage::UsageLedger::new(&snapshot);
-        self.summarize_recorded(
+        self.summarize_single(single_request::SummaryRequest {
             snapshot,
-            range,
+            original: range,
             cancel,
-            policy,
-            &mut ledger,
-            None,
-            false,
+            ledger: &mut ledger,
             boundary,
             automatic,
-        )
+            drop_all_reasoning: false,
+            active: None,
+            requested_limit: None,
+        })
         .await
         .map_err(|error| usage::annotate(error, ledger.usage()))
     }
-    #[allow(clippy::too_many_arguments)]
-    async fn summarize_recorded(
-        &self,
-        snapshot: Snapshot,
-        range: Range<usize>,
-        cancel: CancellationToken,
-        policy: crate::config::Compaction,
-        ledger: &mut usage::UsageLedger,
-        active: Option<policy::ActiveTurnPlan>,
-        drop_all_reasoning: bool,
-        mut boundary: Option<&mut boundary::Boundary<'_>>,
-        automatic: Option<AutomaticStage>,
-    ) -> Result<CompactResult, ApiError> {
-        self.summarize_single(
-            snapshot,
-            range,
-            cancel,
-            ledger,
-            boundary,
-            automatic,
-            drop_all_reasoning,
-            active,
-            policy.summary_max_chars,
-        )
-        .await
-    }
-}
-
-/// Fixed model-facing notice for an active-Turn summary (#181): covered tools
-/// already ran, so the model must not repeat them blindly.
-fn active_turn_notice(originals: &[String], retained: usize) -> String {
-    let first = originals.first().map_or("", String::as_str);
-    let order = if retained > 0 {
-        format!(
-            " {retained} user message(s) delivered during the summarized work are kept under User instructions to keep; their order relative to its steps may differ from the original. When exact order matters, follow the originals with shellboy history relations --node {first} --relation next."
-        )
-    } else {
-        String::new()
-    };
-    format!(
-        "Shellboy context notice: the tool work below in the active Turn was summarized, replacing {} source nodes ({first} through {}). The tools it describes were already executed and their side effects remain; inspect the current state before repeating an operation. The latest tool round is included as text at the end.{order} Originals: shellboy history get --node <source_node_id>.",
-        originals.len(),
-        originals.last().map_or("", String::as_str),
-    )
-}
-
-/// #182 ④: the latest complete tool round as plain text. Reasoning, signed
-/// thinking and other opaque provider blocks are never included; calls and
-/// results become text, so no tool_use/tool_result block remains.
-fn latest_round_text(group: &Group) -> String {
-    let mut lines = vec!["Latest tool round (already executed; provided as text):".to_owned()];
-    for source in &group.sources {
-        // A message accepted while the round ran is a bare role payload.
-        let items: Vec<Value> = match source.payload.get("output").and_then(Value::as_array) {
-            Some(items) => items.clone(),
-            None => source
-                .payload
-                .get("item")
-                .cloned()
-                .or_else(|| source.payload.get("role").map(|_| source.payload.clone()))
-                .into_iter()
-                .collect(),
-        };
-        for item in items {
-            if item.get("type").and_then(Value::as_str) == Some("reasoning")
-                || crate::model::opaque::is_opaque(&item)
-            {
-                continue;
-            }
-            let text = |v: &Value| v.as_str().map_or_else(|| v.to_string(), str::to_owned);
-            match item.get("type").and_then(Value::as_str) {
-                Some("function_call") => lines.push(format!(
-                    "Tool call {} ({}): {}",
-                    text(&item["call_id"]),
-                    text(&item["name"]),
-                    text(&item["arguments"])
-                )),
-                Some("function_call_output") => lines.push(format!(
-                    "Tool result {}: {}",
-                    text(&item["call_id"]),
-                    text(&item["output"])
-                )),
-                _ => {
-                    let content = item
-                        .get("content")
-                        .and_then(|c| {
-                            c.as_str()
-                                .map(|t| vec![json!({"text":t})])
-                                .or_else(|| c.as_array().cloned())
-                        })
-                        .map(|parts| {
-                            parts
-                                .iter()
-                                .filter_map(|p| p.get("text").and_then(Value::as_str))
-                                .collect::<Vec<_>>()
-                                .join("\n")
-                        })
-                        .filter(|t| !t.is_empty());
-                    match content {
-                        Some(body) => lines.push(format!("{}: {body}", text(&item["role"]))),
-                        None => lines.push(item.to_string()),
-                    }
-                }
-            }
-        }
-    }
-    lines.join("\n")
 }
 
 /// The immutable spill projection is shared by explicit spills and the atomic
@@ -1153,12 +915,12 @@ fn spill_payload(group: &Group) -> Option<Value> {
 
 fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageError> {
     use discard::{DiscardReason as R, rejected};
-    let matches: Option<(Option<bool>, Option<bool>, Option<bool>)> = tx.query_row(
-        "SELECT selection_revision=?2,profile_revision=?3,reasoning_epoch=?4 FROM thread WHERE id=?1 AND deleted_at IS NULL",
-        params![s.thread,s.revision as i64,s.profile_revision,s.epoch],
-        |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+    let matches:Option<(Option<bool>,Option<bool>,Option<bool>,Option<bool>)>=tx.query_row(
+        "SELECT selection_revision=?2,profile_revision=?3,reasoning_epoch=?4,summary_max_chars IS ?5 FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        params![s.thread,s.revision as i64,s.profile_revision,s.epoch,s.summary_max_chars],
+        |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
     ).optional()?;
-    let Some((selection, profile, epoch)) = matches else {
+    let Some((selection, profile, epoch, settings)) = matches else {
         return Err(rejected(
             R::ThreadUnavailable,
             "Compaction snapshot changed; late result discarded",
@@ -1169,6 +931,7 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
         (selection, R::SelectionChanged),
         (profile, R::ProfileChanged),
         (epoch, R::EpochChanged),
+        (settings, R::SummarySettingsChanged),
     ] {
         if valid != Some(true) {
             return Err(
@@ -1351,6 +1114,7 @@ fn source_groups(sources: Vec<Source>, completed: &HashSet<String>) -> Vec<Group
     }
     groups
 }
+#[cfg(test)]
 fn segments(
     groups: &[Group],
     epoch: i64,
@@ -1483,8 +1247,7 @@ mod tests {
             turn_boundaries: HashMap::new(),
             turn_fence: None,
             run_fence: None,
-            segment_chars: SEGMENT_CHARS,
-            reduce_rounds: 4,
+            summary_max_chars: None,
         }
     }
     #[test]
@@ -2082,6 +1845,32 @@ mod tests {
         .await
         .unwrap();
         let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let stale_settings = compactor.snapshot("t", true).await.unwrap();
+        db.call(|db| {
+            db.execute("UPDATE thread SET summary_max_chars=9000 WHERE id='t'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let settings_rejected = db
+            .call(move |db| {
+                let tx = db.transaction()?;
+                validate(&tx, &stale_settings)?;
+                Ok(())
+            })
+            .await
+            .unwrap_err()
+            .into_api_error();
+        assert_eq!(
+            settings_rejected.details.unwrap()["compaction_discard_reason"],
+            "summary_settings_changed"
+        );
+        db.call(|db| {
+            db.execute("UPDATE thread SET summary_max_chars=NULL WHERE id='t'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
         let snapshot = compactor.snapshot("t", true).await.unwrap();
         db.call(|db| {
             db.execute(

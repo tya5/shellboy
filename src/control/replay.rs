@@ -53,11 +53,14 @@ struct Ledger {
     pinned: AtomicUsize,
 }
 struct Frame {
+    #[cfg(test)]
     ordinal: usize,
     stamp: Stamp,
     items: Vec<Value>,
     group: Option<String>,
+    #[cfg(test)]
     spill_result_item: bool,
+    #[cfg(test)]
     spill_projection_safe: bool,
     spill_marker: bool,
     bytes: usize,
@@ -130,6 +133,7 @@ impl ReplayLease {
         &self.0.witness
     }
     /// Recover source order without sorting or copying any model payload.
+    #[cfg(test)]
     fn source_order(&self) -> Option<Vec<Option<&Frame>>> {
         let mut ordered = vec![None; self.0.frames.len()];
         for frame in &self.0.frames {
@@ -141,6 +145,7 @@ impl ReplayLease {
         Some(ordered)
     }
     /// Detect changes to an earlier selected path without copying payloads.
+    #[cfg(test)]
     pub(crate) fn extends(&self, previous: &PathWitness) -> bool {
         use sha2::{Digest, Sha256};
         if previous.nodes > self.0.frames.len() {
@@ -169,6 +174,7 @@ impl ReplayLease {
     /// Prove that no older tool span can shrink, using a conservative lower
     /// bound for each replacement and at most 8 MiB of already-replayed JSON.
     /// False means "unknown or possibly reducible", never "reducible".
+    #[cfg(test)]
     pub(crate) fn proves_no_reducing_older_tools(&self) -> bool {
         const MAX_BYTES: usize = 8 * 1024 * 1024;
         const MAX_FRAMES: usize = 4096;
@@ -270,6 +276,7 @@ impl ReplayLease {
     }
 
     /// Node anchoring the newest replayable tool group, if one exists.
+    #[cfg(test)]
     pub(crate) fn latest_tool_anchor(&self) -> Option<&str> {
         self.0
             .frames
@@ -287,6 +294,7 @@ impl ReplayLease {
     /// Active-Turn summary can cover an older tool group or spill marker even
     /// if that group itself is not worth spilling. Return true only when that
     /// scope is structurally impossible, without inspecting user content.
+    #[cfg(test)]
     pub(crate) fn proves_no_active_middle(&self) -> bool {
         let mut first = None;
         for frame in &self.0.frames {
@@ -306,6 +314,7 @@ impl ReplayLease {
 
     /// Only completed groups before the newest can become ordinary spill
     /// targets. Ignore growth of the newest, protected group.
+    #[cfg(test)]
     pub(crate) fn old_tool_frontier(&self) -> String {
         use sha2::{Digest, Sha256};
         let Some(ordered) = self.source_order() else {
@@ -712,8 +721,12 @@ fn decode_frame_checked(
     keep: &std::collections::HashSet<String>,
     ledger: &Arc<Ledger>,
 ) -> Result<Frame, FrameError> {
-    let (group, items, spill_result_item, spill_projection_safe, spill_marker) = match body {
-        None => (None, Vec::new(), false, true, false),
+    #[cfg(test)]
+    let mut spill_result_item = false;
+    #[cfg(test)]
+    let mut spill_projection_safe = true;
+    let (group, items, spill_marker) = match body {
+        None => (None, Vec::new(), false),
         Some(body) => {
             let value: Value = serde_json::from_str(&body)
                 .map_err(|error| StorageError::Schema(error.to_string()))?;
@@ -722,13 +735,14 @@ fn decode_frame_checked(
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             let spill = value.get("spill_version").is_some();
-            let no_output = value.get("output").and_then(Value::as_array).is_none();
-            // convert() prefers role over item, while spill_payload() prefers
-            // item over role; never prove a lower bound for that ambiguity.
-            let spill_projection_safe =
-                !(no_output && value.get("role").is_some() && value.get("item").is_some());
-            let spill_result_item = spill_projection_safe
-                && no_output
+            #[cfg(test)]
+            spill_projection_safe = {
+                let no_output = value.get("output").and_then(Value::as_array).is_none();
+                !(no_output && value.get("role").is_some() && value.get("item").is_some())
+            };
+            #[cfg(test)]
+            spill_result_item = spill_projection_safe
+                && value.get("output").and_then(Value::as_array).is_none()
                 && value
                     .get("item")
                     .and_then(|item| item.get("type"))
@@ -742,12 +756,12 @@ fn decode_frame_checked(
                 } else {
                     items
                 },
-                spill_result_item,
-                spill_projection_safe,
                 spill,
             )
         }
     };
+    #[cfg(not(test))]
+    let _ = ordinal;
     let bytes = size_of::<Frame>()
         + 2 * size_of::<usize>()
         + stamp.id.capacity()
@@ -757,11 +771,14 @@ fn decode_frame_checked(
         + items.iter().map(heap_bytes).sum::<usize>();
     ledger.live.fetch_add(bytes, Ordering::AcqRel);
     Ok(Frame {
+        #[cfg(test)]
         ordinal,
         stamp,
         items,
         group,
+        #[cfg(test)]
         spill_result_item,
+        #[cfg(test)]
         spill_projection_safe,
         spill_marker,
         bytes,

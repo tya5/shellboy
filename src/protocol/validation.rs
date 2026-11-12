@@ -358,12 +358,15 @@ pub(crate) fn parse_target_percent(value: &str) -> Result<Option<i64>, ApiError>
 pub(crate) fn parse_summary_chars(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "summary_max_chars", &(1..=i64::MAX as usize))
 }
+#[cfg(test)]
 pub(crate) fn parse_segment_chars(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "segment_chars", &crate::config::SEGMENT_CHARS_RANGE)
 }
+#[cfg(test)]
 pub(crate) fn parse_reduce_rounds(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "reduce_rounds", &crate::config::REDUCE_ROUNDS_RANGE)
 }
+#[cfg(test)]
 fn check_summary_parameters(segment: Option<u64>, rounds: Option<u64>) -> Result<(), ApiError> {
     if let Some(value) = segment {
         parse_segment_chars(&value.to_string())?;

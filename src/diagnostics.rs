@@ -589,6 +589,7 @@ impl Diagnostics {
         }
     }
     /// Finite try_send only. This method is safe to call on the UI main thread.
+    #[cfg(test)]
     pub(crate) fn record_automatic_compaction(
         &self,
         event: DiagnosticEvent,

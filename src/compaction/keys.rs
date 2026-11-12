@@ -25,6 +25,7 @@ impl<'a> CompactionKeys<'a> {
     pub(crate) fn result(operation: &str) -> String {
         format!("compact.result.{operation}")
     }
+    #[cfg(test)]
     pub(super) fn summary_part(digest: &str) -> String {
         format!("summary.part.{digest}")
     }

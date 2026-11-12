@@ -31,6 +31,7 @@ impl RawContextUsage {
     /// Proactive-compaction evidence from the same latest completed attempt the
     /// CLI reports: its ID, provider-reported input tokens (never estimated),
     /// and whether a replacement was adopted after it started.
+    #[cfg(test)]
     pub(crate) fn latest_reported_input(&self) -> Option<(&str, Option<u64>, bool)> {
         if self.coverage.is_some() {
             return None;
