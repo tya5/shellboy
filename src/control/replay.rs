@@ -277,45 +277,6 @@ impl ReplayLease {
         true
     }
 
-    /// Node anchoring the newest replayable tool group, if one exists.
-    #[cfg(test)]
-    #[cfg(test)]
-    pub(crate) fn latest_tool_anchor(&self) -> Option<&str> {
-        self.0
-            .frames
-            .iter()
-            .filter(|frame| {
-                frame.group.is_some()
-                    && frame.items.iter().any(|item| {
-                        item.get("type").and_then(Value::as_str) == Some("function_call")
-                    })
-            })
-            .max_by_key(|frame| frame.ordinal)
-            .map(|frame| frame.stamp.id.as_str())
-    }
-
-    /// Active-Turn summary can cover an older tool group or spill marker even
-    /// if that group itself is not worth spilling. Return true only when that
-    /// scope is structurally impossible, without inspecting user content.
-    #[cfg(test)]
-    #[cfg(test)]
-    pub(crate) fn proves_no_active_middle(&self) -> bool {
-        let mut first = None;
-        for frame in &self.0.frames {
-            if frame.spill_marker {
-                return false;
-            }
-            if let Some(group) = frame.group.as_deref() {
-                match first {
-                    None => first = Some(group),
-                    Some(previous) if previous != group => return false,
-                    _ => {}
-                }
-            }
-        }
-        true
-    }
-
     /// Only completed groups before the newest can become ordinary spill
     /// targets. Ignore growth of the newest, protected group.
     #[cfg(test)]

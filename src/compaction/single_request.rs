@@ -381,8 +381,7 @@ impl Compactor {
             .clients
             .get(&snapshot.profile)
             .map_err(|e| invalid(&e.to_string()))?;
-        let mut trial =
-            Trial::new(selected, identity.clone()).ok_or_else(|| invalid("No summary range"))?;
+        let mut trial = Trial::new(selected).ok_or_else(|| invalid("No summary range"))?;
         let mut retries = 0u32;
         loop {
             if cancel.is_cancelled() {
@@ -530,9 +529,15 @@ pub(super) struct Trial {
     terminal: bool,
 }
 impl Trial {
-    pub(super) fn new(original: Range<usize>, identity: FailureIdentity) -> Option<Self> {
+    pub(super) fn new(original: Range<usize>) -> Option<Self> {
         (!original.is_empty()).then_some(Self {
-            #[cfg(test)]
+            selected: original,
+            terminal: false,
+        })
+    }
+    #[cfg(test)]
+    fn with_identity(original: Range<usize>, identity: FailureIdentity) -> Option<Self> {
+        (!original.is_empty()).then_some(Self {
             identity,
             selected: original,
             terminal: false,
@@ -796,7 +801,7 @@ mod tests {
     fn trial_keeps_original_identity_across_half_then_success_or_failure() {
         let snapshot = fixture(&[40, 40, 40, 40]);
         let identity = failure_identity("t", &snapshot, 0..4, OutputLimit(20000)).unwrap();
-        let mut trial = Trial::new(0..4, identity).unwrap();
+        let mut trial = Trial::with_identity(0..4, identity).unwrap();
         let original = trial.identity.0.clone();
         let mut error = model::ModelError::new("provider", "synthetic context refusal");
         error.provider_code = Some("context_length_exceeded".into());
@@ -815,7 +820,7 @@ mod tests {
             trial.finish_request(&snapshot, Err(&error), |_| panic!("no remainder retry")),
             Next::Done
         );
-        let mut failed = Trial::new(
+        let mut failed = Trial::with_identity(
             0..4,
             failure_identity("t", &snapshot, 0..4, OutputLimit(20000)).unwrap(),
         )
