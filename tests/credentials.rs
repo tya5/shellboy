@@ -731,7 +731,13 @@ async fn config_get_states_where_each_key_comes_from_and_nothing_else() {
         assert_eq!(got["credentials_file"]["present"], true);
         // Only a name and a fact: no value, no length.
         assert!(!mentions(&got.to_string()));
-        let shown = got["credentials_file"].to_string();
+        // The path holds a random temporary directory name that can contain any
+        // digits, so only the reported facts are searched.
+        let shown = {
+            let mut facts = got["credentials_file"].clone();
+            facts.as_object_mut().unwrap().remove("path");
+            facts.to_string()
+        };
         assert!(!shown.contains("api_key") && !shown.contains(&KEY.len().to_string()));
 
         let set_reply = call(&control, set("envy", OTHER_KEY)).await.unwrap();

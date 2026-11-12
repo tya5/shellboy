@@ -693,9 +693,16 @@ async fn multiple_calls_keep_source_order_numbers_commands_background_and_cancel
         .unwrap();
     assert!(running_row.contains("背景（利用者）"), "{running_row}");
     assert!(running_row.find("sleep 30").unwrap() < running_row.find("背景（利用者）").unwrap());
+    // The background-process panel (`\-[1] $ cmd`) may or may not be on screen
+    // when the frame is drawn; only conversation items count here.
+    let conversation: String = shown
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("\\-["))
+        .map(|line| format!("{line}\n"))
+        .collect();
     for command in ["printf one", "sleep 30", "printf MUST_NOT_RUN"] {
         assert_eq!(
-            shown.matches(command).count(),
+            conversation.matches(command).count(),
             1,
             "call/result merge must emit one item per stable identity: {shown}"
         );
