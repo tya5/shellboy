@@ -204,8 +204,10 @@ pub struct Connection {
     #[serde(default, deserialize_with = "summary_chars_option")]
     pub summary_max_chars: Option<u64>,
     /// Overrides `[compaction] segment_chars` for this connection.
+    #[serde(skip)]
     pub segment_chars: Option<usize>,
     /// Overrides `[compaction] reduce_rounds` for this connection.
+    #[serde(skip)]
     pub reduce_rounds: Option<usize>,
     /// The `credentials.toml` beside the loaded configuration file (#269); never
     /// accepted from TOML. `None` when the connection did not come from a file.
@@ -1077,9 +1079,13 @@ pub fn resolve_cli_data_dir(
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(from = "CompactionFields")]
 pub struct Compaction {
+    #[serde(skip_serializing)]
     pub summary_max_chars: Option<u64>,
+    #[serde(skip_serializing)]
     pub summary_max_percent: Option<f64>,
+    #[serde(skip_serializing)]
     pub summary_map_max_requests: usize,
+    #[serde(skip_serializing)]
     pub summary_reduce_max_requests: usize,
     /// Proactive compaction threshold on the provider-reported input tokens of
     /// the last adopted attempt. 0 disables; connections may override it.
@@ -1087,47 +1093,18 @@ pub struct Compaction {
     /// Characters of original conversation per map part (one model request
     /// each) and the packing size of a reduce request. Connections and a
     /// Thread may override it; a compaction may override it once.
+    #[serde(skip_serializing)]
     pub segment_chars: usize,
     /// Maximum reduce rounds before a still-too-long summary is rejected.
+    #[serde(skip_serializing)]
     pub reduce_rounds: usize,
 }
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
-struct CompactionFields {
-    summary_max_chars: Option<u64>,
-    summary_max_percent: Option<f64>,
-    summary_map_max_requests: Option<usize>,
-    summary_reduce_max_requests: Option<usize>,
-    auto_at_tokens: Option<u64>,
-    segment_chars: Option<usize>,
-    reduce_rounds: Option<usize>,
-}
+struct CompactionFields { auto_at_tokens:Option<u64> }
 impl From<CompactionFields> for Compaction {
-    fn from(f: CompactionFields) -> Self {
-        let request_only = f.summary_max_chars.is_none()
-            && f.summary_max_percent.is_none()
-            && (f.summary_map_max_requests.is_some()
-                || f.summary_reduce_max_requests.is_some()
-                || f.auto_at_tokens.is_some()
-                || f.segment_chars.is_some()
-                || f.reduce_rounds.is_some());
-        Self {
-            summary_max_chars: if request_only {
-                Some(20_000)
-            } else {
-                f.summary_max_chars
-            },
-            summary_max_percent: if request_only {
-                Some(5.0)
-            } else {
-                f.summary_max_percent
-            },
-            summary_map_max_requests: f.summary_map_max_requests.unwrap_or(128),
-            summary_reduce_max_requests: f.summary_reduce_max_requests.unwrap_or(16),
-            auto_at_tokens: f.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),
-            segment_chars: f.segment_chars.unwrap_or(DEFAULT_SEGMENT_CHARS),
-            reduce_rounds: f.reduce_rounds.unwrap_or(DEFAULT_REDUCE_ROUNDS),
-        }
+    fn from(fields:CompactionFields)->Self {
+        Self {auto_at_tokens:fields.auto_at_tokens.unwrap_or(DEFAULT_AUTO_AT_TOKENS),..Default::default()}
     }
 }
 impl Default for Compaction {

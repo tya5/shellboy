@@ -162,8 +162,8 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         auto_at_tokens,
         auto_compact_target_percent,
         summary_max_chars,
-        segment_chars,
-        reduce_rounds,
+        segment_chars:_,
+        reduce_rounds:_,
         credentials_file: _,
         stored_keys: _,
     } = connection;
@@ -206,8 +206,6 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         auto_compact_target_percent,
     );
     out.plain(&at("summary_max_chars"), summary_max_chars);
-    out.plain(&at("segment_chars"), segment_chars);
-    out.plain(&at("reduce_rounds"), reduce_rounds);
 }
 fn shell_fields(out: &mut Fields, shell: &Shell) {
     let Shell {

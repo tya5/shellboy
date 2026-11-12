@@ -130,3 +130,16 @@ summary_max_chars INTEGER CHECK(summary_max_chars IS NULL OR
 (typeof(summary_max_chars)='integer' AND summary_max_chars BETWEEN1AND9223372036854775807)).
 This paragraph is notation, not executable SQL (actual statements must use
 separate BETWEEN numeric tokens). No SQL/registry change in this checkpoint.
+
+## Public Pre-Release Compatibility Removal
+
+Old Thread/manual segment_chars/reduce_rounds and manual max_percent flags,
+DTO fields and UI form controls are removed, not ignored compatibility shims.
+Old connection segment_chars/reduce_rounds and old [compaction] summary/map/
+reduce controls are rejected as unknown input. [compaction] auto_at_tokens is
+retained; new output/target settings resolve Thread->connection->defaults.
+Persisted old Thread columns/cache data remain untouched. Internal snapshot /
+preview scaffolding still being removed is not a supported public setting.
+Strict consumers must regenerate against final schema before release; old
+configuration must be edited by its owner before activation. This task does
+not read/edit real user configuration or migrate installed data.
