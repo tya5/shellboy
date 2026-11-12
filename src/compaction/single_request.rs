@@ -136,7 +136,7 @@ impl Compactor {
         let adoption=SummaryAdoption {
             automatic,removed_characters:(source_chars-projected) as u64,drop_all_reasoning,snapshot,
             sources,payload,start:selected.start,count:selected.end,
-            result:CompactResult {source_characters:Some(source_chars),summary_characters:Some(text_chars),summary_limit:Some(limit.0 as usize),model_requests:Some(ledger.usage().requests as usize),source_nodes:originals.len(),original_node_ids:originals,summary_usage:Some(ledger.usage().clone()),..Default::default()}
+            result:CompactResult {source_characters:Some(source_chars as u64),summary_characters:Some(text_chars as u64),summary_limit:Some(limit.0),model_requests:Some(ledger.usage().requests as usize),source_nodes:originals.len(),original_node_ids:originals,summary_usage:Some(ledger.usage().clone()),..Default::default()}
         };
         let config=self.config.clone();
         self.database.call(move |db| {let tx=db.transaction()?;let result=adoption.adopt_tx(&tx,&config,&cancel)?;tx.commit()?;Ok(result)}).await.map_err(storage_error)
