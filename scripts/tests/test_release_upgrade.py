@@ -15,8 +15,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
         db.execute('PRAGMA foreign_keys=ON')
-        current = (ROOT / 'src/storage/current.sql').read_text(encoding='utf-8')
-        base = current.split('-- Derived readback paths only:')[0]
+        # Use a pinned schema-42 source: current.sql is schema 43 and correctly
+        # no longer contains segment_chars/reduce_rounds. These historical
+        # upgrade tests must not derive old schemas from the current schema.
+        current=(ROOT/'tests/fixtures/storage-current-schema42.sql').read_text(encoding='utf-8')
+        base=current.split('-- Derived readback paths only:')[0]
         # Model the historical schema, then exercise the actual additive migration.
         witness = ", selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0)"
         self.assertEqual(base.count(witness), 1)
@@ -409,7 +412,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
     def test_schema37_to38_checks_only_the_human_pending_index(self):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
-        db.executescript((ROOT / 'src/storage/current.sql').read_text())
+        db.executescript((ROOT/'tests/fixtures/storage-current-schema42.sql').read_text())
         db.executescript("DROP INDEX receipt_human_reply_pending; DELETE FROM schema_migration WHERE version>=38; PRAGMA user_version=37;")
         before, _ = self.upgrade(db, 37, 38)
         self.assertEqual(checks.ledger(db), before + [(38, '0038_human_reply_pending')])
