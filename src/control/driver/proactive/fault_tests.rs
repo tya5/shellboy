@@ -755,11 +755,7 @@ pub(super) async fn checkpoint(
         9 => {
             let hit = injection.reached.clone();
             control.store.database.call(move |db| {
-                db.execute_batch("CREATE TEMP TABLE retired_write_hits(site TEXT NOT NULL);
-                    INSERT INTO app_meta(key,value) VALUES
-                      ('compact.automatic_active.retired-write-test','seed-active'),
-                      ('compact.automatic_guard.retired-write-test','seed-guard'),
-                      ('compact.automatic_status.retired-write-test','seed-status');")?;
+                db.execute_batch("CREATE TEMP TABLE retired_write_hits(site TEXT NOT NULL);");
                 db.create_scalar_function("retired_write_hit", 1, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
                     hit.store(true, Ordering::SeqCst);
                     Ok(1i64)

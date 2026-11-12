@@ -396,7 +396,7 @@ async fn assert_record(
                 // Every replacement adopted for the Thread: (kind, output node).
                 let replacements: Vec<(String, String)> = db.prepare("SELECT n.kind,n.id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 ORDER BY n.rowid")?
                     .query_map([&target], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
-                let witness: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1 AND key!='compact.automatic_active.retired-write-test'", [&target], |r| r.get(0))?;
+                let witness: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1", [&target], |r| r.get(0))?;
                 let pending: Option<String> = db.query_row("SELECT value FROM app_meta WHERE key='compact.automatic_target.'||?1", [&target], |r| r.get(0)).optional()?;
                 let boundary: Option<(i64, i64)> = db.query_row("SELECT revision,epoch FROM fault_boundary", [], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
                 let initial: Option<i64> = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0)).optional().ok().flatten();
@@ -422,26 +422,11 @@ async fn assert_record(
     // reached or is rejected. A healthy W3 (cancellation, rejected final
     // write) legitimately saves its normal result before the failure.
     let mut guard_expected = guard_before.to_vec();
-    if fault == Fault::RetiredWritesAbsent {
-        guard_expected.extend([
-            (
-                "compact.automatic_guard.retired-write-test".into(),
-                "seed-guard".into(),
-            ),
-            (
-                "compact.automatic_status.retired-write-test".into(),
-                "seed-status".into(),
-            ),
-        ]);
-        guard_expected.sort();
-    }
-    if !matches!(fault, Fault::RetiredWritesAbsent) {
-        assert_eq!(
-            guard_rows(control).await,
-            guard_expected,
-            "the #180 guard is exactly the pre-attempt value"
-        );
-    }
+    assert_eq!(
+        guard_rows(control).await,
+        guard_expected,
+        "the #180 guard/status rows remain byte-exact through this observation"
+    );
     // This record is read after shutdown/reopen, so terminal writers that
     // succeeded are reflected; final-record write denials remain provisional.
     let phase = if live {
@@ -588,40 +573,18 @@ async fn assert_record(
         "no legacy activity witness {fault:?} live={live}"
     );
     if fault == Fault::RetiredWritesAbsent {
-        let rows: Vec<(String, String)> = control.store.database.call(|db| {
-            Ok(db.prepare("SELECT key,value FROM app_meta WHERE key='compact.automatic_active.retired-write-test' ORDER BY key")?
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                .collect::<rusqlite::Result<_>>()?)
-        }).await.unwrap();
-        if live {
-            assert_eq!(
-                rows,
-                [(
-                    "compact.automatic_active.retired-write-test".into(),
-                    "seed-active".into()
-                )],
-                "legacy W0 row remains byte-exact through the held checkpoint"
-            );
-        } else {
-            assert!(
-                rows.is_empty(),
-                "normal terminal cleanup removes the retired W0 sentinel row"
-            );
-        }
-        if live {
-            let hits: i64 = control
-                .store
-                .database
-                .call(|db| {
-                    Ok(db.query_row("SELECT count(*) FROM retired_write_hits", [], |r| r.get(0))?)
-                })
-                .await
-                .unwrap();
-            assert_eq!(
-                hits, 0,
-                "no retired W0/W2/W3 production write was attempted"
-            );
-        }
+        let hits: i64 = control
+            .store
+            .database
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM retired_write_hits", [], |r| r.get(0))?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            hits, 0,
+            "no retired W0/W2/W3 production write through {live} observation"
+        );
     }
     assert!(
         pending.is_none(),
