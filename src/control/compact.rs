@@ -282,7 +282,10 @@ mod tests {
             from_node_id: Some("first".into()),
             to_node_id: Some("last".into()),
         }
-      db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE operation_receipt(operation_id TEXT PRIMARY KEY,result_ref_json TEXT NOT NULL);").unwrap();
+    }
+    fn fixture() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE operation_receipt(operation_id TEXT PRIMARY KEY,result_ref_json TEXT NOT NULL);").unwrap();
         for (operation, explicit) in [
             ("automatic-a", false),
             ("automatic-b", false),
