@@ -138,7 +138,7 @@ pub(super) struct DispatchRequest<'a, 'b> {
     cancel: &'a CancellationToken,
     ledger: &'a mut usage::UsageLedger,
     boundary: Option<&'a mut boundary::Boundary<'b>>,
-    eligible: Box<dyn Fn(Range<usize>) -> bool + 'a>,
+    eligible: Box<dyn Fn(Range<usize>) -> bool + Send + 'a>,
 }
 pub(super) struct Dispatched {
     pub(super) selected: Range<usize>,
