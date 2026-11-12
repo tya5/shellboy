@@ -401,26 +401,39 @@ mod activity_migration_tests {
     fn executor_matches_registered_migration_versions() {
         // Schema1 is bootstrap-only; every later registered migration must
         // have exactly one executable step, in registry order.
-        let registered:Vec<_>=crate::storage::MIGRATION_NAMES.iter().skip(1).map(|(version,_)|*version).collect();
-        let executable:Vec<_>=MIGRATIONS.iter().map(|migration|migration.version).collect();
-        assert_eq!(executable,registered);
+        let registered: Vec<_> = crate::storage::MIGRATION_NAMES
+            .iter()
+            .skip(1)
+            .map(|(version, _)| *version)
+            .collect();
+        let executable: Vec<_> = MIGRATIONS
+            .iter()
+            .map(|migration| migration.version)
+            .collect();
+        assert_eq!(executable, registered);
     }
 
     #[tokio::test]
     async fn pinned_schema42_startup_upgrade_writer_settings_and_reopen() {
         // Pinned verbatim from 4e6241a9:src/storage/current.sql, not derived
         // by downgrading today's schema or replaying the executor under test.
-        let root=tempfile::tempdir().unwrap();let path=root.path().join("conversation.sqlite");
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("conversation.sqlite");
         {
-            let db=Connection::open(&path).unwrap();
-            db.execute_batch(include_str!("../../tests/fixtures/compaction-schema42.sql")).unwrap();
-            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),42);
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(include_str!("../../tests/fixtures/compaction-schema42.sql"))
+                .unwrap();
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                42
+            );
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')",[]).unwrap();
         }
         // open_connection is the actual startup migration path. Keep this
         // connection open while the foreground DbWorker owns a second handle.
-        let _startup=crate::storage::open_connection(&path,None,None,false).unwrap();
-        let writer=crate::storage::DbWorker::open(&path).await.unwrap();
+        let _startup = crate::storage::open_connection(&path, None, None, false).unwrap();
+        let writer = crate::storage::DbWorker::open(&path).await.unwrap();
         writer.call(|db| {
             assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,43);
             let old:(Option<i64>,Option<i64>)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
@@ -429,7 +442,7 @@ mod activity_migration_tests {
             Ok(())
         }).await.unwrap();
         writer.shutdown().await.unwrap();
-        let reopened=crate::storage::DbWorker::open(&path).await.unwrap();
+        let reopened = crate::storage::DbWorker::open(&path).await.unwrap();
         reopened.call(|db| {
             let saved:(i64,i64)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
             assert_eq!(saved,(80,24000));
@@ -438,7 +451,6 @@ mod activity_migration_tests {
         }).await.unwrap();
         reopened.shutdown().await.unwrap();
     }
-
 
     #[test]
     fn rebuild_fk_violation_rejects_commit_preserves_old_rows_and_restores_enforcement() {
