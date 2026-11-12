@@ -289,19 +289,19 @@ impl Compactor {
         };
         let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":summary_text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
         let mut kept_reasoning = Vec::new();
-        if let Some(plan) = &active {
-            if reaches_latest {
-                kept_reasoning = snapshot.groups[plan.latest]
-                    .sources
-                    .iter()
-                    .filter(|s| s.payload["type"] == "tool_call")
-                    .map(|s| s.id.clone())
-                    .collect();
-                payload["summary_scope"] = json!("active_turn_middle");
-                payload["kept_reasoning_node_ids"] = json!(kept_reasoning);
-            } else {
-                payload["summary_scope"] = json!("active_turn_prefix");
-            }
+        if let Some(plan) = &active
+            && reaches_latest
+        {
+            kept_reasoning = snapshot.groups[plan.latest]
+                .sources
+                .iter()
+                .filter(|s| s.payload["type"] == "tool_call")
+                .map(|s| s.id.clone())
+                .collect();
+            payload["summary_scope"] = json!("active_turn_middle");
+            payload["kept_reasoning_node_ids"] = json!(kept_reasoning);
+        } else if active.is_some() {
+            payload["summary_scope"] = json!("active_turn_prefix");
         }
         let projected = edit::projection_characters(&payload, snapshot.epoch);
         if projected >= source_chars {
@@ -395,7 +395,6 @@ impl Compactor {
                 .ok_or_else(|| invalid("Summary trial already ended"))?;
             let payload = super::single_request::request(snapshot, selected.clone(), limit);
             // Preserve existing transport admission and durable usage accounting.
-            // Legacy usage counters remain until public schema retirement step.
             let admission = self
                 .summary_admission(&client, snapshot, cancel, boundary.as_deref_mut())
                 .await?;

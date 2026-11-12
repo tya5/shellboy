@@ -705,14 +705,14 @@ fn apply_runtime(
         )
         .details(json!({"written":false})));
     }
+    if written && state.read_only {
+        return Err(ApiError::new(
+            ErrorCode::IoFailed,
+            "The configuration file is read-only; nothing was written",
+        )
+        .details(json!({"config_path":path,"written":false})));
+    }
     if written {
-        if state.read_only {
-            return Err(ApiError::new(
-                ErrorCode::IoFailed,
-                "The configuration file is read-only; nothing was written",
-            )
-            .details(json!({"config_path":path,"written":false})));
-        }
         if let Some(warning) =
             replace_atomically(path, &state, edited.as_bytes(), before_replace, replace)?
         {
@@ -1028,15 +1028,16 @@ fn remove_field(doc: &mut DocumentMut, path: &[String], index: usize) -> Result<
         return Ok(());
     };
     if let Some(next) = next {
-        if let Some(mut key) = parent.key_mut(&next) {
-            let old = key
-                .leaf_decor()
-                .prefix()
-                .and_then(|prefix| prefix.as_str())
-                .unwrap_or_default()
-                .to_owned();
-            key.leaf_decor_mut().set_prefix(comment + &old);
-        }
+        let Some(mut key) = parent.key_mut(&next) else {
+            return Ok(());
+        };
+        let old = key
+            .leaf_decor()
+            .prefix()
+            .and_then(|prefix| prefix.as_str())
+            .unwrap_or_default()
+            .to_owned();
+        key.leaf_decor_mut().set_prefix(comment + &old);
         return Ok(());
     }
     let mut best = None;
