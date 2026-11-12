@@ -291,19 +291,17 @@ fn compact_summary_limits_match_new_main_and_reject_other_modes() {
     set(&mut form, "from_node", "a");
     set(&mut form, "to_node", "b");
     set(&mut form, "max_chars", "1200");
-    set(&mut form, "max_percent", "12.5");
     let Command::ContextEdit(args) = form.command(&c.cwd).unwrap() else {
         panic!("summary command required")
     };
     assert_eq!(args.max_chars, Some(1200));
-    assert_eq!(args.max_percent, Some(12.5));
     for mode in ["deferred", "maximal", "spill", "trim", "omit", "restore"] {
         set(&mut form, "action", mode);
         assert!(form.command(&c.cwd).is_err(), "{mode}");
     }
     set(&mut form, "action", "summary");
-    for value in ["0", "101", "NaN", "inf", "-1"] {
-        set(&mut form, "max_percent", value);
+    for value in ["0", "9223372036854775808", "NaN", "inf", "-1"] {
+        set(&mut form, "max_chars", value);
         assert!(form.command(&c.cwd).is_err(), "{value}");
     }
 }

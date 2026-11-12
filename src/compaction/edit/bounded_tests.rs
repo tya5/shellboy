@@ -412,7 +412,6 @@ async fn map_cache_survives_output_limit_changes() {
     edit(&f, &a).await.unwrap_err();
     assert_eq!(lines(&log), 5);
     a.max_chars = Some(3000);
-    a.max_percent = Some(100.0);
     let r = edit(&f, &a).await.unwrap();
     assert_eq!(r.compact.model_requests, Some(0));
     assert_eq!(r.compact.reused_parts, 1);
@@ -452,12 +451,11 @@ async fn bounded_summary_override_and_unicode_character_count_and_nonshrinking_r
     f.text("n0", &"source".repeat(10_000)).await;
     let mut a = args("n0");
     a.max_chars = Some(3000);
-    a.max_percent = Some(4.0);
     let r = edit(&f, &a).await.unwrap();
     assert_eq!(r.compact.summary_characters, Some(2000));
     assert_eq!(
         r.compact.summary_limit,
-        Some((r.compact.source_characters.unwrap() as f64 * 0.04).floor() as u64)
+        Some(3000)
     );
     assert_eq!(lines(&log), 1);
     finish(f, server).await;

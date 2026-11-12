@@ -989,6 +989,7 @@ impl Compactor {
             automatic,
             drop_all_reasoning,
             active,
+            policy.summary_max_chars,
         )
         .await
     }

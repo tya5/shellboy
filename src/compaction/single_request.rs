@@ -134,6 +134,7 @@ impl Compactor {
         automatic: Option<AutomaticStage>,
         drop_all_reasoning: bool,
         active: Option<policy::ActiveTurnPlan>,
+        requested_limit:Option<u64>,
     ) -> Result<CompactResult, ApiError> {
         let region = if active.is_some() {
             Region::Active
@@ -177,10 +178,10 @@ impl Compactor {
         let max_chars = max_chars
             .map(|n| u64::try_from(n).map_err(|_| invalid("Invalid saved summary character limit")))
             .transpose()?;
-        let limit = OutputLimit(crate::config::summary_chars_for(
+        let limit = OutputLimit(requested_limit.unwrap_or(crate::config::summary_chars_for(
             max_chars,
             self.config.connections.get(&snapshot.profile),
-        ));
+        )));
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
         let thread = snapshot.thread.clone();
