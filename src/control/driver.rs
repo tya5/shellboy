@@ -3,7 +3,6 @@ mod adoption;
 mod notification_admission;
 mod overflow;
 mod proactive;
-mod proactive_guard;
 mod request;
 mod retry;
 mod shell_output;

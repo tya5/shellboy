@@ -505,7 +505,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         token: "site-token".into(),
         thread: thread_id.clone(),
         turn,
-        target_tokens: None,
     };
     let begin = (attempt.clone(), automatic.token.clone());
     control

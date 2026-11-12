@@ -13,7 +13,6 @@ pub(crate) struct AutomaticStage {
     /// `closed_spill`, `closed_summary`, `active_spill` or `active_summary`.
     pub(crate) stage: &'static str,
     /// Calibrated attempts: the pending-target key and its provisional value.
-    pub(crate) target: Option<(String, String)>,
 }
 
 /// Replaces W2/W4 bodies while keeping the stage facts of the same token.
@@ -106,12 +105,6 @@ pub(super) fn record_tx(
             format!("$.automatic_trim_attempt.committed_stages.{}", stage.stage)
         ],
     )?;
-    if let Some((key, value)) = &stage.target {
-        tx.execute(
-            "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params![key, value],
-        )?;
-    }
     Ok(())
 }
 

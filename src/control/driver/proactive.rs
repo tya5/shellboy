@@ -7,78 +7,9 @@ mod fault_tests;
 
 pub(super) const REASON: &str = "proactive_threshold";
 
-/// Loaded lazily from durable Thread metadata; unlike token growth, the
-/// witness changes only when eligible saved source facts may have changed.
+/// Kept as a caller handle; no durable progress/marks policy lives here.
 #[derive(Default)]
-pub(super) struct ProactiveBudget {
-    loaded: bool,
-    guard: Option<super::proactive_guard::Guard>,
-    status_context: Option<(String, String)>,
-    below_context: Option<(String, String)>,
-    /// #182: the previous attempt in this Run adopted the ordinary prefix
-    /// summary; if a fresh measurement is still at or above the threshold,
-    /// the active-Turn summary goes first in the next attempt.
-    /// #248: summary stages rejected earlier in this Turn.
-    blocks: Blocks,
-}
-
-/// A summary stage that failed (not cancelled) is not tried again in the same
-/// Turn while the forecast is unknown, until that stage adopts a summary. With
-/// known marks, closed rejection survives unrelated spill/active adoption until
-/// a new closed-summary source appears. The
-/// Run-local state is simply lost on restart (one more attempt is allowed).
-#[derive(Default)]
-struct Blocks {
-    turn: String,
-    closed: bool,
-    active: bool,
-    closed_marks: Option<Vec<String>>,
-}
-
-impl Blocks {
-    fn note(
-        &mut self,
-        turn: &str,
-        closed: Option<&str>,
-        active: Option<&str>,
-        marks: Option<&[String]>,
-    ) {
-        if self.turn != turn {
-            *self = Self {
-                turn: turn.to_owned(),
-                ..Self::default()
-            };
-        }
-        if closed == Some("rejected") {
-            self.closed_marks = marks.map(<[String]>::to_vec);
-        }
-        if closed == Some("adopted") {
-            self.closed_marks = None;
-        }
-        for (flag, outcome) in [(&mut self.closed, closed), (&mut self.active, active)] {
-            match outcome {
-                Some("rejected") => *flag = true,
-                Some("adopted") => *flag = false,
-                _ => {}
-            }
-        }
-    }
-    fn closed_for(&self, turn: &str, marks: Option<&[String]>) -> bool {
-        self.turn == turn
-            && self.closed
-            && match (&self.closed_marks, marks) {
-                (Some(previous), Some(current)) => {
-                    !super::proactive_guard::has_new_marks(previous, current, "summary:")
-                }
-                // Unknown coverage keeps the #248 per-stage Turn block.
-                (_, None) => true,
-                (None, Some(_)) => false,
-            }
-    }
-    fn active_for(&self, turn: &str) -> bool {
-        self.turn == turn && self.active
-    }
-}
+pub(super) struct ProactiveBudget;
 
 /// One automatic attempt's identity for the #226 recoverable record.
 struct Automatic {
@@ -86,7 +17,6 @@ struct Automatic {
     token: String,
     thread: String,
     turn: String,
-    target_tokens: Option<u64>,
 }
 
 impl Automatic {
@@ -156,25 +86,8 @@ impl Automatic {
         result
     }
 
-    /// The calibrated provisional target uses the scope W4 would give the
-    /// stage; `marks` stays null, the documented coverage-limited baseline.
     fn stage(&self, stage: &'static str) -> crate::compaction::AutomaticStage {
-        let scope = match stage {
-            "closed_spill" => "spill",
-            "closed_summary" => "prefix",
-            _ => "active_turn",
-        };
-        crate::compaction::AutomaticStage {
-            attempt_id: self.attempt.clone(),
-            token: self.token.clone(),
-            stage,
-            target: self.target_tokens.map(|tokens| {
-                (
-                    crate::compaction::CompactionKeys::new(&self.thread).automatic_target(),
-                    json!({"attempt":self.attempt,"target_tokens":tokens,"scope":scope,"turn":self.turn,"marks":null,"provisional":true}).to_string(),
-                )
-            }),
-        }
+        crate::compaction::AutomaticStage {attempt_id:self.attempt.clone(),token:self.token.clone(),stage}
     }
 }
 
@@ -191,26 +104,6 @@ async fn summary_stage(control:&Arc<Control>,compactor:&crate::compaction::Compa
     Ok(result)
 }
 
-enum Measurement {
-    BelowThreshold,
-    Ready(Evidence),
-}
-
-struct Evidence {
-    attempt: String,
-    input_tokens: u64,
-    input_characters: Option<u64>,
-    insufficient_prefix: bool,
-    prior_turn_prefix: bool,
-    insufficient_spill: bool,
-    exhausted_active: bool,
-    baseline_marks: Option<Vec<String>>,
-}
-
-/// Called at the request boundary while the Thread boundary guard is held and
-/// before the next attempt is prepared. Returns true when compaction ran (any
-/// outcome); the caller then re-reads the Turn snapshot because the replay
-/// lease was released and the selected path may have changed.
 pub(super) async fn maybe_compact(
     control: &Arc<Control>,
     snapshot: &mut Snapshot,
@@ -290,7 +183,6 @@ pub(super) async fn maybe_compact(
         token: uuid::Uuid::new_v4().to_string(),
         thread: snapshot.thread.clone(),
         turn: snapshot.turn.clone(),
-        target_tokens: None,
     };
     let (id, token, thread) = (
         automatic.attempt.clone(),
