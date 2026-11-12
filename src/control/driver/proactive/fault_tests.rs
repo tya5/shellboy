@@ -505,12 +505,31 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             "postcommit barrier reached"
         );
         assert_boundary(&control, &target, scenario, fault, "checkpoint").await;
+        if fault == Fault::Remeasurement {
+            assert!(
+                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
+                "remeasurement failure is armed before checkpoint release"
+            );
+        }
         release_checkpoint.notify_one();
+        if fault == Fault::Remeasurement {
+            crate::test_watchdog::watchdog("remeasurement failure consumed", async {
+                while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
     }
     let shutdown = control.shutdown().await;
     if matches!(
         fault,
-        Fault::Persistent | Fault::RejectFinal | Fault::Remeasurement
+        Fault::Persistent
+            | Fault::RejectFinal
+            | Fault::Remeasurement
+            | Fault::Storage
+            | Fault::RetiredWritesAbsent
     ) {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
     } else {

@@ -100,7 +100,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         .await
         .unwrap();
     }
-    let live = assert_record(
+    let checkpoint = assert_record(
         &control,
         &target,
         fault,
@@ -110,15 +110,39 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         true,
     )
     .await;
+    assert_eq!(
+        checkpoint.record["outcome"],
+        expected_outcome(fault, ObservationPhase::AtCommittedCheckpoint),
+        "record is observed only while its explicit stage barrier is held"
+    );
     if fault != Fault::RejectFact {
         assert!(checkpoint_reached.load(Ordering::SeqCst));
         assert_boundary(&control, &target, scenario, fault, "checkpoint").await;
+        if fault == Fault::Remeasurement {
+            assert!(
+                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
+                "remeasurement failure is armed at the checkpoint"
+            );
+        }
         release_checkpoint.notify_one();
+        if fault == Fault::Remeasurement {
+            crate::test_watchdog::watchdog("record remeasurement fault consumed", async {
+                while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
     }
     let shutdown = control.shutdown().await;
     if matches!(
         fault,
-        Fault::Persistent | Fault::RejectFinal | Fault::Remeasurement
+        Fault::Persistent
+            | Fault::RejectFinal
+            | Fault::Remeasurement
+            | Fault::Storage
+            | Fault::RetiredWritesAbsent
     ) {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
     } else {
@@ -133,6 +157,32 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
     assert!(
         receive.try_recv().is_err(),
         "no extra provider POST after checkpoint release and shutdown"
+    );
+    let terminal = assert_record(
+        &control,
+        &target,
+        fault,
+        scenario,
+        stage,
+        &guard_before,
+        false,
+    )
+    .await;
+    assert_eq!(
+        terminal.attempt, checkpoint.attempt,
+        "same attempt across phases"
+    );
+    assert_eq!(
+        terminal.record["trigger"], checkpoint.record["trigger"],
+        "immutable trigger across phases"
+    );
+    assert_eq!(
+        terminal.record["committed_stages"], checkpoint.record["committed_stages"],
+        "committed stage facts retained across terminal write"
+    );
+    assert!(
+        receive.try_recv().is_err(),
+        "no provider POST after terminal outcome"
     );
     drop_fault_triggers(&control).await;
     drop(control);
@@ -150,8 +200,8 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
     )
     .await;
     assert_eq!(
-        live.record, after.record,
-        "restart reconciles nothing and rewrites nothing"
+        terminal.record, after.record,
+        "restart preserves the exact post-shutdown terminal record byte-for-byte"
     );
     later_attempt(&control, &mut receive, &target, &after).await;
     control.shutdown().await.unwrap();
