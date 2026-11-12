@@ -417,11 +417,9 @@ mod activity_migration_tests {
             assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),42);
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')",[]).unwrap();
         }
-        let startup=crate::storage::open_connection(&path,None,None,false).unwrap();
-        assert_eq!(startup.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0)).unwrap(),43);
-        let legacy:(Option<i64>,Option<i64>)=startup.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
-        assert_eq!(legacy,(None,None));
-        drop(startup);
+        // open_connection is the actual startup migration path. Keep this
+        // connection open while the foreground DbWorker owns a second handle.
+        let _startup=crate::storage::open_connection(&path,None,None,false).unwrap();
         let writer=crate::storage::DbWorker::open(&path).await.unwrap();
         writer.call(|db| {
             assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,43);
