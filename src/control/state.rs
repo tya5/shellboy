@@ -134,6 +134,12 @@ pub(super) fn complete_attempt(
             diagnostic_json(response)
         ],
     )?;
+    if changed==1 {
+        let evidence:(String,String,String,Option<u64>)=db.query_row(
+            "SELECT t.thread_id,a.profile_id,a.model_id,json_extract(a.input_manifest_json,'$.compaction_scope_generation') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1",
+            [attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+        crate::compaction::a_state::complete_report_tx(db,&evidence.0,&evidence.1,&evidence.2,attempt,evidence.3,crate::usage::StandardUsage::from_value(&response["usage"]).input_tokens)?;
+    }
     attempt_outcome(db, attempt, AttemptState::Completed, changed)
 }
 fn diagnostic_json(response: &Value) -> String {

@@ -112,7 +112,7 @@ impl Compactor {
         if blocked {return Err(invalid("This closed summary range already failed deterministically"));}
         let dispatched=self.dispatch_single_summary(&snapshot,original,limit,&cancel,ledger,boundary,|prefix| {
             range::validate(&snapshot,std::slice::from_ref(&prefix),range::RangeMode::Summary).is_ok()
-                && snapshot.groups[prefix].iter().any(Group::eligible)
+                && snapshot.groups[prefix].iter().any(|g|g.sources.iter().any(|s|s.payload.get("summary_format").is_none()))
         }).await;
         let dispatched=match dispatched {
             Ok(result)=>result,
@@ -131,7 +131,7 @@ impl Compactor {
         let sources:Vec<Source>=snapshot.groups[selected.clone()].iter().flat_map(|g|g.sources.clone()).chain(snapshot.extra_sources.clone()).collect();
         let originals:Vec<String>=sources.iter().map(|s|s.id.clone()).collect();
         let text_chars=dispatched.response.text.chars().count();
-        let source_chars=sources.iter().map(|s|edit::projection_characters(&s.payload,snapshot.epoch)).sum::<usize>();
+        let source_chars=sources.iter().map(|s|edit::projection_characters(&s.payload,snapshot.epoch)).sum::<u64>();
         let payload=json!({"item":{"role":"developer","content":[{"type":"input_text","text":dispatched.response.text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
         let projected=edit::projection_characters(&payload,snapshot.epoch);
         if projected>=source_chars {
@@ -220,7 +220,7 @@ pub(super) fn failure_identity(thread: &str, snapshot: &Snapshot, original: Rang
     let groups=snapshot.groups.get(original)?;
     let first=groups.iter().flat_map(|g|g.sources.iter()).next()?;
     let last=groups.iter().rev().flat_map(|g|g.sources.iter().rev()).next()?;
-    Some(FailureIdentity(digest(&serde_json::to_vec(&json!([
+    Some(FailureIdentity(crate::digest::sha256_hex(&serde_json::to_vec(&json!([
         thread,first.id,last.id,snapshot.profile,snapshot.model,limit.0
     ])).expect("identity serializes"))))
 }
