@@ -8785,7 +8785,10 @@ mod tool_refresh_tests {
             context_usage: None,
             usage_totals: None,
         }
-    i.view().generation,
+    }
+    fn frame(ui: &UiState, read_revision: u64, facts: Option<ToolObservation>) -> UiUpdate {
+        UiUpdate::CurrentView {
+            generation: ui.view().generation,
             details: details(),
             context_usage: Default::default(),
             history: Box::new(UiUpdate::History {
