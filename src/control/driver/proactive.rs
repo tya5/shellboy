@@ -146,7 +146,7 @@ pub(super) async fn maybe_compact(
             .transpose()?,
         connection,
     );
-    let percent = crate::config::target_percent_for(
+    let percent = crate::config::SummarySettings::resolve(
         data.0
             .1
             .map(|n| {
@@ -155,8 +155,8 @@ pub(super) async fn maybe_compact(
                 })
             })
             .transpose()?,
-        connection,
-    );
+        None,connection,None,
+    ).target_percent;
     if threshold == 0 {
         return Ok(false);
     }

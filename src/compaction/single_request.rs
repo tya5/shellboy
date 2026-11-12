@@ -2,21 +2,11 @@
 //! Not yet connected to dispatch/adoption: no #A writer or settings storage.
 use super::*;
 
-pub(super) const DEFAULT_OUTPUT_CHARACTERS: u64 = 20_000;
-
-/// Already-resolved policy. Validation/storage remain at the settings boundary.
+/// Request construction consumes an already-resolved output policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct OutputLimit(pub(super) u64);
-impl OutputLimit {
-    pub(super) fn resolve(thread: Option<Self>, connection: Option<Self>) -> Self {
-        thread
-            .or(connection)
-            .unwrap_or(Self(DEFAULT_OUTPUT_CHARACTERS))
-    }
-}
-
 fn resolved_limit(manual:Option<u64>,thread:Option<u64>,connection:Option<&crate::config::Connection>)->OutputLimit {
-    OutputLimit(manual.unwrap_or_else(||crate::config::summary_chars_for(thread,connection)))
+    OutputLimit(crate::config::SummarySettings::resolve(None,thread,connection,manual).output_characters)
 }
 
 pub(super) fn request(snapshot: &Snapshot, selected: Range<usize>, limit: OutputLimit) -> Value {
@@ -585,17 +575,17 @@ mod tests {
     #[test]
     fn one_request_contains_whole_selected_range_and_output_instruction() {
         let snapshot = fixture(&[40, 60, 80]);
-        let body = request(&snapshot, 0..2, OutputLimit::resolve(None, None));
+        let body = request(&snapshot, 0..2, resolved_limit(None,None,None));
         let text = body.to_string();
         assert!(text.contains("source0") && text.contains("source1"));
         assert!(!text.contains("source2"));
         assert!(text.contains("20000") && text.contains("User instructions to keep"));
         assert_eq!(
-            OutputLimit::resolve(Some(OutputLimit(37)), Some(OutputLimit(80))),
+            resolved_limit(Some(37),Some(80),None),
             OutputLimit(37)
         );
         assert_eq!(
-            OutputLimit::resolve(None, Some(OutputLimit(80))),
+            resolved_limit(None,Some(80),None),
             OutputLimit(80)
         );
     }

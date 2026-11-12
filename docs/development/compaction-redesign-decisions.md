@@ -143,3 +143,17 @@ preview scaffolding still being removed is not a supported public setting.
 Strict consumers must regenerate against final schema before release; old
 configuration must be edited by its owner before activation. This task does
 not read/edit real user configuration or migrate installed data.
+
+## Structural Repair Of Repeated Migration Failures
+
+| Failure group | Root cause | Authority / repair |
+| --- | --- | --- |
+| Defaults overrode Thread settings; preview and effective output diverged | Multiple independent priority implementations | SummarySettings::resolve is sole default/priority authority for selector, request, preview and readback; deleted old separate resolvers and OutputLimit default logic. |
+| DTO fields removed while fixtures still construct obsolete contracts | Positional field repetition rather than semantic construction | ContextEditArgs::for_range and ThreadSetArgs::summary_settings own construction; protocol and settings fixtures use these typed entry points. Removed fields remain removed. |
+| Raw/function boundaries damaged by syntax-guessing substitutions | Regex treated Rust text as syntax | Stopped syntax-guessing edits. Restored explicit original boundaries; subsequent edits use named exact semantic blocks only. |
+
+Request formats model input only; Trial owns original identity/cursor/termination;
+adoption owns final saved-projection shrink check and transactional revalidation.
+This refactor does not merge those responsibilities, weaken guards, add legacy
+fallbacks, or claim tests passed. Remaining obsolete runtime fixtures are part
+of this same migration group, not a reason to restore removed public fields.

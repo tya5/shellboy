@@ -18,16 +18,7 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
         (ContextEditAction::Trim, None, None, false),
         (ContextEditAction::Restore, None, Some("b"), false),
     ] {
-        let command = Command::ContextEdit(ContextEditArgs {
-            max_chars: None,
-            max_percent: None,
-            segment_chars: None,
-            reduce_rounds: None,
-            thread_id: Some("t".into()),
-            action,
-            from_node_id: from.map(str::to_owned),
-            to_node_id: to.map(str::to_owned),
-        });
+        let command = Command::ContextEdit(ContextEditArgs::for_range(action,Some("t".into()),from.map(str::to_owned),to.map(str::to_owned)));
         assert_eq!(command.validate().is_ok(), valid, "{command:?}");
         assert!(!command.is_read_only());
     }
@@ -35,10 +26,7 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
         assert!(
             Command::ContextEdit(ContextEditArgs {
                 max_chars: None,
-                max_percent: None,
-                segment_chars: None,
-                reduce_rounds: None,
-                thread_id: None,
+                            thread_id: None,
                 action: ContextEditAction::Restore,
                 from_node_id: Some(id),
                 to_node_id: None,
@@ -925,27 +913,10 @@ fn index_dimensions_are_explicit_bounded_and_rebuild_only() {
 
 #[test]
 fn summary_limits_are_checked_at_the_owner_boundary() {
-    let mut a = ContextEditArgs {
-        thread_id: None,
-        action: ContextEditAction::Summary,
-        from_node_id: Some("a".into()),
-        to_node_id: Some("b".into()),
-        max_chars: Some(1),
-        max_percent: None,
-        segment_chars: None,
-        reduce_rounds: None,
-    };
-    assert!(a.validate().is_ok());
-    a.max_chars = Some(0);
-    assert!(a.validate().is_err());
-    a.max_chars = None;
-    for p in [0.0, -1.0, 100.1, f64::NAN, f64::INFINITY] {
-        a.max_percent = Some(p);
-        assert!(a.validate().is_err());
-    }
-    a.max_percent = Some(5.0);
-    a.action = ContextEditAction::Omit;
-    assert!(a.validate().is_err());
+    let mut a=ContextEditArgs::for_range(ContextEditAction::Summary,None,Some("a".into()),Some("b".into()));
+    for value in [1,i64::MAX as u64] {a.max_chars=Some(value);assert!(a.validate().is_ok());}
+    for value in [0,i64::MAX as u64+1,u64::MAX] {a.max_chars=Some(value);assert!(a.validate().is_err());}
+    a.max_chars=Some(5);a.action=ContextEditAction::Omit;assert!(a.validate().is_err());
 }
 
 #[test]

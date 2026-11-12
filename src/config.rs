@@ -1138,15 +1138,20 @@ fn target_percent_option<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Optio
 fn summary_chars_option<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
     bounded_setting(d, i64::MAX as u64)
 }
-pub fn target_percent_for(thread: Option<u64>, connection: Option<&Connection>) -> u64 {
-    thread
-        .or_else(|| connection.and_then(|c| c.auto_compact_target_percent))
-        .unwrap_or(20)
+/// Authoritative request settings: manual overrides only output size; Thread
+/// overrides connection defaults. Callers must validate persisted inputs first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SummarySettings {
+    pub target_percent: u64,
+    pub output_characters: u64,
 }
-pub fn summary_chars_for(thread: Option<u64>, connection: Option<&Connection>) -> u64 {
-    thread
-        .or_else(|| connection.and_then(|c| c.summary_max_chars))
-        .unwrap_or(20000)
+impl SummarySettings {
+    pub fn resolve(thread_percent:Option<u64>,thread_characters:Option<u64>,connection:Option<&Connection>,manual_characters:Option<u64>)->Self {
+        Self {
+            target_percent:thread_percent.or_else(||connection.and_then(|c|c.auto_compact_target_percent)).unwrap_or(20),
+            output_characters:manual_characters.or(thread_characters).or_else(||connection.and_then(|c|c.summary_max_chars)).unwrap_or(20000),
+        }
+    }
 }
 pub const DEFAULT_AUTO_AT_TOKENS: u64 = 200_000;
 pub const DEFAULT_SEGMENT_CHARS: usize = 64_000;

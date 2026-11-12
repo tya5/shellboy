@@ -20,8 +20,8 @@ async fn store() -> (TempDir, Store) {
         default_effort="custom"
         [connections.other]
         base_url="http://127.0.0.1:2/v1"
-        segment_chars=40000
-        reduce_rounds=3
+        summary_max_chars=12000
+        auto_compact_target_percent=3
     "#,
     )
     .unwrap();
@@ -2510,17 +2510,8 @@ async fn thread_auto_compact_override_is_copied_by_fork() {
     store.database.shutdown().await.unwrap();
 }
 
-fn set_summary_parameters(
-    thread: &str,
-    segment_chars: Option<&str>,
-    reduce_rounds: Option<&str>,
-) -> Command {
-    Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(thread.into()),
-        segment_chars: segment_chars.map(Into::into),
-        reduce_rounds: reduce_rounds.map(Into::into),
-        ..Default::default()
-    }))
+fn set_summary_parameters(thread:&str,chars:Option<&str>,percent:Option<&str>)->Command {
+    Command::ThreadSet(Box::new(ThreadSetArgs::summary_settings(thread.into(),percent.map(str::to_owned),chars.map(str::to_owned))))
 }
 
 #[tokio::test]
@@ -2528,9 +2519,9 @@ async fn thread_summary_parameters_follow_default_connection_thread_precedence_a
     let (_root, store) = store().await;
     let thread = create(&store, None).await.thread_id;
     let got = get_thread(&store, &thread).await;
-    assert_eq!(got["segment_chars"], Value::Null);
-    assert_eq!(got["effective_segment_chars"], 64_000);
-    assert_eq!(got["effective_reduce_rounds"], 4);
+    assert_eq!(got["summary_max_chars"], Value::Null);
+    assert_eq!(got["effective_summary_max_chars"], 20_000);
+    assert_eq!(got["effective_auto_compact_target_percent"], 20);
     // The connection value replaces [compaction] for a Thread without its own value.
     let moved = execute(
         &store,
@@ -2541,29 +2532,29 @@ async fn thread_summary_parameters_follow_default_connection_thread_precedence_a
         })),
     )
     .await;
-    assert_eq!(moved.result["effective_segment_chars"], 40_000);
-    assert_eq!(moved.result["effective_reduce_rounds"], 3);
+    assert_eq!(moved.result["effective_summary_max_chars"], 12_000);
+    assert_eq!(moved.result["effective_auto_compact_target_percent"], 3);
     // The Thread value replaces the connection value and reports both.
     let set = execute(
         &store,
         set_summary_parameters(&thread, Some("8000"), Some("9")),
     )
     .await;
-    assert_eq!(set.result["segment_chars"], 8_000);
-    assert_eq!(set.result["effective_segment_chars"], 8_000);
-    assert_eq!(set.result["reduce_rounds"], 9);
-    assert_eq!(set.result["effective_reduce_rounds"], 9);
+    assert_eq!(set.result["summary_max_chars"], 8_000);
+    assert_eq!(set.result["effective_summary_max_chars"], 8_000);
+    assert_eq!(set.result["auto_compact_target_percent"], 9);
+    assert_eq!(set.result["effective_auto_compact_target_percent"], 9);
     // Each value changes independently; an empty string clears only that one.
     let cleared = execute(&store, set_summary_parameters(&thread, Some(""), None)).await;
-    assert_eq!(cleared.result["segment_chars"], Value::Null);
-    assert_eq!(cleared.result["effective_segment_chars"], 40_000);
-    assert_eq!(cleared.result["reduce_rounds"], 9);
+    assert_eq!(cleared.result["summary_max_chars"], Value::Null);
+    assert_eq!(cleared.result["effective_summary_max_chars"], 12_000);
+    assert_eq!(cleared.result["auto_compact_target_percent"], 9);
     let got = get_thread(&store, &thread).await;
-    assert_eq!(got["effective_segment_chars"], 40_000);
-    assert_eq!(got["effective_reduce_rounds"], 9);
+    assert_eq!(got["effective_summary_max_chars"], 12_000);
+    assert_eq!(got["effective_auto_compact_target_percent"], 9);
     execute(&store, set_summary_parameters(&thread, None, Some(""))).await;
     assert_eq!(
-        get_thread(&store, &thread).await["effective_reduce_rounds"],
+        get_thread(&store, &thread).await["effective_auto_compact_target_percent"],
         3
     );
     store.database.shutdown().await.unwrap();
@@ -2579,13 +2570,13 @@ async fn thread_summary_parameters_reject_out_of_range_values_and_are_inherited(
     )
     .await;
     for (segment, rounds) in [
-        (Some("1999"), None),
-        (Some("1000001"), None),
+        (Some("0"), None),
+        (Some("9223372036854775808"), None),
         (Some("-1"), None),
         (Some("1.5"), None),
         (Some(" 5000"), None),
         (None, Some("0")),
-        (None, Some("17")),
+        (None, Some("101")),
         (None, Some("x")),
     ] {
         let error = store
@@ -2603,19 +2594,19 @@ async fn thread_summary_parameters_reject_out_of_range_values_and_are_inherited(
     }
     let got = get_thread(&store, &thread).await;
     assert_eq!(
-        (got["segment_chars"].clone(), got["reduce_rounds"].clone()),
+        (got["summary_max_chars"].clone(), got["auto_compact_target_percent"].clone()),
         (2_000.into(), 16.into())
     );
     // A child starts from its parent's values; later parent changes do not reach it.
     let child = create(&store, Some(thread.clone())).await;
     assert_eq!(
-        (child.segment_chars, child.reduce_rounds),
+        (child.summary_max_chars, child.auto_compact_target_percent),
         (Some(2_000), Some(16))
     );
     execute(&store, set_summary_parameters(&thread, Some(""), Some(""))).await;
     let got = get_thread(&store, &child.thread_id).await;
     assert_eq!(
-        (got["segment_chars"].clone(), got["reduce_rounds"].clone()),
+        (got["summary_max_chars"].clone(), got["auto_compact_target_percent"].clone()),
         (2_000.into(), 16.into())
     );
     store.database.shutdown().await.unwrap();

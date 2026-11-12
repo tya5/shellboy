@@ -703,7 +703,7 @@ fn make_plan(loaded: &Loaded, args: &CompactPreviewArgs, config: &Config) -> Pla
             ));
         }
         let connection=config.connections.get(&snapshot.profile);
-        let cap=args.max_chars.unwrap_or_else(||crate::config::summary_chars_for(loaded.thread_summary_chars,connection));
+        let cap=crate::config::SummarySettings::resolve(None,loaded.thread_summary_chars,connection,args.max_chars).output_characters;
         plan.summary=Some(Summary{source_characters,limit:cap});
         plan.after = None;
         // Counts describe original messages removed, not unknown generated text.

@@ -774,6 +774,14 @@ args!(ContextEditArgs {
     #[serde(default)] to_node_id: Option<String>,
     #[serde(default)] max_chars: Option<u64>
 });
+impl ContextEditArgs {
+    /// The single construction point for optional request controls. Builders
+    /// and fixtures set only their explicit overrides after constructing it.
+    pub fn for_range(action:ContextEditAction,thread_id:Option<String>,from_node_id:Option<String>,to_node_id:Option<String>)->Self {
+        Self {thread_id,action,from_node_id,to_node_id,max_chars:None}
+    }
+}
+
 args!(#[derive(Default)] CompactPreviewArgs {
     #[serde(default)] thread_id: Option<String>,
     #[serde(default)] action: Option<ContextEditAction>,
@@ -851,6 +859,11 @@ args!(ThreadRewindArgs {
     dry_run: bool
 });
 args!(#[derive(Default)] ThreadSetArgs { #[serde(default, skip_serializing_if = "Option::is_none")] agents: Option<String>, #[serde(default)] connection: Option<String>, #[serde(default)] thread_id: Option<String>, #[serde(default)] cwd: Option<String>, #[serde(default)] model: Option<String>, #[serde(default)] effort: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] title: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] auto_compact_at: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] auto_compact_target_percent: Option<String>, #[serde(default, skip_serializing_if="Option::is_none")] summary_max_chars: Option<String>, #[serde(default, skip_serializing_if = "Option::is_none")] parent_id: Option<String> });
+impl ThreadSetArgs {
+    pub fn summary_settings(thread_id:String,target_percent:Option<String>,summary_max_chars:Option<String>)->Self {
+        Self {thread_id:Some(thread_id),auto_compact_target_percent:target_percent,summary_max_chars,..Default::default()}
+    }
+}
 args!(MessageAskArgs { #[serde(default, skip_serializing_if = "Option::is_none")] thread_id: Option<String>, text: String });
 args!(MessageSendArgs { #[serde(default, skip_serializing_if = "is_false")] human: bool, #[serde(default, skip_serializing_if = "is_false")] resume_recovery: bool, #[serde(default, skip_serializing_if = "is_false")] to_human: bool, #[serde(default, skip_serializing_if = "is_false")] expect_reply: bool, #[serde(default, skip_serializing_if = "Option::is_none")] sender_label: Option<String>, #[serde(default)] thread_id: Option<String>, text: String, #[serde(default, skip_serializing_if = "Deliver::is_next")] deliver: Deliver });
 /// Message delivery timing; `Complete` is Revisit.

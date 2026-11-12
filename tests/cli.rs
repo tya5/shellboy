@@ -1118,15 +1118,12 @@ async fn compact_summary_limit_overrides_are_typed_and_summary_only() {
         "b",
         "--max-chars",
         "6000",
-        "--max-percent",
-        "2.5",
     ])
     .await;
     let Command::ContextEdit(args) = command else {
         panic!("expected context edit")
     };
     assert_eq!(args.max_chars, Some(6000));
-    assert_eq!(args.max_percent, Some(2.5));
     assert!(args.validate().is_ok());
     for arguments in [
         vec!["compact", "--max-chars", "6000"],
