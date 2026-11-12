@@ -479,8 +479,6 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
             auto_compact_target_percent: None,
             summary_max_chars: None,
             auto_compact_at: None,
-            segment_chars: None,
-            reduce_rounds: None,
             agents: None,
             connection: None,
             thread_id: Some(thread.clone()),

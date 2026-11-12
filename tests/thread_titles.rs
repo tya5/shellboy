@@ -483,8 +483,6 @@ fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> 
         auto_compact_target_percent: None,
         summary_max_chars: None,
         auto_compact_at: None,
-        segment_chars: None,
-        reduce_rounds: None,
         agents: None,
         connection: None,
         thread_id: thread.map(Into::into),

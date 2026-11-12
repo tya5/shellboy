@@ -794,12 +794,6 @@ pub struct ThreadSetOptions {
     pub auto_compact_target_percent: Option<String>,
     #[arg(long, allow_hyphen_values = true)]
     pub summary_max_chars: Option<String>,
-    /// Summary segment size in characters for this Thread (2000..=1000000); an empty string restores the connection value.
-    #[arg(long, allow_hyphen_values = true)]
-    pub segment_chars: Option<String>,
-    /// Maximum summary reduce rounds for this Thread (1..=16); an empty string restores the connection value.
-    #[arg(long, allow_hyphen_values = true)]
-    pub reduce_rounds: Option<String>,
     /// Move this Thread under another live Thread; an empty string detaches it (no parent). Live Runs keep their owner.
     #[arg(long = "parent")]
     pub parent_id: Option<String>,
@@ -1437,8 +1431,6 @@ impl Cli {
                     auto_compact_at: a.auto_compact_at,
                     auto_compact_target_percent: a.auto_compact_target_percent,
                     summary_max_chars: a.summary_max_chars,
-                    segment_chars: a.segment_chars,
-                    reduce_rounds: a.reduce_rounds,
                     parent_id: a.parent_id,
                 })),
             },

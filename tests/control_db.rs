@@ -209,8 +209,6 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
                 auto_compact_at: None,
                 auto_compact_target_percent:None,
                 summary_max_chars:None,
-                segment_chars: None,
-                reduce_rounds: None,
                 agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
@@ -1033,8 +1031,6 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             auto_compact_target_percent: None,
             summary_max_chars: None,
             auto_compact_at: None,
-            segment_chars: None,
-            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
@@ -1053,8 +1049,6 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             auto_compact_target_percent: None,
             summary_max_chars: None,
             auto_compact_at: None,
-            segment_chars: None,
-            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id.clone()),
@@ -1073,8 +1067,6 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             auto_compact_target_percent: None,
             summary_max_chars: None,
             auto_compact_at: None,
-            segment_chars: None,
-            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.thread_id),
@@ -2384,8 +2376,6 @@ fn set_auto_compact(thread: &str, value: &str) -> Command {
     Command::ThreadSet(Box::new(ThreadSetArgs {
         thread_id: Some(thread.into()),
         auto_compact_at: Some(value.into()),
-        segment_chars: None,
-        reduce_rounds: None,
         ..Default::default()
     }))
 }

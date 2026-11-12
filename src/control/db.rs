@@ -999,7 +999,7 @@ impl Store {
                 if path.pop().as_deref()!=Some(&node){return Err(error(ErrorCode::InvalidState,"Edit fork boundary changed"));}
                 tx.execute("DELETE FROM attachment_selection WHERE thread_id=?1 AND attachment_id IN (SELECT id FROM attachment_ref WHERE source_node_id=?2)",params![fork,node]).map_err(sql_error)?;
                 history::select_path(&tx,&fork,1,&path,&now).map_err(storage_error)?;
-                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,segment_chars:None,reduce_rounds:None, parent_id: None},None,&now)?;}
+                if args.connection.is_some()||args.model.is_some()||args.effort.is_some(){store.set_thread(&tx,&ThreadSetArgs{ auto_compact_target_percent:None,summary_max_chars:None,agents: None,thread_id:Some(fork.clone()),connection:args.connection,model:args.model,effort:args.effort,cwd:None,title:None,auto_compact_at:None,parent_id: None},None,&now)?;}
                 let revision:i64=history::selection_revision(&tx, &fork, history::ThreadScope::Any).map_err(sql_error)?;
                 let mut result=store.send_content(&tx,&MessageSendArgs { human: true, resume_recovery: false,
  to_human: false, expect_reply: false, sender_label: None,thread_id:Some(fork),text:content.text.clone(),deliver:options.deliver},None,&operation_id,&now,SendContent { elements: content.new_source_elements(files.len())?, sender: MessageSender::recorded(None, None, true) })?;
@@ -1370,12 +1370,7 @@ impl Store {
                         serde_json::json!(details.effective_auto_compact_target_percent);
                     result.result["effective_summary_max_chars"] =
                         serde_json::json!(details.effective_summary_max_chars);
-                    result.result["segment_chars"] = serde_json::json!(details.segment_chars);
-                    result.result["effective_segment_chars"] =
-                        serde_json::json!(details.effective_segment_chars);
-                    result.result["reduce_rounds"] = serde_json::json!(details.reduce_rounds);
-                    result.result["effective_reduce_rounds"] =
-                        serde_json::json!(details.effective_reduce_rounds);
+
                 }
                 Ok(result)
             }
@@ -1744,14 +1739,6 @@ impl Store {
             details.summary_max_chars,
             connection,
         ));
-        details.effective_segment_chars = Some(
-            compaction.segment_chars_for(details.segment_chars.map(|v| v as usize), connection)
-                as u64,
-        );
-        details.effective_reduce_rounds = Some(
-            compaction.reduce_rounds_for(details.reduce_rounds.map(|v| v as usize), connection)
-                as u64,
-        );
     }
 
     fn set_thread(
@@ -1794,22 +1781,6 @@ impl Store {
             )
             .map_err(sql_error)?;
         }
-        if let Some(value) = &args.segment_chars {
-            let value = crate::protocol::validation::parse_segment_chars(value)?;
-            tx.execute(
-                "UPDATE thread SET segment_chars=?2 WHERE id=?1",
-                params![id, value],
-            )
-            .map_err(sql_error)?;
-        }
-        if let Some(value) = &args.reduce_rounds {
-            let value = crate::protocol::validation::parse_reduce_rounds(value)?;
-            tx.execute(
-                "UPDATE thread SET reduce_rounds=?2 WHERE id=?1",
-                params![id, value],
-            )
-            .map_err(sql_error)?;
-        }
         // A move alone is organization: no updated_at change, so the list does not jump.
         let moved_only = args.parent_id.is_some()
             && title.is_none()
@@ -1820,9 +1791,7 @@ impl Store {
             && args.agents.is_none()
             && args.auto_compact_at.is_none()
             && args.auto_compact_target_percent.is_none()
-            && args.summary_max_chars.is_none()
-            && args.segment_chars.is_none()
-            && args.reduce_rounds.is_none();
+            && args.summary_max_chars.is_none();
         if moved_only {
             let mut result = MutationResult::value(thread_details(tx, &id)?)?;
             if let Some(moved) = &moved {
@@ -2339,7 +2308,7 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
-    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at,auto_compact_target_percent,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(11)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(12)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,segment_chars: row.get::<_,Option<i64>>(8)?.map(|v|v as u64), effective_segment_chars: None, reduce_rounds: row.get::<_,Option<i64>>(9)?.map(|v|v as u64), effective_reduce_rounds: None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
+    let mut details=connection.query_row("SELECT title,cwd,profile_id,model_id,effort,parent_thread_id,agents_path,auto_compact_at,segment_chars,reduce_rounds,archived_at,auto_compact_target_percent,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",[id],|row|Ok(ThreadDetails { instruction_sources: None, archived_at: row.get(10)?, tags: Vec::new(), auto_compact_at: row.get::<_,Option<i64>>(7)?.map(|v|v as u64), effective_auto_compact_at: None, auto_compact_target_percent: row.get::<_,Option<i64>>(11)?.map(|v|v as u64), summary_max_chars:row.get::<_,Option<i64>>(12)?.map(|v|v as u64), effective_auto_compact_target_percent:None,effective_summary_max_chars:None,awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None,usage_totals:None, agents_path: row.get(6)?,context_usage:None,thread_id:id.into(),title:row.get(0)?,cwd:row.get(1)?,connection:row.get(2)?,model:row.get(3)?,effort:row.get(4)?,parent_id:row.get(5)?,run_id:None,turn_id:None,shells_count:0,recovery_reason:None,parent_change:None,context:None})).optional().map_err(sql_error)?.ok_or_else(||error(ErrorCode::ThreadNotFound,"Thread not found"))?;
     details.instruction_sources = connection.query_row(
         "SELECT CASE WHEN s.content_hash GLOB 'instruction-bundle-v1:sha256:*' AND json_valid(substr(s.body,38)) THEN json_extract(substr(s.body,38),'$.extra') ELSE NULL END FROM turn t JOIN instruction_snapshot s ON s.id=t.instruction_snapshot_id WHERE t.thread_id=?1 ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",[id],|r|r.get::<_,Option<String>>(0)).optional().map_err(sql_error)?.flatten().and_then(|body|serde_json::from_str::<Vec<Value>>(&body).ok()).map(|mut files| {for file in &mut files {if let Some(file)=file.as_object_mut() { file.remove("body"); }} json!({"extra":files,"snapshot":"latest_prepared_turn"})});
     details.tags = tags::for_thread(connection, id)?;

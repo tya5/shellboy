@@ -422,12 +422,6 @@ impl ThreadSetArgs {
         if let Some(value) = &self.summary_max_chars {
             parse_summary_chars(value)?;
         }
-        if let Some(value) = &self.segment_chars {
-            parse_segment_chars(value)?;
-        }
-        if let Some(value) = &self.reduce_rounds {
-            parse_reduce_rounds(value)?;
-        }
         if self.connection.is_none()
             && self.cwd.is_none()
             && self.model.is_none()
@@ -437,8 +431,6 @@ impl ThreadSetArgs {
             && self.auto_compact_at.is_none()
             && self.auto_compact_target_percent.is_none()
             && self.summary_max_chars.is_none()
-            && self.segment_chars.is_none()
-            && self.reduce_rounds.is_none()
             && self.parent_id.is_none()
         {
             Err(invalid("thread.set requires a change"))

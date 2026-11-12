@@ -2172,8 +2172,6 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
             auto_compact_target_percent: None,
             summary_max_chars: None,
             auto_compact_at: None,
-            segment_chars: None,
-            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(accepted.thread_id.clone()),

@@ -1072,8 +1072,6 @@ async fn context_observations_wait_for_a_request_boundary_and_survive_failed_htt
             auto_compact_target_percent: None,
             summary_max_chars: None,
             auto_compact_at: None,
-            segment_chars: None,
-            reduce_rounds: None,
             agents: None,
             title: None,
             thread_id: Some(thread.clone()),
@@ -1142,8 +1140,6 @@ async fn model_a_b_a_never_revives_prior_reasoning_but_preserves_canonical_dag()
                     auto_compact_target_percent: None,
                     summary_max_chars: None,
                     auto_compact_at: None,
-                    segment_chars: None,
-                    reduce_rounds: None,
                     agents: None,
                     title: None,
                     thread_id: Some(thread.clone()),
@@ -4121,8 +4117,6 @@ async fn set_thread_auto_compact(control: &Arc<Control>, thread: &str, value: &s
         Command::ThreadSet(Box::new(ThreadSetArgs {
             thread_id: Some(thread.into()),
             auto_compact_at: Some(value.into()),
-            segment_chars: None,
-            reduce_rounds: None,
             ..Default::default()
         })),
     )
