@@ -214,6 +214,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0042_notification_semantic_descriptor.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 43,
+        sql: include_str!("../../migrations/0043_thread_single_summary_settings.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
