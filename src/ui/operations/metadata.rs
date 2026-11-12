@@ -832,8 +832,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::ThreadSet => local!(
             language,
-            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイル、親Threadを変更します。",
-            "Change a Thread's display title, working folder, connection, model, reasoning effort, instruction file, and parent Thread."
+            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイル、親Thread、自動要約設定、summary文字数上限を変更します。",
+            "Change a Thread's display title, working folder, connection, model, reasoning effort, instruction file, parent, proactive compaction settings, and summary character limit."
         ),
         OperationId::MessageReply => local!(
             language,
@@ -1468,7 +1468,7 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
                     .help
             }
             crate::config::UiLanguage::En => {
-                "Target size after proactive compaction, as a percentage (integer 1–100) of this Thread's configured input-token threshold. This is not a summary-output character ratio. An empty CLI value returns to the connection or [compaction] value. Separate from the absolute manual summary character cap (max_chars)."
+                "Target size after proactive compaction, as a percentage (integer 1-100) of this Thread's configured input-token threshold. This is not a summary-output character ratio. An empty CLI value returns to the connection or [compaction] value. Separate from the absolute manual summary character cap (max_chars)."
             }
         },
         FieldId::Title => local!(
