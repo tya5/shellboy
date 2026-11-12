@@ -15,7 +15,9 @@ fn args(to: &str) -> ContextEditArgs {
         to_node_id: Some(to.into()),
         max_chars: None,
     }
-.count()
+}
+fn lines(path: &Path) -> usize {
+    std::fs::read_to_string(path).unwrap().lines().count()
 }
 async fn setup(responses: Vec<String>, log: &Path) -> (Fixture, tokio::task::JoinHandle<()>) {
     std::fs::write(log, "").unwrap();
