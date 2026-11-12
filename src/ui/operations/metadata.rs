@@ -108,7 +108,6 @@ impl Form {
             "from_node" => FieldId::FromNode,
             "to_node" => FieldId::ToNode,
             "max_chars" => FieldId::SummaryMaxChars,
-            "max_percent" => FieldId::SummaryMaxPercent,
             "scope" => FieldId::IndexScope,
             "space" => FieldId::Space,
             "threads" => FieldId::Threads,
@@ -1186,11 +1185,6 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "要約文字数上限（空=設定値）",
             "Summary character limit (empty = configured)"
         ),
-        FieldId::SummaryMaxPercent => local!(
-            language,
-            "要約割合上限（空=設定値）",
-            "Summary percentage limit (empty = configured)"
-        ),
         FieldId::IndexScope => local!(language, "索引対象範囲", "Index scope"),
         FieldId::Space => local!(language, "索引領域ID", "Index space ID"),
         FieldId::Threads => local!(language, "索引対象Thread ID", "Thread IDs to index"),
@@ -1609,11 +1603,6 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "summaryだけで指定できます。完成した要約の文字数上限です。",
             "Only for summary. Maximum length of the completed summary."
-        ),
-        FieldId::SummaryMaxPercent => local!(
-            language,
-            "summaryだけで指定できます。元の文字数に対する割合で、0より大きく100以下です。",
-            "Only for summary. Percentage of original characters, greater than zero and at most 100."
         ),
         FieldId::IndexScope => local!(
             language,

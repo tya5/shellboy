@@ -449,7 +449,6 @@ const MEANINGS: &[Meaning] = &[
             ("from_node_id", FieldId::FromNode),
             ("to_node_id", FieldId::ToNode),
             ("max_chars", FieldId::SummaryMaxChars),
-            ("max_percent", FieldId::SummaryMaxPercent),
         ],
         None,
     ),
