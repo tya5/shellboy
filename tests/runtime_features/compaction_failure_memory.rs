@@ -231,10 +231,18 @@ async fn legal_new_run_reopens_provider_failure_memory() {
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;
 
-    let first = proactive_third_turn(&control, &mut receive, &target, 150, auth_veto_reply()).await;
-    assert_eq!(
-        first, 1,
-        "initial real Run admits one failed provider invocation"
+    let first_trace = proactive_third_turn_after_run(
+        &control,
+        &mut receive,
+        &target,
+        150,
+        auth_veto_reply(),
+        None,
+    )
+    .await;
+    assert!(
+        !first_trace.summary_scopes.is_empty(),
+        "initial real Run admits provider summary requests"
     );
     let first_events = proactive_events(&control, &target).await;
     let first_attempt = first_events
@@ -290,14 +298,25 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         &target,
         150,
         auth_veto_reply(),
-        Some(&first_run),
-        Some(&first_scope.1),
+        Some((&first_run, &first_scope.1)),
     )
     .await;
     let all_events = proactive_events(&control, &target).await;
+    assert!(
+        second.summary_requests > 0,
+        "a distinct live Run/Turn admits provider calls across the entire warmup boundary: {all_events:#?}"
+    );
+    assert_eq!(second.summary_requests, second.summary_scopes.len());
+    assert!(
+        second
+            .summary_scopes
+            .iter()
+            .all(|(run, turn)| run != &first_run && turn != &first_scope.1)
+    );
     assert_eq!(
-        second, 1,
-        "a distinct live Run/Turn is not inhibited by the prior Run's provider key: {all_events:#?}"
+        second.summary_bodies.first(),
+        first_trace.summary_bodies.first(),
+        "the re-opened request has the same serialized summary input (same E source and settings)"
     );
     let second_attempt = all_events
         .iter()

@@ -4107,8 +4107,15 @@ async fn ax_growing_turn_summary_requests(
     }).await.unwrap()
 }
 
-/// Two completed Turns (input 50 then `second`), then a third request. Returns
-/// how many summary (tool-free) requests preceded the third ordinary request.
+/// Repeated Turns may produce summary requests even during warmup; trace those
+/// separately from ordinary model requests so provider accounting is truthful.
+#[derive(Default)]
+struct ProactiveTrace {
+    summary_requests: usize,
+    summary_scopes: Vec<(String, String)>,
+    summary_bodies: Vec<Value>,
+}
+
 async fn proactive_third_turn(
     control: &Arc<Control>,
     receive: &mut mpsc::Receiver<Incoming>,
@@ -4116,8 +4123,26 @@ async fn proactive_third_turn(
     second: u64,
     summary_reply: (u16, Value),
 ) -> usize {
-    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None, None)
+    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None)
         .await
+        .summary_requests
+}
+
+async fn live_run_turn_scope(control: &Control, thread: &str) -> (String, String, String) {
+    let target = thread.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
+                [target],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap()
 }
 
 async fn proactive_third_turn_after_run(
@@ -4126,49 +4151,51 @@ async fn proactive_third_turn_after_run(
     thread: &str,
     second: u64,
     summary_reply: (u16, Value),
-    prior_run: Option<&str>,
-    prior_turn: Option<&str>,
-) -> usize {
+    prior_scope: Option<(&str, &str)>,
+) -> ProactiveTrace {
+    let mut trace = ProactiveTrace::default();
     for (n, tokens) in [(0, 50), (1, second)] {
         send(control, thread, &format!("task {n}")).await;
-        let request = incoming(control, receive).await;
-        if n == 0 {
-            if let Some(prior_run) = prior_run {
-                let target = thread.to_owned();
-                let (run_id, state): (String, String) = control.store.database.call(move |db| {
-                    Ok(db.query_row(
-                        "SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping') ORDER BY created_at DESC LIMIT 1",
-                        [target],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )?)
-                }).await.unwrap();
+        loop {
+            let next = incoming(control, receive).await;
+            let scope = live_run_turn_scope(control, thread).await;
+            assert_eq!(scope.2, "live", "each warmup request belongs to a live Run");
+            if let Some((prior_run, prior_turn)) = prior_scope {
+                assert_ne!(scope.0, prior_run, "warmup Run is distinct before counting");
                 assert_ne!(
-                    run_id, prior_run,
-                    "public request dispatch must start a distinct Run before provider accounting"
+                    scope.1, prior_turn,
+                    "warmup Turn is distinct before counting"
                 );
-                assert_eq!(state, "live");
             }
+            if next.body["tools"] == json!([]) {
+                trace.summary_requests += 1;
+                assert!(
+                    trace.summary_requests <= 8,
+                    "bounded warmup summary requests"
+                );
+                trace.summary_scopes.push((scope.0, scope.1));
+                trace.summary_bodies.push(next.body.clone());
+                next.reply.send(summary_reply.clone()).unwrap();
+                continue;
+            }
+            assert_current_context_once(
+                &next.body,
+                &current_context(control, thread).await,
+                "warmup ordinary request",
+            );
+            next.reply
+                .send((200, answer_with_usage("saved answer", tokens)))
+                .unwrap();
+            break;
         }
-        request
-            .reply
-            .send((200, answer_with_usage("saved answer", tokens)))
-            .unwrap();
         settled(control, thread).await;
     }
     send(control, thread, "current task").await;
-    let mut summaries = 0;
     loop {
         let next = incoming(control, receive).await;
-        if let (Some(prior_run), Some(prior_turn)) = (prior_run, prior_turn) {
-            let target = thread.to_owned();
-            let scope: (String, String, String) = control.store.database.call(move |db| {
-                db.query_row(
-                    "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
-                    [target],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                ).map_err(Into::into)
-            }).await.unwrap();
-            assert_eq!(scope.2, "live", "provider accounting belongs to a live Run");
+        let scope = live_run_turn_scope(control, thread).await;
+        assert_eq!(scope.2, "live", "provider accounting belongs to a live Run");
+        if let Some((prior_run, prior_turn)) = prior_scope {
             assert_ne!(
                 scope.0, prior_run,
                 "actual candidate Run differs before accounting"
@@ -4179,20 +4206,25 @@ async fn proactive_third_turn_after_run(
             );
         }
         if next.body["tools"] == json!([]) {
-            summaries += 1;
-            assert!(summaries <= 4, "bounded summary requests");
+            trace.summary_requests += 1;
+            assert!(trace.summary_requests <= 8, "bounded summary requests");
+            trace.summary_scopes.push((scope.0, scope.1));
+            trace.summary_bodies.push(next.body.clone());
             next.reply.send(summary_reply.clone()).unwrap();
             continue;
         }
-        let context = current_context(control, thread).await;
-        assert_current_context_once(&next.body, &context, "after proactive summary");
+        assert_current_context_once(
+            &next.body,
+            &current_context(control, thread).await,
+            "after proactive summary",
+        );
         next.reply
             .send((200, answer_with_usage("last answer", 10)))
             .unwrap();
         break;
     }
     settled(control, thread).await;
-    summaries
+    trace
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4488,19 +4520,28 @@ async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
     assert!(slots.1.is_none(), "no active summary was attempted");
 }
 
-/// #303 §6.4: an `invalid_request_error` on a 500 response is transient. It
-/// records no failed range, so the one new eligible report retries once
-/// (§2.3: one attempt per reported value). Numeric 400 refusals are covered
-/// separately by the S2 halving/minimum-outcome tests.
+/// A terminal 500 provider response is invocation-scoped in S2b even when its
+/// embedded body says invalid_request_error. The later eligible report is still
+/// recorded as an attempt, but is suppressed in the same Run/Turn; no E slot is
+/// written because this is not a deterministic refusal.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_transient_summary_failure_retries_once_per_new_report() {
-    let (summaries, _, slots) = bx_token_growth((
+async fn proactive_provider_500_is_suppressed_once_per_same_run_scope() {
+    let (summaries, attempts, slots) = bx_token_growth((
         500,
         json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}}),
     ))
     .await;
-    assert_eq!(summaries, 2, "one summary request per eligible report");
-    assert_eq!(slots, (None, None), "a transient failure records no range");
+    assert_eq!(summaries, 1, "one provider dispatch in the unchanged scope");
+    assert_eq!(
+        attempts.len(),
+        2,
+        "both eligible reports retain their attempts"
+    );
+    assert_eq!(
+        slots,
+        (None, None),
+        "provider failure records no deterministic E slot"
+    );
 }
 
 /// Two completed Turns (first known report 50 > target 20, then 150 >= the
