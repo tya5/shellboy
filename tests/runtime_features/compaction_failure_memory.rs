@@ -348,12 +348,24 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         .iter()
         .find(|event| event["attempt_id"] == second_attempt)
         .expect("new-Run provider response trigger remains in durable events");
+    assert_eq!(
+        fresh_trigger["trigger"]["auto_at_tokens"], 100,
+        "actual automatic trigger threshold: {fresh_trigger:#?}"
+    );
+    assert_eq!(
+        fresh_trigger["trigger"]["input_tokens"],
+        second.admission_report.as_ref().unwrap()["input_tokens"],
+        "fresh successful report is the trigger's reported input: {fresh_trigger:#?}"
+    );
+    let a_report = second.a_state_report.as_ref().unwrap();
+    assert_eq!(
+        a_report["run_id"],
+        second.admission_report.as_ref().unwrap()["run_id"],
+        "#A belongs to the new Run: {a_report:#?}"
+    );
     assert!(
-        fresh_trigger["trigger"]["a_input_tokens"]
-            .as_u64()
-            .zip(fresh_trigger["trigger"]["target_tokens"].as_u64())
-            .is_some_and(|(a, target)| a > target),
-        "automatic summary path requires #A above target: {fresh_trigger:#?}"
+        a_report["input_tokens"].as_i64().is_some_and(|a| a > 80),
+        "#A exceeds threshold 100 at the configured default 80 percent target: {a_report:#?}"
     );
     let second_scope = control
         .store

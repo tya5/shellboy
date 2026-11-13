@@ -4115,6 +4115,7 @@ struct ProactiveTrace {
     summary_scopes: Vec<(String, String)>,
     summary_bodies: Vec<Value>,
     admission_report: Option<Value>,
+    a_state_report: Option<Value>,
 }
 
 async fn proactive_third_turn(
@@ -4221,6 +4222,22 @@ async fn proactive_third_turn_after_run(
                 Ok(report.unwrap_or(Value::Null))
             }).await.unwrap()
         );
+        let target = thread.to_owned();
+        trace.a_state_report = Some(control.store.database.call(move |db| {
+            let row = db.query_row(
+                "SELECT json_extract(value,'$.first.attempt'),json_extract(value,'$.first.input_tokens'),
+                    (SELECT t.run_id FROM model_attempt m JOIN turn t ON t.id=m.turn_id
+                     WHERE m.id=json_extract(app_meta.value,'$.first.attempt'))
+                 FROM app_meta WHERE key=?1",
+                [format!("compact.a_state.{target}")],
+                |row| Ok(json!({
+                    "attempt_id": row.get::<_,Option<String>>(0)?,
+                    "input_tokens": row.get::<_,Option<i64>>(1)?,
+                    "run_id": row.get::<_,Option<String>>(2)?
+                })),
+            ).optional()?;
+            Ok(row.unwrap_or(Value::Null))
+        }).await.unwrap());
         let report = trace.admission_report.as_ref().unwrap();
         let (prior_run, _) = prior_scope.unwrap();
         assert_ne!(
