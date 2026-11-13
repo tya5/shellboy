@@ -26,6 +26,7 @@ fn assert_scope_trace(result: &AxFixtureResult) {
 /// Assert all admitted and suppressed reports, not only the aggregate HTTP
 /// count. Suppression is an honest preparation outcome with no request facts.
 fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted_requests: u64) {
+    assert_eq!(result.summaries, admitted_requests as usize, "actual synthetic HTTP summary POST count: {:#?}", result.records);
     assert_eq!(result.records.len(), 17, "one report outcome per eligible report: {:#?}", result.records);
     let admitted: Vec<_> = result.records
         .iter()
