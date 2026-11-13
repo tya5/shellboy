@@ -3870,7 +3870,11 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
     let result = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0).await;
-    assert_eq!(result.summaries, 1, "one closed summary request: {:#?}", result.records);
+    assert_eq!(
+        result.summaries, 1,
+        "one closed summary request: {:#?}",
+        result.records
+    );
     let records = result.records;
     let failed: Vec<&Value> = records
         .iter()
@@ -3894,12 +3898,15 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
 /// and minimum-outcome memory are covered by the dedicated S2a matrix.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
-    let result = ax_growing_turn_summary_requests(|| {
-        (
-            401,
-            json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
-        )
-    }, 0)
+    let result = ax_growing_turn_summary_requests(
+        || {
+            (
+                401,
+                json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
+            )
+        },
+        0,
+    )
     .await;
     let summaries = result.summaries;
     let records = result.records;
