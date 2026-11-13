@@ -227,7 +227,10 @@ fn connection_spill_is_visible_and_editable_as_a_native_boolean() {
     let text = "[connections.proxy]\nbase_url = \"https://proxy.example/v1\"\nspill = false\n";
     let (_root, path, _) = fixture(text);
     let values = read(&loaded(&path)).unwrap();
-    assert_eq!(values["file"]["values"]["connections.proxy.spill"], false);
+    assert_eq!(
+        values["file"]["values"]["connections"]["proxy"]["spill"],
+        false
+    );
     let edited = edit_text(text, &[change("connections.proxy.spill", json!(true))]).unwrap();
     assert!(edited.contains("spill = true"));
     let cleared = edit_text(&edited, &[removal("connections.proxy.spill")]).unwrap();
