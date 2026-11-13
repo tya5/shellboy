@@ -248,6 +248,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
                 auto_compact_target_percent: None,
                 summary_max_chars: None,
                 max_tokens: None,
+                spill: None,
                 agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
@@ -1070,6 +1071,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             auto_compact_target_percent: None,
             summary_max_chars: None,
             max_tokens: None,
+            spill: None,
             auto_compact_at: None,
             agents: None,
             title: None,
@@ -1089,6 +1091,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             auto_compact_target_percent: None,
             summary_max_chars: None,
             max_tokens: None,
+            spill: None,
             auto_compact_at: None,
             agents: None,
             title: None,
@@ -1108,6 +1111,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
             auto_compact_target_percent: None,
             summary_max_chars: None,
             max_tokens: None,
+            spill: None,
             auto_compact_at: None,
             agents: None,
             title: None,
@@ -3097,8 +3101,12 @@ async fn thread_max_tokens_refuses_a_clash_with_connection_extra_body_limit() {
 async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     let (_root, store) = spill_store().await;
     let create_off = ThreadCreateArgs {
+        agents: None,
         connection: Some("off".into()),
-        ..Default::default()
+        cwd: None,
+        model: None,
+        effort: None,
+        parent_id: None,
     };
     let parent: ThreadDetails = serde_json::from_value(
         execute(&store, Command::ThreadCreate(create_off.clone()))
@@ -3113,8 +3121,12 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
         execute(
             &store,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
                 connection: Some("on".into()),
-                ..Default::default()
+                cwd: None,
+                model: None,
+                effort: None,
+                parent_id: None,
             }),
         )
         .await
@@ -3144,8 +3156,12 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
         execute(
             &store,
             Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                connection: None,
+                cwd: None,
+                model: None,
+                effort: None,
                 parent_id: Some(parent.thread_id.clone()),
-                ..Default::default()
             }),
         )
         .await

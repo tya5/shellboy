@@ -479,6 +479,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
             auto_compact_target_percent: None,
             summary_max_chars: None,
             max_tokens: None,
+            spill: None,
             auto_compact_at: None,
             agents: None,
             connection: None,

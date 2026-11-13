@@ -2172,6 +2172,7 @@ async fn assert_human_background_notice(has_remaining_call: bool) {
             auto_compact_target_percent: None,
             summary_max_chars: None,
             max_tokens: None,
+            spill: None,
             auto_compact_at: None,
             agents: None,
             title: None,

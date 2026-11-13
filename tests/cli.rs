@@ -707,8 +707,8 @@ async fn thread_title_preserves_explicit_empty_reset() {
         Command::ThreadSet(a) if a.title.is_none()));
 }
 
-#[test]
-fn thread_spill_cli_accepts_real_argv_values() {
+#[tokio::test]
+async fn thread_spill_cli_accepts_real_argv_values() {
     for value in ["on", "off", ""] {
         let cli = Cli::try_parse_from([
             "shellboy", "thread", "set", "--thread", "fixture", "--spill", value,

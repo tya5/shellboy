@@ -483,6 +483,7 @@ fn set_title(thread: Option<&str>, title: Option<&str>, model: Option<&str>) -> 
         auto_compact_target_percent: None,
         summary_max_chars: None,
         max_tokens: None,
+        spill: None,
         auto_compact_at: None,
         agents: None,
         connection: None,
