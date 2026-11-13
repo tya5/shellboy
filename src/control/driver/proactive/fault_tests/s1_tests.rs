@@ -47,6 +47,44 @@ async fn t5_context_terminal_has_one_public_outcome() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s2_complete_http400_shrinks_to_minimum_public_outcome() {
+    terminal_public_case("s2_minimum_http400").await;
+    terminal_public_case("s2_minimum_http400_success").await;
+    terminal_public_case("s2_ineligible_floor").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s2_complete_http413_and_422_are_input_refusal_controls() {
+    terminal_public_case("s2_minimum_http413").await;
+    terminal_public_case("s2_minimum_http422").await;
+    terminal_public_case("s2_minimum_sse400").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s2_http_body_codes_are_not_stream_witnesses() {
+    terminal_public_case("s2_minimum_http400_body500").await;
+    terminal_public_case("s2_http500_body400").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s2_actual_auth_and_rate_status_veto_typed_context_halving() {
+    for case in [
+        "s2_veto_401_context",
+        "s2_veto_403_context",
+        "s2_veto_404_context",
+        "s2_veto_429_context",
+        "s2_veto_quota_context",
+    ] {
+        terminal_public_case(case).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn s2_http500_body400_is_not_a_stream_witness() {
+    terminal_public_case("s2_http500_body400").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn t8_protocol_failure_is_unclassified_not_deterministic() {
     terminal_public_case("protocol").await;
 }
@@ -62,10 +100,17 @@ async fn t5_provider_500_preserves_zero_retry_budget() {
 }
 
 async fn terminal_public_case(case: &str) {
-    let context = case == "context";
+    let context = case == "context" || case.ends_with("_context");
+    let s2_minimum = case.starts_with("s2_minimum_");
+    let s2_veto = case.starts_with("s2_veto_");
+    let s2_ineligible = case == "s2_ineligible_floor";
+    let s2_success = case == "s2_minimum_http400_success";
     let sse_terminal = matches!(
         case,
-        "sse_terminal_responses" | "sse_terminal_chat" | "sse_terminal_429_responses"
+        "sse_terminal_responses"
+            | "sse_terminal_chat"
+            | "sse_terminal_429_responses"
+            | "s2_minimum_sse400"
     );
     let sse_eof = case.starts_with("sse_eof_");
     let zero_retry_eof = case.contains("_r0_");
@@ -77,12 +122,18 @@ async fn terminal_public_case(case: &str) {
     } else {
         400
     };
-    let expected_summary_posts = if context || (sse_eof && !zero_retry_eof) {
+    let expected_summary_posts = if context && s2_veto {
+        1
+    } else if s2_ineligible {
+        1
+    } else if s2_success {
+        2
+    } else if context || s2_minimum || (sse_eof && !zero_retry_eof) {
         3
     } else {
         1
     };
-    crate::test_watchdog::watchdog("S1 public terminal contract", async {
+    crate::test_watchdog::watchdog("public terminal compaction contract", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let owner = if stream_case {
@@ -129,13 +180,23 @@ async fn terminal_public_case(case: &str) {
                     next.reply.send((200,json!({"_test_sse_body":raw,"_test_hold_sse_open":!sse_eof}))).unwrap();
                     continue;
                 }
-                let code = if context { "context_length_exceeded" } else { "SECRET_PROVIDER_CODE" };
-                let response = if case == "protocol" {
+                let code = if context { "context_length_exceeded" } else if s2_minimum { if case.ends_with("body500") { "500" } else { "invalid_request_error" } } else if case == "s2_http500_body400" { "400" } else { "SECRET_PROVIDER_CODE" };
+                        let response = if case == "protocol" {
                     (200, json!({"status":"completed","output":"SECRET_PROVIDER_MESSAGE"}))
+                } else if case == "s2_minimum_http400_success" && summary_posts == 2 {
+                    (200, answer("summary"))
                 } else {
-                    (match case { "context" => 400, "provider429" => 429, "provider500" => 500, _ => 401 }, json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":code,"compaction_outcome":{"kind":"rejected","reason":"profile_changed"}}}))
+                    let body = if case == "s2_veto_quota_context" {
+                        json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":"context_length_exceeded","type":"usage_limit_reached","resets_at":chrono::Utc::now().timestamp()+3600}})
+                    } else {
+                        json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":code,"compaction_outcome":{"kind":"rejected","reason":"profile_changed"}}})
+                    };
+                    (match case { "context" | "s2_minimum_http400" | "s2_minimum_http400_success" | "s2_minimum_http400_body500" => 400, "s2_minimum_http413" => 413, "s2_minimum_http422" => 422, "s2_http500_body400" | "provider500" => 500, "provider429" | "s2_veto_429_context" | "s2_veto_quota_context" => 429, "s2_veto_403_context" => 403, "s2_veto_404_context" => 404, _ => 401 }, body)
                 };
                 next.reply.send(response).unwrap();
+                if case == "s2_veto_quota_context" {
+                    break;
+                }
             } else {
                 if let Some(release) = held_sse_release.take() {
                     let _ = release.send(());
@@ -155,7 +216,11 @@ async fn terminal_public_case(case: &str) {
             let rows = statement.query_map(params![format!("compact.deterministic_range_failure.closed.{scope}"),format!("compact.deterministic_range_failure.active.{scope}")], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         }).await.unwrap();
-        assert_eq!(failure_slots.len(), if context {1} else {0}, "source-owned deterministic predicate must preserve original two-slot truth set");
+        assert_eq!(
+            failure_slots.len(),
+            if context && !s2_veto || s2_minimum && !s2_success { 1 } else { 0 },
+            "only qualifying deterministic context/minimum failures write the original E slot",
+        );
         control.shutdown().await.unwrap();
         drop(control);
         owner.shutdown().await.unwrap();
@@ -163,15 +228,30 @@ async fn terminal_public_case(case: &str) {
         let log = std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
         assert_eq!(summary_posts, expected_summary_posts, "fixed original-source admission vector");
         eprintln!("paired pre-S1 vector case={case}: summary_posts={summary_posts}");
-        let expected = match case { "context" => "context_limit_terminal", "protocol" | "sse_eof_responses" | "sse_eof_chat" | "sse_eof_r0_responses" | "sse_eof_r0_chat" => "unclassified", _ => "provider_error" };
+        let expected = match case { "context" => "context_limit_terminal", "s2_minimum_http400" | "s2_minimum_http400_body500" | "s2_minimum_http413" | "s2_minimum_http422" | "s2_minimum_sse400" => "rejected_at_minimum", "protocol" | "sse_eof_responses" | "sse_eof_chat" | "sse_eof_r0_responses" | "sse_eof_r0_chat" => "unclassified", _ => "provider_error" };
         let items = list["items"].as_array().unwrap();
+        if s2_success {
+            let completed = items.iter().find(|v| v["kind"] == "automatic_reduction").expect("automatic reduction outcome");
+            assert_eq!(completed["state"], "adopted");
+            assert_eq!(completed["compaction_outcome"], Value::Null);
+            assert_eq!(completed["metrics"]["summary_usage"]["requests"], 2);
+            return;
+        }
         let item = items.iter().find(|v| v["kind"] == "automatic_reduction").expect("real automatic attempt must remain listed");
         let fact = &item["compaction_outcome"];
         assert_eq!(fact["outcome"]["kind"], "failed", "missing classified terminal public fact: {list:#}");
         assert_eq!(fact["outcome"]["reason"], expected);
         assert_eq!(fact["phase"], "closed_summary");
         assert_eq!(fact["outcome"]["origin"], if expected == "unclassified" { "protocol" } else { "provider_response" });
-        if sse_terminal {
+        if case == "s2_http500_body400" {
+            assert_eq!(fact["outcome"]["http_status"], 500);
+            assert!(fact["outcome"].get("provider_status").is_none());
+            assert!(fact["outcome"].get("provider_status_source").is_none());
+        } else if case == "s2_minimum_sse400" {
+            assert_eq!(fact["outcome"]["http_status"], 200);
+            assert_eq!(fact["outcome"]["provider_status"], 400);
+            assert_eq!(fact["outcome"]["provider_status_source"], "stream_error_code");
+        } else if sse_terminal {
             assert_eq!(fact["outcome"]["http_status"], 200);
             assert_eq!(fact["outcome"]["provider_status"], embedded_status);
             assert_eq!(fact["outcome"]["provider_status_source"], "stream_error_code");
@@ -180,7 +260,7 @@ async fn terminal_public_case(case: &str) {
             assert!(fact["outcome"].get("provider_status").is_none());
             assert!(fact["outcome"].get("provider_status_source").is_none());
         } else {
-            assert_eq!(fact["outcome"]["http_status"], match case { "context" => 400, "provider429" => 429, "provider500" => 500, _ => 401 });
+            assert_eq!(fact["outcome"]["http_status"], match case { "context" | "s2_minimum_http400" | "s2_minimum_http400_body500" => 400, "s2_minimum_http413" => 413, "s2_minimum_http422" => 422, "provider429" | "s2_veto_429_context" | "s2_veto_quota_context" => 429, "provider500" => 500, "s2_veto_403_context" => 403, "s2_veto_404_context" => 404, _ => 401 });
         }
         assert!(fact.to_string().len() <= 1024);
         assert!(fact["outcome"].get("provider_code").is_none());
@@ -189,9 +269,13 @@ async fn terminal_public_case(case: &str) {
         assert_eq!(item["metrics"]["model_requests"], summary_posts);
         assert_eq!(item["metrics"]["summary_usage"]["input_tokens"]["unknown_count"], summary_posts);
         assert_eq!(item["metrics"]["summary_usage"]["input_tokens"]["known_sum"], Value::Null);
-        if context {
+        if context && !s2_veto || s2_minimum {
             assert_eq!(fact["outcome"]["final_group_count"], 1);
             assert!(fact["outcome"]["final_source_nodes"].as_u64().is_some_and(|n| n > 0));
+        }
+        if s2_minimum && case != "s2_minimum_sse400" {
+            assert!(fact["outcome"].get("provider_status").is_none());
+            assert!(fact["outcome"].get("provider_status_source").is_none());
         }
         let status_item = page["items"].as_array().unwrap().iter().find(|v| v["id"] == item["attempt_id"]).unwrap();
         assert_eq!(status_item["compaction_outcome"], *fact);

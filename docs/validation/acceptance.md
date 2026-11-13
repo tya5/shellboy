@@ -11715,3 +11715,47 @@ These focused controls plus the guarded full standard command establish local S1
 validation, not full qualification. The final contract-matrix audit, independent
 exact-source review, and normal/all-OS CI on the same commit remain pending. Existing
 retry classifier and S2/S3 production code remain unchanged.
+
+
+### #301 S2a Refusal Halving (Unqualified Candidate)
+
+Base: landed S1b `9baa554e2fc0f8a7dfdaf51e7de705835adce638`; source changes remain
+uncommitted in `task/compaction-s2-failure-halving-8478`. S2a does not implement
+S2b provider-scoped memory/CAS.
+
+Corrected public RED on the baseline (`cargo test --locked --lib s2_ --
+--nocapture`, execution `51f463d5-6475-49e1-9e54-de25740573a6`, exit101) showed
+HTTP400/413/422 and trusted SSE400 stopped after1 POST rather than the required
+three; actual401/403/404/429 plus typed context halved to3 rather than vetoing
+at1. This is intentional product RED evidence. The earlier 4-case run also
+reached the intended mismatches. One abandoned run hung on a quota fixture waiting
+for a follow-on request after terminal quota; it was stopped, not treated as a
+product result. The fixture was fixed to stop after the terminal local observation.
+
+Guarded S2a validations (serial Rust slot):
+- `cargo test --locked --lib s2_ -- --nocapture`, execution
+  `75e95859-b7fb-4d7c-9024-72f8bf706174`, exit0:5 passed. Includes exact3 POST
+  refusals for HTTP400/413/422 and HTTP200 trusted SSE400; 2 POST shorter-prefix
+  success; 1 POST ineligible floor; 1 POST each actual401/403/404/429 with
+  contradictory typed context; HTTP400 body code500 vs HTTP500 body code400
+  controls. The quota vector was added and passed separately below.
+- `cargo test --locked --lib s2_actual_auth_and_rate_status_veto_typed_context_halving
+  -- --nocapture`, execution `a63e7328-beef-4cab-aa87-364bea381da1`, exit0:1 test
+  passed all five status/quota vectors.
+- `cargo test --locked --lib compaction::discard::schema_contract_tests --
+  --nocapture`, execution `659fed61-a9a7-404f-8351-ae02d333a5ed`, exit0:3 passed,
+  including generated schema/decoder minimum-reason/status-pair vectors and privacy.
+- `cargo test --locked --lib compaction::single_request::tests:: -- --nocapture
+  && cargo test --locked --lib t5_context_terminal_has_one_public_outcome --
+  --nocapture`, execution `e72caa48-998e-4142-bbea-0582f8fef7b1`, exit0:11 selector
+  unit tests and1 public context-regression test passed. The later zero/skew exact
+  bound and schema rerun `75e95859-...` passed1 and3 tests respectively.
+- `cargo check --locked --tests`, execution `56f5539e-d7b0-4d16-b1b6-9475694d8266`,
+  exit0. It reported a temporary dead-code warning in the test-only compatibility
+  adapter; the adapter was gated `cfg(test)` afterward and needs recheck.
+
+These runs are on evolving source, not a committed/reviewed exact SHA. Formatting
+was applied, but `cargo fmt -- --check` initially exited1 before that formatting;
+rerun final formatter check and relevant tests after the last fixture/source edits.
+Independent source review, full standard check, normal CI, three-OS CI and landing
+remain pending. No real provider or installed owner was used.

@@ -46,6 +46,7 @@ impl CompactionPhase {
 pub enum FailureReason {
     ProviderError,
     ContextLimitTerminal,
+    RejectedAtMinimum,
     Refused,
     Empty,
     NotShrinking,
@@ -53,9 +54,10 @@ pub enum FailureReason {
     Unclassified,
 }
 impl FailureReason {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::ProviderError,
         Self::ContextLimitTerminal,
+        Self::RejectedAtMinimum,
         Self::Refused,
         Self::Empty,
         Self::NotShrinking,
@@ -72,10 +74,13 @@ impl FailureReason {
         }
     }
     fn allows_http_status(self) -> bool {
-        matches!(self, Self::ProviderError | Self::ContextLimitTerminal)
+        matches!(
+            self,
+            Self::ProviderError | Self::ContextLimitTerminal | Self::RejectedAtMinimum
+        )
     }
     fn allows_final_counts(self) -> bool {
-        self == Self::ContextLimitTerminal
+        matches!(self, Self::ContextLimitTerminal | Self::RejectedAtMinimum)
     }
 }
 
@@ -98,6 +103,13 @@ fn constrain_failure_schema(schema: &mut schemars::Schema) {
                     properties.insert(name.into(), json!({"type":"null"}));
                 }
             }
+            if reason == FailureReason::RejectedAtMinimum {
+                properties.insert("final_group_count".into(), json!({"const":1}));
+                properties.insert(
+                    "final_source_nodes".into(),
+                    json!({"type":"integer","minimum":1,"maximum":9007199254740991u64}),
+                );
+            }
             (!properties.is_empty()).then(|| {
                 json!({
                     "if":{"properties":{"reason":{"const":reason}},"required":["reason"]},
@@ -106,6 +118,17 @@ fn constrain_failure_schema(schema: &mut schemars::Schema) {
             })
         })
         .collect();
+    rules.push(json!({
+        "if":{"properties":{"reason":{"const":"rejected_at_minimum"}},"required":["reason"]},
+        "then":{
+            "required":["origin","http_status","final_group_count","final_source_nodes"],
+            "properties":{"origin":{"const":"provider_response"},"final_group_count":{"const":1},"final_source_nodes":{"type":"integer","minimum":1,"maximum":9007199254740991u64}},
+            "anyOf":[
+                {"properties":{"http_status":{"enum":[400,413,422]}},"required":["http_status"]},
+                {"properties":{"http_status":{"type":"integer","minimum":200,"maximum":299},"provider_status":{"enum":[400,413,422]},"provider_status_source":{"const":"stream_error_code"}},"required":["http_status","provider_status","provider_status_source"]}
+            ]
+        }
+    }));
     rules.push(json!({
         "if": {
             "anyOf": [
@@ -116,17 +139,19 @@ fn constrain_failure_schema(schema: &mut schemars::Schema) {
         "then": {
             "required":["provider_status","provider_status_source"],
             "properties":{
-                "reason":{"const":"provider_error"},
+                "reason":{"enum":["provider_error","rejected_at_minimum"]},
                 "origin":{"const":"provider_response"},
                 "provider_status":{"type":"integer","minimum":100,"maximum":599},
                 "provider_status_source":{"const":"stream_error_code"}
             }
         }
     }));
-    for reason in FailureReason::ALL
-        .into_iter()
-        .filter(|reason| *reason != FailureReason::ProviderError)
-    {
+    for reason in FailureReason::ALL.into_iter().filter(|reason| {
+        !matches!(
+            reason,
+            FailureReason::ProviderError | FailureReason::RejectedAtMinimum
+        )
+    }) {
         rules.push(json!({
             "if":{"properties":{"reason":{"const":reason}},"required":["reason"]},
             "then":{"properties":{"provider_status":{"type":"null"},"provider_status_source":{"type":"null"}}}
@@ -181,7 +206,8 @@ impl Outcome {
                 reason: FailureReason::Refused
                     | FailureReason::Empty
                     | FailureReason::NotShrinking
-                    | FailureReason::ContextLimitTerminal,
+                    | FailureReason::ContextLimitTerminal
+                    | FailureReason::RejectedAtMinimum,
                 ..
             }
         )
@@ -198,29 +224,43 @@ impl Outcome {
                 provider_status_source,
                 final_group_count,
                 final_source_nodes,
-            } => {
-                reason
-                    .required_origin()
-                    .is_none_or(|required| origin == required)
-                    && http_status
-                        .is_none_or(|s| (100..=599).contains(&s) && reason.allows_http_status())
-                    && provider_status.is_some() == provider_status_source.is_some()
-                    && provider_status.is_none_or(|status| {
-                        (100..=599).contains(&status)
-                            && reason == FailureReason::ProviderError
-                            && origin == FailureOrigin::ProviderResponse
-                    })
-                    && provider_status_source.is_none_or(|source| {
-                        source == crate::model::StreamProviderStatusSource::StreamErrorCode
-                            && reason == FailureReason::ProviderError
-                            && origin == FailureOrigin::ProviderResponse
-                    })
-                    && [final_group_count, final_source_nodes]
-                        .into_iter()
-                        .all(|n| {
-                            n.is_none_or(|n| n > 0 && n <= SAFE && reason.allows_final_counts())
-                        })
-            }
+            } => reason
+                .required_origin()
+                .is_none_or(|required| origin == required)
+                && http_status
+                    .is_none_or(|s| (100..=599).contains(&s) && reason.allows_http_status())
+                && provider_status.is_some() == provider_status_source.is_some()
+                && provider_status.is_none_or(|status| {
+                    (100..=599).contains(&status)
+                        && matches!(
+                            reason,
+                            FailureReason::ProviderError | FailureReason::RejectedAtMinimum
+                        )
+                        && origin == FailureOrigin::ProviderResponse
+                })
+                && provider_status_source.is_none_or(|source| {
+                    source == crate::model::StreamProviderStatusSource::StreamErrorCode
+                        && matches!(
+                            reason,
+                            FailureReason::ProviderError | FailureReason::RejectedAtMinimum
+                        )
+                        && origin == FailureOrigin::ProviderResponse
+                })
+                && [final_group_count, final_source_nodes]
+                    .into_iter()
+                    .all(|n| n.is_none_or(|n| n > 0 && n <= SAFE && reason.allows_final_counts()))
+                && (reason != FailureReason::RejectedAtMinimum
+                    || (origin == FailureOrigin::ProviderResponse
+                        && final_group_count == Some(1)
+                        && final_source_nodes.is_some_and(|n| n > 0 && n <= SAFE)
+                        && (http_status.is_some_and(|s| matches!(s, 400 | 413 | 422))
+                            || (http_status.is_some_and(|s| (200..=299).contains(&s))
+                                && provider_status
+                                    .is_some_and(|s| matches!(s, 400 | 413 | 422))
+                                && provider_status_source
+                                    == Some(
+                                        crate::model::StreamProviderStatusSource::StreamErrorCode,
+                                    ))))),
         }
     }
 }
@@ -487,6 +527,19 @@ mod outcome_contract_tests {
             assert_eq!(restored.code, error.code);
             assert_eq!(restored.message, error.message);
         }
+        let minimum = attach(
+            ApiError::new(ErrorCode::InvalidState, "minimum"),
+            Outcome::Failed {
+                reason: FailureReason::RejectedAtMinimum,
+                origin: FailureOrigin::ProviderResponse,
+                http_status: Some(400),
+                provider_status: None,
+                provider_status_source: None,
+                final_group_count: Some(1),
+                final_source_nodes: Some(1),
+            },
+        );
+        assert!(cause(&minimum).deterministic());
         let forged = ApiError::new(ErrorCode::InvalidState, "unknown")
             .details(json!({"compaction_discard_reason":"summary_refused","single_summary_context_terminal":true,"compaction_cause":{"kind":"rejected","reason":"profile_changed"}}));
         assert!(!cause(&forged).deterministic());
@@ -819,6 +872,34 @@ mod schema_contract_tests {
             true,
         );
         check(
+            fact(
+                json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":400,"final_group_count":1,"final_source_nodes":2}),
+            ),
+            true,
+        );
+        check(
+            fact(
+                json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":200,"provider_status":413,"provider_status_source":"stream_error_code","final_group_count":1,"final_source_nodes":2}),
+            ),
+            true,
+        );
+        check(
+            fact(
+                json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":400,"provider_status":500,"provider_status_source":"stream_error_code","final_group_count":1,"final_source_nodes":2}),
+            ),
+            true,
+        );
+        for invalid in [
+            json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":500,"final_group_count":1,"final_source_nodes":2}),
+            json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":200,"final_group_count":1,"final_source_nodes":2}),
+            json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":400,"final_group_count":2,"final_source_nodes":2}),
+            json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":400,"final_group_count":1}),
+            json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":429,"provider_status":400,"provider_status_source":"stream_error_code","final_group_count":1,"final_source_nodes":2}),
+            json!({"kind":"failed","reason":"rejected_at_minimum","origin":"provider_response","http_status":400,"provider_status":400,"final_group_count":1,"final_source_nodes":2}),
+        ] {
+            check(fact(invalid), false);
+        }
+        check(
             fact(json!({"kind":"failed","reason":"not_shrinking","origin":"output_validation"})),
             true,
         );
@@ -833,6 +914,7 @@ mod schema_contract_tests {
         for reason in [
             "provider_error",
             "context_limit_terminal",
+            "rejected_at_minimum",
             "refused",
             "empty",
             "not_shrinking",

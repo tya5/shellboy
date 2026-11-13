@@ -155,6 +155,25 @@ exact-source review and this unit's own normal/three-OS CI are separate gates.
 No SSE parser/halving/suppression/adoption relaxation/progress UI or installed
 Core change belongs to this unit.
 
+### #301 S2a Refusal Halving (Unqualified Candidate)
+
+S1b is landed at `9baa554e2fc0f8a7dfdaf51e7de705835adce638`. The fresh S2a
+worktree is based on that exact tip. S2a currently adds complete actual HTTP
+400/413/422 and trusted 2xx SSE refusal classification, a bounded weighted
+whole-group retry to singleton, auth/quota veto before typed-context handling,
+and the new schema-bounded `rejected_at_minimum` outcome. Minimum failures write
+the original E through the existing deterministic slot; prior failure categories
+and suppression semantics remain unchanged. Existing context halving and weighted
+selection remain unchanged;
+provider-keyed memory/CAS (S2b) is not implemented.
+
+Synthetic public REDs were observed at the landed-S1b base. Focused S2a public,
+status-provenance and veto controls now pass, together with schema/decoder
+parity, weighted zero/skew bound, context regression and `cargo check --tests`.
+This is still an uncommitted candidate: exact-source independent review, normal
+and three-OS CI, full acceptance/documentation audit and landing remain pending.
+No provider, owner, private database or model/settings operation was performed.
+
 S1a schema-review follow-up is an UNQUALIFIED source-preparation candidate while
 local heavy builds are held by the 8192 MiB swap guard. The real schema mismatch
 RED is reproduced; shared schema/decoder constraints are authored but await hosted

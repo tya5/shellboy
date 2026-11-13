@@ -99,21 +99,33 @@ pub(super) enum Next {
     Failed,
 }
 
+#[cfg(test)]
 pub(super) fn after_result(
     snapshot: &Snapshot,
     selected: Range<usize>,
     result: Result<(), &model::ModelError>,
     eligible: impl FnOnce(Range<usize>) -> bool,
 ) -> Next {
+    let shrink = result.is_err_and(model::ModelError::is_context_limit);
+    after_classified_result(snapshot, selected, result, shrink, eligible)
+}
+
+fn after_classified_result(
+    snapshot: &Snapshot,
+    selected: Range<usize>,
+    result: Result<(), &model::ModelError>,
+    shrink: bool,
+    eligible: impl FnOnce(Range<usize>) -> bool,
+) -> Next {
     match result {
-        Ok(()) => Next::Done, // No remainder scheduling in this trial.
-        Err(error) if error.is_context_limit() => {
+        Ok(()) => Next::Done,
+        Err(_) if shrink => {
             match half_prefix(snapshot, selected).filter(|prefix| eligible(prefix.clone())) {
                 Some(prefix) => Next::RetryPrefix(prefix),
                 None => Next::Failed,
             }
         }
-        Err(_) => Next::Failed, // Transport retries occur before this final result.
+        Err(_) => Next::Failed,
     }
 }
 
@@ -463,7 +475,18 @@ impl Compactor {
                             "Compaction cancelled; original path retained",
                         ));
                     }
-                    if !failure.error.is_context_limit() {
+                    let actual_status = failure.facts.status;
+                    let veto_halving = matches!(actual_status, Some(401 | 403 | 404 | 429))
+                        || failure.error.usage_limit.is_some();
+                    let context_refusal = failure.error.is_context_limit() && !veto_halving;
+                    let input_refusal = !veto_halving
+                        && (matches!(actual_status, Some(400 | 413 | 422))
+                            || (actual_status.is_some_and(|status| (200..=299).contains(&status))
+                                && failure.error.stream_provider_status.is_some_and(|witness| {
+                                    matches!(witness.value, 400 | 413 | 422)
+                                })));
+                    let shrink = context_refusal || input_refusal;
+                    if !shrink {
                         if let Some(delay) = retry::retry_delay(connection, &failure, retries) {
                             retries += 1;
                             self.summary_backoff(snapshot, delay, cancel, boundary.as_deref_mut())
@@ -485,33 +508,66 @@ impl Compactor {
                             cause,
                         ));
                     }
-                    match trial.finish_request(snapshot, Err(&failure.error), &eligible) {
+                    match trial.finish_classified(snapshot, Err(&failure.error), shrink, &eligible)
+                    {
                         Next::RetryPrefix(_) => {
                             retries = 0;
                             continue;
                         }
                         Next::Done | Next::Failed => {
-                            let groups = trial.selected.end - trial.selected.start;
-                            let nodes = snapshot.groups[trial.selected.clone()]
-                                .iter()
-                                .map(|g| g.sources.len() as u64)
-                                .sum();
+                            if context_refusal {
+                                let groups = trial.selected.end - trial.selected.start;
+                                let nodes = snapshot.groups[trial.selected.clone()]
+                                    .iter()
+                                    .map(|g| g.sources.len() as u64)
+                                    .sum();
+                                return Err(discard::attach(
+                                    invalid(
+                                        "Summary context refusal at final eligible prefix; original path retained",
+                                    ),
+                                    discard::Outcome::Failed {
+                                        reason: discard::FailureReason::ContextLimitTerminal,
+                                        origin: discard::FailureOrigin::ProviderResponse,
+                                        http_status: actual_status
+                                            .filter(|s| (100..=599).contains(s)),
+                                        provider_status: None,
+                                        provider_status_source: None,
+                                        final_group_count: Some(groups as u64).filter(|n| *n > 0),
+                                        final_source_nodes: Some(nodes).filter(|n| *n > 0),
+                                    },
+                                ));
+                            }
+                            if input_refusal && trial.selected.len() == 1 {
+                                let nodes = snapshot.groups[trial.selected.clone()]
+                                    .iter()
+                                    .map(|g| g.sources.len() as u64)
+                                    .sum::<u64>();
+                                return Err(discard::attach(
+                                    invalid(
+                                        "Summary input refused at minimum eligible group; original path retained",
+                                    ),
+                                    discard::Outcome::Failed {
+                                        reason: discard::FailureReason::RejectedAtMinimum,
+                                        origin: discard::FailureOrigin::ProviderResponse,
+                                        http_status: actual_status
+                                            .filter(|s| (100..=599).contains(s)),
+                                        provider_status: failure
+                                            .error
+                                            .stream_provider_status
+                                            .map(|witness| witness.value),
+                                        provider_status_source: failure
+                                            .error
+                                            .stream_provider_status
+                                            .map(|witness| witness.source),
+                                        final_group_count: Some(1),
+                                        final_source_nodes: Some(nodes).filter(|n| *n > 0),
+                                    },
+                                ));
+                            }
+                            let cause = discard::model_cause(&failure.error, actual_status);
                             return Err(discard::attach(
-                                invalid(
-                                    "Summary context refusal at final eligible prefix; original path retained",
-                                ),
-                                discard::Outcome::Failed {
-                                    reason: discard::FailureReason::ContextLimitTerminal,
-                                    origin: discard::FailureOrigin::ProviderResponse,
-                                    http_status: failure
-                                        .facts
-                                        .status
-                                        .filter(|s| (100..=599).contains(s)),
-                                    provider_status: None,
-                                    provider_status_source: None,
-                                    final_group_count: Some(groups as u64).filter(|n| *n > 0),
-                                    final_source_nodes: Some(nodes).filter(|n| *n > 0),
-                                },
+                                invalid("Summary request failed; original path retained"),
+                                cause,
                             ));
                         }
                     }
@@ -624,10 +680,21 @@ impl Trial {
         result: Result<(), &model::ModelError>,
         eligible: impl FnOnce(Range<usize>) -> bool,
     ) -> Next {
+        let shrink = result.is_err_and(model::ModelError::is_context_limit);
+        self.finish_classified(snapshot, result, shrink, eligible)
+    }
+    fn finish_classified(
+        &mut self,
+        snapshot: &Snapshot,
+        result: Result<(), &model::ModelError>,
+        shrink: bool,
+        eligible: impl FnOnce(Range<usize>) -> bool,
+    ) -> Next {
         if self.terminal {
             return Next::Done;
         }
-        let next = after_result(snapshot, self.selected.clone(), result, eligible);
+        let next =
+            after_classified_result(snapshot, self.selected.clone(), result, shrink, eligible);
         match &next {
             Next::RetryPrefix(prefix) => self.selected = prefix.clone(),
             Next::Done | Next::Failed => self.terminal = true,
@@ -871,6 +938,28 @@ mod tests {
     }
 
     #[test]
+    fn skewed_weights_keep_strict_prefixes_within_the_n_trial_bound() {
+        let snapshot = fixture(&[1000, 0, 0, 0]);
+        let mut selected = 0..4;
+        let mut trials = 1;
+        while let Some(next) = half_prefix(&snapshot, selected.clone()) {
+            assert_eq!(next.start, 0);
+            assert!(next.len() < selected.len());
+            selected = next;
+            trials += 1;
+        }
+        assert_eq!(selected, 0..1);
+        assert!(
+            trials <= 4,
+            "four groups admit at most four distinct trials"
+        );
+        assert_eq!(
+            trials, 2,
+            "dominant first group reaches the singleton in one shrink"
+        );
+    }
+
+    #[test]
     fn zero_weights_and_fixed_context_still_terminate_at_one_group() {
         let mut snapshot = fixture(&[0, 0, 0, 0]);
         // Empty projections are measured by the same existing replay API.
@@ -883,6 +972,28 @@ mod tests {
         assert_eq!(half_prefix(&snapshot, 0..3), Some(0..2));
         assert_eq!(half_prefix(&snapshot, 0..2), Some(0..1));
         assert_eq!(half_prefix(&snapshot, 0..1), None);
+        let mut all_zero = 0..4;
+        let mut zero_trials = 1;
+        while let Some(next) = half_prefix(&snapshot, all_zero.clone()) {
+            assert_eq!(next.start, 0);
+            assert_eq!(next.len() + 1, all_zero.len());
+            all_zero = next;
+            zero_trials += 1;
+        }
+        assert_eq!(zero_trials, 4);
+        let mut last_only = snapshot.clone();
+        last_only.groups[3].sources[0].payload =
+            json!({"type":"message","role":"user","content":"x"});
+        let mut last_range = 0..4;
+        let mut last_trials = 1;
+        while let Some(next) = half_prefix(&last_only, last_range.clone()) {
+            assert_eq!(next.start, 0);
+            assert_eq!(next.len() + 1, last_range.len());
+            last_range = next;
+            last_trials += 1;
+        }
+        assert_eq!(last_range, 0..1);
+        assert_eq!(last_trials, 4);
         snapshot.groups[0].sources[0].payload =
             json!({"type":"message","role":"user","content":"actual"});
         let without = half_prefix(&snapshot, 0..4);
