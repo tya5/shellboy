@@ -52,6 +52,63 @@ pub enum FailureReason {
     Cancelled,
     Unclassified,
 }
+impl FailureReason {
+    const ALL: [Self; 7] = [
+        Self::ProviderError,
+        Self::ContextLimitTerminal,
+        Self::Refused,
+        Self::Empty,
+        Self::NotShrinking,
+        Self::Cancelled,
+        Self::Unclassified,
+    ];
+    fn required_origin(self) -> Option<FailureOrigin> {
+        match self {
+            Self::Refused | Self::Empty | Self::NotShrinking => {
+                Some(FailureOrigin::OutputValidation)
+            }
+            Self::Cancelled => Some(FailureOrigin::Cancellation),
+            _ => None,
+        }
+    }
+    fn allows_http_status(self) -> bool {
+        matches!(self, Self::ProviderError | Self::ContextLimitTerminal)
+    }
+    fn allows_final_counts(self) -> bool {
+        self == Self::ContextLimitTerminal
+    }
+}
+
+// Schema and decoder share the reason-dependent rules. Optional null metadata
+// remains equivalent to absence, as in the existing serde Option contract.
+fn constrain_failure_schema(schema: &mut schemars::Schema) {
+    use serde_json::json;
+    let rules: Vec<_> = FailureReason::ALL
+        .into_iter()
+        .filter_map(|reason| {
+            let mut properties = serde_json::Map::new();
+            if let Some(origin) = reason.required_origin() {
+                properties.insert("origin".into(), json!({"const":origin}));
+            }
+            if !reason.allows_http_status() {
+                properties.insert("http_status".into(), json!({"type":"null"}));
+            }
+            if !reason.allows_final_counts() {
+                for name in ["final_group_count", "final_source_nodes"] {
+                    properties.insert(name.into(), json!({"type":"null"}));
+                }
+            }
+            (!properties.is_empty()).then(|| {
+                json!({
+                    "if":{"properties":{"reason":{"const":reason}},"required":["reason"]},
+                    "then":{"properties":properties},
+                })
+            })
+        })
+        .collect();
+    schema.insert("allOf".into(), json!(rules));
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureOrigin {
@@ -70,6 +127,7 @@ pub enum Outcome {
     Rejected {
         reason: RejectionReason,
     },
+    #[schemars(transform = constrain_failure_schema)]
     Failed {
         reason: FailureReason,
         origin: FailureOrigin,
@@ -108,25 +166,15 @@ impl Outcome {
                 final_group_count,
                 final_source_nodes,
             } => {
-                let output = matches!(
-                    reason,
-                    FailureReason::Refused | FailureReason::Empty | FailureReason::NotShrinking
-                );
-                (!output || origin == FailureOrigin::OutputValidation)
-                    && (reason != FailureReason::Cancelled || origin == FailureOrigin::Cancellation)
-                    && http_status.is_none_or(|s| {
-                        (100..=599).contains(&s)
-                            && matches!(
-                                reason,
-                                FailureReason::ProviderError | FailureReason::ContextLimitTerminal
-                            )
-                    })
+                reason
+                    .required_origin()
+                    .is_none_or(|required| origin == required)
+                    && http_status
+                        .is_none_or(|s| (100..=599).contains(&s) && reason.allows_http_status())
                     && [final_group_count, final_source_nodes]
                         .into_iter()
                         .all(|n| {
-                            n.is_none_or(|n| {
-                                n > 0 && n <= SAFE && reason == FailureReason::ContextLimitTerminal
-                            })
+                            n.is_none_or(|n| n > 0 && n <= SAFE && reason.allows_final_counts())
                         })
             }
         }
@@ -602,6 +650,120 @@ mod retention_contract_tests {
 #[cfg(test)]
 mod schema_contract_tests {
     use super::*;
+    #[test]
+    fn generated_schema_matches_terminal_decoder_vectors() {
+        use serde_json::json;
+        let generated: serde_json::Value =
+            serde_json::from_str(&crate::protocol::schema_json()).unwrap();
+        let schema = json!({
+            "$schema":"https://json-schema.org/draft/2020-12/schema",
+            "$ref":"#/definitions/CompactionOutcomeFact",
+            "definitions":generated["definitions"],
+        });
+        let validator = jsonschema::validator_for(&schema).unwrap();
+        let fact = |outcome| json!({"phase":"closed_summary","elapsed_ms":1,"outcome":outcome});
+        let check = |value: serde_json::Value, expected: bool| {
+            assert_eq!(
+                decode(&value.to_string()).is_some(),
+                expected,
+                "decoder: {value}"
+            );
+            assert_eq!(
+                validator.is_valid(&value),
+                expected,
+                "generated schema: {value}"
+            );
+        };
+        // Independent review counterexample: all individual field bounds pass,
+        // but origin, HTTP and counts contradict the output-validation reason.
+        check(
+            fact(
+                json!({"kind":"failed","reason":"refused","origin":"transport","http_status":401,"final_group_count":1}),
+            ),
+            false,
+        );
+        check(
+            fact(json!({"kind":"failed","reason":"cancelled","origin":"internal"})),
+            false,
+        );
+        check(
+            fact(
+                json!({"kind":"failed","reason":"provider_error","origin":"provider_response","final_source_nodes":1}),
+            ),
+            false,
+        );
+        check(
+            fact(
+                json!({"kind":"failed","reason":"context_limit_terminal","origin":"provider_response","http_status":400,"final_group_count":1,"final_source_nodes":2}),
+            ),
+            true,
+        );
+        check(
+            fact(json!({"kind":"failed","reason":"not_shrinking","origin":"output_validation"})),
+            true,
+        );
+        check(
+            fact(json!({"kind":"rejected","reason":"run_started"})),
+            true,
+        );
+        check(
+            fact(json!({"kind":"rejected","reason":"run_started","http_status":401})),
+            false,
+        );
+        for reason in [
+            "provider_error",
+            "context_limit_terminal",
+            "refused",
+            "empty",
+            "not_shrinking",
+            "cancelled",
+            "unclassified",
+        ] {
+            for origin in [
+                "provider_response",
+                "transport",
+                "protocol",
+                "preparation",
+                "output_validation",
+                "storage",
+                "cancellation",
+                "internal",
+            ] {
+                for metadata in [
+                    json!({}),
+                    json!({"http_status":null}),
+                    json!({"final_group_count":null,"final_source_nodes":null}),
+                    json!({"http_status":100}),
+                    json!({"http_status":401}),
+                    json!({"http_status":599}),
+                    json!({"http_status":99}),
+                    json!({"http_status":600}),
+                    json!({"final_group_count":1}),
+                    json!({"final_source_nodes":2}),
+                    json!({"final_group_count":0}),
+                    json!({"final_source_nodes":-1}),
+                    json!({"final_group_count":1.5}),
+                    json!({"final_source_nodes":9007199254740992u64}),
+                    json!({"http_status":401,"final_group_count":1,"final_source_nodes":2}),
+                    json!({"provider_code":"SECRET"}),
+                    json!({"message":"SECRET"}),
+                ] {
+                    let mut outcome = json!({"kind":"failed","reason":reason,"origin":origin});
+                    outcome
+                        .as_object_mut()
+                        .unwrap()
+                        .extend(metadata.as_object().unwrap().clone());
+                    let value = fact(outcome);
+                    let accepted = decode(&value.to_string()).is_some();
+                    assert_eq!(
+                        validator.is_valid(&value),
+                        accepted,
+                        "schema/decoder drift: {value}"
+                    );
+                }
+            }
+        }
+    }
     #[test]
     fn fact_schema_has_no_provider_code_message_or_private_capability() {
         let schema = serde_json::to_value(schemars::schema_for!(CompactionOutcomeFact)).unwrap();

@@ -4417,3 +4417,27 @@ Guard test mutations must respect first-failure ordering: actual path and
 selection edits advance the nonappend generation before prefix validation.
 A deliberate mismatched-witness injection is a branch negative, not proof a
 normal history edit can bypass that generation fence.
+
+### S1a Generated Schema And Decoder Agreement
+
+Independent source review found that the generated failed-outcome schema accepted
+reason/origin/status/count combinations the decoder quarantined. Preserve the
+existing decoder truth set: share reason-dependent origin and metadata permissions
+with a Schemars variant transform, rather than weaken validation or edit generated
+JSON. Optional null metadata retains its existing absence semantics. Public cause
+names, carrier, producer/control behavior and deterministic predicate do not change.
+
+Pin `jsonschema` as a test-only dependency with default features disabled. A real
+Draft 2020-12 validator is necessary for generated-schema/decoder differential
+vectors; a hand-written subset checker would duplicate the semantics being tested.
+The tests validate in-memory local definitions only, with no file/HTTP retrieval,
+background worker, product dependency or shutdown responsibility. Existing pinned
+runtime dependencies are unchanged; lockfile additions are test-validator packages.
+
+The memory-guarded local schema-fix build stopped before qualification. An explicit
+`source_prepare` CI dispatch is a bounded resource exception for schema generation
+and the real parity test on one Ubuntu runner, with exact expected-SHA verification,
+command/exit-code evidence and retained artifacts. Standard native jobs are disabled
+for this mode; its job name cannot satisfy the existing three-native-job reuse gate.
+It grants no deployment or landing authority. The generated artifact must enter a
+new reviewed source SHA before standard/all-OS qualification; no old green transfers.

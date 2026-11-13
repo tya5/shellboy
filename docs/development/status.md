@@ -154,3 +154,9 @@ Public RED evidence exists before implementation; qualification, independent
 exact-source review and this unit's own normal/three-OS CI are separate gates.
 No SSE parser/halving/suppression/adoption relaxation/progress UI or installed
 Core change belongs to this unit.
+
+S1a schema-review follow-up is an UNQUALIFIED source-preparation candidate while
+local heavy builds are held by the 8192 MiB swap guard. The real schema mismatch
+RED is reproduced; shared schema/decoder constraints are authored but await hosted
+generation/parity evidence and a later committed artifact. Source preparation is
+not standard/all-OS qualification or permission to land the current candidate.

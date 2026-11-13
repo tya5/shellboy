@@ -4,6 +4,14 @@ on:
     branches: ["main"]
   workflow_dispatch:
     inputs:
+      source_prepare:
+        description: Generate schema and run its parity test only; NOT standard or native qualification
+        type: boolean
+        default: false
+      source_prepare_sha:
+        description: Exact 40-character candidate SHA required for source preparation
+        type: string
+        default: ''
       shutdown_repeats:
         description: Run only the shutdown PTY test 50 times on native macOS, before and after
         type: boolean
@@ -54,6 +62,7 @@ permissions:
   actions: read
 jobs:
   reuse:
+    if: '!inputs.source_prepare'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -70,6 +79,61 @@ jobs:
           script: |
             const reuse = require('./scripts/ci-reuse.cjs');
             await reuse({github, context, core});
+  source-prepare:
+    name: SOURCE PREPARE - Not Qualification
+    if: inputs.source_prepare == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: '1'
+      RUST_TEST_THREADS: '1'
+      EXPECTED_SOURCE_SHA: ${{ inputs.source_prepare_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-v1
+          cache-on-failure: true
+      - name: Verify exact source, generate schema and test real-schema parity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source-prepare
+          actual=$(git rev-parse HEAD)
+          printf 'purpose=SOURCE PREPARE ONLY; NOT STANDARD/THREE-OS QUALIFICATION\nexpected=%s\nactual=%s\nevent_sha=%s\n' "$EXPECTED_SOURCE_SHA" "$actual" "$GITHUB_SHA" > source-prepare/manifest.txt
+          if ! [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || [[ "$actual" != "$EXPECTED_SOURCE_SHA" ]] || [[ "$actual" != "$GITHUB_SHA" ]]; then
+            echo 'Exact source SHA verification failed' >&2
+            exit 2
+          fi
+          run_logged() {
+            local label=$1
+            shift
+            printf '%s: ' "$label" >> source-prepare/commands.txt
+            printf '%q ' "$@" >> source-prepare/commands.txt
+            printf '\n' >> source-prepare/commands.txt
+            set +e
+            "$@" > "source-prepare/$label.stdout" 2> "source-prepare/$label.stderr"
+            local code=$?
+            set -e
+            printf '%s\t%s\n' "$label" "$code" >> source-prepare/exit-codes.tsv
+            cat "source-prepare/$label.stderr"
+            if [[ "$label" != schema ]]; then cat "source-prepare/$label.stdout"; fi
+            return "$code"
+          }
+          run_logged toolchain rustup toolchain install 1.99.1 --profile minimal --component rustfmt || exit $?
+          run_logged format cargo fmt --all -- --check || exit $?
+          run_logged schema cargo run --locked -- protocol schema || exit $?
+          cp source-prepare/schema.stdout source-prepare/protocol.schema.json || exit $?
+          run_logged parity cargo test --locked --lib compaction::discard::schema_contract_tests::generated_schema_matches_terminal_decoder_vectors -- --exact --nocapture || exit $?
+      - name: Retain source preparation manifest, exit codes, generated schema and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-prepare-${{ github.sha }}
+          path: source-prepare
+          if-no-files-found: error
   docs-checks:
     # #245: documentation-only main pushes skip the three-OS cargo checks.
     needs: reuse
@@ -91,7 +155,7 @@ jobs:
           done
   check:
     needs: reuse
-    if: always() && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
+    if: always() && !inputs.source_prepare && !inputs.shutdown_repeats && !inputs.shell_output_repeats && needs.reuse.outputs.reuse != 'true' && needs.reuse.outputs.docs_only != 'true'
     strategy:
       fail-fast: false
       matrix:

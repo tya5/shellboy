@@ -11595,3 +11595,34 @@ witness without weakening or resetting generation triggers.
 These focused results do not establish full-suite/clippy success, independent
 source approval, exact-SHA normal/three-OS CI, deployment or live-provider recovery.
 Those remain separate qualification gates reported with the final source SHA.
+
+### S1a Schema Review Follow-Up
+
+The complete local standard check on source
+`343eeeb7fd2db3422675864aa2f980498892a6aa` exited 0: check --tests, Python 218,
+format, strict clippy, library 2573 passed/25 ignored, integration 1394 passed/19
+ignored, additional targets 14 passed/1 ignored and 9 passed/2 ignored, and the
+feature-specific integration check 1 passed. Peak observed swap was 7609.2 MiB;
+the guard did not abort. The linker emitted the existing large `__eh_frame`
+warning. This result is specific to that original source, not a later schema fix
+or integrated tree, and did not clear the independent schema finding.
+
+A new real-generator schema/decoder parity test then reproduced that finding:
+0 passed/1 failed, exit 101, on refused + transport + HTTP 401 + final group count 1.
+The generated schema accepted the fact while the unchanged decoder rejected it;
+this was an assertion RED, not a compile/dependency/harness failure. The parity
+test uses generated protocol definitions and a standards validator, not a manually
+edited schema or a selected-keyword imitation. Explicit positive/negative vectors
+and the seven-reason/eight-origin/metadata matrix cover origin constraints, legal
+HTTP/count combinations, null normalization, numeric bounds and forbidden secrets.
+Repair qualification and the later main-merge/CI results remain separate gates.
+
+The first fixed-source local qualification attempt stopped during compilation at
+8204.1 MiB system swap, above the mandatory 8192 MiB guard; exit 124, command group
+terminated and cleanup confirmed. No repaired test result or generated artifact
+was produced. Local heavy work stays on hold, with no automatic restart.
+An explicitly selected Ubuntu source-prepare mode verifies its exact expected SHA,
+records commands/exit codes, generates schema from that source and runs the real
+schema parity test. Failed commands fail the job and logs/artifacts are retained.
+This is source preparation only, not normal/full/three-OS qualification. Applying
+its generated artifact creates a later source SHA requiring its own review/checks.
