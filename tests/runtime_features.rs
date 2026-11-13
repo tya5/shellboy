@@ -4195,7 +4195,7 @@ async fn proactive_third_turn_after_run(
         }
         settled(control, thread).await;
     }
-    if prior_scope.is_some() {
+    if let Some((prior_run, _)) = prior_scope {
         let target = thread.to_owned();
         trace.admission_report = Some(
             control.store.database.call(move |db| {
@@ -4239,7 +4239,6 @@ async fn proactive_third_turn_after_run(
             Ok(row.unwrap_or(Value::Null))
         }).await.unwrap());
         let report = trace.admission_report.as_ref().unwrap();
-        let (prior_run, _) = prior_scope.unwrap();
         assert_ne!(
             report["run_id"], prior_run,
             "latest eligible report belongs to the new Run: {report:#?}"
