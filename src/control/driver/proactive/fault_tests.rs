@@ -1327,3 +1327,5 @@ async fn completed_trigger_rejection(reason: &'static str) {
         assert!(!facts[0].to_string().contains("PRIVATE_SENTINEL"));
     }).await.unwrap();
 }
+
+mod s1_tests;
