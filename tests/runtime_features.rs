@@ -4116,7 +4116,19 @@ async fn proactive_third_turn(
     second: u64,
     summary_reply: (u16, Value),
 ) -> usize {
-    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None).await
+    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None, false)
+        .await
+}
+
+pub(crate) async fn proactive_third_turn_stopping_live_run(
+    control: &Arc<Control>,
+    receive: &mut mpsc::Receiver<Incoming>,
+    thread: &str,
+    second: u64,
+    summary_reply: (u16, Value),
+) -> usize {
+    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None, true)
+        .await
 }
 
 async fn proactive_third_turn_after_run(
@@ -4126,6 +4138,7 @@ async fn proactive_third_turn_after_run(
     second: u64,
     summary_reply: (u16, Value),
     prior_run: Option<&str>,
+    stop_before_final_reply: bool,
 ) -> usize {
     for (n, tokens) in [(0, 50), (1, second)] {
         send(control, thread, &format!("task {n}")).await;
@@ -4165,9 +4178,70 @@ async fn proactive_third_turn_after_run(
         }
         let context = current_context(control, thread).await;
         assert_current_context_once(&next.body, &context, "after proactive summary");
-        next.reply
-            .send((200, answer_with_usage("last answer", 10)))
-            .unwrap();
+        let stopped_run = if stop_before_final_reply {
+            let target = thread.to_owned();
+            let (run_id, state): (String, String) = control.store.database.call(move |db| {
+                db.query_row(
+                    "SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping') ORDER BY created_at DESC LIMIT 1",
+                    [target],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                ).map_err(Into::into)
+            }).await.unwrap();
+            assert_eq!(
+                state, "live",
+                "the provider-failure Run is still active before its ordinary reply"
+            );
+            request(
+                control,
+                Command::RunStop(RunTarget {
+                    run_id: run_id.clone(),
+                }),
+            )
+            .await;
+            let state: String = control
+                .store
+                .database
+                .call({
+                    let id = run_id.clone();
+                    move |db| {
+                        Ok(
+                            db.query_row("SELECT state FROM run WHERE id=?1", [id], |row| {
+                                row.get(0)
+                            })?,
+                        )
+                    }
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                state, "stopping",
+                "public RunStop applies while the original Turn is live"
+            );
+            Some(run_id)
+        } else {
+            None
+        };
+        let _ = next.reply.send((200, answer_with_usage("last answer", 10)));
+        if let Some(run_id) = stopped_run {
+            settled(control, thread).await;
+            let state: String = control
+                .store
+                .database
+                .call(move |db| {
+                    Ok(
+                        db.query_row("SELECT state FROM run WHERE id=?1", [run_id], |row| {
+                            row.get(0)
+                        })?,
+                    )
+                })
+                .await
+                .unwrap();
+            assert_eq!(
+                state, "stopped",
+                "the public stop completes before a later Run is created"
+            );
+            return summaries;
+        }
         break;
     }
     settled(control, thread).await;

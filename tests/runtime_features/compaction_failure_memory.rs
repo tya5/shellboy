@@ -231,7 +231,14 @@ async fn legal_new_run_reopens_provider_failure_memory() {
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;
 
-    let first = proactive_third_turn(&control, &mut receive, &target, 150, auth_veto_reply()).await;
+    let first = proactive_third_turn_stopping_live_run(
+        &control,
+        &mut receive,
+        &target,
+        150,
+        auth_veto_reply(),
+    )
+    .await;
     assert_eq!(
         first, 1,
         "initial real Run admits one failed provider invocation"
@@ -260,13 +267,6 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         .unwrap();
 
     let first_run = first_scope.0.clone();
-    request(
-        &control,
-        Command::RunStop(RunTarget {
-            run_id: first_run.clone(),
-        }),
-    )
-    .await;
     let stopped: String =
         control
             .store
@@ -281,7 +281,7 @@ async fn legal_new_run_reopens_provider_failure_memory() {
             .unwrap();
     assert_eq!(
         stopped, "stopped",
-        "end old Run through public RunStop before testing reopen"
+        "public RunStop ended the first Run before reopen"
     );
 
     let second = proactive_third_turn_after_run(
@@ -291,6 +291,7 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         150,
         auth_veto_reply(),
         Some(&first_run),
+        false,
     )
     .await;
     assert_eq!(
