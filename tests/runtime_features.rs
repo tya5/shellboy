@@ -3869,7 +3869,7 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 /// so no active summary is attempted either.
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
-    let (summaries, records) = ax_growing_turn_summary_requests(|| (200, answer(" "))).await;
+    let (summaries, records) = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0).await;
     assert_eq!(summaries, 1, "one closed summary request: {records:#?}");
     let failed: Vec<&Value> = records
         .iter()
@@ -3898,7 +3898,7 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
             401,
             json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
         )
-    })
+    }, 0)
     .await;
     // Tool reports 2..=18 are at or above the threshold (200 + index). An
     // actual 401 vetoes all halving/memory; each report still has one attempt.
@@ -3947,12 +3947,15 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
 /// to the automatic failure record.
 async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
+    retries: u8,
 ) -> (usize, Vec<Value>) {
     crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let options = "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
-        let owner = proactive_owner(root.path(), &url, options).await;
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=10\n{options}")).unwrap();
+        let owner = DataOwner::start(Some(config), Some(root.path().join("data")), root.path().into()).await.unwrap();
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
         for text in ["hi", "yo"] {
