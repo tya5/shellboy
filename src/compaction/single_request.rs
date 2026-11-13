@@ -920,6 +920,107 @@ mod tests {
                 .collect(),
         )
     }
+    #[tokio::test]
+    async fn same_captured_e_reopens_for_new_real_run_and_turn_scope() {
+        let (_root, db) = super::super::tests::database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('completed-run','t','completed','now');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('source-turn','t','completed-run','completed','now');",
+            )?;
+            history::append_node(
+                &tx,
+                "t",
+                "stable-source",
+                Some("source-turn"),
+                "message",
+                &json!({"role":"user","content":"same authorized source"}),
+                "now",
+            )?;
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('run-one','t','live','now');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn-one','t','run-one','running','now');",
+            )?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+
+        let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let first = compactor.snapshot("t", true).await.unwrap();
+        let limit = OutputLimit(20_000);
+        let first_e = failure_identity("t", &first, 0..1, limit).expect("actual stored source");
+        let first_f =
+            provider_identity(&first_e, &first, "actual-owner").expect("captured live scope");
+        assert!(failure_memory::blocks(
+            &failure_memory::SlotRead::Exact(first_f.clone()),
+            &first_e.0,
+            Some(&first_f)
+        ));
+
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute("UPDATE run SET state='completed' WHERE id='run-one'", [])?;
+            tx.execute("UPDATE turn SET state='completed' WHERE id='turn-one'", [])?;
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('run-two','t','live','later');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn-two','t','preparing','run-two','later');",
+            )?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let second = compactor.snapshot("t", true).await.unwrap();
+        let second_e =
+            failure_identity("t", &second, 0..1, limit).expect("same actual stored source");
+        let second_f =
+            provider_identity(&second_e, &second, "actual-owner").expect("new captured live scope");
+        assert_eq!(
+            first_e.0, second_e.0,
+            "E stays fixed across legal Run/Turn reopening"
+        );
+        assert_ne!(
+            first_f, second_f,
+            "new real Run/Turn scope reopens provider memory"
+        );
+        assert!(!failure_memory::blocks(
+            &failure_memory::SlotRead::Exact(first_f),
+            &second_e.0,
+            Some(&second_f)
+        ));
+
+        db.call(|db| {
+            db.execute("UPDATE turn SET generation=9 WHERE id='turn-two'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let changed_generation = compactor.snapshot("t", true).await.unwrap();
+        let generation_e = failure_identity("t", &changed_generation, 0..1, limit).unwrap();
+        let generation_f =
+            provider_identity(&generation_e, &changed_generation, "actual-owner").unwrap();
+        assert_eq!(
+            second_e.0, generation_e.0,
+            "generation does not alter persistent E"
+        );
+        assert_ne!(
+            second_f, generation_f,
+            "new actual Turn generation reopens provider memory"
+        );
+        assert!(!failure_memory::blocks(
+            &failure_memory::SlotRead::Exact(first_f),
+            &generation_e.0,
+            Some(&generation_f)
+        ));
+
+        let changed_limit_e =
+            failure_identity("t", &changed_generation, 0..1, OutputLimit(10_000)).unwrap();
+        assert_ne!(
+            generation_e.0, changed_limit_e.0,
+            "changed effective settings identity is distinct"
+        );
+        db.shutdown().await.unwrap();
+    }
+
     #[test]
     fn one_request_contains_whole_selected_range_and_output_instruction() {
         let snapshot = fixture(&[40, 60, 80]);
