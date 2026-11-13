@@ -349,8 +349,10 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         .find(|event| event["attempt_id"] == second_attempt)
         .expect("new-Run provider response trigger remains in durable events");
     assert!(
-        fresh_trigger["trigger"]["a_input_tokens"].as_u64().unwrap()
-            > fresh_trigger["trigger"]["target_tokens"].as_u64().unwrap(),
+        fresh_trigger["trigger"]["a_input_tokens"]
+            .as_u64()
+            .zip(fresh_trigger["trigger"]["target_tokens"].as_u64())
+            .is_some_and(|(a, target)| a > target),
         "automatic summary path requires #A above target: {fresh_trigger:#?}"
     );
     let second_scope = control
