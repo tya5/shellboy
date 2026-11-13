@@ -8013,6 +8013,10 @@
             "null"
           ]
         },
+        "effective_spill": {
+          "default": true,
+          "type": "boolean"
+        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -8079,6 +8083,13 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "spill": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "summary_max_chars": {
           "default": null,
@@ -8300,6 +8311,12 @@
           ]
         },
         "parent_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "spill": {
           "type": [
             "string",
             "null"
@@ -11233,6 +11250,10 @@
             "null"
           ]
         },
+        "effective_spill": {
+          "default": true,
+          "type": "boolean"
+        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -11299,6 +11320,13 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "spill": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "summary_max_chars": {
           "default": null,
@@ -11441,6 +11469,10 @@
             "null"
           ]
         },
+        "effective_spill": {
+          "default": true,
+          "type": "boolean"
+        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -11507,6 +11539,13 @@
           "format": "uint64",
           "minimum": 0,
           "type": "integer"
+        },
+        "spill": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "summary_max_chars": {
           "default": null,
