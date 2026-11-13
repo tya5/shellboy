@@ -97,9 +97,11 @@ mod spill_override_decode_tests {
     fn accepts_only_null_and_integer_zero_or_one() {
         let db = Connection::open_in_memory().unwrap();
         for (literal, expected) in [("NULL", None), ("0", Some(false)), ("1", Some(true))] {
-            let value = db.query_row(&format!("SELECT {literal}"), [], |row| {
-                decode_spill_override(row.get_ref(0)?, 0)
-            }).unwrap();
+            let value = db
+                .query_row(&format!("SELECT {literal}"), [], |row| {
+                    decode_spill_override(row.get_ref(0)?, 0)
+                })
+                .unwrap();
             assert_eq!(value, expected, "{literal}");
         }
         for literal in ["2", "'bad'", "0.5"] {

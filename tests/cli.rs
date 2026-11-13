@@ -725,8 +725,12 @@ fn thread_spill_cli_accepts_real_argv_values() {
     }
     let cli = Cli::try_parse_from([
         "shellboy", "thread", "set", "--thread", "fixture", "--spill", "maybe",
-    ]).unwrap();
-    let error = cli.into_command_with_stdin(cwd(), &mut &b""[..]).await.unwrap_err();
+    ])
+    .unwrap();
+    let error = cli
+        .into_command_with_stdin(cwd(), &mut &b""[..])
+        .await
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 

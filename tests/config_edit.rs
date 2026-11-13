@@ -232,7 +232,10 @@ fn connection_spill_is_visible_and_editable_as_a_native_boolean() {
     assert!(edited.contains("spill = true"));
     let cleared = edit_text(&edited, &[removal("connections.proxy.spill")]).unwrap();
     assert!(!cleared.contains("spill ="));
-    assert_eq!(Config::parse(&cleared).unwrap().connections["proxy"].spill, None);
+    assert_eq!(
+        Config::parse(&cleared).unwrap().connections["proxy"].spill,
+        None
+    );
 }
 
 #[test]
@@ -1386,16 +1389,24 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     let root = tempfile::tempdir().unwrap();
     let owner = owner(root.path(), "http://127.0.0.1:1/v1").await;
     let control = Control::new(&owner, root.path().into());
-    let created = request(&control, Command::ThreadCreate(ThreadCreateArgs {
-        agents: None,
-        connection: None,
-        cwd: None,
-        model: None,
-        effort: None,
-        parent_id: None,
-    })).await;
+    let created = request(
+        &control,
+        Command::ThreadCreate(ThreadCreateArgs {
+            agents: None,
+            connection: None,
+            cwd: None,
+            model: None,
+            effort: None,
+            parent_id: None,
+        }),
+    )
+    .await;
     let thread = created["thread_id"].as_str().unwrap().to_owned();
-    let get_thread = || Command::ThreadGet(ThreadTarget { thread_id: Some(thread.clone()) });
+    let get_thread = || {
+        Command::ThreadGet(ThreadTarget {
+            thread_id: Some(thread.clone()),
+        })
+    };
     let initial = request(&control, get_thread()).await;
     assert_eq!(initial["spill"], Value::Null);
     assert_eq!(initial["effective_spill"], true);
@@ -1403,10 +1414,16 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
     async fn config_spill(control: &std::sync::Arc<Control>, op: &str, value: bool) {
         let current = request(control, Command::ConfigGet(ConfigGetArgs {})).await;
         let hash = current["file"]["content_hash"].as_str().unwrap().to_owned();
-        let result = set(control, op, ConfigSetArgs {
-            expected_hash: hash,
-            changes: vec![change("connections.fixture.spill", json!(value))],
-        }).await.unwrap();
+        let result = set(
+            control,
+            op,
+            ConfigSetArgs {
+                expected_hash: hash,
+                changes: vec![change("connections.fixture.spill", json!(value))],
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(result["written"], true);
         assert_eq!(result["restart_required"], false);
         assert_eq!(result["applied_to_running_owner"], true);
@@ -1415,46 +1432,61 @@ async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() 
         &control,
         &format!("{}:spill-connection-off", control.store.instance_id),
         false,
-    ).await;
+    )
+    .await;
     let inherited_off = request(&control, get_thread()).await;
     assert_eq!(inherited_off["spill"], Value::Null);
     assert_eq!(inherited_off["effective_spill"], false);
 
-    let off = request(&control, Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(thread.clone()),
-        spill: Some("off".into()),
-        ..Default::default()
-    }))).await;
+    let off = request(
+        &control,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            spill: Some("off".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
     assert_eq!(off["spill"], false);
     config_spill(
         &control,
         &format!("{}:spill-connection-on", control.store.instance_id),
         true,
-    ).await;
+    )
+    .await;
     let thread_off_connection_on = request(&control, get_thread()).await;
     assert_eq!(thread_off_connection_on["spill"], false);
     assert_eq!(thread_off_connection_on["effective_spill"], false);
 
-    let on = request(&control, Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(thread.clone()),
-        spill: Some("on".into()),
-        ..Default::default()
-    }))).await;
+    let on = request(
+        &control,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            spill: Some("on".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
     assert_eq!(on["spill"], true);
     config_spill(
         &control,
         &format!("{}:spill-connection-off-again", control.store.instance_id),
         false,
-    ).await;
+    )
+    .await;
     let thread_on_connection_off = request(&control, get_thread()).await;
     assert_eq!(thread_on_connection_off["spill"], true);
     assert_eq!(thread_on_connection_off["effective_spill"], true);
 
-    request(&control, Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(thread.clone()),
-        spill: Some(String::new()),
-        ..Default::default()
-    }))).await;
+    request(
+        &control,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            spill: Some(String::new()),
+            ..Default::default()
+        })),
+    )
+    .await;
     let cleared = request(&control, get_thread()).await;
     assert_eq!(cleared["spill"], Value::Null);
     assert_eq!(cleared["effective_spill"], false);

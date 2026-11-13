@@ -553,29 +553,88 @@ mod activity_migration_tests {
         let path = root.path().join("synthetic44.sqlite");
         {
             let db = Connection::open(&path).unwrap();
-            db.execute_batch(include_str!("../../tests/fixtures/storage-current-schema43.sql"))
-                .unwrap();
+            db.execute_batch(include_str!(
+                "../../tests/fixtures/storage-current-schema43.sql"
+            ))
+            .unwrap();
             db.execute_batch(include_str!("../../migrations/0044_thread_max_tokens.sql"))
                 .unwrap();
             db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now'),('unrelated','/other','','p','m','now')",[]).unwrap();
-            assert_eq!(db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 44);
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                44
+            );
         }
         let worker = crate::storage::DbWorker::open(&path).await.unwrap();
-        worker.call(|db| {
-            assert_eq!(db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?, 45);
-            assert_eq!(db.query_row("SELECT spill_override FROM thread WHERE id='old'", [], |r| r.get::<_, Option<i64>>(0))?, None);
-            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=45", [], |r| r.get::<_, String>(0))?, "0045_thread_spill_override");
-            assert_eq!(db.query_row("SELECT spill_override FROM thread WHERE id='unrelated'", [], |r| r.get::<_, Option<i64>>(0))?, None);
-            assert_eq!(db.query_row("SELECT count(*) FROM thread WHERE id IN ('old','unrelated')", [], |r| r.get::<_, i64>(0))?, 2);
-            db.execute("UPDATE thread SET spill_override=0 WHERE id='old'", [])?;
-            assert_eq!(db.query_row("SELECT spill_override FROM thread WHERE id='old'", [], |r| r.get::<_, i64>(0))?, 0);
-            db.execute("UPDATE thread SET spill_override=1 WHERE id='old'", [])?;
-            for bad in ["2", "'bad'", "0.5"] {
-                assert!(db.execute(&format!("UPDATE thread SET spill_override={bad} WHERE id='old'"), []).is_err(), "{bad}");
-            }
-            assert!(db.prepare("PRAGMA foreign_key_check")?.query([])?.next()?.is_none());
-            Ok(())
-        }).await.unwrap();
+        worker
+            .call(|db| {
+                assert_eq!(
+                    db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+                    45
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT spill_override FROM thread WHERE id='old'",
+                        [],
+                        |r| r.get::<_, Option<i64>>(0)
+                    )?,
+                    None
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT name FROM schema_migration WHERE version=45",
+                        [],
+                        |r| r.get::<_, String>(0)
+                    )?,
+                    "0045_thread_spill_override"
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT spill_override FROM thread WHERE id='unrelated'",
+                        [],
+                        |r| r.get::<_, Option<i64>>(0)
+                    )?,
+                    None
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM thread WHERE id IN ('old','unrelated')",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    2
+                );
+                db.execute("UPDATE thread SET spill_override=0 WHERE id='old'", [])?;
+                assert_eq!(
+                    db.query_row(
+                        "SELECT spill_override FROM thread WHERE id='old'",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                db.execute("UPDATE thread SET spill_override=1 WHERE id='old'", [])?;
+                for bad in ["2", "'bad'", "0.5"] {
+                    assert!(
+                        db.execute(
+                            &format!("UPDATE thread SET spill_override={bad} WHERE id='old'"),
+                            []
+                        )
+                        .is_err(),
+                        "{bad}"
+                    );
+                }
+                assert!(
+                    db.prepare("PRAGMA foreign_key_check")?
+                        .query([])?
+                        .next()?
+                        .is_none()
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         worker.shutdown().await.unwrap();
     }
 

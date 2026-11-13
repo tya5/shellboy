@@ -1833,7 +1833,12 @@ impl Store {
                 "" => None,
                 "on" => Some(1_i64),
                 "off" => Some(0_i64),
-                _ => return Err(error(ErrorCode::InvalidArgument, "spill must be on, off, or empty to inherit")),
+                _ => {
+                    return Err(error(
+                        ErrorCode::InvalidArgument,
+                        "spill must be on, off, or empty to inherit",
+                    ));
+                }
             };
             tx.execute(
                 "UPDATE thread SET spill_override=?2 WHERE id=?1",

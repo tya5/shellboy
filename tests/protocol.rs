@@ -148,7 +148,9 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 #[test]
 fn thread_set_spill_wire_accepts_only_string_on_off_or_empty_clear() {
     let request = |value: Value| {
-        Request::from_value(json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{"thread_id":"t","spill":value}}))
+        Request::from_value(
+            json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{"thread_id":"t","spill":value}}),
+        )
     };
     for value in ["on", "off", ""] {
         let parsed = request(json!(value)).unwrap();
@@ -160,11 +162,25 @@ fn thread_set_spill_wire_accepts_only_string_on_off_or_empty_clear() {
         "operation_id":"op-null",
         "command":"thread.set",
         "args":{"thread_id":"t","title":"ordinary change","spill":null}
-    })).unwrap();
+    }))
+    .unwrap();
     let wire = serde_json::to_value(null.command).unwrap();
-    assert!(wire["args"].get("spill").is_none(), "JSON null is Option omission/no-change");
-    for value in [json!(true), json!(false), json!(1), json!("inherit"), json!("ON")] {
-        assert_eq!(request(value.clone()).unwrap_err().code, ErrorCode::InvalidArgument, "{value}");
+    assert!(
+        wire["args"].get("spill").is_none(),
+        "JSON null is Option omission/no-change"
+    );
+    for value in [
+        json!(true),
+        json!(false),
+        json!(1),
+        json!("inherit"),
+        json!("ON"),
+    ] {
+        assert_eq!(
+            request(value.clone()).unwrap_err().code,
+            ErrorCode::InvalidArgument,
+            "{value}"
+        );
     }
 }
 

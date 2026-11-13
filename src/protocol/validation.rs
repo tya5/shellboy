@@ -394,7 +394,11 @@ impl ThreadSetArgs {
         if let Some(value) = &self.max_tokens {
             parse_max_tokens(value)?;
         }
-        if self.spill.as_deref().is_some_and(|value| !matches!(value, "on" | "off" | "")) {
+        if self
+            .spill
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "on" | "off" | ""))
+        {
             return Err(invalid("spill must be on, off, or empty to inherit"));
         }
         if self.connection.is_none()

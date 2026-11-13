@@ -49,9 +49,13 @@ async fn spill_store() -> (TempDir, Store) {
         [connections.inherit]
         base_url="http://127.0.0.1:3/v1"
     "#,
-    ).unwrap();
+    )
+    .unwrap();
     let cwd = directory.path().join("project");
-    (directory, Store::new(database, Arc::new(config), cwd, "instance".into()))
+    (
+        directory,
+        Store::new(database, Arc::new(config), cwd, "instance".into()),
+    )
 }
 
 fn request(command: Command) -> Request {
@@ -2434,7 +2438,10 @@ async fn public_thread_get_reports_raw_spill_and_effective_default() {
     let (_root, store) = store().await;
     let thread = create(&store, None).await.thread_id;
     let details = get_thread(&store, &thread).await;
-    assert!(details.get("spill").is_some(), "raw spill override must be present");
+    assert!(
+        details.get("spill").is_some(),
+        "raw spill override must be present"
+    );
     assert_eq!(details["spill"], Value::Null);
     assert_eq!(details["effective_spill"], true);
 
@@ -2459,7 +2466,10 @@ async fn public_thread_get_reports_raw_spill_and_effective_default() {
     .unwrap();
     store.execute(null_is_omission, None).await.unwrap();
     let unchanged = get_thread(&store, &thread).await;
-    assert_eq!(unchanged["spill"], false, "null must not clear explicit off");
+    assert_eq!(
+        unchanged["spill"], false,
+        "null must not clear explicit off"
+    );
     assert_eq!(unchanged["effective_spill"], false);
     store.database.shutdown().await.unwrap();
 }
@@ -3083,7 +3093,6 @@ async fn thread_max_tokens_refuses_a_clash_with_connection_extra_body_limit() {
     store.database.shutdown().await.unwrap();
 }
 
-
 #[tokio::test]
 async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     let (_root, store) = spill_store().await;
@@ -3092,26 +3101,39 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
         ..Default::default()
     };
     let parent: ThreadDetails = serde_json::from_value(
-        execute(&store, Command::ThreadCreate(create_off.clone())).await.result,
-    ).unwrap();
+        execute(&store, Command::ThreadCreate(create_off.clone()))
+            .await
+            .result,
+    )
+    .unwrap();
     assert_eq!(parent.spill, None);
     assert_eq!(parent.effective_spill, false);
 
     let connection_on: ThreadDetails = serde_json::from_value(
-        execute(&store, Command::ThreadCreate(ThreadCreateArgs {
-            connection: Some("on".into()),
-            ..Default::default()
-        })).await.result,
-    ).unwrap();
+        execute(
+            &store,
+            Command::ThreadCreate(ThreadCreateArgs {
+                connection: Some("on".into()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .result,
+    )
+    .unwrap();
     assert_eq!(connection_on.spill, None);
     assert_eq!(connection_on.effective_spill, true);
 
     let before = thread_revisions(&store, &parent.thread_id).await;
-    let turned_off = execute(&store, Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(parent.thread_id.clone()),
-        spill: Some("off".into()),
-        ..Default::default()
-    }))).await;
+    let turned_off = execute(
+        &store,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(parent.thread_id.clone()),
+            spill: Some("off".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
     assert_eq!(turned_off.result["spill"], false);
     assert_eq!(turned_off.result["effective_spill"], false);
     let after = thread_revisions(&store, &parent.thread_id).await;
@@ -3119,39 +3141,67 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     assert_eq!((after.1, after.2, after.3), (before.1, before.2, before.3));
 
     let child: ThreadDetails = serde_json::from_value(
-        execute(&store, Command::ThreadCreate(ThreadCreateArgs {
-            parent_id: Some(parent.thread_id.clone()),
-            ..Default::default()
-        })).await.result,
-    ).unwrap();
+        execute(
+            &store,
+            Command::ThreadCreate(ThreadCreateArgs {
+                parent_id: Some(parent.thread_id.clone()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .result,
+    )
+    .unwrap();
     assert_eq!(child.spill, Some(false));
     assert_eq!(child.effective_spill, false);
 
-    let failed = store.execute(request(Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(parent.thread_id.clone()),
-        connection: Some("missing".into()),
-        spill: Some("on".into()),
-        ..Default::default()
-    }))), None).await.unwrap_err();
+    let failed = store
+        .execute(
+            request(Command::ThreadSet(Box::new(ThreadSetArgs {
+                thread_id: Some(parent.thread_id.clone()),
+                connection: Some("missing".into()),
+                spill: Some("on".into()),
+                ..Default::default()
+            }))),
+            None,
+        )
+        .await
+        .unwrap_err();
     assert_eq!(failed.code, ErrorCode::ConfigInvalid);
     assert_eq!(get_thread(&store, &parent.thread_id).await["spill"], false);
-    assert_eq!(get_thread(&store, &parent.thread_id).await["effective_spill"], false);
+    assert_eq!(
+        get_thread(&store, &parent.thread_id).await["effective_spill"],
+        false
+    );
 
-    execute(&store, Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(parent.thread_id.clone()),
-        spill: Some(String::new()),
-        ..Default::default()
-    }))).await;
+    execute(
+        &store,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(parent.thread_id.clone()),
+            spill: Some(String::new()),
+            ..Default::default()
+        })),
+    )
+    .await;
     let cleared = get_thread(&store, &parent.thread_id).await;
     assert_eq!(cleared["spill"], Value::Null);
     assert_eq!(cleared["effective_spill"], false);
 
-    let invalid = store.execute(request(Command::ThreadSet(Box::new(ThreadSetArgs {
-        thread_id: Some(parent.thread_id.clone()),
-        spill: Some("bad".into()),
-        ..Default::default()
-    }))), None).await.unwrap_err();
+    let invalid = store
+        .execute(
+            request(Command::ThreadSet(Box::new(ThreadSetArgs {
+                thread_id: Some(parent.thread_id.clone()),
+                spill: Some("bad".into()),
+                ..Default::default()
+            }))),
+            None,
+        )
+        .await
+        .unwrap_err();
     assert_eq!(invalid.code, ErrorCode::InvalidArgument);
-    assert_eq!(get_thread(&store, &parent.thread_id).await["spill"], Value::Null);
+    assert_eq!(
+        get_thread(&store, &parent.thread_id).await["spill"],
+        Value::Null
+    );
     store.database.shutdown().await.unwrap();
 }

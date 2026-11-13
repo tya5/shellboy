@@ -147,11 +147,15 @@ impl Fixture {
 
 #[tokio::test]
 async fn rewind_cuts_the_path_and_keeps_the_tail_as_a_child_thread() {
-    let f = Fixture::new([
-        plain(6),
-        n_path(6),
-        "UPDATE thread SET spill_override=0 WHERE id='T';".into(),
-    ].concat()).await;
+    let f = Fixture::new(
+        [
+            plain(6),
+            n_path(6),
+            "UPDATE thread SET spill_override=0 WHERE id='T';".into(),
+        ]
+        .concat(),
+    )
+    .await;
     let value = f.rewind(Some("T"), "n3", None).await.unwrap();
     assert_eq!(value["thread_id"], "T");
     assert_eq!(value["node_id"], "n3");
@@ -202,24 +206,47 @@ async fn rewind_cuts_the_path_and_keeps_the_tail_as_a_child_thread() {
     assert_eq!(
         f.query({
             let branch = branch.clone();
-            move |db| db.query_row("SELECT spill_override FROM thread WHERE id=?1", [&branch], |r| r.get::<_, Option<i64>>(0)).unwrap()
-        }).await,
+            move |db| {
+                db.query_row(
+                    "SELECT spill_override FROM thread WHERE id=?1",
+                    [&branch],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .unwrap()
+            }
+        })
+        .await,
         Some(0)
     );
-    let changed = f.store.execute(Request::new(
-        format!("instance:{}", uuid::Uuid::new_v4()),
-        Command::ThreadSet(Box::new(ThreadSetArgs {
-            thread_id: Some("T".into()),
-            spill: Some("on".into()),
-            ..Default::default()
-        })),
-    ), None).await.unwrap();
+    let changed = f
+        .store
+        .execute(
+            Request::new(
+                format!("instance:{}", uuid::Uuid::new_v4()),
+                Command::ThreadSet(Box::new(ThreadSetArgs {
+                    thread_id: Some("T".into()),
+                    spill: Some("on".into()),
+                    ..Default::default()
+                })),
+            ),
+            None,
+        )
+        .await
+        .unwrap();
     assert_eq!(changed.result["spill"], true);
     assert_eq!(
         f.query({
             let branch = branch.clone();
-            move |db| db.query_row("SELECT spill_override FROM thread WHERE id=?1", [&branch], |r| r.get::<_, Option<i64>>(0)).unwrap()
-        }).await,
+            move |db| {
+                db.query_row(
+                    "SELECT spill_override FROM thread WHERE id=?1",
+                    [&branch],
+                    |r| r.get::<_, Option<i64>>(0),
+                )
+                .unwrap()
+            }
+        })
+        .await,
         Some(0),
         "the rewind branch keeps the raw setting it copied"
     );
