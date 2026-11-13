@@ -917,7 +917,12 @@ fn active_shell_cursor_keeps_watermark_live_state_and_time_filters() {
     let first = shells(&c, &a).unwrap();
     assert_eq!(first["items"][0]["execution_id"], "c");
     a.cursor = first["next_cursor"].as_str().map(str::to_owned);
-    shell_row(&c, "late", "t", "2026-10-30T00:00:00Z", "late", 0);
+    let watermark: i64 = c
+        .query_row("SELECT max(rowid) FROM shell_execution", [], |r| r.get(0))
+        .unwrap();
+    // This late insertion sorts below the saved cursor. Keyset ordering alone
+    // must admit it; only the insertion watermark can keep it out of the page.
+    shell_row(&c, "late", "t", "2026-10-29T23:59:59Z", "late", 0);
     c.execute(
         "UPDATE shell_execution SET state='running',exit_code=NULL,ended_at=NULL WHERE id='late'",
         [],
@@ -928,6 +933,53 @@ fn active_shell_cursor_keeps_watermark_live_state_and_time_filters() {
         [],
     )
     .unwrap();
+    // Negative control: the same production query without its watermark
+    // predicate must return the new row through this first-page keyset.
+    let query = shell::query(false, true);
+    let without_watermark = query.replace("s.rowid<=?9", "?9>=0");
+    assert_ne!(query, without_watermark);
+    let cursor_time =
+        chrono::DateTime::parse_from_rfc3339(first["items"][0]["started_at"].as_str().unwrap())
+            .unwrap();
+    let raw: String = c
+        .query_row(
+            &without_watermark,
+            params![
+                None::<String>,
+                i64::MIN,
+                0,
+                i64::MAX,
+                u32::MAX,
+                cursor_time.timestamp(),
+                cursor_time.timestamp_subsec_nanos(),
+                "c",
+                watermark,
+                "running",
+                None::<i32>,
+                None::<String>,
+                200,
+                0
+            ],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let unwatermarked: Value = serde_json::from_str(&raw).unwrap();
+    assert!(
+        unwatermarked["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["execution_id"] == "late"),
+        "keyset/state filters alone must admit the late insertion: {unwatermarked}"
+    );
+    let inserted: i64 = c
+        .query_row(
+            "SELECT rowid FROM shell_execution WHERE id='late'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(inserted > watermark);
     let next = shells(&c, &a).unwrap();
     assert_eq!(next["items"][0]["execution_id"], "a");
     a.cursor = next["next_cursor"].as_str().map(str::to_owned);
@@ -949,7 +1001,11 @@ fn active_shell_cursor_keeps_watermark_live_state_and_time_filters() {
         .iter()
         .map(|i| i["execution_id"].as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(ids, ["late", "c", "a"]);
+    assert_eq!(
+        ids,
+        ["c", "a"],
+        "older late insertion is outside the half-open time filter"
+    );
     a.exit_code = Some(0);
     assert_eq!(shells(&c, &a).unwrap()["items"], json!([]));
     a.state = Some("exited".into());
