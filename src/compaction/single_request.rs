@@ -230,18 +230,9 @@ impl Compactor {
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
         let provider_identity = if automatic.is_some() {
-            self.owner_instance_id.as_deref().and_then(|owner| {
-                let run = snapshot.run_fence.as_deref()?;
-                let (turn, generation) = snapshot.turn_fence.as_ref()?;
-                let generation = u64::try_from(*generation).ok()?;
-                Some(failure_memory::provider_turn_key(
-                    &identity.0,
-                    run,
-                    turn,
-                    generation,
-                    owner,
-                ))
-            })
+            self.owner_instance_id
+                .as_deref()
+                .and_then(|owner| provider_identity(&identity, &snapshot, owner))
         } else {
             None
         };
@@ -689,6 +680,23 @@ impl Region {
 /// Capture ONCE before halving: original endpoints and request settings.
 #[derive(Clone)]
 pub(super) struct FailureIdentity(String);
+pub(super) fn provider_identity(
+    identity: &FailureIdentity,
+    snapshot: &Snapshot,
+    owner_instance_id: &str,
+) -> Option<String> {
+    let run = snapshot.run_fence.as_deref()?;
+    let (turn, generation) = snapshot.turn_fence.as_ref()?;
+    let generation = u64::try_from(*generation).ok()?;
+    Some(failure_memory::provider_turn_key(
+        &identity.0,
+        run,
+        turn,
+        generation,
+        owner_instance_id,
+    ))
+}
+
 pub(super) fn failure_identity(
     thread: &str,
     snapshot: &Snapshot,
