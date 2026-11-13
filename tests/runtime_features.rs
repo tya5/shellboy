@@ -3869,8 +3869,9 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 /// so no active summary is attempted either.
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
-    let (summaries, records) = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0).await;
-    assert_eq!(summaries, 1, "one closed summary request: {records:#?}");
+    let result = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0).await;
+    assert_eq!(result.summaries, 1, "one closed summary request: {:#?}", result.records);
+    let records = result.records;
     let failed: Vec<&Value> = records
         .iter()
         .filter(|record| {
@@ -3893,13 +3894,15 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
 /// and minimum-outcome memory are covered by the dedicated S2a matrix.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
-    let (summaries, records) = ax_growing_turn_summary_requests(|| {
+    let result = ax_growing_turn_summary_requests(|| {
         (
             401,
             json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
         )
     }, 0)
     .await;
+    let summaries = result.summaries;
+    let records = result.records;
     // Tool reports 2..=18 are at or above the threshold (200 + index). An
     // actual 401 vetoes all halving/memory; each report still has one attempt.
     let eligible_reports = (0..19).filter(|index| *index >= 2).count();
@@ -3945,10 +3948,19 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
 /// threshold 200. Returns the summary (tool-free) request count and every
 /// proactive attempt record. An explicit compact afterwards is not subject
 /// to the automatic failure record.
+struct AxFixtureResult {
+    summaries: usize,
+    records: Vec<Value>,
+    owner_instance_id: String,
+    report_scopes: Vec<(String, String, i64)>,
+    initial_path_ids: Vec<String>,
+    final_path_ids: Vec<String>,
+}
+
 async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
     retries: u8,
-) -> (usize, Vec<Value>) {
+) -> AxFixtureResult {
     crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
@@ -3964,6 +3976,13 @@ async fn ax_growing_turn_summary_requests(
             settled(&control, &target).await;
         }
         send(&control, &target, &"protected current ".repeat(70_000)).await;
+        let path_thread = target.clone();
+        let initial_path_ids = control.store.database.call(move |db| {
+            let mut statement = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?;
+            let rows = statement.query_map([path_thread], |row| row.get::<_, String>(0))?;
+            let ids = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(ids)
+        }).await.unwrap();
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"nope","arguments":"{}"}]});
         let mut summaries = 0;
         for index in 0..=19 {
@@ -3979,11 +3998,24 @@ async fn ax_growing_turn_summary_requests(
         }
         settled(&control, &target).await;
         let mut records = Vec::new();
+        let mut report_scopes = Vec::new();
         for event in proactive_events(&control, &target).await {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
-            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
+            let (record, scope): (String, (String, String, i64)) = control.store.database.call(move |db| Ok((
+                db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [&attempt], |r| r.get(0))?,
+                db.query_row("SELECT t.run_id,m.turn_id,m.generation FROM model_attempt m JOIN turn t ON t.id=m.turn_id WHERE m.id=?1", [attempt], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
+            ))).await.unwrap();
             records.push(serde_json::from_str::<Value>(&record).unwrap());
+            report_scopes.push(scope);
         }
+        let path_thread = target.clone();
+        let final_path_ids = control.store.database.call(move |db| {
+            let mut statement = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?;
+            let rows = statement.query_map([path_thread], |row| row.get::<_, String>(0))?;
+            let ids = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(ids)
+        }).await.unwrap();
+        let owner_instance_id = owner.instance_id.clone();
         eprintln!("summary_requests={summaries} records={records:#?}");
         // The failure record is automatic-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
@@ -3991,7 +4023,7 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        (summaries, records)
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids }
     }).await.unwrap()
 }
 
