@@ -1091,6 +1091,7 @@ async fn edit_adapter_loads_full_original_then_forks_before_first_request_and_di
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_target_percent: None,
                 summary_max_chars: None,
+                max_tokens: None,
                 auto_compact_at: None,
                 agents: None,
                 thread_id: Some("source".into()),
@@ -2673,6 +2674,7 @@ async fn persisted_output_identity_is_delivered_before_each_history_window() {
             Command::ThreadSet(Box::new(ThreadSetArgs {
                 auto_compact_target_percent: None,
                 summary_max_chars: None,
+                max_tokens: None,
                 auto_compact_at: None,
                 agents: None,
                 thread_id: Some(thread.clone()),

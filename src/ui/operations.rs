@@ -1476,6 +1476,12 @@ impl Form {
                         Text,
                     ),
                     f(
+                        "max_tokens",
+                        "出力上限（空=変更なし/none=接続の値へ）",
+                        String::new(),
+                        Text,
+                    ),
+                    f(
                         "parent",
                         "親会話（空=変更なし/none=親なし）",
                         String::new(),
@@ -1507,6 +1513,7 @@ impl Form {
                         auto_compact_target_percent: form
                             .clearable("auto_compact_target_percent")?,
                         summary_max_chars: form.clearable("summary_max_chars")?,
+                        max_tokens: form.clearable("max_tokens")?,
                         parent_id: form.clearable("parent")?,
                     })))
                 },

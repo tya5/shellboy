@@ -66,6 +66,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (41, "0041_receipt_reply_node_lookup"),
     (42, "0042_notification_semantic_descriptor"),
     (43, "0043_thread_single_summary_settings"),
+    (44, "0044_thread_max_tokens"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -79,7 +80,7 @@ mod migration_startup_tests;
 pub(crate) mod statement_observation;
 pub(crate) const CURRENT_SCHEMA: &str = include_str!("storage/current.sql");
 #[cfg(test)]
-pub(crate) use schema42_test_fixture::REWIND_43_TO_42;
+pub(crate) use schema42_test_fixture::REWIND_CURRENT_TO_42;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StorageError {
@@ -1762,7 +1763,9 @@ mod schema_validation_tests {
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
         db.execute_batch(
-            "ALTER TABLE thread DROP COLUMN summary_max_chars;
+            "ALTER TABLE thread DROP COLUMN max_tokens;
+             DELETE FROM schema_migration WHERE version=44;
+             ALTER TABLE thread DROP COLUMN summary_max_chars;
              ALTER TABLE thread DROP COLUMN auto_compact_target_percent;
              ALTER TABLE thread ADD COLUMN segment_chars INTEGER CHECK(segment_chars IS NULL OR segment_chars BETWEEN 2000 AND 1000000);
              ALTER TABLE thread ADD COLUMN reduce_rounds INTEGER CHECK(reduce_rounds IS NULL OR reduce_rounds BETWEEN 1 AND 16);

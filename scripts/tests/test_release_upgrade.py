@@ -15,7 +15,7 @@ class ReleaseUpgradeTests(unittest.TestCase):
         db = sqlite3.connect(':memory:')
         self.addCleanup(db.close)
         db.execute('PRAGMA foreign_keys=ON')
-        # Use a pinned schema-42 source: current.sql is schema 43 and correctly
+        # Use a pinned schema-42 source: current.sql is schema 44 and correctly
         # no longer contains segment_chars/reduce_rounds. These historical
         # upgrade tests must not derive old schemas from the current schema.
         current=(ROOT/'tests/fixtures/storage-current-schema42.sql').read_text(encoding='utf-8')
@@ -433,11 +433,11 @@ class ReleaseUpgradeTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'migration 40 missing'):
             checks.check_migration(db, before, 39, 40)
 
-    def test_arguments_default_to_public_v0100_schema32_and_current_target43(self):
+    def test_arguments_default_to_public_v0100_schema32_and_current_target44(self):
         required = ['--old', '/old', '--new', '/new', '--root', '/new-fixture']
         args = checks.parse_args(required)
         self.assertEqual((args.old_version, args.start_schema, args.expected_version, args.expected_new_schema),
-                         ('0.10.0', 32, checks.CARGO_VERSION, 43))
+                         ('0.10.0', 32, checks.CARGO_VERSION, 44))
         explicit_current = checks.parse_args(required + ['--old-version', '0.7.2', '--start-schema', '28', '--expected-version', '0.8.0', '--expected-new-schema', '28'])
         self.assertEqual((explicit_current.start_schema, explicit_current.expected_new_schema), (28, 28))
         schema29 = checks.parse_args(required + ['--old-version', '0.8.1', '--expected-new-schema', '29'])
@@ -448,9 +448,9 @@ class ReleaseUpgradeTests(unittest.TestCase):
         explicit = checks.parse_args(required + ['--old-version', '0.5.0', '--start-schema', '17', '--expected-new-schema', '19'])
         self.assertEqual((explicit.old_version, explicit.start_schema, explicit.expected_new_schema), ('0.5.0', 17, 19))
         current = checks.parse_args(required + ['--old-version', '0.6.0', '--expected-version', '0.6.1'])
-        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 43))
+        self.assertEqual((current.start_schema, current.expected_new_schema), (19, 44))
         release = checks.parse_args(required + ['--old-version', '0.7.0', '--expected-version', '0.7.1'])
-        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 43))
+        self.assertEqual((release.start_schema, release.expected_new_schema), (24, 44))
         historical = checks.parse_args(required + ['--old-version', '0.4.0', '--expected-new-schema', '17'])
         self.assertEqual((historical.start_schema, historical.expected_new_schema), (14, 17))
         explicit_public_schema = checks.parse_args(required + ['--old-version', '0.7.0', '--start-schema', '24'])

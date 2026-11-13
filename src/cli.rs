@@ -787,6 +787,9 @@ pub struct ThreadSetOptions {
     /// Maximum characters requested for one summary (positive integer); an empty string restores the connection or configured value.
     #[arg(long, allow_hyphen_values = true)]
     pub summary_max_chars: Option<String>,
+    /// Model output limit (tokens, positive integer) for this Thread's requests, replacing the connection max_tokens; an empty string restores the connection or default value.
+    #[arg(long, allow_hyphen_values = true)]
+    pub max_tokens: Option<String>,
     /// Move this Thread under another live Thread; an empty string detaches it (no parent). Live Runs keep their owner.
     #[arg(long = "parent")]
     pub parent_id: Option<String>,
@@ -1424,6 +1427,7 @@ impl Cli {
                     auto_compact_at: a.auto_compact_at,
                     auto_compact_target_percent: a.auto_compact_target_percent,
                     summary_max_chars: a.summary_max_chars,
+                    max_tokens: a.max_tokens,
                     parent_id: a.parent_id,
                 })),
             },

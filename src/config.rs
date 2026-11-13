@@ -299,6 +299,15 @@ pub enum ApiEndpoint {
     Models,
 }
 impl Connection {
+    /// The output limit a conversation request sends: the Thread's own value,
+    /// then this connection's `max_tokens`. `None` sends no limit field (the
+    /// provider decides); `anthropic_messages` requires one and uses
+    /// [`DEFAULT_MESSAGES_MAX_TOKENS`].
+    pub fn effective_max_tokens(&self, thread: Option<u64>) -> Option<u64> {
+        thread
+            .or(self.max_tokens)
+            .or((self.api == Api::AnthropicMessages).then_some(DEFAULT_MESSAGES_MAX_TOKENS))
+    }
     pub fn endpoint(&self, endpoint: ApiEndpoint) -> Result<Url, ConfigError> {
         let mut url = api_root(&self.base_url)?;
         let suffix = match endpoint {

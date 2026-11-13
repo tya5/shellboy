@@ -354,13 +354,29 @@ impl HttpModelClient {
         thread: Option<&str>,
         tags: Option<&[crate::model::wire_bytes::ItemTag]>,
     ) -> Result<(Value, Option<HeaderValue>, crate::model::wire_bytes::Labels), ModelError> {
-        if let Some(key) = self.connection.output_limit_collision_key() {
-            return Err(ModelError::new(
-                "invalid_config",
+        // A Thread override arrives in the canonical (Responses-shaped) field
+        // and replaces the connection value; the dialect maps it below.
+        let thread_limit = match request
+            .as_object_mut()
+            .and_then(|object| object.remove(crate::model::THREAD_OUTPUT_LIMIT_FIELD))
+        {
+            None => None,
+            Some(value) => Some(value.as_u64().filter(|limit| *limit > 0).ok_or_else(|| {
+                ModelError::new("protocol", "Thread max_tokens must be a positive integer")
+            })?),
+        };
+        let limit = thread_limit.or(self.connection.max_tokens);
+        if let Some(key) = self.connection.output_limit_collision_key_for(limit) {
+            let message = if thread_limit.is_some() {
+                format!(
+                    "extra_body.{key} duplicates this Thread's max_tokens; clear the Thread value (thread set --max-tokens '') or remove the extra_body key"
+                )
+            } else {
                 format!(
                     "extra_body.{key} duplicates configured max_tokens; remove one of the two settings"
-                ),
-            ));
+                )
+            };
+            return Err(ModelError::new("invalid_config", message));
         }
         let session_header = self.prepare_session(thread, &mut request)?;
         let Some(object) = request.as_object_mut() else {
@@ -380,13 +396,8 @@ impl HttpModelClient {
             .prompt_caching
             .then(|| dialect::CacheHint::of(&request));
         crate::model::apply_context_role(&mut request, self.connection.context_role);
-        let (mut request, labels) = dialect::encode_tagged(
-            self.connection.api,
-            request,
-            self.connection.max_tokens,
-            cache,
-            tags,
-        )?;
+        let (mut request, labels) =
+            dialect::encode_tagged(self.connection.api, request, limit, cache, tags)?;
         // Shellboy never interprets these. Config validation rejects any key
         // Shellboy owns, so a plain insert can neither override nor reorder.
         if let Some(object) = request.as_object_mut() {

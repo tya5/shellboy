@@ -4355,3 +4355,22 @@ reply pending index/count exactness and protocol 5. Preserve #276 SQL semantics 
 update migration identity, FK rebuild selector, fixtures and measurement labels. Merge upstream without rewriting
 published task history. Prior schema-38 CI is not schema-39 evidence; refresh focused checks and both CI at the same
 final SHA, followed by independent W8 delta review. Landing remains after v0.11.0, not authorized by this renumbering.
+
+### Per-Thread output limit (schema 44, branch feat/thread-max-tokens)
+
+User request: a Thread may override the connection's model output limit. Adopted:
+nullable `thread.max_tokens` (positive integer, no Shellboy upper bound), set with
+`thread set --max-tokens N`, `''` clears. Precedence for conversation requests is
+Thread value, then connection `max_tokens`, then the existing Messages default
+32768; Responses/Chat send no limit field when both are unset. The value travels in
+the canonical request as `max_output_tokens` and the HTTP client maps it to each
+dialect's native field. Inherited by child Threads and forks; not a
+`thread_settings_changed` notice field (like the summary settings, it does not
+change the execution context the model reasons about). Low-confidence choices:
+(1) summary requests keep the connection value, because `summary_max_chars` owns
+summary length; (2) a Thread value plus the same native key in the connection's
+`extra_body` fails the request with `invalid_config` instead of picking one, as for
+the connection setting; (3) `effective_max_tokens` reports 32768 for Messages when
+nothing is set, because that value is actually sent. Recheck if users expect the
+override to cover summaries or prefer the Thread value to silently win over
+`extra_body`.

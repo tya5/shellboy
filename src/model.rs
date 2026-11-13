@@ -204,6 +204,16 @@ pub fn configure_shell_description(request: &mut Value, enabled: bool) {
         }
     }
 }
+/// Canonical request field carrying a Thread's `max_tokens` override. The HTTP
+/// client removes it and sends the limit in each dialect's own field.
+pub const THREAD_OUTPUT_LIMIT_FIELD: &str = "max_output_tokens";
+/// Set the Thread's output-limit override on a canonical conversation request.
+/// `None` keeps the connection value. Summary requests never call this.
+pub fn apply_thread_max_tokens(request: &mut Value, max_tokens: Option<u64>) {
+    if let Some(limit) = max_tokens {
+        request[THREAD_OUTPUT_LIMIT_FIELD] = json!(limit);
+    }
+}
 pub fn response_request(
     model: &str,
     input: Vec<Value>,
@@ -369,7 +379,7 @@ fn output_limit_error(raw: &Value) -> Option<ModelError> {
     };
     limited.then(|| ModelError::new(
         "output_limit",
-        "The response was cut off by the output limit. Configure max_tokens for this connection.",
+        "The response was cut off by the output limit. Raise max_tokens for this Thread (shellboy thread set --max-tokens N) or for this connection.",
     ))
 }
 

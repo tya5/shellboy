@@ -226,6 +226,7 @@ const MEANINGS: &[Meaning] = &[
                 FieldId::AutoCompactTargetPercent,
             ),
             ("summary_max_chars", FieldId::SummaryMaxChars),
+            ("max_tokens", FieldId::MaxTokens),
             ("parent_id", FieldId::Parent),
             ("agents", FieldId::Agents),
         ],

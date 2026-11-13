@@ -226,6 +226,7 @@ async fn stream_input_layout_and_db_fairness() {
                             Command::ThreadSet(Box::new(ThreadSetArgs {
                                 auto_compact_target_percent: None,
                                 summary_max_chars: None,
+                                max_tokens: None,
                                 agents: None,
                                 thread_id: Some(thread),
                                 connection: None,

@@ -43,6 +43,8 @@ struct Snapshot {
     /// Measured bytes of this attempt's request body (#186), set at preparation.
     input_bytes: Option<crate::model::wire_bytes::InputBytes>,
     effort: Option<String>,
+    /// The Thread's own output limit; `None` keeps the connection value.
+    max_tokens: Option<u64>,
     epoch: i64,
     cwd: PathBuf,
     agents: PathBuf,
@@ -634,7 +636,7 @@ async fn next_with_clients(
         // already runnable: settings never wake background/recovery waits.
         tx.execute("INSERT OR IGNORE INTO delivery(event_id,recipient_id,state) SELECT e.id,?2,'pending' FROM event e WHERE e.target_thread_id=?1 AND e.kind='context_changed' AND e.target_run_id IS NULL AND (json_extract(e.payload_ref_json,'$.kind') IS NOT 'agents_reference' OR json_extract(e.payload_ref_json,'$.change.excluded_turn_id') IS NOT ?3) AND NOT EXISTS(SELECT 1 FROM delivery d WHERE d.event_id=e.id AND d.state='processed')",params![thread,run,turn])?;
         let events:Vec<(String,String)>=tx.prepare("SELECT e.id,json_object('event_id',e.id,'kind',e.kind,'payload',json(e.payload_ref_json)) FROM event e JOIN delivery d ON d.event_id=e.id WHERE d.recipient_id=?1 AND d.state='pending' AND (json_extract(e.payload_ref_json,'$.kind') IS NOT 'agents_reference' OR json_extract(e.payload_ref_json,'$.change.excluded_turn_id') IS NOT ?2) AND (e.kind<>'context_changed' OR NOT EXISTS(SELECT 1 FROM delivery done WHERE done.event_id=e.id AND done.state='processed')) ORDER BY e.created_at,e.id")?.query_map(params![run,turn],|r|Ok((r.get(0)?,r.get(1)?)))?.collect::<Result<_,_>>()?;
-        let mut snapshot=tx.query_row("SELECT u.generation,t.selection_revision,t.profile_revision,t.profile_id,t.model_id,t.effort,t.reasoning_epoch,t.cwd,COALESCE((SELECT s.source_path FROM instruction_snapshot s WHERE s.id=u.instruction_snapshot_id),t.agents_path) FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[&turn],|r|Ok(Snapshot{clients:clients.clone(),thread:thread.clone(),run:run.clone(),turn:turn.clone(),generation:r.get(0)?,selection:r.get(1)?,profile_revision:r.get(2)?,profile:r.get(3)?,model:r.get(4)?,effort:r.get(5)?,epoch:r.get(6)?,cwd:PathBuf::from(r.get::<_,String>(7)?),agents:PathBuf::from(r.get::<_,String>(8)?),cache_comparison_response_id:None,cache_diagnostics_enabled:false,input_bytes:None,input:None,receipts:vec![],events:events.iter().map(|v|v.0.clone()).collect()}))?;
+        let mut snapshot=tx.query_row("SELECT u.generation,t.selection_revision,t.profile_revision,t.profile_id,t.model_id,t.effort,t.reasoning_epoch,t.cwd,COALESCE((SELECT s.source_path FROM instruction_snapshot s WHERE s.id=u.instruction_snapshot_id),t.agents_path),t.max_tokens FROM turn u JOIN thread t ON t.id=u.thread_id WHERE u.id=?1",[&turn],|r|Ok(Snapshot{clients:clients.clone(),thread:thread.clone(),run:run.clone(),turn:turn.clone(),generation:r.get(0)?,selection:r.get(1)?,profile_revision:r.get(2)?,profile:r.get(3)?,model:r.get(4)?,effort:r.get(5)?,max_tokens:r.get::<_,Option<i64>>(9)?.map(|v|v as u64),epoch:r.get(6)?,cwd:PathBuf::from(r.get::<_,String>(7)?),agents:PathBuf::from(r.get::<_,String>(8)?),cache_comparison_response_id:None,cache_diagnostics_enabled:false,input_bytes:None,input:None,receipts:vec![],events:events.iter().map(|v|v.0.clone()).collect()}))?;
         if config.connections.get(&snapshot.profile).is_some_and(|c| c.prompt_cache_diagnostics) {
             snapshot.cache_comparison_response_id = model::cache_diagnostics::last_response_id(&tx, &thread)?;
         }

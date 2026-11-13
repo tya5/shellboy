@@ -163,6 +163,8 @@ struct Plan {
     profile: String,
     model: String,
     effort: Option<String>,
+    /// The Thread's output-limit override in effect for this request.
+    max_tokens: Option<u64>,
     epoch: i64,
     /// The next request's cwd; None for an attempt, whose context line is saved.
     cwd: Option<String>,
@@ -189,6 +191,8 @@ type TurnRow = (
     String,
     Option<String>,
 );
+/// connection, model, effort, reasoning epoch, cwd, Thread output limit.
+type NextRow = (String, String, Option<String>, i64, String, Option<u64>);
 /// turn, connection, model, effort, reasoning epoch, manifest, usage.
 type AttemptRow = (
     String,
@@ -268,6 +272,8 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
         profile,
         model,
         effort,
+        // Attempts saved before the per-Thread limit existed had no override.
+        max_tokens: manifest["max_tokens"].as_u64(),
         epoch,
         // The attempt's context line is a saved node inside its replayed prefix (#183).
         cwd: None,
@@ -289,14 +295,23 @@ fn attempt_plan(tx: &Connection, thread: &str, attempt: &str) -> Result<Plan> {
 /// The next request of the Thread's latest Turn from the current saved path.
 /// Pending deliveries not yet appended to the path are not included.
 fn next_plan(tx: &Connection, thread: &str, config: &Config) -> Result<Plan> {
-    let row: Option<(String, String, Option<String>, i64, String)> = tx
+    let row: Option<NextRow> = tx
         .query_row(
-            "SELECT profile_id,model_id,effort,reasoning_epoch,cwd FROM thread WHERE id=?1 AND deleted_at IS NULL",
+            "SELECT profile_id,model_id,effort,reasoning_epoch,cwd,max_tokens FROM thread WHERE id=?1 AND deleted_at IS NULL",
             [thread],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get::<_, Option<i64>>(5)?.map(|v| v as u64),
+                ))
+            },
         )
         .optional()?;
-    let Some((profile, model, effort, epoch, cwd)) = row else {
+    let Some((profile, model, effort, epoch, cwd, max_tokens)) = row else {
         return Err(fail("not_found", "Thread not found"));
     };
     let turn: Option<String> = tx
@@ -338,6 +353,7 @@ fn next_plan(tx: &Connection, thread: &str, config: &Config) -> Result<Plan> {
         profile,
         model,
         effort,
+        max_tokens,
         epoch,
         cwd: Some(cwd),
         agents,
@@ -469,6 +485,7 @@ fn assemble(config: &Config, tx: &Connection, plan: Plan) -> Result<Assembled> {
             .collect();
         let mut request =
             crate::model::response_request(&plan.model, input, plan.effort.as_deref(), true);
+        crate::model::apply_thread_max_tokens(&mut request, plan.max_tokens);
         if let Some((enabled, id)) = cache {
             crate::model::cache_diagnostics::apply_request(&mut request, enabled, id);
         }

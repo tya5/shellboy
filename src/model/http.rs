@@ -1068,6 +1068,93 @@ mod configured_output_limit_tests {
         }
     }
     #[test]
+    fn thread_override_replaces_connection_limit_in_each_native_field() {
+        let base = serde_json::json!({"model":"synthetic-model","input":[{"role":"user","content":[{"type":"input_text","text":"synthetic"}]}],"tools":[]});
+        for (api, key) in [
+            (Api::Responses, "max_output_tokens"),
+            (Api::ChatCompletions, "max_completion_tokens"),
+            (Api::AnthropicMessages, "max_tokens"),
+        ] {
+            for connection_limit in [None, Some(1234)] {
+                let mut client = HttpModelClient::new(Connection {
+                    api,
+                    base_url: "https://synthetic.invalid/v1".into(),
+                    ..Connection::default()
+                })
+                .unwrap();
+                client.connection.max_tokens = connection_limit;
+                let plain = client.wire_request(base.clone(), None).unwrap().0;
+                let mut request = base.clone();
+                crate::model::apply_thread_max_tokens(&mut request, Some(64000));
+                let wire = client.wire_request(request, None).unwrap().0;
+                assert_eq!(wire[key], 64000, "{api:?} {connection_limit:?}");
+                // The canonical carrier is never sent under a foreign name.
+                for other in ["max_output_tokens", "max_completion_tokens", "max_tokens"] {
+                    if other != key {
+                        assert!(wire.get(other).is_none(), "{api:?} sent {other}");
+                    }
+                }
+                let mut without = wire.clone();
+                without[key] = plain.get(key).cloned().unwrap_or_default();
+                if plain.get(key).is_none() {
+                    without.as_object_mut().unwrap().remove(key);
+                }
+                assert_eq!(without, plain, "only the limit may differ for {api:?}");
+                // No override keeps the connection value exactly.
+                let mut request = base.clone();
+                crate::model::apply_thread_max_tokens(&mut request, None);
+                assert_eq!(client.wire_request(request, None).unwrap().0, plain);
+            }
+        }
+    }
+    #[test]
+    fn thread_override_collides_with_extra_body_limit_and_rejects_bad_carrier() {
+        let base = serde_json::json!({"model":"synthetic","input":[],"tools":[]});
+        for (api, key) in [
+            (Api::Responses, "max_output_tokens"),
+            (Api::ChatCompletions, "max_completion_tokens"),
+        ] {
+            let mut client = HttpModelClient::new(Connection {
+                api,
+                base_url: "https://synthetic.invalid/v1".into(),
+                ..Connection::default()
+            })
+            .unwrap();
+            // Valid connection: no max_tokens, so extra_body may carry the key.
+            client.connection.extra_body = serde_json::json!({key:777})
+                .as_object()
+                .unwrap()
+                .clone()
+                .into_iter()
+                .collect();
+            assert_eq!(client.wire_request(base.clone(), None).unwrap().0[key], 777);
+            let mut request = base.clone();
+            crate::model::apply_thread_max_tokens(&mut request, Some(64000));
+            let error = client.wire_request(request, None).unwrap_err();
+            assert_eq!(error.kind, "invalid_config");
+            assert!(error.message.contains("Thread"), "{}", error.message);
+        }
+        let client = HttpModelClient::new(Connection {
+            base_url: "https://synthetic.invalid/v1".into(),
+            ..Connection::default()
+        })
+        .unwrap();
+        for bad in [
+            serde_json::json!(0),
+            serde_json::json!(-1),
+            serde_json::json!("64"),
+            serde_json::json!(1.5),
+        ] {
+            let mut request = base.clone();
+            request[crate::model::THREAD_OUTPUT_LIMIT_FIELD] = bad.clone();
+            assert_eq!(
+                client.wire_request(request, None).unwrap_err().kind,
+                "protocol",
+                "{bad}"
+            );
+        }
+    }
+    #[test]
     fn config_parser_accepts_positive_limits_for_each_api_and_keeps_unset_optional() {
         for api in ["responses", "chat_completions", "anthropic_messages"] {
             for value in [None, Some(1), Some(1234)] {

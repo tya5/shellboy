@@ -994,11 +994,24 @@ an explicit configuration/send error, even for an equal value or null. Other
 API keys are not newly reserved. Existing Messages reserved-field rules remain
 unchanged; this does not add aliases or silently choose between duplicate limits.
 
+A Thread can replace the connection value for its own conversation requests with
+`shellboy thread set --max-tokens N` (positive integer; `''` restores the
+connection value, or 32768 for Messages). The Thread value wins over the
+connection `max_tokens` and is sent in the same native field. There is no
+Shellboy upper bound; the provider's limit applies. It is saved in the database,
+not in the configuration file, is inherited by child Threads and forks, survives
+`--connection` changes, and applies from the next model request. `thread get` shows
+`max_tokens` (the Thread's own value, `null` if none) and `effective_max_tokens`
+(the value sent; absent when no limit field is sent). Compaction summary requests
+keep using the connection value; their length is set by `summary_max_chars`.
+If the connection's `extra_body` carries the same native key, a request with a
+Thread value fails with `invalid_config` instead of choosing one of them.
+
 ### Provider output-limit completion
 
 When the provider explicitly reports an output cap, Shellboy returns an
-`output_limit` error and recommends adjusting this connection's existing
-`max_tokens` setting. The response remains incomplete: available partial output
+`output_limit` error and recommends raising `max_tokens` for the Thread
+(`thread set --max-tokens N`) or for the connection. The response remains incomplete: available partial output
 and provider response details are retained, and no automatic retry is made.
 The exact signals are Responses `incomplete_details.reason = max_output_tokens`,
 Chat Completions `finish_reason = length`, and Anthropic Messages

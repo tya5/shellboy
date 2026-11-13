@@ -71,6 +71,16 @@ source/tests do not establish release adoption, all-OS CI or actual-owner accept
 Core0.11.2 publication follows independent exact review and hosted CI; owner updates
 are exclusively outside Claude after publication, never author shell operations.
 
+### Per-Thread output limit (branch `feat/thread-max-tokens`, local only)
+
+`thread set --max-tokens N` stores a per-Thread output limit (schema 44, nullable
+`thread.max_tokens`, positive integer). It replaces the connection `max_tokens` for
+conversation requests in all three APIs, is inherited by child Threads and forks,
+and is reported as `max_tokens` / `effective_max_tokens`. Summary requests keep the
+connection value. Focused unit/integration tests and the pinned schema-43 upgrade
+ran locally on macOS; the full `scripts/check.sh`, all-OS CI and a real provider
+were not run. Not pushed.
+
 ### v0.12.0 Candidate (#303 single-request compaction)
 
 #303 landed on main at cf9b662d0c (exact-SHA all-OS CI success, two independent

@@ -296,6 +296,7 @@ pub(super) fn prepare_request(
     }
     let mut request =
         model::response_request(&snapshot.model, input, snapshot.effort.as_deref(), true);
+    model::apply_thread_max_tokens(&mut request, snapshot.max_tokens);
     model::cache_diagnostics::apply_request(
         &mut request,
         snapshot.cache_diagnostics_enabled,
@@ -375,6 +376,11 @@ impl Snapshot {
         // path nodes were replayed, and the cwd its context line named.
         if let Some(replay) = &self.input {
             manifest["replay"] = json!(replay.witness());
+        }
+        // The Thread override in effect for this attempt, so inspection can
+        // rebuild the same body after the Thread setting changes.
+        if let Some(limit) = self.max_tokens {
+            manifest["max_tokens"] = json!(limit);
         }
         manifest["compaction_report_token"] =
             serde_json::to_value(crate::compaction::a_state::begin_report_tx(

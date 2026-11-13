@@ -358,6 +358,11 @@ pub(crate) fn parse_target_percent(value: &str) -> Result<Option<i64>, ApiError>
 pub(crate) fn parse_summary_chars(value: &str) -> Result<Option<i64>, ApiError> {
     parse_bounded_override(value, "summary_max_chars", &(1..=i64::MAX as usize))
 }
+/// Per-Thread output limit. Only a positive integer; the provider's own limit
+/// is the real bound, so Shellboy adds none of its own.
+pub(crate) fn parse_max_tokens(value: &str) -> Result<Option<i64>, ApiError> {
+    parse_bounded_override(value, "max_tokens", &(1..=i64::MAX as usize))
+}
 
 impl ThreadSetArgs {
     fn validate(&self) -> Result<(), ApiError> {
@@ -386,6 +391,9 @@ impl ThreadSetArgs {
         if let Some(value) = &self.summary_max_chars {
             parse_summary_chars(value)?;
         }
+        if let Some(value) = &self.max_tokens {
+            parse_max_tokens(value)?;
+        }
         if self.connection.is_none()
             && self.cwd.is_none()
             && self.model.is_none()
@@ -395,6 +403,7 @@ impl ThreadSetArgs {
             && self.auto_compact_at.is_none()
             && self.auto_compact_target_percent.is_none()
             && self.summary_max_chars.is_none()
+            && self.max_tokens.is_none()
             && self.parent_id.is_none()
         {
             Err(invalid("thread.set requires a change"))

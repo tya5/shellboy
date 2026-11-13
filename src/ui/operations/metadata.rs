@@ -79,6 +79,7 @@ impl Form {
             "auto_compact_at" => FieldId::AutoCompactAt,
             "auto_compact_target_percent" => FieldId::AutoCompactTargetPercent,
             "summary_max_chars" => FieldId::SummaryMaxChars,
+            "max_tokens" => FieldId::MaxTokens,
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
             "archived" => FieldId::Archived,
@@ -832,8 +833,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::ThreadSet => local!(
             language,
-            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、指示ファイル、親Thread、自動要約設定、summary文字数上限を変更します。",
-            "Change a Thread's display title, working folder, connection, model, reasoning effort, instruction file, parent, proactive compaction settings, and summary character limit."
+            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、出力上限、指示ファイル、親Thread、自動要約設定、summary文字数上限を変更します。",
+            "Change a Thread's display title, working folder, connection, model, reasoning effort, output limit, instruction file, parent, proactive compaction settings, and summary character limit."
         ),
         OperationId::MessageReply => local!(
             language,
@@ -1149,6 +1150,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
                 "Proactive compaction target percentage"
             )
         }
+        FieldId::MaxTokens => local!(language, "出力上限", "Output limit"),
         FieldId::Title => local!(language, "表示タイトル", "Display title"),
         FieldId::Descendants => local!(language, "子孫も対象", "Include descendants"),
         FieldId::Archived => local!(language, "アーカイブの扱い", "Archived conversations"),
@@ -1471,6 +1473,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
                 "Target size after proactive compaction, as a percentage (integer 1-100) of this Thread's configured input-token threshold. This is not a summary-output character ratio. An empty CLI value returns to the connection or [compaction] value. Separate from the absolute manual summary character cap (max_chars)."
             }
         },
+        FieldId::MaxTokens => local!(
+            language,
+            "このThreadのモデル要求の出力上限（トークン、正の整数）です。接続のmax_tokensより優先します。CLIの空文字（フォームではnone）で接続の値または既定へ戻します。要約要求には適用しません。",
+            "Output limit in tokens (positive integer) for this Thread's model requests; it replaces the connection max_tokens. An empty CLI value (none in the form) returns to the connection or default value. Summary requests do not use it."
+        ),
         FieldId::Title => local!(
             language,
             "保存タイトルを変更します。空文字は自動タイトルへ戻します。",

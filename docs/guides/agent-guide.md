@@ -875,6 +875,16 @@ an explicit configuration/send error, even for an equal value or null. Other
 API keys are not newly reserved. Existing Messages reserved-field rules remain
 unchanged; this does not add aliases or silently choose between duplicate limits.
 
+One Thread can use its own output limit without changing the saved connection:
+`shellboy thread set --max-tokens N` (positive integer) replaces the connection
+value for that Thread's conversation requests from the next model request, and
+`--max-tokens ''` restores it. `shellboy thread get` shows `max_tokens` (the
+Thread's own value or `null`) and `effective_max_tokens` (the value sent; absent
+when no limit field is sent). Child Threads and forks start with the same value.
+Summary requests keep the connection value. If you hit `output_limit` on long
+answers in one Thread, raise the Thread value instead of editing the connection;
+still choose a value the endpoint/model supports.
+
 ### Output-limit results
 
 `output_limit` means a provider supplied the exact terminal evidence that its

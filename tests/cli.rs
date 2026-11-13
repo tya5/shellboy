@@ -708,6 +708,30 @@ async fn thread_title_preserves_explicit_empty_reset() {
 }
 
 #[tokio::test]
+async fn thread_set_max_tokens_passes_value_and_empty_restore() {
+    assert!(
+        matches!(convert(&["thread", "set", "--thread", "t", "--max-tokens", "64000"]).await,
+        Command::ThreadSet(a) if a.max_tokens.as_deref() == Some("64000") && a.thread_id.as_deref() == Some("t"))
+    );
+    assert!(
+        matches!(convert(&["thread", "set", "--max-tokens", ""]).await,
+        Command::ThreadSet(a) if a.max_tokens.as_deref() == Some(""))
+    );
+    assert!(matches!(convert(&["thread", "set", "--model", "m"]).await,
+        Command::ThreadSet(a) if a.max_tokens.is_none()));
+    // Bad values parse as text and are rejected by the shared protocol validation.
+    for bad in ["0", "-5", "1.5"] {
+        let cli = Cli::try_parse_from(["shellboy", "thread", "set", "--max-tokens", bad]).unwrap();
+        let error = cli
+            .into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad}");
+        assert!(error.message.contains("max_tokens"), "{}", error.message);
+    }
+}
+
+#[tokio::test]
 async fn search_filters_and_relation_direction_are_typed_without_implicit_target() {
     let command = convert(&[
         "history",

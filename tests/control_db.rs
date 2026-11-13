@@ -211,6 +211,7 @@ async fn thread_settings_inherit_agents_and_model_switch_never_restores_old_epoc
                 auto_compact_at: None,
                 auto_compact_target_percent: None,
                 summary_max_chars: None,
+                max_tokens: None,
                 agents: None,
                 title: None,
                 thread_id: Some(id.clone()),
@@ -1032,6 +1033,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
         Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_target_percent: None,
             summary_max_chars: None,
+            max_tokens: None,
             auto_compact_at: None,
             agents: None,
             title: None,
@@ -1050,6 +1052,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
         Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_target_percent: None,
             summary_max_chars: None,
+            max_tokens: None,
             auto_compact_at: None,
             agents: None,
             title: None,
@@ -1068,6 +1071,7 @@ async fn explicit_effort_clear_is_null_and_model_change_retains_an_existing_effo
         Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_target_percent: None,
             summary_max_chars: None,
+            max_tokens: None,
             auto_compact_at: None,
             agents: None,
             title: None,
@@ -2788,4 +2792,136 @@ async fn single_summary_settings_inherit_clear_and_reopen() {
     assert_eq!(result.result["auto_compact_target_percent"], 80);
     assert_eq!(result.result["summary_max_chars"], 12345);
     reopened.database.shutdown().await.unwrap();
+}
+
+async fn max_tokens_store() -> (TempDir, Store) {
+    let directory = tempfile::tempdir().unwrap();
+    let database = DbWorker::open(directory.path().join("db")).await.unwrap();
+    let config = Config::parse(
+        r#"
+        default_connection="plain"
+        default_model="fixture"
+        [connections.plain]
+        base_url="http://127.0.0.1:1/v1"
+        [connections.limited]
+        base_url="http://127.0.0.1:2/v1"
+        max_tokens=4096
+        [connections.messages]
+        api="anthropic_messages"
+        base_url="http://127.0.0.1:3/v1"
+    "#,
+    )
+    .unwrap();
+    let startup_cwd = directory.path().join("project");
+    (
+        directory,
+        Store::new(database, Arc::new(config), startup_cwd, "instance".into()),
+    )
+}
+
+fn set_max_tokens(thread: &str, value: &str) -> Command {
+    Command::ThreadSet(Box::new(ThreadSetArgs {
+        thread_id: Some(thread.into()),
+        max_tokens: Some(value.into()),
+        ..Default::default()
+    }))
+}
+
+fn switch_connection(thread: &str, connection: &str) -> Command {
+    Command::ThreadSet(Box::new(ThreadSetArgs {
+        thread_id: Some(thread.into()),
+        connection: Some(connection.into()),
+        ..Default::default()
+    }))
+}
+
+#[tokio::test]
+async fn thread_max_tokens_overrides_connection_value_survives_switch_and_clears() {
+    let (_root, store) = max_tokens_store().await;
+    let thread = create(&store, None).await.thread_id;
+    // Unset everywhere: Responses sends no limit field, so nothing is effective.
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(got["max_tokens"], Value::Null);
+    assert!(got.get("effective_max_tokens").is_none(), "{got}");
+    let moved = execute(&store, switch_connection(&thread, "limited")).await;
+    assert_eq!(moved.result["effective_max_tokens"], 4096);
+    let moved = execute(&store, switch_connection(&thread, "messages")).await;
+    assert_eq!(moved.result["effective_max_tokens"], 32768);
+    // The Thread value wins over the connection and the Messages default.
+    let set = execute(&store, set_max_tokens(&thread, "64000")).await;
+    assert_eq!(set.result["max_tokens"], 64000);
+    assert_eq!(set.result["effective_max_tokens"], 64000);
+    let moved = execute(&store, switch_connection(&thread, "limited")).await;
+    assert_eq!(moved.result["max_tokens"], 64000);
+    assert_eq!(moved.result["effective_max_tokens"], 64000);
+    assert_eq!(
+        get_thread(&store, &thread).await["effective_max_tokens"],
+        64000
+    );
+    // An empty string clears only the Thread value.
+    let cleared = execute(&store, set_max_tokens(&thread, "")).await;
+    assert_eq!(cleared.result["max_tokens"], Value::Null);
+    assert_eq!(cleared.result["effective_max_tokens"], 4096);
+    assert_eq!(cleared.result["connection"], "limited");
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_max_tokens_rejects_non_positive_or_non_integer_and_is_inherited() {
+    let (_root, store) = max_tokens_store().await;
+    let thread = create(&store, None).await.thread_id;
+    execute(&store, set_max_tokens(&thread, "9000")).await;
+    for bad in ["0", "-1", "1.5", "abc", " 5", "9223372036854775808"] {
+        let error = store
+            .execute(request(set_max_tokens(&thread, bad)), None)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad}");
+    }
+    assert_eq!(get_thread(&store, &thread).await["max_tokens"], 9000);
+    // The upper bound is the provider's, not Shellboy's.
+    execute(&store, set_max_tokens(&thread, "9223372036854775807")).await;
+    execute(&store, set_max_tokens(&thread, "9000")).await;
+    // A child and a fork start from the source value; later changes do not reach them.
+    let child = create(&store, Some(thread.clone())).await;
+    assert_eq!(child.max_tokens, Some(9000));
+    let source = thread.clone();
+    store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            shellboy::history::append_node(
+                &tx,
+                &source,
+                "base",
+                None,
+                "user",
+                &serde_json::json!({"role":"user","content":[{"type":"input_text","text":"base"}]}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let fork = execute(
+        &store,
+        Command::ThreadFork(ThreadForkArgs {
+            agents: None,
+            thread_id: thread.clone(),
+            node_id: "base".into(),
+            cwd: None,
+        }),
+    )
+    .await;
+    assert_eq!(fork.result["max_tokens"], 9000);
+    let fork_id = fork.result["thread_id"].as_str().unwrap().to_owned();
+    execute(&store, set_max_tokens(&thread, "")).await;
+    assert_eq!(
+        get_thread(&store, &child.thread_id).await["max_tokens"],
+        9000
+    );
+    assert_eq!(get_thread(&store, &fork_id).await["max_tokens"], 9000);
+    assert_eq!(get_thread(&store, &thread).await["max_tokens"], Value::Null);
+    store.database.shutdown().await.unwrap();
 }

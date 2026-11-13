@@ -146,6 +146,36 @@ fn rejects_unknown_fields_and_invalid_limits_without_echoing_inputs() {
 }
 
 #[test]
+fn thread_set_max_tokens_accepts_positive_integer_strings_and_empty_clear_only() {
+    let request = |value: serde_json::Value| {
+        Request::from_value(
+            json!({"protocol_version":PROTOCOL_VERSION,"operation_id":"op","command":"thread.set","args":{"thread_id":"t","max_tokens":value}}),
+        )
+    };
+    for good in ["1", "64000", "9223372036854775807", ""] {
+        let accepted = request(json!(good)).unwrap();
+        let Command::ThreadSet(args) = accepted.command else {
+            panic!("thread.set expected")
+        };
+        assert_eq!(args.max_tokens.as_deref(), Some(good));
+    }
+    for bad in ["0", "-1", "1.5", " 5", "x", "9223372036854775808"] {
+        let error = request(json!(bad)).unwrap_err();
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad}");
+        assert!(error.message.contains("max_tokens"), "{}", error.message);
+    }
+    // The wire value is a string like the other Thread overrides: a JSON number
+    // is a shape error, and null equals omission (nothing to change).
+    for bad in [json!(64000), json!(0), json!(1.5), json!(null)] {
+        assert_eq!(
+            request(bad.clone()).unwrap_err().code,
+            ErrorCode::InvalidArgument,
+            "{bad}"
+        );
+    }
+}
+
+#[test]
 fn success_and_error_envelopes_match_contract_and_omit_absent_fields() {
     let message = MessageAccepted {
         to_human: false,

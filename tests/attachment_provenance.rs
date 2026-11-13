@@ -478,6 +478,7 @@ async fn separate_sources_same_path_model_switch_fork_and_owner_restart_preserve
         Command::ThreadSet(Box::new(ThreadSetArgs {
             auto_compact_target_percent: None,
             summary_max_chars: None,
+            max_tokens: None,
             auto_compact_at: None,
             agents: None,
             connection: None,

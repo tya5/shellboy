@@ -7453,6 +7453,14 @@
             "null"
           ]
         },
+        "effective_max_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -7474,6 +7482,15 @@
         },
         "last_input": {
           "default": null
+        },
+        "max_tokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "model": {
           "type": "string"
@@ -7712,6 +7729,12 @@
         },
         "effort": {
           "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_tokens": {
           "type": [
             "string",
             "null"
@@ -10650,6 +10673,14 @@
             "null"
           ]
         },
+        "effective_max_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -10671,6 +10702,15 @@
         },
         "last_input": {
           "default": null
+        },
+        "max_tokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "model": {
           "type": "string"
@@ -10841,6 +10881,14 @@
             "null"
           ]
         },
+        "effective_max_tokens": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "effective_summary_max_chars": {
           "format": "uint64",
           "minimum": 0,
@@ -10862,6 +10910,15 @@
         },
         "last_input": {
           "default": null
+        },
+        "max_tokens": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "model": {
           "type": "string"

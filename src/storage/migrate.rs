@@ -219,6 +219,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0043_thread_single_summary_settings.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 44,
+        sql: include_str!("../../migrations/0044_thread_max_tokens.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -447,7 +452,7 @@ mod activity_migration_tests {
         let _startup = crate::storage::open_connection(&path, None, None, false).unwrap();
         let writer = crate::storage::DbWorker::open(&path).await.unwrap();
         writer.call(move |db| {
-            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,43);
+            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,crate::storage::SCHEMA_VERSION);
             let old:(Option<i64>,Option<i64>)=db.query_row("SELECT auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
             assert_eq!(old,(None,None));
             let columns:Vec<String>=db.prepare("PRAGMA table_info(thread)")?.query_map([],|r|r.get(1))?.collect::<rusqlite::Result<_>>()?;
@@ -474,6 +479,65 @@ mod activity_migration_tests {
             assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=43",[],|r|r.get::<_,i64>(0))?,1);
             Ok(())
         }).await.unwrap();
+        reopened.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pinned_schema43_startup_upgrade_adds_unset_thread_max_tokens() {
+        // Pinned verbatim from 441750809e:src/storage/current.sql (v0.12.0),
+        // not derived by downgrading today's schema.
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("conversation.sqlite");
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(include_str!(
+                "../../tests/fixtures/storage-current-schema43.sql"
+            ))
+            .unwrap();
+            assert_eq!(
+                db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                    .unwrap(),
+                43
+            );
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at,auto_compact_target_percent,summary_max_chars) VALUES('old','/','','p','m','now',80,24000)",[]).unwrap();
+        }
+        let _startup = crate::storage::open_connection(&path, None, None, false).unwrap();
+        let writer = crate::storage::DbWorker::open(&path).await.unwrap();
+        writer.call(move |db| {
+            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,44);
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=44",[],|r|r.get::<_,String>(0))?,"0044_thread_max_tokens");
+            // Existing Threads keep the connection value: the new column is unset.
+            let old:(Option<i64>,i64,i64)=db.query_row("SELECT max_tokens,auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+            assert_eq!(old,(None,80,24000));
+            for bad in ["0","-1","1.5","'x'"] {
+                assert!(db.execute(&format!("UPDATE thread SET max_tokens={bad} WHERE id='old'"),[]).is_err(),"{bad}");
+            }
+            db.execute("UPDATE thread SET max_tokens=9223372036854775807 WHERE id='old'",[])?;
+            db.execute("UPDATE thread SET max_tokens=64000 WHERE id='old'",[])?;
+            assert!(db.prepare("PRAGMA foreign_key_check").unwrap().query([])?.next()?.is_none());
+            Ok(())
+        }).await.unwrap();
+        writer.shutdown().await.unwrap();
+        let reopened = crate::storage::DbWorker::open(&path).await.unwrap();
+        reopened
+            .call(|db| {
+                assert_eq!(
+                    db.query_row("SELECT max_tokens FROM thread WHERE id='old'", [], |r| r
+                        .get::<_, i64>(0))?,
+                    64000
+                );
+                assert_eq!(
+                    db.query_row(
+                        "SELECT count(*) FROM schema_migration WHERE version=44",
+                        [],
+                        |r| r.get::<_, i64>(0)
+                    )?,
+                    1
+                );
+                Ok(())
+            })
+            .await
+            .unwrap();
         reopened.shutdown().await.unwrap();
     }
 
@@ -622,7 +686,8 @@ mod activity_migration_tests {
         for start in [24, 25, 26, 27, 28] {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-            db.execute_batch(crate::storage::REWIND_43_TO_42).unwrap();
+            db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
+                .unwrap();
             db.execute_batch("DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;")
                 .unwrap();
             db.execute_batch(" DROP INDEX jobs_running_recovery; DROP INDEX IF EXISTS model_attempt_active_recovery; DELETE FROM schema_migration WHERE version>=29; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind;")
@@ -675,7 +740,8 @@ mod activity_migration_tests {
     fn active_attempt_recovery_index_updates_only_interruptible_attempts() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch(crate::storage::REWIND_43_TO_42).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
+            .unwrap();
         db.execute_batch("DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
         db.execute_batch("DROP INDEX model_attempt_active_recovery; DELETE FROM schema_migration WHERE version>=29; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind;  PRAGMA user_version=28;
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','/a','p','m','now');
@@ -709,7 +775,8 @@ mod activity_migration_tests {
     fn recovery_candidate_migration_backfills_preexisting_rows() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch(crate::storage::REWIND_43_TO_42).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
+            .unwrap();
         db.execute_batch("DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
         db.execute_batch("DROP TRIGGER tool_group_recovery_group_insert; DROP TRIGGER tool_group_recovery_group_update; DROP TRIGGER tool_group_recovery_group_delete; DROP TRIGGER tool_group_recovery_call_insert; DROP TRIGGER tool_group_recovery_call_update; DROP TRIGGER tool_group_recovery_call_delete; DROP TRIGGER tool_group_recovery_result_insert; DROP TRIGGER tool_group_recovery_result_update; DROP TRIGGER tool_group_recovery_result_delete; DROP TABLE tool_group_recovery_candidate; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DELETE FROM schema_migration WHERE version>=28;  PRAGMA user_version=27;
             INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/a','p','m','old');
@@ -737,7 +804,8 @@ mod activity_migration_tests {
             let mut db = Connection::open_in_memory().unwrap();
             db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
             if upgrade {
-                db.execute_batch(crate::storage::REWIND_43_TO_42).unwrap();
+                db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
+                    .unwrap();
                 db.execute_batch("DROP INDEX receipt_human_reply_pending;")
                     .unwrap();
                 db.execute_batch(" DROP INDEX receipt_reply_pending; DROP INDEX jobs_running_recovery; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=26; PRAGMA user_version=25;").unwrap();
@@ -750,8 +818,8 @@ mod activity_migration_tests {
             );
             assert_eq!(
                 crate::storage::SCHEMA_VERSION,
-                43,
-                "schema 43 adds the single-request summary settings"
+                44,
+                "schema 44 adds the per-Thread output limit"
             );
             assert_eq!(
                 db.query_row(
@@ -801,7 +869,8 @@ mod activity_migration_tests {
         use rusqlite::params;
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch(crate::storage::REWIND_43_TO_42).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
+            .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('legacy','','','p','m','now')", []).unwrap();
         for index in 0..20 {
             let node = format!("legacy-node-{index}");
@@ -829,7 +898,8 @@ mod activity_migration_tests {
     fn version_22_upgrade_preserves_rows_and_installs_activity_indexes() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch(crate::storage::REWIND_43_TO_42).unwrap();
+        db.execute_batch(crate::storage::REWIND_CURRENT_TO_42)
+            .unwrap();
         db.execute_batch("DELETE FROM schema_migration WHERE version>38; DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DROP INDEX IF EXISTS receipt_human_reply_pending;").unwrap();
         db.execute_batch(" DROP INDEX history_tool_group_attempt; DROP INDEX IF EXISTS receipt_reply_pending; DROP INDEX jobs_running_recovery; DROP INDEX activity_attempt_turn; DROP INDEX activity_turn_run; DROP INDEX activity_turn_run_state; DROP INDEX activity_group_turn_state; DROP INDEX activity_shell_spawned_turn; DROP INDEX activity_shell_uncollected_owner; DROP INDEX receipt_run_completion; DROP INDEX model_attempt_active_recovery; ALTER TABLE thread DROP COLUMN auto_compact_at; ALTER TABLE thread DROP COLUMN segment_chars; ALTER TABLE thread DROP COLUMN reduce_rounds; DROP INDEX IF EXISTS threads_visible_updated; DROP INDEX IF EXISTS threads_archived_updated; DROP TABLE thread_tag; DROP INDEX threads_cwd_updated; DROP TRIGGER logical_index_embedding_chunk_insert; DROP TRIGGER logical_index_embedding_chunk_delete; DROP TRIGGER logical_index_embedding_chunk_update; DROP TRIGGER logical_index_space_insert; DROP TRIGGER logical_index_space_delete; DROP TRIGGER logical_index_space_update; DROP INDEX chunks_job; ALTER TABLE index_space DROP COLUMN int8_scale; ALTER TABLE thread DROP COLUMN archived_at; ALTER TABLE thread DROP COLUMN branch_kind; DELETE FROM schema_migration WHERE version>=23; PRAGMA user_version=22; INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now');").unwrap();
         db.execute_batch("INSERT INTO run(id,thread_id,state,created_at) VALUES('r','t','completed','now'); INSERT INTO turn(id,thread_id,run_id,state,created_at) VALUES('u','t','r','completed','now'); PRAGMA ignore_check_constraints=ON; INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at) VALUES('bad','r','u','bad','exited','/','broken json','UTF-8','UTF-8','closed','now'),('good','r','u','good','exited','/','{\"spawned\":true}','UTF-8','UTF-8','closed','now'); PRAGMA ignore_check_constraints=OFF;").unwrap();

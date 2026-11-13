@@ -99,7 +99,15 @@ impl Config {
 }
 impl Connection {
     pub(crate) fn output_limit_collision_key(&self) -> Option<&'static str> {
-        self.max_tokens?;
+        self.output_limit_collision_key_for(self.max_tokens)
+    }
+    /// The `extra_body` key that would duplicate an explicit output limit,
+    /// whether it comes from this connection or from a Thread override.
+    pub(crate) fn output_limit_collision_key_for(
+        &self,
+        limit: Option<u64>,
+    ) -> Option<&'static str> {
+        limit?;
         let key = match self.api {
             Api::Responses => "max_output_tokens",
             Api::ChatCompletions => "max_completion_tokens",

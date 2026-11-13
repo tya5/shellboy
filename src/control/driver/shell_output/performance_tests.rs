@@ -74,6 +74,7 @@ async fn performance_ten_shells_ten_lifecycle_waits() {
             cache_diagnostics_enabled: false,
             input_bytes: None,
             effort: None,
+            max_tokens: None,
             epoch: 0,
             cwd: root.path().into(),
             agents: root.path().join("AGENTS.md"),
