@@ -25,6 +25,7 @@ pub(crate) use attempt::{
     AutomaticStage, begin_tx as attempt_begin_tx, finish_tx as attempt_finish_tx,
 };
 mod edit;
+mod failure_memory;
 mod keys;
 pub(crate) mod preview;
 pub use edit::ContextEditResult;
