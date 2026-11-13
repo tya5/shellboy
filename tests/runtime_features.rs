@@ -8,6 +8,8 @@ use shellboy::{
     protocol::*,
 };
 use std::{sync::Arc, time::Duration};
+#[path = "compaction_failure_memory.rs"]
+mod compaction_failure_memory;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
