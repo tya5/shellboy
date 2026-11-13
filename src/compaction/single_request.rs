@@ -954,17 +954,49 @@ mod tests {
             Ok(())
         }).await.unwrap();
 
-        let compactor = Compactor::new(db.clone(), Arc::new(Config::default()));
+        let config = Arc::new(Config::default());
+        let owner_lifetime = CancellationToken::new();
+        let owner = String::from("synthetic-owner-lifetime");
+        let compactor = Compactor::with_owner_instance(
+            db.clone(),
+            config.clone(),
+            Arc::new(crate::model::http::HttpClients::new(&config)),
+            owner.clone(),
+            owner_lifetime.clone(),
+        );
         let first = compactor.snapshot("t", true).await.unwrap();
         let limit = OutputLimit(20_000);
         let first_e = failure_identity("t", &first, 0..1, limit).expect("actual stored source");
-        let first_f =
-            provider_identity(&first_e, &first, "actual-owner").expect("captured live scope");
-        assert!(failure_memory::blocks(
-            &failure_memory::SlotRead::Exact(first_f.clone()),
-            &first_e.0,
-            Some(&first_f)
-        ));
+        let first_f = provider_identity(&first_e, &first, &owner).expect("captured live scope");
+        let first_e_value = first_e.0.clone();
+        let first_proof = first.clone();
+        let first_f_value = first_f.clone();
+        let first_cancel = CancellationToken::new();
+        let first_owner_lifetime = owner_lifetime.clone();
+        db.call(move |db| {
+            let observation = failure_memory::read(db, &Region::Closed.key("t"))?;
+            assert_eq!(observation, failure_memory::SlotRead::Absent);
+            let tx = db.unchecked_transaction()?;
+            assert!(remember_failure_qualified(
+                &tx,
+                &first_proof,
+                &first_cancel,
+                Some(&first_owner_lifetime),
+                "t",
+                Region::Closed,
+                &observation,
+                &first_f_value,
+            )?);
+            tx.commit()?;
+            assert!(failure_memory::blocks(
+                &failure_memory::read(db, &Region::Closed.key("t"))?,
+                &first_e_value,
+                Some(&first_f_value),
+            ));
+            Ok(())
+        })
+        .await
+        .unwrap();
 
         db.call(|db| {
             let tx = db.transaction()?;
@@ -981,7 +1013,7 @@ mod tests {
         let second_e =
             failure_identity("t", &second, 0..1, limit).expect("same actual stored source");
         let second_f =
-            provider_identity(&second_e, &second, "actual-owner").expect("new captured live scope");
+            provider_identity(&second_e, &second, &owner).expect("new captured live scope");
         assert_eq!(
             first_e.0, second_e.0,
             "E stays fixed across legal Run/Turn reopening"
@@ -990,8 +1022,40 @@ mod tests {
             first_f, second_f,
             "new real Run/Turn scope reopens provider memory"
         );
+        let stale_proof = first.clone();
+        let stale_f = provider_identity(&second_e, &second, &owner).unwrap();
+        let stale_cancel = CancellationToken::new();
+        let stale_owner_lifetime = owner_lifetime.clone();
+        db.call(move |db| {
+            let tx = db.unchecked_transaction()?;
+            assert!(
+                !remember_failure_qualified(
+                    &tx,
+                    &stale_proof,
+                    &stale_cancel,
+                    Some(&stale_owner_lifetime),
+                    "t",
+                    Region::Closed,
+                    &failure_memory::SlotRead::Absent,
+                    &stale_f,
+                )?,
+                "obsolete Run snapshot cannot save a new provider key"
+            );
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let new_scope_slot = db
+            .call(|db| failure_memory::read(db, &Region::Closed.key("t")))
+            .await
+            .unwrap();
+        assert_eq!(
+            new_scope_slot,
+            failure_memory::SlotRead::Exact(first_f.clone())
+        );
         assert!(!failure_memory::blocks(
-            &failure_memory::SlotRead::Exact(first_f),
+            &new_scope_slot,
             &second_e.0,
             Some(&second_f)
         ));
@@ -1004,8 +1068,7 @@ mod tests {
         .unwrap();
         let changed_generation = compactor.snapshot("t", true).await.unwrap();
         let generation_e = failure_identity("t", &changed_generation, 0..1, limit).unwrap();
-        let generation_f =
-            provider_identity(&generation_e, &changed_generation, "actual-owner").unwrap();
+        let generation_f = provider_identity(&generation_e, &changed_generation, &owner).unwrap();
         assert_eq!(
             second_e.0, generation_e.0,
             "generation does not alter persistent E"
@@ -1015,16 +1078,32 @@ mod tests {
             "new actual Turn generation reopens provider memory"
         );
         assert!(!failure_memory::blocks(
-            &failure_memory::SlotRead::Exact(first_f),
+            &new_scope_slot,
             &generation_e.0,
             Some(&generation_f)
         ));
 
+        db.call(|db| {
+            db.execute("UPDATE thread SET summary_max_chars=10000 WHERE id='t'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let changed_settings = compactor.snapshot("t", true).await.unwrap();
+        let changed_thread_limit = changed_settings
+            .summary_max_chars
+            .map(|value| u64::try_from(value).unwrap());
+        let changed_limit = resolved_limit(
+            None,
+            changed_thread_limit,
+            config.connections.get(&changed_settings.profile),
+            &config.compaction,
+        );
         let changed_limit_e =
-            failure_identity("t", &changed_generation, 0..1, OutputLimit(10_000)).unwrap();
+            failure_identity("t", &changed_settings, 0..1, changed_limit).unwrap();
         assert_ne!(
             generation_e.0, changed_limit_e.0,
-            "changed effective settings identity is distinct"
+            "changed persisted summary setting changes E"
         );
         db.shutdown().await.unwrap();
     }
