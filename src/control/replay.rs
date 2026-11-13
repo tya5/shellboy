@@ -14,9 +14,11 @@ use std::{
 };
 
 mod inspection;
+#[cfg(test)]
+mod metadata_tests;
 mod tool_order;
 
-const ADAPTER_VERSION: u32 = 3;
+const ADAPTER_VERSION: u32 = 4;
 const TOOL_SCHEMA_VERSION: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Context {
@@ -595,6 +597,11 @@ pub(crate) fn convert_kept(mut value: Value, epoch: i64, kept: bool) -> Vec<Valu
 // Provider-local item identities are not conversation identities. Normalize only
 // the outbound copy; call_id still pairs calls/results and reasoning is opaque.
 fn outbound_item(mut item: Value) -> Value {
+    // Epochs belong to saved replay metadata, never to a provider input item.
+    // Only this outbound copy is changed; content and opaque blocks stay intact.
+    if let Some(object) = item.as_object_mut() {
+        object.remove("reasoning_epoch");
+    }
     // Generic assistant nodes (for example a saved human-approval ask) may
     // store their text using the user-side input_text content tag. Responses
     // accepts output_text/refusal for assistant messages; normalize only the
@@ -880,16 +887,25 @@ mod tests {
             for item in &mut expected {
                 let object = item.as_object_mut().unwrap();
                 object.remove("reasoning_epoch");
-                if matches!(object.get("type").and_then(Value::as_str), Some("message" | "function_call")) {
+                if matches!(
+                    object.get("type").and_then(Value::as_str),
+                    Some("message" | "function_call")
+                ) {
                     object.remove("id");
                 }
             }
-            let wire = crate::model::dialect::encode(crate::config::Api::Responses,
-                json!({"model":"synthetic","input":convert(saved.clone(), 7)})).unwrap();
+            let wire = crate::model::dialect::encode(
+                crate::config::Api::Responses,
+                json!({"model":"synthetic","input":convert(saved.clone(), 7)}),
+            )
+            .unwrap();
             let wire: Value = serde_json::from_slice(&serde_json::to_vec(&wire).unwrap()).unwrap();
             assert_eq!(serde_json::to_vec(&saved).unwrap(), before);
             for item in wire["input"].as_array().unwrap() {
-                assert!(item.get("reasoning_epoch").is_none(), "internal epoch leaked to Responses");
+                assert!(
+                    item.get("reasoning_epoch").is_none(),
+                    "internal epoch leaked to Responses"
+                );
             }
             assert_eq!(wire["input"], json!(expected));
         }
@@ -1208,7 +1224,7 @@ mod tests {
                 // Simulate a retained old conversion, rather than merely testing
                 // version equality: a stale frame must never reach the request.
                 let frame = Arc::get_mut(&mut entry.frames[0]).unwrap();
-                frame.items[0] = json!({"type":"message","id":"chatcmpl-stale"});
+                frame.items[0] = json!({"type":"message","id":"chatcmpl-stale","reasoning_epoch":0});
             }
             let lease = run.load(db, "t")?;
             assert_eq!(lease.materialize(), vec![json!({"type":"message","role":"assistant","content":[],"status":"completed"})]);

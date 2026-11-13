@@ -11494,3 +11494,49 @@ Source/privacy/budget review of 831d0907 accepted by S6; subsequent change only 
 documentation control names. Exact final CI/review/main adoption is still pending.
 No Studio consumption, installed Core, paid provider, private DB or UI success is
 implied by these producer tests. Schema40 and installed owner remain unchanged.
+
+## Outbound epoch metadata boundary (2026-11-13)
+
+macOS arm64, local disposable SQLite and localhost synthetic summary server only.
+Base: v0.13.0 main `c212ecb8e3f56e2f7e8cee0ee49f9e7bd942c3bd`.
+The test-only checkpoint `9bfc5a2d30cbb45a20dd658e8c089dea6855c58c`
+reproduced two original REDs (each exit 101, 0 passed / 1 failed):
+`compaction::tests::adopted_summary_replay_responses_excludes_internal_epoch`
+failed on `unknown parameter input[4].reasoning_epoch` after real synthetic
+summary adoption, replay and final Responses JSON serialization;
+`control::replay::tests::outbound_metadata_boundary_preserves_all_replay_shapes`
+failed on leaked internal epoch metadata.
+
+After the shared outbound-copy repair, those regressions passed. The focused
+commands also passed all seven `control::replay::tests::` tests and the exact
+`compaction::tests::active_turn_summary_leaves_original_nodes_edges_and_order_intact`
+test (1 + 7 + 1 passed, no failures; all three commands exit 0). Assertions cover
+absence of the reserved field on serialized input items, retained summary bytes
+and content/message provenance, raw-role/item/output shapes, literal text and
+tool JSON strings, call IDs, provider-local ID normalization, opaque signatures,
+epoch eligibility, cache rebuilding, and original nodes/edges/order preservation.
+
+Commands used the shared serial heavy/Rust slot, `CARGO_BUILD_JOBS=1`,
+`RUST_TEST_THREADS=1`, and an 8192 MiB system-swap abort guard. Peak observed swap
+was 3745.69 MiB for the adoption RED, 3632.62 MiB for the shape RED, and 3592.62 MiB
+for the fixed focused run; no threshold abort occurred. This is local synthetic
+source evidence, not real-provider acceptance, private-history attribution,
+independent review, full-suite or three-OS CI, installation, or actual recovery.
+
+The expanded independent-risk matrix then passed 15 focused tests (1 real-adoption
+HTTP test, all 12 replay-module tests, 1 original-node preservation test, and 1
+interleaved spill/provenance test; each command exit 0). The adoption test checks
+exactly one summary request and one separate conversation POST, with a checked
+localhost server validating the final body before responding: selected model,
+phase sentinel, six final input items including the summary, mapped context role,
+store/stream flags, output limit, and missing owned epoch fields. The raw saved
+summary string is compared after adoption, after replay, and after HTTP send.
+Historical saved-summary tests compare raw SQLite payload strings, revisions,
+path and Thread state through cold/warm cache loads, a separately baselined
+append, and database reopen. Same-name literal/schema/tool/opaque fields remain
+exact, and same/mismatched/missing/malformed epochs plus `kept` prefix eligibility
+are tested. Existing pair rejection and spill byte/source-order controls pass.
+Two initial expanded-test setup errors used an empty default API root; only those
+synthetic pure-wire fixtures were corrected to explicit localhost roots, without
+changing production behavior or weakening preservation assertions.
+Final `cargo check --tests` and `cargo fmt --check` also exited 0 on this source.

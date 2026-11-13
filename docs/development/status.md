@@ -133,3 +133,12 @@ canonical identity/execution authority unchanged. Synthetic producers and protoc
 schema golden pass; first spill omission and zero-filter mistakes are retained in
 acceptance history. S6 source gate accepted; exact final CI/main remains pending.
 No #274 reader rewrite, #297 sender edit, schema40 or installed change.
+
+## Outbound replay metadata boundary (2026-11-13)
+
+The narrow source repair from v0.13.0 main preserves saved summary metadata while
+excluding `reasoning_epoch` from outbound canonical input items at the shared
+replay-copy boundary. Original REDs reproduced the invalid field; fifteen focused
+synthetic tests passed after repair (see the validation record). This is not an
+installed-owner change or successful provider recovery; independent review,
+full-suite and exact-SHA three-OS CI remain separate gates.

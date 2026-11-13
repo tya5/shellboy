@@ -1797,6 +1797,12 @@ mod tests {
     async fn summary_proxy_capturing(
         responses: Vec<Value>,
     ) -> (String, tokio::task::JoinHandle<Vec<Value>>) {
+        summary_proxy_capturing_checked(responses, |_| {}).await
+    }
+    async fn summary_proxy_capturing_checked(
+        responses: Vec<Value>,
+        check: fn(&Value),
+    ) -> (String, tokio::task::JoinHandle<Vec<Value>>) {
         use tokio::{
             io::{AsyncReadExt, AsyncWriteExt},
             net::TcpListener,
@@ -1833,6 +1839,7 @@ mod tests {
                             if prompt.starts_with("Summarize the following conversation") {
                                 assert!(prompt.contains("headings Goal, Constraints, Current state, Open issues and next steps, Key references."));
                             }
+                            check(&body);
                             calls.push(body);
                             break;
                         }
@@ -2274,36 +2281,117 @@ mod tests {
             .summary_node_id
             .unwrap();
         assert_eq!(server.await.unwrap(), 1);
-        db.call(move |db| {
-            let stored = || db.query_row(
-                "SELECT payload_json FROM node WHERE id=?1", [&summary],
-                |row| row.get::<_, String>(0),
+        let saved_summary = summary.clone();
+        let (input, saved_bytes) = db
+            .call(move |db| {
+                let stored = || {
+                    db.query_row(
+                        "SELECT payload_json FROM node WHERE id=?1",
+                        [&summary],
+                        |row| row.get::<_, String>(0),
+                    )
+                };
+                let before = stored()?;
+                let payload: Value = serde_json::from_str(&before).unwrap();
+                assert!(payload["item"].get("reasoning_epoch").is_some());
+                let input = crate::control::replay::ReplayCache::new(1_000_000)
+                    .load(db, "t")?
+                    .materialize();
+                let wire = crate::model::dialect::encode(
+                    crate::config::Api::Responses,
+                    json!({"model":"synthetic", "input":input.clone()}),
+                )
+                .unwrap();
+                let final_json = serde_json::to_string(&wire).unwrap();
+                let decoded: Value = serde_json::from_str(&final_json).unwrap();
+                assert_eq!(
+                    stored()?,
+                    before,
+                    "replay must not rewrite saved summary bytes"
+                );
+                let items = decoded["input"].as_array().unwrap();
+                for (index, item) in items.iter().enumerate() {
+                    assert!(
+                        item.get("reasoning_epoch").is_none(),
+                        "unknown parameter input[{index}].reasoning_epoch"
+                    );
+                }
+                let last = items.last().unwrap();
+                assert_eq!(last["content"], payload["item"]["content"]);
+                assert!(last.to_string().contains("SUMMARY-WITH-INSTRUCTIONS"));
+                assert!(last.to_string().contains("Latest tool round"));
+                assert_eq!(
+                    history::summary_message_ids(db, &summary)?,
+                    ["user-after-g1", "user-after-g2"]
+                );
+                assert_eq!(
+                    items.len(),
+                    5,
+                    "summary and preserved prefix must reach preparation"
+                );
+                Ok((input, before))
+            })
+            .await
+            .unwrap();
+        let completion = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"REPLAY-COMPLETE"}]}]});
+        let (url, replay_server) = summary_proxy_capturing_checked(vec![completion], |body| {
+            assert_eq!(body["model"], "synthetic");
+            assert_eq!(body["stream"], true);
+            assert_eq!(body["store"], false);
+            assert_eq!(body["input"].as_array().unwrap().len(), 6);
+            assert_eq!(body["input"][0]["content"][0]["text"], "FINAL-REPLAY-PHASE");
+            assert_eq!(body["input"][5]["role"], "user");
+            let text = body["input"][5]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains("SUMMARY-WITH-INSTRUCTIONS") && text.contains("Latest tool round")
             );
-            let before = stored()?;
-            let payload: Value = serde_json::from_str(&before).unwrap();
-            assert!(payload["item"].get("reasoning_epoch").is_some());
-            let input = crate::control::replay::ReplayCache::new(1_000_000)
-                .load(db, "t")?.materialize();
-            let wire = crate::model::dialect::encode(
-                crate::config::Api::Responses,
-                json!({"model":"synthetic", "input":input}),
-            ).unwrap();
-            let final_json = serde_json::to_string(&wire).unwrap();
-            let decoded: Value = serde_json::from_str(&final_json).unwrap();
-            assert_eq!(stored()?, before, "replay must not rewrite saved summary bytes");
-            let items = decoded["input"].as_array().unwrap();
-            for (index, item) in items.iter().enumerate() {
-                assert!(item.get("reasoning_epoch").is_none(),
-                    "unknown parameter input[{index}].reasoning_epoch");
+            for item in body["input"].as_array().unwrap() {
+                assert!(
+                    item.get("reasoning_epoch").is_none(),
+                    "internal metadata reached final HTTP body"
+                );
             }
-            let last = items.last().unwrap();
-            assert_eq!(last["content"], payload["item"]["content"]);
-            assert!(last.to_string().contains("SUMMARY-WITH-INSTRUCTIONS"));
-            assert!(last.to_string().contains("Latest tool round"));
-            assert_eq!(history::summary_message_ids(db, &summary)?,
-                ["user-after-g1", "user-after-g2"]);
+            assert_eq!(body["max_output_tokens"], 321);
+        })
+        .await;
+        let mut connection = summary_config(url).connections.remove("fixture").unwrap();
+        connection.context_role = crate::config::ContextRole::User;
+        connection.max_tokens = Some(321);
+        connection.response_max_retries = 0;
+        let client = crate::model::http::HttpModelClient::new(connection).unwrap();
+        let mut final_input = vec![
+            json!({"role":"system","content":[{"type":"input_text","text":"FINAL-REPLAY-PHASE"}]}),
+        ];
+        final_input.extend(input);
+        let response = client
+            .response_for_thread(
+                "t",
+                crate::model::response_request("synthetic", final_input, None, false),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.raw["status"], "completed");
+        assert_eq!(
+            replay_server.await.unwrap().len(),
+            1,
+            "exactly one final conversation POST"
+        );
+        db.call(move |db| {
+            let after: String = db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [&saved_summary],
+                |row| row.get(0),
+            )?;
+            assert_eq!(
+                after, saved_bytes,
+                "actual HTTP preparation/send must not rewrite summary bytes"
+            );
             Ok(())
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         db.shutdown().await.unwrap();
     }
 

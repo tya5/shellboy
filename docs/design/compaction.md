@@ -1499,3 +1499,15 @@ unbounded per-range history, capacity-exhaustion stop, or restored marks/witness
 Range endpoints/settings changes allow another request. Internal revisions/epoch
 are deliberately NOT extra identity authority here. This witness does not
 replace atomic source/adoption validation. #A state storage remains unapproved.
+
+## Internal replay metadata and outbound items
+
+`reasoning_epoch` is Shellboy-owned saved replay metadata, including when an
+adopted active summary carries it on its nested `item`. Replay reads the saved
+wrapper epoch for signed-reasoning eligibility, then removes the internal epoch
+property from each outbound item copy, for `output`, `item` and direct-role
+payload shapes alike. It never rewrites retained node bytes or recursively
+scrubs content, tool argument/result strings, or provider-opaque blocks. Existing
+provider-local ID normalization and signed/opaque reasoning eligibility remain
+unchanged. The Responses adapter receives canonical provider items, not internal
+replay bookkeeping; no provider-tolerance fallback or database migration applies.

@@ -4374,3 +4374,14 @@ the connection setting; (3) `effective_max_tokens` reports 32768 for Messages wh
 nothing is set, because that value is actually sent. Recheck if users expect the
 override to cover summaries or prefer the Thread value to silently win over
 `extra_body`.
+
+## Outbound replay metadata ownership (2026-11-13)
+
+An active summary stores `reasoning_epoch` on both its wrapper and nested item.
+Unwrapping that item previously exposed internal metadata to Responses, which
+can reject it as an unknown input-item parameter. Keep the saved representation
+and epoch eligibility rules, but remove this known internal field once at the
+shared outbound replay-copy boundary for all three payload shapes. Do not add
+recursive sanitization, dialect tolerance, history rewrites or a new schema.
+Synthetic adoption-through-final-JSON and per-shape preservation regressions
+qualify the boundary; real-provider recovery/deployment remain separate actions.
