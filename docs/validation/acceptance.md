@@ -11759,3 +11759,41 @@ was applied, but `cargo fmt -- --check` initially exited1 before that formatting
 rerun final formatter check and relevant tests after the last fixture/source edits.
 Independent source review, full standard check, normal CI, three-OS CI and landing
 remain pending. No real provider or installed owner was used.
+
+
+### S2a Review-Fix Follow-Up (Unqualified)
+
+The independent review of `1dd3a0942181f3cb43373e94f76b9c4d1e1f3ea4` required
+complete HTTP-body evidence, the published schema artifact, and actual Retry-After
+429 projection. Follow-up source changes gate numeric halving on
+`http_error_complete` + provider kind + matching actual status, or `terminal_received`
++ 2xx + trusted provider SSE witness. Local public cases exercise interrupted
+HTTP400 and byte-bounded truncated HTTP413; each stays at one POST, has no minimum
+counts and writes no deterministic E. A real local 429 Retry-After header case
+asserts one POST, `provider_error`/`provider_response`, HTTP429, and no stream pair.
+The original complete body typed quota case remains present. The checked-in
+`docs/reference/protocol.schema.json` was regenerated using `cargo run --locked --
+protocol schema`; exact artifact parity passed.
+
+Focused guarded results on evolving source: `cargo test --locked --lib t10_ --
+--nocapture` passed5; `cargo test --locked --lib s2_ -- --nocapture` passed7;
+`cargo test --locked --lib compaction::discard::schema_contract_tests --
+--nocapture` passed3; the schema artifact integration parity test passed1. These
+include the updated T10 SSE singleton expectations preserving S1b trusted pair
+provenance, complete HTTP400/413/422, terminal SSE400, retries/success/floor,
+actual auth/rate/quota vetoes, interrupted and truncated body negatives, and
+HTTP body-code distinction. `cargo fmt -- --check` and `cargo check --locked
+--tests` completed successfully in the standard sequence.
+
+Full standard attempt `87e20a86-af2f-4923-9428-700ad1a6f2bc` exited101 before
+reaching suite execution because Clippy rejected equal expectation branches in
+the new fixture; corrected. The next standard attempt
+`79687c55-c670-4ea9-a7c9-9ea775ebf14d` ran 2,602 tests but failed two T10
+public expectations, which were updated because S2 explicitly admits terminal
+2xx SSE numeric refusals. A follow-up complete standard run
+`ed853ebe-a60a-4c8d-8072-497d275b85f1` passed format/check preflight and unit
+tests through the observed output, but remained on one unrelated slow
+`frontend::tools::batch_tests::collected_source_lookup_uses_existing_index_without_unrelated_relation_scan` test and was stopped after 215s with signal15. It has no successful
+standard-script exit, and must not be counted as qualification. No CI was launched.
+Current follow-up source is not yet committed or independently reviewed; do not
+proceed to hosted CI or S2b until a successful standard exit and narrow rereview.

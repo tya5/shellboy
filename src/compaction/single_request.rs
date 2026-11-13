@@ -479,12 +479,19 @@ impl Compactor {
                     let veto_halving = matches!(actual_status, Some(401 | 403 | 404 | 429))
                         || failure.error.usage_limit.is_some();
                     let context_refusal = failure.error.is_context_limit() && !veto_halving;
-                    let input_refusal = !veto_halving
-                        && (matches!(actual_status, Some(400 | 413 | 422))
-                            || (actual_status.is_some_and(|status| (200..=299).contains(&status))
-                                && failure.error.stream_provider_status.is_some_and(|witness| {
-                                    matches!(witness.value, 400 | 413 | 422)
-                                })));
+                    let complete_http_refusal = failure.facts.http_error_complete
+                        && failure.error.kind == "provider"
+                        && failure.error.status == actual_status
+                        && matches!(actual_status, Some(400 | 413 | 422));
+                    let trusted_stream_refusal = failure.facts.terminal_received
+                        && actual_status.is_some_and(|status| (200..=299).contains(&status))
+                        && failure.error.kind == "provider"
+                        && failure
+                            .error
+                            .stream_provider_status
+                            .is_some_and(|witness| matches!(witness.value, 400 | 413 | 422));
+                    let input_refusal =
+                        !veto_halving && (complete_http_refusal || trusted_stream_refusal);
                     let shrink = context_refusal || input_refusal;
                     if !shrink {
                         if let Some(delay) = retry::retry_delay(connection, &failure, retries) {

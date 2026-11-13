@@ -1134,6 +1134,25 @@ async fn proxy() -> (
                         if hold {
                             let _ = wait_release.await;
                         }
+                    } else if body.get("_test_retry_after").is_some() {
+                        let body = body.to_string();
+                        let _ = stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nRetry-After: 3600\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
+                    } else if body.get("_test_incomplete").is_some() {
+                        let truncate = body["_test_incomplete"] == "bounded";
+                        let body = if truncate {
+                            format!(
+                                "{{\"error\":{{\"message\":\"SECRET_PROVIDER_MESSAGE\",\"code\":\"invalid_request_error\"}}}}{}",
+                                "x".repeat(70 * 1024)
+                            )
+                        } else {
+                            r#"{"error":{"message":"SECRET_PROVIDER_MESSAGE","code":"invalid_request_error"}}"#.to_owned()
+                        };
+                        let declared = if truncate {
+                            body.len()
+                        } else {
+                            body.len() + 100
+                        };
+                        let _ = stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {declared}\r\nConnection: close\r\n\r\n{body}").as_bytes()).await;
                     } else {
                         let body = body.to_string();
                         let _ = stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;

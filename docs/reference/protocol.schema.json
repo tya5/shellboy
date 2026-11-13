@@ -2167,6 +2167,7 @@
       "enum": [
         "provider_error",
         "context_limit_terminal",
+        "rejected_at_minimum",
         "refused",
         "empty",
         "not_shrinking",
@@ -3939,6 +3940,30 @@
               "if": {
                 "properties": {
                   "reason": {
+                    "const": "rejected_at_minimum"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "const": 1
+                  },
+                  "final_source_nodes": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
                     "const": "refused"
                   }
                 },
@@ -4074,6 +4099,79 @@
             },
             {
               "if": {
+                "properties": {
+                  "reason": {
+                    "const": "rejected_at_minimum"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "http_status": {
+                        "enum": [
+                          400,
+                          413,
+                          422
+                        ]
+                      }
+                    },
+                    "required": [
+                      "http_status"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "http_status": {
+                        "maximum": 299,
+                        "minimum": 200,
+                        "type": "integer"
+                      },
+                      "provider_status": {
+                        "enum": [
+                          400,
+                          413,
+                          422
+                        ]
+                      },
+                      "provider_status_source": {
+                        "const": "stream_error_code"
+                      }
+                    },
+                    "required": [
+                      "http_status",
+                      "provider_status",
+                      "provider_status_source"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "final_group_count": {
+                    "const": 1
+                  },
+                  "final_source_nodes": {
+                    "maximum": 9007199254740991,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "origin": {
+                    "const": "provider_response"
+                  }
+                },
+                "required": [
+                  "origin",
+                  "http_status",
+                  "final_group_count",
+                  "final_source_nodes"
+                ]
+              }
+            },
+            {
+              "if": {
                 "anyOf": [
                   {
                     "properties": {
@@ -4111,7 +4209,10 @@
                     "const": "stream_error_code"
                   },
                   "reason": {
-                    "const": "provider_error"
+                    "enum": [
+                      "provider_error",
+                      "rejected_at_minimum"
+                    ]
                   }
                 },
                 "required": [

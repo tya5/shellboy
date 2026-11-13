@@ -446,6 +446,10 @@ mod tests {
 
 pub(super) fn model_cause(error: &crate::model::ModelError, status: Option<u16>) -> Outcome {
     let (reason, origin) = match error.kind.as_str() {
+        "usage_limit" if error.usage_limit.is_some() && status == Some(429) => (
+            FailureReason::ProviderError,
+            FailureOrigin::ProviderResponse,
+        ),
         "provider" => (
             FailureReason::ProviderError,
             FailureOrigin::ProviderResponse,

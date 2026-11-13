@@ -170,9 +170,16 @@ provider-keyed memory/CAS (S2b) is not implemented.
 Synthetic public REDs were observed at the landed-S1b base. Focused S2a public,
 status-provenance and veto controls now pass, together with schema/decoder
 parity, weighted zero/skew bound, context regression and `cargo check --tests`.
-This is still an uncommitted candidate: exact-source independent review, normal
-and three-OS CI, full acceptance/documentation audit and landing remain pending.
-No provider, owner, private database or model/settings operation was performed.
+The first exact-SHA review requested changes. Follow-up source now gates numeric
+HTTP refusal halving on complete bounded body + provider classification, preserves
+terminal trusted SSE evidence, adds interrupted/truncated body negatives, maps an
+actual Retry-After 429 quota veto to provider_error with HTTP status, and regenerates
+the checked-in protocol schema. Focused controls and artifact parity pass. The full
+standard attempt initially caught stale T10 expectations for the newly contracted
+SSE halving; after updating those, a repeat reached a slow unrelated test and was
+stopped without a standard exit. Exact-source narrow rereview and a successful
+standard check remain pending; no hosted CI/landing is authorized yet. S2b remains
+separate and unimplemented. No provider, owner or private database operation.
 
 S1a schema-review follow-up is an UNQUALIFIED source-preparation candidate while
 local heavy builds are held by the 8192 MiB swap guard. The real schema mismatch
