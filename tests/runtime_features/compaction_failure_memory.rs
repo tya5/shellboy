@@ -211,3 +211,86 @@ async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
         );
     }
 }
+
+/// A real later Run and its own current Turn reopen provider-scoped inhibition.
+/// The pure key test separately proves the Run component changes while E stays fixed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn legal_new_run_reopens_provider_failure_memory() {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(
+        root.path(),
+        &url,
+        "[compaction]\nauto_at_tokens=100\nsummary_max_chars=4000\n",
+    )
+    .await;
+    let control = Control::new(&owner, root.path().into());
+    let target = thread(&control).await;
+
+    let first = proactive_third_turn(&control, &mut receive, &target, 150, auth_veto_reply()).await;
+    assert_eq!(
+        first, 1,
+        "initial real Run admits one failed provider invocation"
+    );
+    let first_events = proactive_events(&control, &target).await;
+    let first_attempt = first_events
+        .iter()
+        .find(|event| event["metrics"]["summary_usage"]["requests"] == 1)
+        .expect("initial provider summary outcome")["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let first_attempt_for_query = first_attempt.clone();
+    let first_scope = control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT t.run_id,m.turn_id,t.generation FROM model_attempt m JOIN turn t ON t.id=m.turn_id WHERE m.id=?1",
+                [&first_attempt_for_query],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+
+    let second =
+        proactive_third_turn(&control, &mut receive, &target, 150, auth_veto_reply()).await;
+    assert_eq!(
+        second, 1,
+        "a legal new Run is not inhibited by the prior Run's provider key"
+    );
+    let all_events = proactive_events(&control, &target).await;
+    let second_attempt = all_events
+        .iter()
+        .filter(|event| event["metrics"]["summary_usage"]["requests"] == 1)
+        .map(|event| event["attempt_id"].as_str().unwrap().to_owned())
+        .find(|attempt| attempt != &first_attempt)
+        .expect("new-Run provider attempt exists");
+    let second_scope = control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT t.run_id,m.turn_id,t.generation FROM model_attempt m JOIN turn t ON t.id=m.turn_id WHERE m.id=?1",
+                [&second_attempt],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?)),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap();
+    assert_ne!(
+        first_scope.0, second_scope.0,
+        "different persisted real Run IDs"
+    );
+    assert_ne!(
+        first_scope.1, second_scope.1,
+        "the new Run owns its own Turn"
+    );
+
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
