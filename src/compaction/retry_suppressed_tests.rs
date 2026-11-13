@@ -32,12 +32,16 @@ fn retry_suppressed_is_preparation_only_and_has_no_provider_facts() {
         assert!(!validator.is_valid(&value), "schema accepted {value}");
     }
 
-    for reason in ["future_reason"] {
-        let mut value = permitted.clone();
-        value["outcome"]["reason"] = Value::String(reason.into());
-        assert!(discard::decode(&value.to_string()).is_none(), "{value}");
-        assert!(!validator.is_valid(&value), "schema accepted {value}");
-    }
+    let mut unknown_reason = permitted.clone();
+    unknown_reason["outcome"]["reason"] = Value::String("future_reason".into());
+    assert!(
+        discard::decode(&unknown_reason.to_string()).is_none(),
+        "{unknown_reason}"
+    );
+    assert!(
+        !validator.is_valid(&unknown_reason),
+        "schema accepted {unknown_reason}"
+    );
 }
 
 #[test]
