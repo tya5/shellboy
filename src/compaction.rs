@@ -2261,6 +2261,53 @@ mod tests {
     /// Shellboy does not quote them. Their message IDs come from the generic
     /// on-demand lookup. Node content: notice, model summary, ④ as text.
     #[tokio::test]
+    async fn adopted_summary_replay_responses_excludes_internal_epoch() {
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"SUMMARY-WITH-INSTRUCTIONS"}]}]});
+        let (url, server) = summary_proxy(vec![raw]).await;
+        let (_root, db) = database().await;
+        active_turn_fixture_with(&db, true).await;
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let summary = compactor
+            .summarize_active_turn("t", CancellationToken::new())
+            .await
+            .unwrap()
+            .summary_node_id
+            .unwrap();
+        assert_eq!(server.await.unwrap(), 1);
+        db.call(move |db| {
+            let stored = || db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1", [&summary],
+                |row| row.get::<_, String>(0),
+            );
+            let before = stored()?;
+            let payload: Value = serde_json::from_str(&before).unwrap();
+            assert!(payload["item"].get("reasoning_epoch").is_some());
+            let input = crate::control::replay::ReplayCache::new(1_000_000)
+                .load(db, "t")?.materialize();
+            let wire = crate::model::dialect::encode(
+                crate::config::Api::Responses,
+                json!({"model":"synthetic", "input":input}),
+            ).unwrap();
+            let final_json = serde_json::to_string(&wire).unwrap();
+            let decoded: Value = serde_json::from_str(&final_json).unwrap();
+            assert_eq!(stored()?, before, "replay must not rewrite saved summary bytes");
+            let items = decoded["input"].as_array().unwrap();
+            for (index, item) in items.iter().enumerate() {
+                assert!(item.get("reasoning_epoch").is_none(),
+                    "unknown parameter input[{index}].reasoning_epoch");
+            }
+            let last = items.last().unwrap();
+            assert_eq!(last["content"], payload["item"]["content"]);
+            assert!(last.to_string().contains("SUMMARY-WITH-INSTRUCTIONS"));
+            assert!(last.to_string().contains("Latest tool round"));
+            assert_eq!(history::summary_message_ids(db, &summary)?,
+                ["user-after-g1", "user-after-g2"]);
+            Ok(())
+        }).await.unwrap();
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn active_turn_summary_keeps_instructions_section_and_message_ids() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"SUMMARY-OF-G1-G2"}]}]});
         let (url, server) = summary_proxy_capturing(vec![raw]).await;

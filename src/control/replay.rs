@@ -857,6 +857,43 @@ fn heap_bytes(value: &Value) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn outbound_metadata_boundary_preserves_all_replay_shapes() {
+        let shapes = [
+            json!({"role":"user","content":[{"type":"input_text","text":"literal reasoning_epoch"}],"reasoning_epoch":7}),
+            json!({"item":{"type":"function_call_output","call_id":"call-1","output":"{\"reasoning_epoch\":7}","reasoning_epoch":7}}),
+            json!({"reasoning_epoch":7,"output":[
+                {"type":"message","id":"provider-message","role":"assistant","content":[{"type":"output_text","text":"answer"}],"reasoning_epoch":7},
+                {"type":"function_call","id":"provider-call","call_id":"call-1","name":"shell","arguments":"{\"command\":\"printf reasoning_epoch\"}","reasoning_epoch":7},
+                {"type":"reasoning","id":"signed-id","summary":[],"encrypted_content":"signed-opaque","reasoning_epoch":7}
+            ]}),
+        ];
+        for saved in shapes {
+            let before = serde_json::to_vec(&saved).unwrap();
+            let mut expected = if let Some(items) = saved.get("output") {
+                items.as_array().unwrap().clone()
+            } else if let Some(item) = saved.get("item") {
+                vec![item.clone()]
+            } else {
+                vec![saved.clone()]
+            };
+            for item in &mut expected {
+                let object = item.as_object_mut().unwrap();
+                object.remove("reasoning_epoch");
+                if matches!(object.get("type").and_then(Value::as_str), Some("message" | "function_call")) {
+                    object.remove("id");
+                }
+            }
+            let wire = crate::model::dialect::encode(crate::config::Api::Responses,
+                json!({"model":"synthetic","input":convert(saved.clone(), 7)})).unwrap();
+            let wire: Value = serde_json::from_slice(&serde_json::to_vec(&wire).unwrap()).unwrap();
+            assert_eq!(serde_json::to_vec(&saved).unwrap(), before);
+            for item in wire["input"].as_array().unwrap() {
+                assert!(item.get("reasoning_epoch").is_none(), "internal epoch leaked to Responses");
+            }
+            assert_eq!(wire["input"], json!(expected));
+        }
+    }
     use super::*;
     use serde_json::json;
 
