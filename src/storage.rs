@@ -81,10 +81,10 @@ pub(crate) fn decode_spill_override(
         ValueRef::Null => Ok(None),
         ValueRef::Integer(0) => Ok(Some(false)),
         ValueRef::Integer(1) => Ok(Some(true)),
-        other => Err(rusqlite::Error::FromSqlConversionFailure(
+        _ => Err(rusqlite::Error::FromSqlConversionFailure(
             column,
             Type::Integer,
-            Box::new(FromSqlError::InvalidType(other.data_type())),
+            Box::new(FromSqlError::InvalidType),
         )),
     }
 }
@@ -104,11 +104,19 @@ mod spill_override_decode_tests {
                 .unwrap();
             assert_eq!(value, expected, "{literal}");
         }
-        for literal in ["2", "'bad'", "0.5"] {
-            let value = db.query_row(&format!("SELECT {literal}"), [], |row| {
-                decode_spill_override(row.get_ref(0)?, 0)
-            });
-            assert!(value.is_err(), "{literal}");
+        for literal in ["2", "-1", "'bad'", "0.5", "x'00'"] {
+            let error = db
+                .query_row(&format!("SELECT {literal}"), [], |row| {
+                    decode_spill_override(row.get_ref(0)?, 0)
+                })
+                .unwrap_err();
+            assert!(
+                matches!(
+                    &error,
+                    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Integer, _)
+                ),
+                "{literal}: {error:?}"
+            );
         }
     }
 }

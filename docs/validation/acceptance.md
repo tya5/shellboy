@@ -11774,3 +11774,21 @@ Thread true + connection false, clear, and live Config updates. The client unit
 test checks `Arc` pool identity for a spill-only connection change. No Rust test
 or build was run for this follow-up due the unresolved guarded target-cache
 refusal described above.
+
+## S6a source_prepare failure and rusqlite type correction (2026-11-13)
+
+Hosted SOURCE PREPARE run `43499889653` on exact f7
+`f7b586d699458ba9f4c653b9fba8b816e1b1debb` passed format, then failed
+compiling `cargo run --locked -- protocol schema` with E0618 at
+`src/storage.rs`: locked rusqlite `0.40.2` defines
+`FromSqlError::InvalidType` as a unit variant, not a constructor taking the
+actual SQLite type. No schema was generated, no schema-parity test ran, and no
+artifact is available for adoption. Preserve the failure logs at
+`ci-watch/20261113T201611Z-69439`.
+
+The follow-up uses the exact locked API: the outer
+`rusqlite::Error::FromSqlConversionFailure` carries the column index and expected
+`Type::Integer`, with `FromSqlError::InvalidType` as the inner unit source. The
+strict decoder still accepts only NULL and integer 0/1. Its negative oracle
+covers integer 2, negative integer, TEXT, REAL and BLOB. These checks are authored
+but unexecuted; request another one-shot SOURCE PREPARE only after source review.
