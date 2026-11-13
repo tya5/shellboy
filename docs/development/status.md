@@ -142,3 +142,13 @@ replay-copy boundary. Original REDs reproduced the invalid field; fifteen focuse
 synthetic tests passed after repair (see the validation record). This is not an
 installed-owner change or successful provider recovery; independent review,
 full-suite and exact-SHA three-OS CI remain separate gates.
+## #304 Active Shell Readback Candidate
+
+Candidate source isolates starting/running/stopping candidates with the existing
+active partial index before the saved-history scan limit. The public regression
+on c212ecb8 plus test-only86e20bb891 reproduced an empty first page after2,205
+newer terminal rows. Unfiltered/terminal listing, cursor watermark, saved owner
+scope and privacy projection remain unchanged. Scoped/global active query-plan,
+terminal-growth and current-state pagination controls accompany the fix.
+This is a source candidate, not independently reviewed/CI-qualified main or an
+installed owner update. Exact execution evidence is reported separately.

@@ -301,6 +301,19 @@ against arbitrary obfuscated secrets. Suppression includes secret-access-key fla
 sshpass password arguments, attached -p values and *_KEY/*_TOKEN/*_SECRET assignments.
 Explicit shell get/read remain separate.
 
+Active-state filters (`starting`, `running`, `stopping`) qualify candidates
+before the 2,000-row window using the existing `shell_active_owner` partial
+index (#304). Terminal history cannot displace an older active execution.
+Thread-scoped queries seek owner/state keys; global queries enumerate only the
+active partial index and sort that subset by the existing saved-start key, not
+the entire shell history. Work can scale with the active population (and scoped
+Run IDs), not just the page size. Remaining command/exit filters still permit
+empty bounded pages and continuation cursors. Unfiltered/terminal history uses
+the original bounded chronological window. Ownership is the shell's saved Run,
+not a requirement that its Run still be live; detached background work can
+outlive a completed Run. Cursor insertion watermark and live-state semantics
+are unchanged. No table, index or migration is added.
+
 These operations run on read-only WAL snapshots through the existing finite
 presentation admission, not the writer's queue. No new tables, workers or queues.
 Derived indexes and their measured sizes are documented in acceptance. Query-plan

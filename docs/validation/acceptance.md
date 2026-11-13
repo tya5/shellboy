@@ -11540,3 +11540,19 @@ Two initial expanded-test setup errors used an empty default API root; only thos
 synthetic pure-wire fixtures were corrected to explicit localhost roots, without
 changing production behavior or weakening preservation assertions.
 Final `cargo check --tests` and `cargo fmt --check` also exited 0 on this source.
+## #304 Active Shell Listing Candidate
+
+Original RED: test-only commit86e20bb891dadaeb1e58ebcb9dc8c19b7441dcef
+on c212ecb8e3f56e2f7e8cee0ee49f9e7bd942c3bd. The actual public Store ShellList
+path returned items=[]/scanned2000/scan_budget_reached=true with nine older
+starting/running/stopping executions and2,205 newer terminal records; expected
+one active row on the first limit1 page. macOS serial test exit101; no provider
+or real shell launch. This is expected original failure evidence, not a pass.
+
+Fix controls cover all three active states, global/Thread scope, public cursor
+pages, redaction/no-receipt behavior, existing partial-index plans, VM work with
+10,000 additional terminal rows, unknown/half-open times, insertion watermark,
+current saved state changes and bounded filtered empty pages. The global plan
+can scan/sort the active partial index; it is not constant-work in the number
+of active executions. Hosted all-OS CI, independent review and installation are
+separate pending gates; no real-user/provider behavior is asserted here.
