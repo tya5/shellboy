@@ -81,6 +81,12 @@ connection value. Focused unit/integration tests and the pinned schema-43 upgrad
 ran locally on macOS; the full `scripts/check.sh`, all-OS CI and a real provider
 were not run. Not pushed.
 
+### v0.13.0 Candidate (per-Thread output limit)
+
+Adds `thread set --max-tokens` (schema 44). See [release notes](release-v0.13.0-draft.md).
+Independent review found no correctness bug; its documentation and early-clash
+follow-ups are included. Tag and publication follow exact-SHA all-OS CI.
+
 ### v0.12.0 Candidate (#303 single-request compaction)
 
 #303 landed on main at cf9b662d0c (exact-SHA all-OS CI success, two independent
