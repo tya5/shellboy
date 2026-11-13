@@ -4591,8 +4591,8 @@ async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
 
 /// A terminal 500 provider response is invocation-scoped in S2b even when its
 /// embedded body says invalid_request_error. The later eligible report is still
-/// recorded as an attempt, but is suppressed in the same Run/Turn; no E slot is
-/// written because this is not a deterministic refusal.
+/// recorded as an attempt, but is suppressed in the same Run/Turn. The closed
+/// slot holds the exact provider-scope digest, not the deterministic E identity.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_provider_500_is_suppressed_once_per_same_run_scope() {
     let (summaries, attempts, slots) = bx_token_growth((
@@ -4606,10 +4606,18 @@ async fn proactive_provider_500_is_suppressed_once_per_same_run_scope() {
         2,
         "both eligible reports retain their attempts"
     );
-    assert_eq!(
-        slots,
-        (None, None),
-        "provider failure records no deterministic E slot"
+    assert!(
+        slots.0.as_deref().is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }),
+        "closed slot stores a valid provider-scope digest: {slots:?}"
+    );
+    assert!(
+        slots.1.is_none(),
+        "only the closed provider scope was exercised: {slots:?}"
     );
 }
 
