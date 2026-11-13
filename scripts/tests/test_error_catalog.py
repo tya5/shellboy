@@ -197,14 +197,20 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.rows()[0]['error'], 'error: safe complete')
         self.assertTrue(self.rows()[0]['stderr_limited'])
 
-    def test_public_schema39_and_additive40_are_supported_without_broad_version_bypass(self):
+    def test_supported_schema39_through45_and_unknown_versions_fail_closed(self):
         add(self.db, 'schema-compat')
-        for version in (39, 40):
+        for version in range(39, 46):
             with self.subTest(version=version):
                 catalog.read_rows(self.db, f'PRAGMA user_version={version}')
                 self.db.commit()
                 self.build()
                 self.assertTrue(self.rows())
+        for version in (38, 46, 999):
+            with self.subTest(version=version):
+                catalog.read_rows(self.db, f'PRAGMA user_version={version}')
+                self.db.commit()
+                with self.assertRaisesRegex(ValueError, 'schema39 through schema45'):
+                    catalog.facts(self.root / 'shellboy.db')
 
     def test_source_version_fail_closed_and_rebuild_after_option_change(self):
         add(self.db, 'f')

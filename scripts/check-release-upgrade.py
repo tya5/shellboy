@@ -10,6 +10,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import signal
@@ -20,10 +21,14 @@ import threading
 import time
 
 
-CARGO_VERSION = next(line.split('"')[1] for line in (Path(__file__).resolve().parents[1] / 'Cargo.toml').read_text(encoding='utf-8').splitlines() if line.startswith('version = '))
-MIGRATIONS = Path(__file__).resolve().parents[1] / 'migrations'
+ROOT = Path(__file__).resolve().parents[1]
+CARGO_VERSION = next(line.split('"')[1] for line in (ROOT / 'Cargo.toml').read_text(encoding='utf-8').splitlines() if line.startswith('version = '))
+MIGRATIONS = ROOT / 'migrations'
 DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41)}
+_storage_source = (ROOT / 'src/storage.rs').read_text(encoding='utf-8')
+_migration_names = _storage_source.split('const MIGRATION_NAMES', 1)[1].split('];', 1)[0]
+CURRENT_SCHEMA_VERSION = len(re.findall(r'^\s*\(\d+,\s*"', _migration_names, re.MULTILINE))
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29, '0.9.0': 31, '0.10.0': 32, '0.11.0': 39}
 
 
@@ -154,9 +159,19 @@ def check_migration(db, before, start, target):
         assert db.execute('SELECT count(*) FROM thread WHERE auto_compact_at IS NOT NULL').fetchone()[0] == 0, 'migration 30 must leave every Thread on the default threshold'
     if target >= 31:
         columns = {row[1]: row for row in db.execute('PRAGMA table_info(thread)')}
-        for name in ('segment_chars', 'reduce_rounds'):
-            assert name in columns and columns[name][2] == 'INTEGER' and not columns[name][3], f'thread.{name} differs from migration 31'
-            assert db.execute(f'SELECT count(*) FROM thread WHERE {name} IS NOT NULL').fetchone()[0] == 0, 'migration 31 must leave every Thread on the default summary parameters'
+        if target < 43:
+            for name in ('segment_chars', 'reduce_rounds'):
+                assert name in columns and columns[name][2] == 'INTEGER' and not columns[name][3], f'thread.{name} differs from migration 31'
+                assert db.execute(f'SELECT count(*) FROM thread WHERE {name} IS NOT NULL').fetchone()[0] == 0, 'migration 31 must leave every Thread on the default summary parameters'
+        else:
+            assert not {'segment_chars', 'reduce_rounds'} & columns.keys(), 'migration 43 must remove retired summary parameters'
+            for name in ('auto_compact_target_percent', 'summary_max_chars'):
+                assert name in columns and columns[name][2] == 'INTEGER' and not columns[name][3], f'thread.{name} differs from migration 43'
+            assert db.execute('SELECT count(*) FROM thread WHERE auto_compact_target_percent IS NOT NULL OR summary_max_chars IS NOT NULL').fetchone()[0] == 0, 'migration 43 must leave every Thread on connection summary settings'
+    if target >= 44:
+        columns = {row[1]: row for row in db.execute('PRAGMA table_info(thread)')}
+        assert 'max_tokens' in columns and columns['max_tokens'][2] == 'INTEGER' and not columns['max_tokens'][3], 'thread.max_tokens differs from migration 44'
+        assert db.execute('SELECT count(*) FROM thread WHERE max_tokens IS NOT NULL').fetchone()[0] == 0, 'migration 44 must leave every Thread on connection output limits'
     if target >= 32:
         columns = {row[1]: row for row in db.execute('PRAGMA table_info(thread)')}
         assert 'archived_at' in columns and columns['archived_at'][2] == 'TEXT' and not columns['archived_at'][3], 'thread.archived_at differs from migration 32'
@@ -204,6 +219,11 @@ def check_migration(db, before, start, target):
         assert 'selection_nonappend_generation' in {row[1] for row in db.execute('PRAGMA table_info(thread)')}, 'migration 40 witness missing'
         for name in ('selection_generation_combined_write', 'selection_generation_update', 'selection_thread_conflict', 'selection_generation_insert', 'selection_path_insert', 'selection_path_delete', 'selection_path_update', 'selection_revision_same_cursor'):
             assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()[0] == 1, f'migration 40 missing {name}'
+    if target >= CURRENT_SCHEMA_VERSION:
+        columns = {row[1] for row in db.execute('PRAGMA table_info(thread)')}
+        assert 'spill_override' in columns, 'migration 45 spill override missing'
+        sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='thread'").fetchone()[0]
+        assert "spill_override IN (0,1)" in sql, 'migration 45 spill override constraint missing'
 
 def apply_migration(db, version):
     if version != 39:
@@ -227,7 +247,7 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, CURRENT_SCHEMA_VERSION - 1) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         apply_migration(db, version)
@@ -241,11 +261,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, CURRENT_SCHEMA_VERSION), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44), default=44,
-                        help='44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION,
+                        help='45 for the per-Thread automatic-spill override; 44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

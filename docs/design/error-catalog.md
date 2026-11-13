@@ -75,6 +75,12 @@ Source path and SQLite sidecars must never alias output; no symlink output path
 or arbitrary output-file override is allowed. Failure leaves the previous derived
 snapshot intact and cleans the tool's own temporary file.
 
+The source-version gate explicitly supports conversation schemas 39 through 45
+(schema45 is the current S6a schema) and rejects older unsupported or future versions;
+extend this allowlist only after verifying that the bounded queries remain valid.
+Schema45 adds only the nullable Thread spill override and does not change the
+catalogue's selected source columns.
+
 Tests use current-schema synthetic temporary data only. They cover grouping,
 causality/Turn constraints, counts, provenance, canaries, malformed/oversized text,
 read-only source hashes, rebuild equivalence, incremental transitions/deletion,

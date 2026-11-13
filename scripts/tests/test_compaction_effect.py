@@ -2,6 +2,7 @@
 """Build a disposable database from current schema and test compaction-effect."""
 import importlib.util
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -10,6 +11,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+_migration_names = (ROOT / 'src/storage.rs').read_text().split('const MIGRATION_NAMES', 1)[1].split('];', 1)[0]
+SCHEMA_VERSION = len(re.findall(r'^\s*\(\d+,\s*"', _migration_names, re.MULTILINE))
 SCRIPT = ROOT / 'scripts/dev/compaction-effect.py'
 MIGRATIONS = ROOT / 'migrations'
 spec = importlib.util.spec_from_file_location('compaction_effect', SCRIPT)
@@ -55,7 +58,7 @@ class CompactionEffectTests(unittest.TestCase):
             before = db.execute('SELECT count(*) FROM model_attempt').fetchone()[0]
             version, rows = effect.read_attempts(db_path)
             result = effect.analyze(rows, '2026-11-03T00:00:00Z', 200000)
-            self.assertEqual(version, 44)
+            self.assertEqual(version, SCHEMA_VERSION)
             self.assertEqual(db.execute('SELECT count(*) FROM model_attempt').fetchone()[0], before)
             self.assertEqual(result['before']['profile/m1']['model_requests'], 3)
             self.assertEqual(result['before']['profile/m1']['provider_input_tokens']['median'], 200000)

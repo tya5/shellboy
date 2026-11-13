@@ -11883,3 +11883,39 @@ The two full-suite failures were old fixture/oracle expectations, not isolated p
 `proactive_transient_summary_failure_retries_once_per_new_report` likewise used HTTP400+`invalid_request_error`, which is no longer transient under S2. It now uses HTTP500 to retain the intended transient retry purpose; no production behavior changed. Correctly selected exact focused commands both passed 1/1: `runtime_features::proactive_provider_rejection_of_summaries_is_not_repeated_either` (58.141s outer command) and `runtime_features::proactive_transient_summary_failure_retries_once_per_new_report` (0.676s). Earlier bare-name `--exact` attempts selected 0 tests and are not evidence; this was corrected with fully qualified names and explicit `running 1 test` output.
 
 Test-only follow-up is pending independent delta review and a new SHA. The earlier e527 full-standard failures remain preserved; do not transfer its failed status to a future candidate or treat review as qualification. Full standard and hosted CI for the follow-up SHA remain pending.
+
+
+## S6a Linux CI preflight failure and schema45 tooling corrections
+
+Normal task CI run `43503155127` on artifact-adoption SHA
+`8be4999b2c51be63790be2494380b7a4a201ce5d` stopped before Rust/Cargo at the
+language-classification consistency step (exit 2): the reviewed fingerprint for
+`src/ui/operations.rs:f2d90a0be0cb1b6e:2` changed after the internal `spill: None`
+ThreadSetArgs constructor addition. This was source-context review maintenance,
+not a UI string change or product behavior result. Leader reviewed the exact
+before/after function scope and approved a narrow classification-record update;
+no source exclusion or audit relaxation was made.
+
+The first complete Python preflight recorded 223 tests: 2 failures and 13 errors.
+All 13 errors were `test_error_catalog` cases failing at the same schema39..44
+allowlist gate; the two failures were `test_compaction_effect` expecting version
+44 and `test_public_release_upgrade_args` expecting exactly migrations1..44. No
+other Python preflight errors occurred. The fix keeps an explicit read-only
+catalogue allowlist through45 and rejects 38/46/999, derives current upgrade-tool
+version from the Rust migration registry, extends migration verification to45,
+and adds synthetic schema43->44->45 replay/convergence plus fresh-schema parity
+and strict nullable 0/1 constraint tests. Migration43's retired summary columns
+are verified absent in current schema, rather than weakening their historical
+migration check. The compaction-effect fixture expectation now follows the
+registered migration inventory.
+
+Focused source-only Python suites pass: public-upgrade arguments/schema replay
+5/5, compaction-effect 3/3, error-catalog 16/16, and release-upgrade parser/source
+checks 36/36. The full `python3 -m unittest discover -s scripts/tests` rerun
+passes 224/224. Other permitted preflights pass: language audit (438 files;
+3,177 a / 1,668 b / 12 c / 4 protected), integration layout (119 suites once;
+watchdog policy clean), Linux reuse gate 18/18, docs suites 1/1 + 2/2 + 7/7,
+pinned rustfmt check on changed Rust paths, and `git diff --check`. No Cargo or
+target access occurred. The original 223/2F/13E receipt remains execution
+`e0a3d73c-428b-4563-b05c-28f00e90ff2e`; this was preflight source-failure evidence,
+not S6a Rust behavior. Full S6a Rust tests and normal CI retry remain pending.
