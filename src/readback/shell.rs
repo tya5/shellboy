@@ -5,11 +5,13 @@ pub(super) const SCAN_LIMIT: usize = 2000;
 fn command_sql() -> &'static str {
     "COALESCE(json_extract(s.shell_json,'$.command'),json_extract(s.shell_json,'$.request.command'))"
 }
-pub(super) fn query(thread: bool) -> String {
+pub(super) fn query(thread: bool, active: bool) -> String {
     let sec = time::seconds("s.started_at");
     let nano = time::nanos("s.started_at");
     let command = command_sql();
-    let index = if thread {
+    let index = if active {
+        "shell_active_owner"
+    } else if thread {
         "shell_owner_started_readback"
     } else {
         "shell_started_readback"
@@ -19,8 +21,16 @@ pub(super) fn query(thread: bool) -> String {
     } else {
         "?1 IS NULL"
     };
+    // State must qualify candidates before the history window: terminal rows
+    // cannot exhaust an active listing. The literal predicate proves the
+    // existing partial-index membership to SQLite; ?10 selects the native state.
+    let state = if active {
+        "s.state IN ('starting','running','stopping') AND s.state=?10 AND "
+    } else {
+        ""
+    };
     format!(
-        "WITH candidates AS MATERIALIZED (SELECT s.id,{sec} sec,{nano} nano FROM shell_execution s INDEXED BY {index} WHERE {scope} AND ({sec})>=?2 AND ({sec})<=min(?4,?6) AND ({sec},{nano})>=(?2,?3) AND ({sec},{nano})<(?4,?5) AND ({sec},{nano},s.id)<(?6,?7,?8) AND s.rowid<=?9 AND (?14=0 OR ({sec})>-9223372036854775808) ORDER BY {sec} DESC,{nano} DESC,s.id DESC LIMIT {}), window AS MATERIALIZED (SELECT * FROM candidates ORDER BY sec DESC,nano DESC,id DESC LIMIT {SCAN_LIMIT}), matched AS MATERIALIZED (SELECT w.* FROM window w JOIN shell_execution s ON s.id=w.id WHERE (?10 IS NULL OR s.state=?10) AND (?11 IS NULL OR s.exit_code=?11) AND (?12 IS NULL OR instr({command},?12)>0) ORDER BY w.sec DESC,w.nano DESC,w.id DESC LIMIT ?13+1) SELECT json_object('scanned',(SELECT count(*) FROM window),'candidate_more',(SELECT count(*) FROM candidates)>{SCAN_LIMIT},'tail',(SELECT json_array(sec,nano,id) FROM window ORDER BY sec,nano,id LIMIT 1),'items',json((SELECT json_group_array(json_object('execution_id',s.id,'run_id',s.owner_run_id,'thread_id',r.thread_id,'turn_id',s.turn_id,'started_at',s.started_at,'ended_at',s.ended_at,'state',s.state,'exit_code',s.exit_code,'sec',m.sec,'nano',m.nano,'description',substr(COALESCE(json_extract(s.shell_json,'$.description'),json_extract(s.shell_json,'$.request.description')),1,80),'raw_command',readback_prefix({command}),'command_characters',readback_chars({command})) ORDER BY m.sec DESC,m.nano DESC,m.id DESC) FROM matched m JOIN shell_execution s ON s.id=m.id JOIN run r ON r.id=s.owner_run_id)))",
+        "WITH candidates AS MATERIALIZED (SELECT s.id,{sec} sec,{nano} nano FROM shell_execution s INDEXED BY {index} WHERE {scope} AND {state}({sec})>=?2 AND ({sec})<=min(?4,?6) AND ({sec},{nano})>=(?2,?3) AND ({sec},{nano})<(?4,?5) AND ({sec},{nano},s.id)<(?6,?7,?8) AND s.rowid<=?9 AND (?14=0 OR ({sec})>-9223372036854775808) ORDER BY {sec} DESC,{nano} DESC,s.id DESC LIMIT {}), window AS MATERIALIZED (SELECT * FROM candidates ORDER BY sec DESC,nano DESC,id DESC LIMIT {SCAN_LIMIT}), matched AS MATERIALIZED (SELECT w.* FROM window w JOIN shell_execution s ON s.id=w.id WHERE (?10 IS NULL OR s.state=?10) AND (?11 IS NULL OR s.exit_code=?11) AND (?12 IS NULL OR instr({command},?12)>0) ORDER BY w.sec DESC,w.nano DESC,w.id DESC LIMIT ?13+1) SELECT json_object('scanned',(SELECT count(*) FROM window),'candidate_more',(SELECT count(*) FROM candidates)>{SCAN_LIMIT},'tail',(SELECT json_array(sec,nano,id) FROM window ORDER BY sec,nano,id LIMIT 1),'items',json((SELECT json_group_array(json_object('execution_id',s.id,'run_id',s.owner_run_id,'thread_id',r.thread_id,'turn_id',s.turn_id,'started_at',s.started_at,'ended_at',s.ended_at,'state',s.state,'exit_code',s.exit_code,'sec',m.sec,'nano',m.nano,'description',substr(COALESCE(json_extract(s.shell_json,'$.description'),json_extract(s.shell_json,'$.request.description')),1,80),'raw_command',readback_prefix({command}),'command_characters',readback_chars({command})) ORDER BY m.sec DESC,m.nano DESC,m.id DESC) FROM matched m JOIN shell_execution s ON s.id=m.id JOIN run r ON r.id=s.owner_run_id)))",
         SCAN_LIMIT + 1
     )
 }
@@ -70,7 +80,13 @@ pub(crate) fn list(db: &Connection, a: &ShellListArgs, instance: &str) -> Result
     let (us, un) = window.upper();
     let raw: String = db
         .query_row(
-            &query(a.thread_id.is_some()),
+            &query(
+                a.thread_id.is_some(),
+                matches!(
+                    a.state.as_deref(),
+                    Some("starting" | "running" | "stopping")
+                ),
+            ),
             params![
                 a.thread_id,
                 ls,

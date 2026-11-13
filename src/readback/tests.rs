@@ -453,7 +453,7 @@ fn readback_plans_seek_shared_tables_and_indexes_have_measured_sizes() {
                 2,
                 1
             ];
-            let p = plans(&c, &shell::query(thread), bindings);
+            let p = plans(&c, &shell::query(thread, false), bindings);
             eprintln!("shell scope={thread}: {p:?}");
             no_scans(&p, &["s", "r"]);
             assert!(p.iter().any(|s| s.contains(if thread {
@@ -723,4 +723,327 @@ fn forked_thread_does_not_attribute_its_first_request_to_inherited_summaries() {
             "parent-next"
         );
     });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_shell_public_pages_ignore_newer_terminal_history() {
+    use crate::{config::Config, control::db::Store, protocol::*, storage::DbWorker};
+    use std::sync::Arc;
+    crate::test_watchdog::watchdog("active shell public pages beyond history window", async {
+        let root = tempfile::tempdir().unwrap();
+        let database = DbWorker::open(root.path().join("db")).await.unwrap();
+        let store = Store::new(
+            database.clone(), Arc::new(Config::parse("").unwrap()),
+            root.path().into(), "test".into(),
+        );
+        database.call(|c| {
+            for t in ["t", "other"] {
+                c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','','p','m','2026-10-31T00:00:00Z')", [t])?;
+                c.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?1,'completed','2026-10-31T00:00:00Z')", [t])?;
+                c.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?1,?1,'completed','2026-10-31T00:00:00Z')", [t])?;
+            }
+            let tx = c.transaction()?;
+            for state in ["starting", "running", "stopping"] {
+                for (id, owner) in [("a", "t"), ("b", "t"), ("foreign", "other")] {
+                    let id = format!("{state}-{id}");
+                    shell_row(&tx, &id, owner, "2026-10-30T00:00:00Z", "echo --token PRIVATE-SENTINEL", 0);
+                    tx.execute("UPDATE shell_execution SET state=?2,ended_at=NULL,exit_code=NULL WHERE id=?1", params![id,state])?;
+                }
+            }
+            for i in 0..2205 {
+                shell_row(&tx, &format!("terminal-{i:05}"), "t", "2026-10-31T00:00:00Z", "history", 0);
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        for thread in [None, Some("t"), Some("other")] {
+            for state in ["starting", "running", "stopping"] {
+                let mut a = args();
+                a.thread_id = thread.map(str::to_owned);
+                a.state = Some(state.into());
+                a.limit = 1;
+                let expected = if thread == Some("other") { 1 } else if thread.is_some() { 2 } else { 3 };
+                let mut ids = Vec::new();
+                loop {
+                    let page = store.execute(Request::new(uuid::Uuid::new_v4().to_string(), Command::ShellList(a.clone())), None).await.unwrap().result;
+                    assert_eq!(page["items"].as_array().unwrap().len(), 1, "old active row must be in first page: {page}");
+                    assert!(page["scanned"].as_u64().unwrap() <= 3);
+                    assert_eq!(page["scan_budget_reached"], false);
+                    assert!(!page.to_string().contains("PRIVATE-SENTINEL"));
+                    assert!(!page.to_string().contains("raw_command"));
+                    let item = &page["items"][0];
+                    assert_eq!(item["state"], state);
+                    assert_eq!(item["command_excerpt_redacted"], true);
+                    if let Some(thread) = thread { assert_eq!(item["thread_id"], thread); }
+                    ids.push(item["execution_id"].as_str().unwrap().to_owned());
+                    a.cursor = page["next_cursor"].as_str().map(str::to_owned);
+                    if a.cursor.is_none() { break; }
+                    assert!(ids.len() < expected, "cursor must make progress");
+                }
+                assert_eq!(ids.len(), expected);
+                let unique: std::collections::HashSet<_> = ids.iter().collect();
+                assert_eq!(unique.len(), expected);
+            }
+        }
+        database.call(|c| {
+            assert_eq!(c.query_row("SELECT count(*) FROM operation_receipt", [], |r| r.get::<_,i64>(0))?, 0);
+            assert_eq!(c.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get::<_,i64>(0))?, 2214);
+            Ok(())
+        }).await.unwrap();
+        database.shutdown().await.unwrap();
+    }).await.unwrap();
+}
+
+#[test]
+fn active_shell_index_work_does_not_grow_with_terminal_history() {
+    let mut c = db();
+    for (id, thread) in [("old", "t"), ("foreign", "other")] {
+        shell_row(&c, id, thread, "2026-10-30T00:00:00Z", "active", 0);
+        c.execute(
+            "UPDATE shell_execution SET state='running',exit_code=NULL,ended_at=NULL WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+    }
+    let mut baseline = Vec::new();
+    for populated in [false, true] {
+        if populated {
+            let tx = c.transaction().unwrap();
+            for i in 0..10000 {
+                shell_row(
+                    &tx,
+                    &format!("terminal-{i}"),
+                    if i % 2 == 0 { "t" } else { "other" },
+                    "2026-10-31T00:00:00Z",
+                    "history",
+                    0,
+                );
+            }
+            tx.commit().unwrap();
+        }
+        for (i, thread) in [None, Some("t")].into_iter().enumerate() {
+            let bindings = params![
+                thread,
+                i64::MIN,
+                0,
+                i64::MAX,
+                u32::MAX,
+                i64::MAX,
+                u32::MAX,
+                "",
+                i64::MAX,
+                "running",
+                None::<i32>,
+                None::<String>,
+                2,
+                0
+            ];
+            let plan = plans(&c, &shell::query(thread.is_some(), true), bindings);
+            assert!(
+                plan.iter()
+                    .any(|s| s.contains("USING INDEX shell_active_owner")),
+                "{plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|s| s.contains("shell_started_readback")
+                    || s.contains("shell_owner_started_readback")),
+                "active query must not traverse terminal history: {plan:?}"
+            );
+            if thread.is_some() {
+                assert!(
+                    plan.iter()
+                        .any(|s| s.contains("SEARCH s USING INDEX shell_active_owner")
+                            && s.contains("owner_run_id=?")
+                            && s.contains("state=?")),
+                    "{plan:?}"
+                );
+            } else {
+                // A global query visits the partial active index, not the full
+                // execution table. Its sort scales with active rows only.
+                assert!(
+                    plan.iter()
+                        .any(|s| s.contains("SCAN s USING INDEX shell_active_owner")),
+                    "{plan:?}"
+                );
+            }
+            let mut a = args();
+            a.thread_id = thread.map(str::to_owned);
+            a.state = Some("running".into());
+            let mut observation = crate::storage::statement_observation::StatementObservation::install_exhaustive_for_tests(&mut c);
+            let page = shells(observation.connection(), &a).unwrap();
+            assert_eq!(
+                page["items"].as_array().unwrap().len(),
+                if thread.is_some() { 1 } else { 2 }
+            );
+            let counters = observation.counters();
+            if populated {
+                assert!(
+                    counters.vm_steps <= baseline[i] + 128,
+                    "terminal rows increased work: baseline={} current={counters:?}",
+                    baseline[i]
+                );
+            } else {
+                baseline.push(counters.vm_steps);
+            }
+        }
+    }
+}
+
+#[test]
+fn active_shell_cursor_keeps_watermark_live_state_and_time_filters() {
+    let c = db();
+    for id in ["a", "b", "c", "unknown"] {
+        shell_row(
+            &c,
+            id,
+            "t",
+            if id == "unknown" {
+                "bad"
+            } else {
+                "2026-10-30T00:00:00Z"
+            },
+            "active",
+            0,
+        );
+        c.execute(
+            "UPDATE shell_execution SET state='running',exit_code=NULL,ended_at=NULL WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+    }
+    let mut a = args();
+    a.state = Some("running".into());
+    a.limit = 1;
+    let first = shells(&c, &a).unwrap();
+    assert_eq!(first["items"][0]["execution_id"], "c");
+    a.cursor = first["next_cursor"].as_str().map(str::to_owned);
+    let watermark: i64 = c
+        .query_row("SELECT max(rowid) FROM shell_execution", [], |r| r.get(0))
+        .unwrap();
+    // This late insertion sorts below the saved cursor. Keyset ordering alone
+    // must admit it; only the insertion watermark can keep it out of the page.
+    shell_row(&c, "late", "t", "2026-10-29T23:59:59Z", "late", 0);
+    c.execute(
+        "UPDATE shell_execution SET state='running',exit_code=NULL,ended_at=NULL WHERE id='late'",
+        [],
+    )
+    .unwrap();
+    c.execute(
+        "UPDATE shell_execution SET state='exited',exit_code=0 WHERE id='b'",
+        [],
+    )
+    .unwrap();
+    // Negative control: the same production query without its watermark
+    // predicate must return the new row through this first-page keyset.
+    let query = shell::query(false, true);
+    let without_watermark = query.replace("s.rowid<=?9", "?9>=0");
+    assert_ne!(query, without_watermark);
+    let cursor_time =
+        chrono::DateTime::parse_from_rfc3339(first["items"][0]["started_at"].as_str().unwrap())
+            .unwrap();
+    let raw: String = c
+        .query_row(
+            &without_watermark,
+            params![
+                None::<String>,
+                i64::MIN,
+                0,
+                i64::MAX,
+                u32::MAX,
+                cursor_time.timestamp(),
+                cursor_time.timestamp_subsec_nanos(),
+                "c",
+                watermark,
+                "running",
+                None::<i32>,
+                None::<String>,
+                200,
+                0
+            ],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let unwatermarked: Value = serde_json::from_str(&raw).unwrap();
+    assert!(
+        unwatermarked["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["execution_id"] == "late"),
+        "keyset/state filters alone must admit the late insertion: {unwatermarked}"
+    );
+    let inserted: i64 = c
+        .query_row(
+            "SELECT rowid FROM shell_execution WHERE id='late'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(inserted > watermark);
+    let next = shells(&c, &a).unwrap();
+    assert_eq!(next["items"][0]["execution_id"], "a");
+    a.cursor = next["next_cursor"].as_str().map(str::to_owned);
+    let last = shells(&c, &a).unwrap();
+    assert_eq!(last["items"][0]["execution_id"], "unknown");
+    assert_eq!(last["items"][0]["started_at_known"], false);
+    assert!(last["next_cursor"].is_null());
+    a.thread_id = Some("other".into());
+    assert_eq!(shells(&c, &a).unwrap_err().code, ErrorCode::CursorExpired);
+    a = args();
+    a.state = Some("running".into());
+    a.since = Some("2026-10-30T00:00:00Z".into());
+    a.until = Some("2026-10-31T00:00:00Z".into());
+    a.limit = 200;
+    let period = shells(&c, &a).unwrap();
+    let ids = period["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["execution_id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        ["c", "a"],
+        "older late insertion is outside the half-open time filter"
+    );
+    a.exit_code = Some(0);
+    assert_eq!(shells(&c, &a).unwrap()["items"], json!([]));
+    a.state = Some("exited".into());
+    assert_eq!(shells(&c, &a).unwrap()["items"][0]["execution_id"], "b");
+}
+
+#[test]
+fn active_shell_filtered_windows_remain_bounded_and_resumable() {
+    let c = db();
+    let tx = c.unchecked_transaction().unwrap();
+    for i in 0..2001 {
+        let id = format!("active-{i:05}");
+        shell_row(
+            &tx,
+            &id,
+            "t",
+            "2026-10-30T00:00:00Z",
+            if i == 0 { "needle" } else { "hay" },
+            0,
+        );
+        tx.execute(
+            "UPDATE shell_execution SET state='running',exit_code=NULL,ended_at=NULL WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+    }
+    tx.commit().unwrap();
+    let mut a = args();
+    a.state = Some("running".into());
+    a.command_contains = Some("needle".into());
+    let first = shells(&c, &a).unwrap();
+    assert_eq!(first["items"], json!([]));
+    assert_eq!(first["scanned"], 2000);
+    assert_eq!(first["scan_budget_reached"], true);
+    a.cursor = first["next_cursor"].as_str().map(str::to_owned);
+    assert!(a.cursor.is_some());
+    let next = shells(&c, &a).unwrap();
+    assert_eq!(next["scanned"], 1);
+    assert_eq!(next["items"][0]["execution_id"], "active-00000");
+    assert!(next["next_cursor"].is_null());
 }

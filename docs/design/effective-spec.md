@@ -406,7 +406,10 @@ uses the requested serde default false, not an inferred owner setting.
 The adopted CLI contract now includes compact list, latest retained compaction in
 thread get, usage get half-open start-time periods, and cross-conversation shell
 list with bounded snippets and cursor pages. These are receipt-free saved facts,
-not provider calls or permission grants. Heavy reads use the shared finite
+not provider calls or permission grants. Active-state shell filters use the
+existing active partial index before the historical candidate limit (#304), so
+newer terminal history cannot hide old active work. Other history/filter and
+cursor/redaction bounds remain unchanged. Heavy reads use the shared finite
 presentation pool and read-only WAL snapshots. Schema 15 adds four justified
 indexes, not tables/workers/queues; see storage and CLI designs for costs, boundary
 semantics and explicit retention/unknown coverage. Unreleased main functionality
