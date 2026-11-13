@@ -11910,12 +11910,14 @@ migration check. The compaction-effect fixture expectation now follows the
 registered migration inventory.
 
 Focused source-only Python suites pass: public-upgrade arguments/schema replay
-5/5, compaction-effect 3/3, error-catalog 16/16, and release-upgrade parser/source
-checks 36/36. The full `python3 -m unittest discover -s scripts/tests` rerun
-passes 224/224. Other permitted preflights pass: language audit (438 files;
-3,177 a / 1,668 b / 12 c / 4 protected), integration layout (119 suites once;
-watchdog policy clean), Linux reuse gate 18/18, docs suites 1/1 + 2/2 + 7/7,
-pinned rustfmt check on changed Rust paths, and `git diff --check`. No Cargo or
-target access occurred. The original 223/2F/13E receipt remains execution
+9/9 (including malformed registry empty/duplicate/gap fail-closed and execution
+of the real migration45 checks while current registry metadata is advanced to46), compaction-effect 3/3,
+error-catalog 16/16, and release-upgrade parser/source checks 36/36. The full
+`python3 -m unittest discover -s scripts/tests` rerun passes 226/226. Other
+permitted preflights pass: language audit (438 files; 3,177 a / 1,668 b / 12 c /
+4 protected), integration layout (119 suites once; watchdog policy clean), Linux
+reuse gate 18/18, docs suites 1/1 + 2/2 + 7/7, pinned rustfmt check on changed
+Rust paths, Python py_compile for touched scripts, and `git diff --check`. No Cargo
+or target access occurred. The original 223/2F/13E receipt remains execution
 `e0a3d73c-428b-4563-b05c-28f00e90ff2e`; this was preflight source-failure evidence,
 not S6a Rust behavior. Full S6a Rust tests and normal CI retry remain pending.

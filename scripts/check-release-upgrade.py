@@ -28,7 +28,20 @@ DERIVED = {version: next(MIGRATIONS.glob(f'{version:04d}_*.sql'))
            for version in (15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41)}
 _storage_source = (ROOT / 'src/storage.rs').read_text(encoding='utf-8')
 _migration_names = _storage_source.split('const MIGRATION_NAMES', 1)[1].split('];', 1)[0]
-CURRENT_SCHEMA_VERSION = len(re.findall(r'^\s*\(\d+,\s*"', _migration_names, re.MULTILINE))
+
+
+def registered_migration_versions(registry):
+    versions = tuple(int(value) for value in re.findall(r'^\s*\((\d+),\s*"', registry, re.MULTILINE))
+    if not versions or versions != tuple(range(1, len(versions) + 1)):
+        raise ValueError('migration registry must be nonempty, unique, and contiguous from version 1')
+    return versions
+
+
+REGISTERED_MIGRATION_VERSIONS = registered_migration_versions(_migration_names)
+CURRENT_SCHEMA_VERSION = REGISTERED_MIGRATION_VERSIONS[-1]
+SPILL_OVERRIDE_SCHEMA_VERSION = 45
+if SPILL_OVERRIDE_SCHEMA_VERSION not in REGISTERED_MIGRATION_VERSIONS:
+    raise ValueError('spill override schema version is not registered')
 PUBLIC_SCHEMA = {'0.3.0': 14, '0.4.0': 14, '0.5.0': 17, '0.6.0': 19, '0.6.1': 19, '0.7.0': 24, '0.7.1': 25, '0.7.2': 27, '0.8.0': 27, '0.8.1': 28, '0.8.2': 28, '0.8.3': 29, '0.9.0': 31, '0.10.0': 32, '0.11.0': 39}
 
 
@@ -219,11 +232,16 @@ def check_migration(db, before, start, target):
         assert 'selection_nonappend_generation' in {row[1] for row in db.execute('PRAGMA table_info(thread)')}, 'migration 40 witness missing'
         for name in ('selection_generation_combined_write', 'selection_generation_update', 'selection_thread_conflict', 'selection_generation_insert', 'selection_path_insert', 'selection_path_delete', 'selection_path_update', 'selection_revision_same_cursor'):
             assert db.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()[0] == 1, f'migration 40 missing {name}'
-    if target >= CURRENT_SCHEMA_VERSION:
-        columns = {row[1] for row in db.execute('PRAGMA table_info(thread)')}
-        assert 'spill_override' in columns, 'migration 45 spill override missing'
-        sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='thread'").fetchone()[0]
-        assert "spill_override IN (0,1)" in sql, 'migration 45 spill override constraint missing'
+    check_spill_override_schema(db, target)
+
+def check_spill_override_schema(db, target):
+    if target < SPILL_OVERRIDE_SCHEMA_VERSION:
+        return
+    columns = {row[1] for row in db.execute('PRAGMA table_info(thread)')}
+    assert 'spill_override' in columns, 'migration 45 spill override missing'
+    sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='thread'").fetchone()[0]
+    assert "spill_override IN (0,1)" in sql, 'migration 45 spill override constraint missing'
+
 
 def apply_migration(db, version):
     if version != 39:

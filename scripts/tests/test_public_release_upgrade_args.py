@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('release_upgrade', ROOT / 'scripts/check-release-upgrade.py')
@@ -51,6 +52,7 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.executescript(fixture.read_text())
         upgrade.prepare_schema(db, 44)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 44)
+        before_45 = upgrade.ledger(db)
         before_columns = {row[1] for row in db.execute('PRAGMA table_info(thread)')}
         self.assertNotIn('spill_override', before_columns)
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
@@ -58,6 +60,9 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0045_thread_spill_override'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
+        # Exercise the real migration checks with registry metadata advanced past 45.
+        with patch.object(upgrade, 'CURRENT_SCHEMA_VERSION', 46):
+            upgrade.check_migration(db, before_45, 44, 45)
         columns = [tuple(row) for row in db.execute('PRAGMA table_info(thread)')]
         fresh = sqlite3.connect(':memory:')
         current_sql = (ROOT / 'src/storage/current.sql').read_text()
@@ -73,6 +78,23 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
         db.close()
         fresh.close()
+
+    def test_migration_registry_version_derivation_rejects_empty_duplicate_and_gap(self):
+        for registry in ("", '(1, "m1"),\n(1, "duplicate")', '(1, "m1"),\n(3, "gap")'):
+            with self.subTest(registry=registry), self.assertRaisesRegex(ValueError, 'nonempty, unique, and contiguous'):
+                upgrade.registered_migration_versions(registry)
+        self.assertEqual(upgrade.registered_migration_versions('(1, "m1"),\n(2, "m2")'), (1, 2))
+
+    def test_migration45_spill_check_is_pinned_to_its_introduction_boundary(self):
+        self.assertEqual(upgrade.SPILL_OVERRIDE_SCHEMA_VERSION, 45)
+        self.assertIn(upgrade.SPILL_OVERRIDE_SCHEMA_VERSION, upgrade.REGISTERED_MIGRATION_VERSIONS)
+        db = sqlite3.connect(':memory:')
+        db.executescript((ROOT / 'src/storage/current.sql').read_text())
+        upgrade.check_spill_override_schema(db, 45)
+        db.execute('ALTER TABLE thread DROP COLUMN spill_override')
+        with self.assertRaisesRegex(AssertionError, 'migration 45 spill override missing'):
+            upgrade.check_spill_override_schema(db, 45)
+        db.close()
 
     def test_schema_rollback_rejected(self):
         for extra in [['--start-schema', '38'], ['--expected-new-schema', '38']]:
