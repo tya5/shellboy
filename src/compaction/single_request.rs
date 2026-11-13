@@ -1005,7 +1005,7 @@ mod tests {
             tx.execute("UPDATE turn SET state='completed' WHERE id='turn-one'", [])?;
             tx.execute_batch(
                 "INSERT INTO run(id,thread_id,state,created_at)VALUES('run-two','t','live','later');
-                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn-two','t','preparing','run-two','later');",
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn-two','t','run-two','preparing','later');",
             )?;
             tx.commit()?;
             Ok(())
