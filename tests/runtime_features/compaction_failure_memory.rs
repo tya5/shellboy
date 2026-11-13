@@ -190,10 +190,7 @@ async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
             "unknown slot permits every eligible provider call"
         );
         assert_eq!(result.records.len(), 17);
-        assert_eq!(
-            result.deterministic_failure_slots, 1,
-            "no second slot was created"
-        );
+        assert_eq!(result.failure_memory_slots, 1, "no second slot was created");
         assert_eq!(
             result.seeded_slot,
             Some((expected_type.to_owned(), expected_bytes)),

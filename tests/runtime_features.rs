@@ -3916,8 +3916,8 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
         "one provider invocation per real scope"
     );
     assert_eq!(
-        result.deterministic_failure_slots, 0,
-        "401 is never deterministic E memory"
+        result.failure_memory_slots, 1,
+        "the actual provider failure is retained only as a bounded private slot"
     );
     assert_eq!(
         result.records.len(),
@@ -3977,7 +3977,7 @@ struct AxFixtureResult {
     report_scopes: Vec<(String, String, i64)>,
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
-    deterministic_failure_slots: usize,
+    failure_memory_slots: usize,
     seeded_slot: Option<(String, Vec<u8>)>,
 }
 
@@ -4066,7 +4066,7 @@ async fn ax_growing_turn_summary_requests(
         }).await.unwrap();
         let owner_instance_id = owner.instance_id.clone();
         let slot_thread = target.clone();
-        let deterministic_failure_slots = control.store.database.call(move |db| {
+        let failure_memory_slots = control.store.database.call(move |db| {
             db.query_row(
                 "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
                 rusqlite::params![
@@ -4091,7 +4091,7 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, deterministic_failure_slots, seeded_slot }
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, failure_memory_slots, seeded_slot }
     }).await.unwrap()
 }
 
