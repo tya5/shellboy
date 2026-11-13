@@ -1082,6 +1082,15 @@ mod tests {
             "same-kind overwrite deliberately has no permanent-history guarantee"
         );
         assert!(same_failed_range(&db, "t", Region::Active, &smaller).unwrap());
+        let mut changed_endpoints = snapshot.clone();
+        changed_endpoints.groups[0].sources[0].id = "different-first-source".into();
+        assert_ne!(
+            failure_identity("t", &snapshot, 0..3, limit).unwrap().0,
+            failure_identity("t", &changed_endpoints, 0..3, limit)
+                .unwrap()
+                .0,
+            "E commits to the source endpoint IDs without exposing the digest"
+        );
         assert_eq!(
             db.query_row("SELECT count(*) FROM app_meta", [], |r| r.get::<_, i64>(0))
                 .unwrap(),

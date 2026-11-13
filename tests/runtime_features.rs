@@ -4014,7 +4014,7 @@ async fn ax_growing_turn_summary_requests(
                 };
                 db.execute(
                     "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
-                    params![format!("compact.deterministic_range_failure.closed.{thread_id}"), value],
+                    rusqlite::params![format!("compact.deterministic_range_failure.closed.{thread_id}"), value],
                 )?;
                 Ok(())
             }).await.unwrap();
@@ -4069,7 +4069,7 @@ async fn ax_growing_turn_summary_requests(
         let deterministic_failure_slots = control.store.database.call(move |db| {
             db.query_row(
                 "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
-                params![
+                rusqlite::params![
                     format!("compact.deterministic_range_failure.closed.{slot_thread}"),
                     format!("compact.deterministic_range_failure.active.{slot_thread}"),
                 ],

@@ -211,3 +211,80 @@ async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
         );
     }
 }
+
+/// The storage-boundary oracle checks SQL projection gating, not physical I/O:
+/// oversized/invalid values are measured in SQLite but never returned to Rust.
+#[test]
+fn invalid_slot_projection_never_returns_unbounded_value() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value);")
+        .unwrap();
+    db.execute(
+        "INSERT INTO app_meta(key,value) VALUES('small',?1),('oversized',?2),('blob',?3),('uppercase',?4),('malformed',?5)",
+        rusqlite::params![
+            "a".repeat(64),
+            "a".repeat(65_536),
+            vec![b'a'; 64],
+            "A".repeat(64),
+            format!("{}g", "a".repeat(63)),
+        ],
+    )
+    .unwrap();
+    let returned_bytes = Rc::new(Cell::new(0usize));
+    let observed = returned_bytes.clone();
+    db.create_scalar_function(
+        "observe_projected_value",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |ctx| {
+            let value = ctx.get_raw(0);
+            if !value.is_null() {
+                observed.set(observed.get() + value.as_bytes().map_or(0, <[u8]>::len));
+            }
+            Ok(value.as_bytes().ok().map(|bytes| bytes.to_vec()))
+        },
+    )
+    .unwrap();
+
+    let projection = "SELECT observe_projected_value(CASE WHEN typeof(value)='text' AND length(CAST(value AS BLOB))=64 AND value NOT GLOB '*[^0-9a-f]*' THEN value END) FROM app_meta WHERE key=?1";
+    assert_eq!(
+        db.query_row(projection, ["small"], |row| row
+            .get::<_, Option<Vec<u8>>>(0))
+            .unwrap()
+            .unwrap()
+            .len(),
+        64
+    );
+    assert_eq!(returned_bytes.get(), 64);
+    assert_eq!(
+        db.query_row(projection, ["oversized"], |row| row
+            .get::<_, Option<Vec<u8>>>(0))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        db.query_row(projection, ["blob"], |row| row.get::<_, Option<Vec<u8>>>(0))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        db.query_row(projection, ["uppercase"], |row| row
+            .get::<_, Option<Vec<u8>>>(0))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        db.query_row(projection, ["malformed"], |row| row
+            .get::<_, Option<Vec<u8>>>(0))
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        returned_bytes.get(),
+        64,
+        "invalid/oversized values are not projected to the caller"
+    );
+}
