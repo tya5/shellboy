@@ -101,8 +101,10 @@ fn assert_provider_scope_records(result: &AxFixtureResult, status: u16, admitted
         ] {
             assert!(outcome.get(field).is_none(), "{field}: {outcome:#?}");
         }
-        assert_eq!(record["error"]["details"]["model_requests"], 0);
-        assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 0);
+        assert!(
+            record["error"].get("details").is_none(),
+            "suppression must omit request and usage facts: {record:#?}"
+        );
     }
 }
 
@@ -257,8 +259,40 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         .await
         .unwrap();
 
-    let second =
-        proactive_third_turn(&control, &mut receive, &target, 150, auth_veto_reply()).await;
+    let first_run = first_scope.0.clone();
+    request(
+        &control,
+        Command::RunStop(RunTarget {
+            run_id: first_run.clone(),
+        }),
+    )
+    .await;
+    let stopped: String =
+        control
+            .store
+            .database
+            .call({
+                let run = first_run.clone();
+                move |db| {
+                    Ok(db.query_row("SELECT state FROM run WHERE id=?1", [run], |row| row.get(0))?)
+                }
+            })
+            .await
+            .unwrap();
+    assert_eq!(
+        stopped, "stopped",
+        "end old Run through public RunStop before testing reopen"
+    );
+
+    let second = proactive_third_turn_after_run(
+        &control,
+        &mut receive,
+        &target,
+        150,
+        auth_veto_reply(),
+        Some(&first_run),
+    )
+    .await;
     assert_eq!(
         second, 1,
         "a legal new Run is not inhibited by the prior Run's provider key"

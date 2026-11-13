@@ -3959,8 +3959,10 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
         assert!(outcome.get("http_status").is_none());
         assert!(outcome.get("final_group_count").is_none());
         assert!(outcome.get("final_source_nodes").is_none());
-        assert_eq!(record["error"]["details"]["model_requests"], 0);
-        assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 0);
+        assert!(
+            record["error"].get("details").is_none(),
+            "suppression must omit request and usage facts: {record:#?}"
+        );
     }
 }
 
@@ -4114,10 +4116,38 @@ async fn proactive_third_turn(
     second: u64,
     summary_reply: (u16, Value),
 ) -> usize {
+    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None).await
+}
+
+async fn proactive_third_turn_after_run(
+    control: &Arc<Control>,
+    receive: &mut mpsc::Receiver<Incoming>,
+    thread: &str,
+    second: u64,
+    summary_reply: (u16, Value),
+    prior_run: Option<&str>,
+) -> usize {
     for (n, tokens) in [(0, 50), (1, second)] {
         send(control, thread, &format!("task {n}")).await;
-        incoming(control, receive)
-            .await
+        let request = incoming(control, receive).await;
+        if n == 0 {
+            if let Some(prior_run) = prior_run {
+                let target = thread.to_owned();
+                let (run_id, state): (String, String) = control.store.database.call(move |db| {
+                    Ok(db.query_row(
+                        "SELECT id,state FROM run WHERE thread_id=?1 AND state IN ('live','stopping') ORDER BY created_at DESC LIMIT 1",
+                        [target],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?)
+                }).await.unwrap();
+                assert_ne!(
+                    run_id, prior_run,
+                    "public request dispatch must start a distinct Run before provider accounting"
+                );
+                assert_eq!(state, "live");
+            }
+        }
+        request
             .reply
             .send((200, answer_with_usage("saved answer", tokens)))
             .unwrap();
