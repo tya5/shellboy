@@ -810,6 +810,7 @@ pub(super) fn remember_failure_qualified(
     remember_failure(tx, thread, region, observed, value)
 }
 
+#[cfg(test)]
 pub(super) fn same_failed_range(
     db: &rusqlite::Connection,
     thread: &str,

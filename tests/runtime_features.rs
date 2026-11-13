@@ -4077,14 +4077,14 @@ async fn ax_growing_turn_summary_requests(
         let owner_instance_id = owner.instance_id.clone();
         let slot_thread = target.clone();
         let failure_memory_slots = control.store.database.call(move |db| {
-            db.query_row(
+            Ok(db.query_row(
                 "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
                 rusqlite::params![
                     format!("compact.deterministic_range_failure.closed.{slot_thread}"),
                     format!("compact.deterministic_range_failure.active.{slot_thread}"),
                 ],
                 |row| row.get::<_, i64>(0).map(|count| count as usize),
-            )
+            )?)
         }).await.unwrap();
         let slot_thread = target.clone();
         let seeded_slot = control.store.database.call(move |db| {
