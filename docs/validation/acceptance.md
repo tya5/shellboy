@@ -11750,3 +11750,27 @@ in an in-memory synthetic table: old row stayed NULL, 0/1 were accepted, and 2,
 non-numeric text and 0.5 were rejected. This checks the DDL/CHECK only; it does
 not verify Rust decoding, the migration runner, current-schema convergence or
 product build.
+
+
+## S6a History fork projection boundary (source review follow-up; not executed)
+
+Source audit found no production `History::fork` call site; in-repository calls
+are tests in `tests/history.rs`. `History::fork` now returns typed
+`HistoryForkResult` with persisted identity/settings and raw nullable spill only,
+not `ThreadDetails` or an effective policy. The public owner `thread.create`,
+`thread.fork`, `thread.get`, and `thread.set` paths use the shared
+`Store::project_thread_details` projector, which takes one `Config::current()`
+copy and resolves Thread -> selected connection -> built-in on. The existing
+config adoption path excludes spill from provider-client identity comparison.
+
+Added or extended source oracles (not yet run):
+`history_fork_returns_raw_spill_persistence_facts_only`,
+`public_thread_get_resolves_live_connection_spill_with_raw_precedence`,
+`live_connections_rebuild_only_changed_clients_and_keep_existing_generations`,
+`spill_precedence_inheritance_revision_and_rollback_are_public`, and
+`thread_rewind_cuts_the_path_and_keeps_the_tail_as_a_child_thread`. The public
+config test covers unset + connection false, Thread false + connection true,
+Thread true + connection false, clear, and live Config updates. The client unit
+test checks `Arc` pool identity for a spill-only connection change. No Rust test
+or build was run for this follow-up due the unresolved guarded target-cache
+refusal described above.

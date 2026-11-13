@@ -139,6 +139,10 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
             .previous_node_ids,
         vec!["b", "summary"]
     );
+    database.call(|connection| {
+        connection.execute("UPDATE thread SET spill_override=0 WHERE id='thread'", [])?;
+        Ok(())
+    }).await.unwrap();
     let child = history
         .fork(ThreadForkArgs {
             agents: None,
@@ -156,7 +160,7 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
     assert_eq!(child.model, "fixture");
     assert_eq!(child.effort.as_deref(), Some("custom"));
     assert_eq!(child.parent_id.as_deref(), Some("thread"));
-    assert_eq!(child.run_id, None);
+    assert_eq!(child.spill, Some(false), "persistence fork returns the raw override only");
     append(&database, "d", "user", json!({"text":"parent only"})).await;
     let child_id = child.thread_id.clone();
     database.call(move |connection| {
@@ -170,6 +174,26 @@ async fn summary_can_precede_existing_suffix_and_fork_keeps_shared_sources() {
         tx.commit()?;
         Ok(())
     }).await.unwrap();
+    database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn history_fork_returns_raw_spill_persistence_facts_only() {
+    let (_directory, database, history) = repository().await;
+    append(&database, "source", "user", json!({"text":"source"})).await;
+    database.call(|connection| {
+        connection.execute("UPDATE thread SET spill_override=0 WHERE id='thread'", [])?;
+        Ok(())
+    }).await.unwrap();
+    let fork = history.fork(ThreadForkArgs {
+        agents: None,
+        thread_id: "thread".into(),
+        node_id: "source".into(),
+        cwd: None,
+    }).await.unwrap();
+    assert_eq!(fork.parent_id.as_deref(), Some("thread"));
+    assert_eq!(fork.spill, Some(false));
+    assert_eq!(fork.connection, "proxy");
     database.shutdown().await.unwrap();
 }
 

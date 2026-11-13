@@ -9,7 +9,10 @@ use shellboy::{
     },
     config_setup::TEMPLATE,
     control::Control,
-    protocol::{ApiError, Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, ErrorCode, Request},
+    protocol::{
+        ApiError, Command, ConfigChange, ConfigGetArgs, ConfigSetArgs, ErrorCode, Request,
+        ThreadCreateArgs, ThreadSetArgs, ThreadTarget,
+    },
 };
 use std::{
     path::{Path, PathBuf},
@@ -1376,4 +1379,85 @@ fn three_api_output_limit_is_saved_and_read_back_without_other_setting_changes()
         apply(&path, &hash, &[removal("connections.synthetic.max_tokens")]).unwrap();
         assert_eq!(loaded(&path).connections["synthetic"].max_tokens, None);
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn public_thread_get_resolves_live_connection_spill_with_raw_precedence() {
+    let root = tempfile::tempdir().unwrap();
+    let owner = owner(root.path(), "http://127.0.0.1:1/v1").await;
+    let control = Control::new(&owner, root.path().into());
+    let created = request(&control, Command::ThreadCreate(ThreadCreateArgs {
+        agents: None,
+        connection: None,
+        cwd: None,
+        model: None,
+        effort: None,
+        parent_id: None,
+    })).await;
+    let thread = created["thread_id"].as_str().unwrap().to_owned();
+    let get_thread = || Command::ThreadGet(ThreadTarget { thread_id: Some(thread.clone()) });
+    let initial = request(&control, get_thread()).await;
+    assert_eq!(initial["spill"], Value::Null);
+    assert_eq!(initial["effective_spill"], true);
+
+    async fn config_spill(control: &std::sync::Arc<Control>, op: &str, value: bool) {
+        let current = request(control, Command::ConfigGet(ConfigGetArgs {})).await;
+        let hash = current["file"]["content_hash"].as_str().unwrap().to_owned();
+        let result = set(control, op, ConfigSetArgs {
+            expected_hash: hash,
+            changes: vec![change("connections.fixture.spill", json!(value))],
+        }).await.unwrap();
+        assert_eq!(result["written"], true);
+        assert_eq!(result["restart_required"], false);
+        assert_eq!(result["applied_to_running_owner"], true);
+    }
+    config_spill(
+        &control,
+        &format!("{}:spill-connection-off", control.store.instance_id),
+        false,
+    ).await;
+    let inherited_off = request(&control, get_thread()).await;
+    assert_eq!(inherited_off["spill"], Value::Null);
+    assert_eq!(inherited_off["effective_spill"], false);
+
+    let off = request(&control, Command::ThreadSet(Box::new(ThreadSetArgs {
+        thread_id: Some(thread.clone()),
+        spill: Some("off".into()),
+        ..Default::default()
+    }))).await;
+    assert_eq!(off["spill"], false);
+    config_spill(
+        &control,
+        &format!("{}:spill-connection-on", control.store.instance_id),
+        true,
+    ).await;
+    let thread_off_connection_on = request(&control, get_thread()).await;
+    assert_eq!(thread_off_connection_on["spill"], false);
+    assert_eq!(thread_off_connection_on["effective_spill"], false);
+
+    let on = request(&control, Command::ThreadSet(Box::new(ThreadSetArgs {
+        thread_id: Some(thread.clone()),
+        spill: Some("on".into()),
+        ..Default::default()
+    }))).await;
+    assert_eq!(on["spill"], true);
+    config_spill(
+        &control,
+        &format!("{}:spill-connection-off-again", control.store.instance_id),
+        false,
+    ).await;
+    let thread_on_connection_off = request(&control, get_thread()).await;
+    assert_eq!(thread_on_connection_off["spill"], true);
+    assert_eq!(thread_on_connection_off["effective_spill"], true);
+
+    request(&control, Command::ThreadSet(Box::new(ThreadSetArgs {
+        thread_id: Some(thread.clone()),
+        spill: Some(String::new()),
+        ..Default::default()
+    }))).await;
+    let cleared = request(&control, get_thread()).await;
+    assert_eq!(cleared["spill"], Value::Null);
+    assert_eq!(cleared["effective_spill"], false);
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
 }

@@ -1241,7 +1241,7 @@ impl Store {
                     self.set_agents_tx(tx, &id, path, caller, now)?;
                 }
                 let mut details = thread_details(tx, &id)?;
-                self.fill_effective_spill(&mut details);
+                self.project_thread_details(&mut details, false);
                 let mut result = MutationResult::value(details)?;
                 result.changed_threads.push(id);
                 Ok(result)
@@ -1255,7 +1255,7 @@ impl Store {
                     self.set_agents_tx(tx, &id, path, caller, now)?;
                 }
                 let mut details = thread_details(tx, &id)?;
-                self.fill_effective_spill(&mut details);
+                self.project_thread_details(&mut details, false);
                 let mut result = MutationResult::value(details)?;
                 result.changed_threads.push(id);
                 Ok(result)
@@ -1263,7 +1263,7 @@ impl Store {
             Command::ThreadGet(args) => {
                 let id = target(args.thread_id.as_deref(), caller)?;
                 let mut details = thread_details(tx, &id)?;
-                self.fill_effective(&mut details);
+                self.project_thread_details(&mut details, true);
                 details.usage_totals = Some(crate::usage_totals::read_logged(
                     tx,
                     &crate::usage_totals::Scope::Thread {
@@ -1367,7 +1367,7 @@ impl Store {
                 if let Some(thread) = result.result["thread_id"].as_str().map(str::to_owned) {
                     let details = thread_details(tx, &thread)?;
                     let mut details = details;
-                    self.fill_effective(&mut details);
+                    self.project_thread_details(&mut details, true);
                     result.result["effective_auto_compact_at"] =
                         serde_json::json!(details.effective_auto_compact_at);
                     result.result["effective_auto_compact_target_percent"] =
@@ -1755,7 +1755,10 @@ impl Store {
         Ok(id)
     }
 
-    fn fill_effective_spill(&self, details: &mut ThreadDetails) {
+    /// Project spill facts for create/fork and all effective fields for readback,
+    /// using one owned current Config copy. Create/fork keep existing optional
+    /// numeric fields absent; the shared spill resolver still uses the same owner source.
+    fn project_thread_details(&self, details: &mut ThreadDetails, include_limits: bool) {
         let config = self.config.current();
         let connection = config.connections.get(&details.connection);
         details.effective_spill = crate::config::SpillPolicy::resolve(
@@ -1763,17 +1766,9 @@ impl Store {
             connection.and_then(|connection| connection.spill),
         )
         .effective;
-    }
-
-    /// Values in effect for the Thread: its own override, then the connection, then `[compaction]`.
-    fn fill_effective(&self, details: &mut ThreadDetails) {
-        let config = self.config.current();
-        let connection = config.connections.get(&details.connection);
-        details.effective_spill = crate::config::SpillPolicy::resolve(
-            details.spill,
-            connection.and_then(|connection| connection.spill),
-        )
-        .effective;
+        if !include_limits {
+            return;
+        }
         let compaction = &config.compaction;
         details.effective_auto_compact_at =
             Some(compaction.auto_at_tokens_for(details.auto_compact_at, connection));

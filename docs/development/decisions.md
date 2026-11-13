@@ -4482,7 +4482,11 @@ Spill-only edits increment ordinary Thread revision but do not increment
 profile_revision, reasoning_epoch, or selection_revision. Create/fork/rewind copy
 the raw nullable value. The driver samples metadata at its existing automatic
 invocation boundary from `Config::current()` and the current Thread row; no new
-client, generation counter, or private RPC is introduced. Runtime `off` is
+client, generation counter, or private RPC is introduced. The persistence-only
+`History::fork` returns a `HistoryForkResult` of persisted raw facts, never a
+fabricated complete `ThreadDetails`; Control's shared projector uses the owner
+Config snapshot for effective readback. Connection-spill-only config updates
+preserve existing HTTP client identity. Runtime `off` is
 intended to keep automatic summary while bypassing automatic spill, but must not
 be activated or claimed complete until separately reviewed S2b is integrated.
 
@@ -4490,3 +4494,14 @@ Basis: final S6a contract `s6a-contract-final-6714.md` (SHA-256
 `dddf58c209595a5165a855180fbe3ab9b6f2a9a9c3ea8bc962a5f4a7e7475aec`) and its
 independent leader review. Revisit the runtime/landing gate only after exact-SHA
 S2b review and source tests; persistence readback is not runtime acceptance.
+
+
+S6a P2 boundary follow-up: the in-repository `History::fork` call sites are
+persistence tests, not Control/CLI public operations. Its return is now typed
+raw persistence facts (`HistoryForkResult`) and does not synthesize effective
+connection settings. The owner Control paths project `ThreadDetails` through
+one current-Config projector. This changes the public Rust helper's return type;
+no in-repo production consumer depended on the prior ThreadDetails shape. Review
+this source API boundary independently. The live-config test checks precedence
+and client-pool identity; it is authored but unexecuted pending safe hosted
+qualification.

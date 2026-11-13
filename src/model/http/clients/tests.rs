@@ -1193,6 +1193,14 @@ async fn live_connections_rebuild_only_changed_clients_and_keep_existing_generat
     assert_eq!(old.default_model.as_deref(), Some("synthetic"));
     assert_eq!(next.default_model.as_deref(), Some("new-model"));
     assert_eq!(config.current().default_model.as_deref(), Some("new-model"));
+
+    let before_spill_only = clients.get("keep").unwrap();
+    config.connections.get_mut("keep").unwrap().spill = Some(false);
+    clients.adopt(&config, None);
+    let after_spill_only = clients.get("keep").unwrap();
+    assert!(Arc::ptr_eq(&before_spill_only.pool, &after_spill_only.pool));
+    assert_eq!(config.current().connections["keep"].spill, Some(false));
+
     config.connections.remove("chat");
     config.default_connection = Some("keep".into());
     clients.adopt(&config, None);

@@ -44,9 +44,13 @@ reference. Paths remain literal data and must be rendered safely.
 reference. They reject any explicit `agents: Some(...)`, including an empty
 string, with invalid_argument before writes, directing callers to Control
 thread.fork. These DB-only helpers do not acquire file workers or invent an
-actor. Their returned agents_path is the actual inherited path. Product
-Control/CLI/TUI fork supports explicit references through validation, CAS and
-audit before invoking the primitive with an inherited/default argument.
+actor. `History::fork` returns a typed `HistoryForkResult` containing only the
+persisted child identity/settings, including the raw nullable spill override; it
+does not claim effective connection policy. Product Control/CLI/TUI fork uses
+the shared ThreadDetails projector and one owned current Config snapshot for
+`effective_spill`. Explicit instruction references still require Control
+validation, CAS and audit before invoking the primitive with an inherited/default
+argument.
 
 ## Outbound provenance (#48)
 

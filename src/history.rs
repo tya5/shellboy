@@ -41,10 +41,24 @@ use crate::{
     protocol::{
         ApiError, ErrorCode, HistoryBody, HistoryExecutionLink, HistoryGetArgs, HistoryListArgs,
         HistorySelection, HistorySnippet, MAX_BODY_BYTES, MAX_LIST_LIMIT, Page, PageCursor,
-        ThreadDetails, ThreadForkArgs,
+        ThreadForkArgs,
     },
     storage::{DbWorker, StorageError},
 };
+
+/// Persisted facts for a History-level fork. Effective settings require the
+/// owner Config snapshot and are projected by Control, not guessed here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryForkResult {
+    pub thread_id: String,
+    pub parent_id: Option<String>,
+    pub cwd: String,
+    pub connection: String,
+    pub model: String,
+    pub effort: Option<String>,
+    pub agents_path: String,
+    pub spill: Option<bool>,
+}
 
 #[derive(Debug, Clone)]
 pub struct History {
@@ -80,9 +94,9 @@ impl History {
             .map_err(storage_error)?
     }
 
-    /// Persistence-only fork: inherit the current reference. Explicit `agents`
-    /// requires Control's thread.fork validation, caller audit and file workers.
-    pub async fn fork(&self, args: ThreadForkArgs) -> Result<ThreadDetails, ApiError> {
+    /// Persistence-only fork result: raw saved values only. Effective settings
+    /// belong to Control, which has the current owner Config snapshot.
+    pub async fn fork(&self, args: ThreadForkArgs) -> Result<HistoryForkResult, ApiError> {
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         self.database
@@ -91,30 +105,22 @@ impl History {
                 if let Err(error) = fork_thread(&tx, &args, &id, &now) {
                     return Ok(Err(error));
                 }
-                let details = tx.query_row(
+                let persisted = tx.query_row(
                     "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path,spill_override FROM thread WHERE id=?1",
                     [&id],
-                    |row| {
-                        Ok(ThreadDetails { instruction_sources: None, archived_at: None, tags: Vec::new(), auto_compact_at: None, effective_auto_compact_at: None, auto_compact_target_percent:None,summary_max_chars:None,effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:None,spill:crate::storage::decode_spill_override(row.get_ref(6)?,6)?,effective_spill:true,effective_max_tokens:None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
-                            context_usage: None,
-                            context: None,
-                            thread_id: id.clone(),
-                            title: String::new(),
-                            cwd: row.get(0)?,
-                            connection: row.get(1)?,
-                            model: row.get(2)?,
-                            effort: row.get(3)?,
-                            parent_id: row.get(4)?,
-                            run_id: None,
-                            turn_id: None,
-                            shells_count: 0,
-                            recovery_reason: None,
-                            parent_change: None,
-                        })
-                    },
+                    |row| Ok(HistoryForkResult {
+                        thread_id: id.clone(),
+                        cwd: row.get(0)?,
+                        connection: row.get(1)?,
+                        model: row.get(2)?,
+                        effort: row.get(3)?,
+                        parent_id: row.get(4)?,
+                        agents_path: row.get(5)?,
+                        spill: crate::storage::decode_spill_override(row.get_ref(6)?, 6)?,
+                    }),
                 )?;
                 tx.commit()?;
-                Ok(Ok(details))
+                Ok(Ok(persisted))
             })
             .await
             .map_err(storage_error)?
