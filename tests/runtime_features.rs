@@ -4114,6 +4114,7 @@ struct ProactiveTrace {
     summary_requests: usize,
     summary_scopes: Vec<(String, String)>,
     summary_bodies: Vec<Value>,
+    admission_report: Option<Value>,
 }
 
 async fn proactive_third_turn(
@@ -4154,7 +4155,10 @@ async fn proactive_third_turn_after_run(
     prior_scope: Option<(&str, &str)>,
 ) -> ProactiveTrace {
     let mut trace = ProactiveTrace::default();
-    for (n, tokens) in [(0, 50), (1, second)] {
+    // A is the first known input report in this boundary: make the new Run's
+    // first real report exceed the configured 80-token summary target.
+    let first_report = if prior_scope.is_some() { 150 } else { 50 };
+    for (n, tokens) in [(0, first_report), (1, second)] {
         send(control, thread, &format!("task {n}")).await;
         loop {
             let next = incoming(control, receive).await;
@@ -4189,6 +4193,54 @@ async fn proactive_third_turn_after_run(
             break;
         }
         settled(control, thread).await;
+    }
+    if prior_scope.is_some() {
+        let target = thread.to_owned();
+        trace.admission_report = Some(
+            control.store.database.call(move |db| {
+                let report = db.query_row(
+                    "SELECT a.id,a.state,json_extract(a.usage_json,'$.input_tokens'),
+                        json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL,
+                        ((EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
+                            WHERE tr.thread_id=t.id AND r.created_at>a.started_at))
+                         OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id)
+                             AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p
+                                 ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
+                        u.run_id,a.turn_id,u.state
+                     FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
+                     WHERE t.id=?1 AND a.state='completed' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
+                     ORDER BY a.rowid DESC LIMIT 1",
+                    [target],
+                    |row| Ok(json!({
+                        "attempt_id": row.get::<_,String>(0)?, "attempt_state": row.get::<_,String>(1)?,
+                        "input_tokens": row.get::<_,Option<i64>>(2)?, "automatic_trim_attempt_present": row.get::<_,bool>(3)?,
+                        "next_request_pending": row.get::<_,bool>(4)?, "run_id": row.get::<_,String>(5)?,
+                        "turn_id": row.get::<_,String>(6)?, "turn_state": row.get::<_,String>(7)?
+                    })),
+                ).optional()?;
+                Ok(report.unwrap_or(Value::Null))
+            }).await.unwrap()
+        );
+        let report = trace.admission_report.as_ref().unwrap();
+        let (prior_run, _) = prior_scope.unwrap();
+        assert_ne!(
+            report["run_id"], prior_run,
+            "latest eligible report belongs to the new Run: {report:#?}"
+        );
+        assert!(
+            report["input_tokens"]
+                .as_i64()
+                .is_some_and(|tokens| tokens >= 100),
+            "fresh report meets configured threshold: {report:#?}"
+        );
+        assert_eq!(
+            report["next_request_pending"], false,
+            "latest report has no newer replacement: {report:#?}"
+        );
+        assert_eq!(
+            report["automatic_trim_attempt_present"], false,
+            "latest report is not already consumed: {report:#?}"
+        );
     }
     send(control, thread, "current task").await;
     loop {

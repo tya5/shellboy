@@ -291,6 +291,30 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         matches!(stopped.as_str(), "completed" | "stopped"),
         "RunStop is terminal-idempotent: expected completed or stopped, got {stopped}"
     );
+    let closed_preview = request(
+        &control,
+        Command::CompactPreview(Box::new(CompactPreviewArgs {
+            thread_id: Some(target.clone()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert!(
+        closed_preview["target_nodes"]["count"]
+            .as_u64()
+            .unwrap_or(0)
+            > 0,
+        "diagnostic summary-source target: {closed_preview:#?}"
+    );
+    assert_ne!(
+        closed_preview["summary"],
+        Value::Null,
+        "snapshot preview must expose the candidate summary target"
+    );
+    assert_eq!(
+        closed_preview["no_target"], false,
+        "actual current path should have a normal closed target"
+    );
 
     let second = proactive_third_turn_after_run(
         &control,
@@ -302,6 +326,19 @@ async fn legal_new_run_reopens_provider_failure_memory() {
     )
     .await;
     let all_events = proactive_events(&control, &target).await;
+    let fresh_attempt = second.admission_report.as_ref().unwrap()["attempt_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let fresh_trigger = all_events
+        .iter()
+        .find(|event| event["attempt_id"] == fresh_attempt)
+        .expect("eligible new-Run report has its actual automatic trigger record");
+    assert!(
+        fresh_trigger["trigger"]["a_input_tokens"].as_u64().unwrap()
+            > fresh_trigger["trigger"]["target_tokens"].as_u64().unwrap(),
+        "automatic summary path requires #A above target: {fresh_trigger:#?}"
+    );
     // Count durable model-attempt records after RunStop, not only requests
     // observed after the helper's current-turn boundary; warmup can compact.
     let second_attempt = all_events
@@ -312,7 +349,14 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         })
         .map(|event| event["attempt_id"].as_str().unwrap().to_owned())
         .find(|attempt| attempt != &first_attempt)
-        .expect("new-Run provider attempt exists anywhere after RunStop");
+        .unwrap_or_else(|| {
+            let facts: Vec<_> = all_events.iter().map(|event| json!({
+                "attempt_id": event["attempt_id"], "state": event["state"],
+                "reason": event["metrics"]["reason"], "outcome": event["compaction_outcome"]["outcome"],
+                "summary_usage": event["metrics"]["summary_usage"], "error_details": event["error"]["details"]
+            })).take(8).collect();
+            panic!("new-Run provider attempt missing; admission_report={:#?}; helper_summary_scopes={:#?}; durable_event_facts={facts:#?}", second.admission_report, second.summary_scopes)
+        });
     let second_scope = control
         .store
         .database
