@@ -4385,3 +4385,35 @@ shared outbound replay-copy boundary for all three payload shapes. Do not add
 recursive sanitization, dialect tolerance, history rewrites or a new schema.
 Synthetic adoption-through-final-JSON and per-shape preservation regressions
 qualify the boundary; real-provider recovery/deployment remain separate actions.
+
+## #301 S1 Terminal Outcome Recording
+
+- One source-owned terminal nonsuccess union distinguishes canonical adoption
+  rejection from model/output/preparation failure; no InvalidState-to-Other
+  classifier, duplicate counter/event, old-name alias or old-owner RPC fallback.
+- The private cause carrier is not serializable: provider JSON and saved generic
+  errors cannot mint a guard/deterministic-failure capability. Current consumers
+  migrate atomically; old DB/log bytes stay historical and are not reclassified.
+- The typed deterministic predicate preserves exactly refusal, empty,
+  nonshrink and final typed-context witness writes. Original two slots,
+  pre-halving endpoint identity, retries/backoff/#A/settings and adoption guards
+  are unchanged. Unknown is not new suppression authority.
+- The shared 1024-byte outcome decoder serves status list/point, canonical
+  compact.list and existing bounded thread.get last_compaction. Existing usage
+  remains separate and unknown. Public provider-code allowlist is empty; raw
+  provider code/message is forbidden in outcome/schema/log projection.
+- S1 is not SSE terminal decoding, broad 400/413/422 halving, suppression,
+  current-path adoption splice or running-progress work. Those require separate
+  reviewed units and independent exact-SHA qualification.
+
+### S1a Overflow And Guard Test Boundaries
+
+The shared typed error carrier may serve overflow/manual callers, but only the
+existing Automatic::observed boundary owns a terminal stage fact. Do not create
+an automatic stage/token merely to satisfy an overflow recovery assertion.
+Removing the retired private discard-reason string requires that assertion to
+check the unchanged original error and safety vector, not invent a new fact.
+Guard test mutations must respect first-failure ordering: actual path and
+selection edits advance the nonappend generation before prefix validation.
+A deliberate mismatched-witness injection is a branch negative, not proof a
+normal history edit can bypass that generation fence.

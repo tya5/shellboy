@@ -1294,27 +1294,37 @@
       },
       "type": "object"
     },
-    "CompactionDiscard": {
+    "CompactionOutcomeFact": {
       "additionalProperties": false,
       "properties": {
         "elapsed_ms": {
           "format": "uint64",
+          "maximum": 9007199254740991,
           "minimum": 0,
           "type": "integer"
         },
-        "phase": {
-          "$ref": "#/definitions/DiscardPhase"
+        "outcome": {
+          "$ref": "#/definitions/Outcome"
         },
-        "reason": {
-          "$ref": "#/definitions/DiscardReason"
+        "phase": {
+          "$ref": "#/definitions/CompactionPhase"
         }
       },
       "required": [
-        "reason",
         "phase",
-        "elapsed_ms"
+        "elapsed_ms",
+        "outcome"
       ],
       "type": "object"
+    },
+    "CompactionPhase": {
+      "enum": [
+        "closed_spill",
+        "closed_summary",
+        "active_spill",
+        "active_summary"
+      ],
+      "type": "string"
     },
     "CompactionUsageResult": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1747,45 +1757,6 @@
       ],
       "type": "string"
     },
-    "DiscardPhase": {
-      "enum": [
-        "closed_spill",
-        "closed_summary",
-        "active_spill",
-        "active_summary"
-      ],
-      "type": "string"
-    },
-    "DiscardReason": {
-      "enum": [
-        "cancelled",
-        "thread_unavailable",
-        "selection_changed",
-        "profile_changed",
-        "summary_settings_changed",
-        "epoch_changed",
-        "run_started",
-        "run_stopped",
-        "turn_started",
-        "turn_changed",
-        "nonappend_generation_changed",
-        "selected_prefix_changed",
-        "current_tail_changed",
-        "source_changed",
-        "source_pruned",
-        "map_request_budget_exhausted",
-        "reduce_request_budget_exhausted",
-        "reduce_round_limit",
-        "summary_not_shrinking",
-        "oversized_retry_exhausted",
-        "summary_refused",
-        "summary_empty",
-        "reduce_model_failed",
-        "reduce_client_unavailable",
-        "other"
-      ],
-      "type": "string"
-    },
     "Endpoint": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
@@ -2178,6 +2149,31 @@
         "execution_id"
       ],
       "type": "object"
+    },
+    "FailureOrigin": {
+      "enum": [
+        "provider_response",
+        "transport",
+        "protocol",
+        "preparation",
+        "output_validation",
+        "storage",
+        "cancellation",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "FailureReason": {
+      "enum": [
+        "provider_error",
+        "context_limit_terminal",
+        "refused",
+        "empty",
+        "not_shrinking",
+        "cancelled",
+        "unclassified"
+      ],
+      "type": "string"
     },
     "Hello": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3895,6 +3891,75 @@
       "title": "Origin",
       "type": "object"
     },
+    "Outcome": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "rejected",
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/definitions/RejectionReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "final_group_count": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "final_source_nodes": {
+              "format": "uint64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "http_status": {
+              "format": "uint16",
+              "maximum": 599,
+              "minimum": 100,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "failed",
+              "type": "string"
+            },
+            "origin": {
+              "$ref": "#/definitions/FailureOrigin"
+            },
+            "reason": {
+              "$ref": "#/definitions/FailureReason"
+            }
+          },
+          "required": [
+            "kind",
+            "reason",
+            "origin"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "OwnerShutdownArgs": {
       "additionalProperties": false,
       "properties": {
@@ -4105,6 +4170,26 @@
       ],
       "title": "ReceiptBudget",
       "type": "object"
+    },
+    "RejectionReason": {
+      "enum": [
+        "cancelled",
+        "thread_unavailable",
+        "selection_changed",
+        "profile_changed",
+        "summary_settings_changed",
+        "epoch_changed",
+        "run_started",
+        "run_stopped",
+        "turn_started",
+        "turn_changed",
+        "nonappend_generation_changed",
+        "selected_prefix_changed",
+        "current_tail_changed",
+        "source_changed",
+        "source_pruned"
+      ],
+      "type": "string"
     },
     "RelationItem": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -9168,10 +9253,10 @@
             "null"
           ]
         },
-        "compaction_discard": {
+        "compaction_outcome": {
           "anyOf": [
             {
-              "$ref": "#/definitions/CompactionDiscard"
+              "$ref": "#/definitions/CompactionOutcomeFact"
             },
             {
               "type": "null"

@@ -56,7 +56,7 @@ pub struct WorkItem {
     pub attempt_model: Option<String>,
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compaction_discard: Option<crate::compaction::discard::CompactionDiscard>,
+    pub compaction_outcome: Option<crate::compaction::discard::CompactionOutcomeFact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revisit: Option<RevisitSummary>,
     pub targets: Vec<crate::protocol::StatusTarget>,
@@ -462,7 +462,7 @@ fn work_item(row: &rusqlite::Row<'_>, kind: WorkKind, state: String) -> Result<P
             .get::<_, Option<String>>(14)
             .map_err(sql)?
             .map(|s| short(s, 256)),
-        compaction_discard: None,
+        compaction_outcome: None,
         reason: row
             .get::<_, Option<String>>(15)
             .map_err(sql)?
@@ -620,7 +620,7 @@ pub fn snapshot(db: &Connection, args: &StatusArgs, instance: &str) -> Result<St
             let text: Option<String> = db
                 .query_row(&query, [&projected.item.id], |r| r.get(0))
                 .map_err(sql)?;
-            projected.item.compaction_discard =
+            projected.item.compaction_outcome =
                 text.as_deref().and_then(crate::compaction::discard::decode);
         }
     }

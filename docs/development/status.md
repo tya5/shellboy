@@ -142,3 +142,15 @@ replay-copy boundary. Original REDs reproduced the invalid field; fifteen focuse
 synthetic tests passed after repair (see the validation record). This is not an
 installed-owner change or successful provider recovery; independent review,
 full-suite and exact-SHA three-OS CI remain separate gates.
+
+### #301 S1 Terminal Recording (Source Qualification)
+
+A recording-only unit replaces the current generic discard observation with a
+single bounded rejected/failed outcome. It retains all fifteen reachable guards,
+original two-slot deterministic policy and existing scheduling/retry/adoption.
+The adopted wire/privacy/paired-test contract is
+[Terminal Compaction Recording](issue-301-s1-recording-contract.md).
+Public RED evidence exists before implementation; qualification, independent
+exact-source review and this unit's own normal/three-OS CI are separate gates.
+No SSE parser/halving/suppression/adoption relaxation/progress UI or installed
+Core change belongs to this unit.

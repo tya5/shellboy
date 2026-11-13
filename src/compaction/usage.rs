@@ -193,8 +193,11 @@ pub(super) fn annotate(mut error: ApiError, usage: &SummaryUsage) -> ApiError {
     match &mut error.details {
         Some(Value::Object(details)) => {
             details.insert("summary_usage".into(), json!(usage));
+            details.insert("model_requests".into(), json!(usage.requests));
         }
-        None => error.details = Some(json!({"summary_usage":usage})),
+        None => {
+            error.details = Some(json!({"summary_usage":usage,"model_requests":usage.requests}))
+        }
         Some(_) => {}
     }
     error
@@ -245,5 +248,37 @@ mod tests {
         // A dotted Thread ID can share the prefix; readers also compare thread_id.
         assert!(other >= low && other < high);
         assert!(record_key("ab", "x") >= high || record_key("ab", "x") < low);
+    }
+}
+
+#[cfg(test)]
+mod failure_projection_tests {
+    use super::*;
+    #[test]
+    fn terminal_error_exposes_admissions_and_partial_usage_without_a_new_ledger() {
+        let mut usage = SummaryUsage::default();
+        usage.begin();
+        usage.observe(Some(StandardUsage {
+            input_tokens: Some(7),
+            ..Default::default()
+        }));
+        usage.begin();
+        let original = ApiError::new(ErrorCode::InvalidState, "original result");
+        let error = annotate(original.clone(), &usage);
+        assert_eq!(error.code, original.code);
+        assert_eq!(error.message, original.message);
+        let details = error.details.unwrap();
+        assert_eq!(details["model_requests"], 2);
+        assert_eq!(details["summary_usage"]["requests"], 2);
+        assert_eq!(details["summary_usage"]["input_tokens"]["known_sum"], 7);
+        assert_eq!(details["summary_usage"]["input_tokens"]["unknown_count"], 1);
+        assert_eq!(
+            details["summary_usage"]["output_tokens"]["known_sum"],
+            Value::Null
+        );
+        assert_eq!(
+            annotate(original.clone(), &SummaryUsage::default()),
+            original
+        );
     }
 }

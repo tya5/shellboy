@@ -244,17 +244,7 @@ impl Compactor {
         let dispatched = match dispatched {
             Ok(result) => result,
             Err(error) => {
-                let reason = error
-                    .details
-                    .as_ref()
-                    .and_then(|v| v["compaction_discard_reason"].as_str());
-                let deterministic = matches!(
-                    reason,
-                    Some("summary_refused" | "summary_empty" | "summary_not_shrinking")
-                ) || error
-                    .details
-                    .as_ref()
-                    .is_some_and(|v| v["single_summary_context_terminal"] == true);
+                let deterministic = discard::cause(&error).deterministic();
                 if deterministic {
                     let thread = snapshot.thread.clone();
                     let proof = snapshot.clone();
@@ -333,8 +323,9 @@ impl Compactor {
                 })
                 .await
                 .map_err(storage_error)?;
-            return Err(discard::rejected(
-                discard::DiscardReason::SummaryNotShrinking,
+            return Err(discard::failed(
+                discard::FailureReason::NotShrinking,
+                discard::FailureOrigin::OutputValidation,
                 "Summary does not shrink its original source projection; original path retained",
             ));
         }
@@ -391,17 +382,36 @@ impl Compactor {
             .config
             .connections
             .get(&snapshot.profile)
-            .ok_or_else(|| ApiError::new(ErrorCode::ConfigInvalid, "Connection not found"))?;
-        let client = self
-            .clients
-            .get(&snapshot.profile)
-            .map_err(|e| invalid(&e.to_string()))?;
+            .ok_or_else(|| {
+                discard::attach(
+                    ApiError::new(ErrorCode::ConfigInvalid, "Connection not found"),
+                    discard::Outcome::Failed {
+                        reason: discard::FailureReason::Unclassified,
+                        origin: discard::FailureOrigin::Preparation,
+                        http_status: None,
+                        final_group_count: None,
+                        final_source_nodes: None,
+                    },
+                )
+            })?;
+        let client = self.clients.get(&snapshot.profile).map_err(|e| {
+            discard::attach(
+                invalid(&e.to_string()),
+                discard::Outcome::Failed {
+                    reason: discard::FailureReason::Unclassified,
+                    origin: discard::FailureOrigin::Preparation,
+                    http_status: None,
+                    final_group_count: None,
+                    final_source_nodes: None,
+                },
+            )
+        })?;
         let mut trial = Trial::new(selected).ok_or_else(|| invalid("No summary range"))?;
         let mut retries = 0u32;
         loop {
             if cancel.is_cancelled() {
                 return Err(discard::rejected(
-                    discard::DiscardReason::Cancelled,
+                    discard::RejectionReason::Cancelled,
                     "Compaction cancelled; original path retained",
                 ));
             }
@@ -443,8 +453,9 @@ impl Compactor {
                         )
                         .await?;
                     if cancel.is_cancelled() {
-                        return Err(discard::rejected(
-                            discard::DiscardReason::Cancelled,
+                        return Err(discard::failed(
+                            discard::FailureReason::Cancelled,
+                            discard::FailureOrigin::Cancellation,
                             "Compaction cancelled; original path retained",
                         ));
                     }
@@ -457,30 +468,60 @@ impl Compactor {
                         }
                         // Keep the provider's reason: the user needs it to act
                         // (credentials, quota, a rejected request).
-                        return Err(invalid(&format!(
-                            "Summary request failed; original path retained: {}",
-                            failure.error.message
-                        ))
-                        .details(json!({
-                            "provider_status": failure.error.status,
-                            "provider_code": failure.error.provider_code,
-                        })));
+                        let cause = discard::model_cause(&failure.error, failure.facts.status);
+                        return Err(discard::attach(
+                            invalid(&format!(
+                                "Summary request failed; original path retained: {}",
+                                failure.error.message
+                            ))
+                            .details(json!({
+                                "provider_status": failure.error.status,
+                                "provider_code": failure.error.provider_code,
+                            })),
+                            cause,
+                        ));
                     }
-                    match trial.finish_request(snapshot,Err(&failure.error),&eligible) {
-                        Next::RetryPrefix(_)=>{retries=0;continue;}
-                        Next::Done|Next::Failed=>return Err(invalid("Summary context refusal at final eligible prefix; original path retained").details(json!({"single_summary_context_terminal":true}))),
+                    match trial.finish_request(snapshot, Err(&failure.error), &eligible) {
+                        Next::RetryPrefix(_) => {
+                            retries = 0;
+                            continue;
+                        }
+                        Next::Done | Next::Failed => {
+                            let groups = trial.selected.end - trial.selected.start;
+                            let nodes = snapshot.groups[trial.selected.clone()]
+                                .iter()
+                                .map(|g| g.sources.len() as u64)
+                                .sum();
+                            return Err(discard::attach(
+                                invalid(
+                                    "Summary context refusal at final eligible prefix; original path retained",
+                                ),
+                                discard::Outcome::Failed {
+                                    reason: discard::FailureReason::ContextLimitTerminal,
+                                    origin: discard::FailureOrigin::ProviderResponse,
+                                    http_status: failure
+                                        .facts
+                                        .status
+                                        .filter(|s| (100..=599).contains(s)),
+                                    final_group_count: Some(groups as u64).filter(|n| *n > 0),
+                                    final_source_nodes: Some(nodes).filter(|n| *n > 0),
+                                },
+                            ));
+                        }
                     }
                 }
             };
             if is_typed_refusal(&response.output) {
-                return Err(discard::rejected(
-                    discard::DiscardReason::SummaryRefused,
+                return Err(discard::failed(
+                    discard::FailureReason::Refused,
+                    discard::FailureOrigin::OutputValidation,
                     "Summary was refused; original path retained",
                 ));
             }
             if response.text.trim().is_empty() {
-                return Err(discard::rejected(
-                    discard::DiscardReason::SummaryEmpty,
+                return Err(discard::failed(
+                    discard::FailureReason::Empty,
+                    discard::FailureOrigin::OutputValidation,
                     "Summary was empty; original path retained",
                 ));
             }

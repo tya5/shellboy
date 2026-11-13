@@ -2735,7 +2735,12 @@ async fn automatic_nonshrinking_summary_enters_recovery_without_adoption_or_rese
             assert_eq!(db.query_row("SELECT count(*) FROM model_attempt",[],|r|r.get::<_,i64>(0))?,3);
             let raw:String=db.query_row("SELECT error_json FROM model_attempt WHERE state='incomplete'",[],|r|r.get(0))?;
             let value:Value=serde_json::from_str(&raw).unwrap();let facts=&value["automatic_trim_attempt"]["error"]["details"];
-            assert_eq!(facts["compaction_discard_reason"],"summary_not_shrinking","{value:#}");assert_eq!(facts["summary_usage"]["requests"],1,"{value:#}");Ok(())
+            // Overflow has no Automatic::observed stage/token. S1 must not
+            // synthesize a terminal stage fact for this unchanged recovery path.
+            assert!(value["automatic_trim_attempt"].get("compaction_outcome").is_none(),"{value:#}");
+            assert_eq!(value["automatic_trim_attempt"]["error"]["code"],"invalid_state","{value:#}");
+            assert_eq!(value["automatic_trim_attempt"]["error"]["message"],"Summary does not shrink its original source projection; original path retained","{value:#}");
+            assert_eq!(facts["summary_usage"]["requests"],1,"{value:#}");Ok(())
         }).await.unwrap();
         assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(),1);
         assert!(receive.try_recv().is_err(),"no resend and no second summary request");
@@ -3608,8 +3613,8 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             assert_eq!(record["trigger"]["a_input_tokens"], first_known_a);
             assert_eq!(record["trigger"]["target_tokens"], 40);
             assert!(record["error"]["message"].as_str().unwrap().to_lowercase().contains("cancel"), "{record:#?}");
-            assert_eq!(record["discard"]["phase"], summary_stage, "{record:#?}");
-            assert_eq!(record["discard"]["reason"], "cancelled", "{record:#?}");
+            assert_eq!(record["compaction_outcome"]["phase"], summary_stage, "{record:#?}");
+            assert_eq!(record["compaction_outcome"]["outcome"]["reason"], "cancelled", "{record:#?}");
             assert_eq!(record["committed_stages"][stage]["spilled_groups"], adopted_ids.len(), "{record:#?}");
             assert!(record["committed_stages"][summary_stage].is_null(), "{record:#?}");
             assert_eq!(record["committed_stages"].as_object().unwrap().len(), 1, "{record:#?}");

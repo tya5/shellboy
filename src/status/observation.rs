@@ -533,7 +533,7 @@ fn canonical_item(
         attempt_connection: get(12),
         attempt_model: get(13),
         reason: get(8),
-        compaction_discard: get(23)
+        compaction_outcome: get(23)
             .as_deref()
             .and_then(crate::compaction::discard::decode),
         revisit: get(18)
@@ -787,12 +787,11 @@ mod tests {
             limit: 200,
             ..Default::default()
         };
-        let fact =
-            serde_json::json!({"reason":"run_started","phase":"closed_summary","elapsed_ms":45});
+        let fact = serde_json::json!({"outcome":{"kind":"rejected","reason":"run_started"},"phase":"closed_summary","elapsed_ms":45});
         for extra in [false, true] {
-            let mut body = serde_json::json!({"kind":"original_failure","private":"PRIVATE_SENTINEL","automatic_trim_attempt":{"discard":fact}});
+            let mut body = serde_json::json!({"kind":"original_failure","private":"PRIVATE_SENTINEL","automatic_trim_attempt":{"compaction_outcome":fact}});
             if extra {
-                body["automatic_trim_attempt"]["discard"]["secret"] =
+                body["automatic_trim_attempt"]["compaction_outcome"]["secret"] =
                     serde_json::json!("PRIVATE_SENTINEL");
             }
             db.execute(
@@ -802,7 +801,7 @@ mod tests {
             .unwrap();
             let page = super::super::snapshot(&db, &args, "fixture").unwrap();
             let expected = page.items.into_iter().find(|v| v.id == "a").unwrap();
-            assert_eq!(expected.compaction_discard.is_some(), !extra);
+            assert_eq!(expected.compaction_outcome.is_some(), !extra);
             let prepared = prepare(
                 read_status_tx(
                     &db,
@@ -828,7 +827,7 @@ mod tests {
             serde_json::Value::Null,
             serde_json::json!({"reason":"future","phase":"closed_summary","elapsed_ms":1}),
         ] {
-            let body = serde_json::json!({"automatic_trim_attempt":{"discard":value}});
+            let body = serde_json::json!({"automatic_trim_attempt":{"compaction_outcome":value}});
             db.execute(
                 "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
                 [body.to_string()],
@@ -840,7 +839,7 @@ mod tests {
                     .iter()
                     .find(|v| v.id == "a")
                     .unwrap()
-                    .compaction_discard
+                    .compaction_outcome
                     .is_none()
             );
             let point = prepare(
@@ -857,7 +856,7 @@ mod tests {
             assert_eq!(point["items"].as_array().unwrap().len(), 1);
             assert!(
                 point["items"][0]["current"]
-                    .get("compaction_discard")
+                    .get("compaction_outcome")
                     .is_none()
             );
         }

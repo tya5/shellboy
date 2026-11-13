@@ -1,3 +1,10 @@
+> Historical #301A proposal and implementation provenance. The current S1
+> recording contract is [Terminal Compaction Recording](issue-301-s1-recording-contract.md).
+> Its single `compaction_outcome` union replaces the old current discard DTO,
+> event and string classifier below; historical records are not reinterpreted.
+> Guard authority and safety constraints remain unchanged. Sections below are
+> retained historical design, not a second current wire/runtime contract.
+
 # Issue 301: Discard Observability And Separate Adoption Design
 
 Status: PROPOSED, source-first review. No runtime guard relaxation authorized.

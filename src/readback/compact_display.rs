@@ -155,3 +155,82 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod outcome_tests {
+    use super::*;
+    use crate::protocol::CompactListArgs;
+
+    #[test]
+    fn terminal_outcome_is_identical_in_canonical_and_display_and_quarantines_only_bad_fact() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
+        db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','','p','m','now');
+            INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','2026-11-01T00:00:00Z');
+            INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','2026-11-01T00:00:00Z');
+            INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,error_json,started_at)VALUES('a','u',0,0,'p','m',0,'completed','{}','{}','2026-11-01T00:00:00Z');").unwrap();
+        let fact = json!({"phase":"closed_summary","elapsed_ms":17,"outcome":{"kind":"failed","reason":"provider_error","origin":"provider_response","http_status":401}});
+        let mut usage = crate::compaction::SummaryUsage {
+            requests: 1,
+            ..Default::default()
+        };
+        usage.input_tokens.unknown_count = 1;
+        usage.cached_tokens.unknown_count = 1;
+        usage.cache_creation_tokens.unknown_count = 1;
+        usage.output_tokens.unknown_count = 1;
+        let usage = serde_json::to_value(usage).unwrap();
+        let args = CompactListArgs {
+            thread_id: Some("t".into()),
+            since: None,
+            until: None,
+            limit: 1,
+        };
+        for malformed in [false, true] {
+            let mut saved = fact.clone();
+            if malformed {
+                saved["outcome"]["provider_code"] = json!("SECRET");
+            }
+            let body=json!({"independent":"SECRET","automatic_trim_attempt":{"outcome":"failed","reason":"proactive_threshold","compaction_outcome":saved,"discard":{"reason":"other","phase":"closed_summary","elapsed_ms":1},"error":{"details":{"summary_usage":usage,"provider_code":"SECRET"}}}}).to_string();
+            db.execute(
+                "UPDATE model_attempt SET error_json=?1 WHERE id='a'",
+                [&body],
+            )
+            .unwrap();
+            let canonical = compact::list(&db, "t", &args).unwrap();
+            let display = compact::prepare(read(&db, "t").unwrap().unwrap()).unwrap();
+            assert_eq!(display["items"], canonical["items"]);
+            let item = &canonical["items"][0];
+            assert_eq!(item["attempt_id"], "a");
+            assert_eq!(item["reason"], "proactive_threshold");
+            assert_eq!(item["state"], "failed");
+            assert_eq!(item["metrics"]["summary_usage"], usage);
+            if malformed {
+                assert!(item.get("compaction_outcome").is_none());
+            } else {
+                assert_eq!(item["compaction_outcome"], fact);
+            }
+            assert!(!canonical.to_string().contains("SECRET"));
+            assert!(!display.to_string().contains("SECRET"));
+            assert_eq!(
+                db.query_row(
+                    "SELECT error_json FROM model_attempt WHERE id='a'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )
+                .unwrap(),
+                body
+            );
+        }
+        let historical=json!({"automatic_trim_attempt":{"outcome":"failed","discard":{"reason":"other","phase":"closed_summary","elapsed_ms":3}}}).to_string();
+        db.execute("UPDATE model_attempt SET error_json=?1", [&historical])
+            .unwrap();
+        let item = compact::list(&db, "t", &args).unwrap();
+        assert!(item["items"][0].get("compaction_outcome").is_none());
+        assert_eq!(
+            db.query_row("SELECT error_json FROM model_attempt", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            historical
+        );
+    }
+}

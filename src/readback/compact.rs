@@ -95,8 +95,9 @@ fn automatic_source_query(w: &Window, display: bool) -> String {
     let node = output_node(root);
     let at = "COALESCE(n.created_at,a.ended_at,a.started_at)";
     format!(
-        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),{failures},CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END FROM {source} ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
+        "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),{failures},CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END,{} FROM {source} ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
         enriched(root),
+        crate::compaction::discard::status_sql("a"),
         w.sql(at)
     )
 }
@@ -206,6 +207,7 @@ struct ReceiptRow {
     in_window: bool,
 }
 struct AutomaticRow {
+    fact: Option<String>,
     id: String,
     at: Option<String>,
     raw: String,
@@ -426,6 +428,7 @@ pub(super) fn collect_tx(
             failures: row.get(7)?,
             reason: budget.optional(row, 8)?,
             trigger: budget.optional(row, 9)?,
+            fact: budget.optional(row, 10)?,
         });
     }
     drop(rows);
@@ -515,11 +518,15 @@ pub(crate) fn prepare(raw: RawCompactions) -> Result<Value, ApiError> {
             .filter(|reason| reason.len() <= 64)
             .unwrap_or_else(|| "failure".into());
         stats["reason"] = json!(reason);
-        insert(
-            &mut events,
-            key.clone(),
-            json!({"event_id":key,"thread_id":thread,"kind":"automatic_reduction","reason":reason,"at":row.at,"timestamp_basis":"replacement_created_at_or_attempt_ended_or_started_at","attempt_id":row.id,"turn_id":row.turn,"trigger":trigger,"state":row.outcome,"metrics":stats}),
-        );
+        let mut item = json!({"event_id":key,"thread_id":thread,"kind":"automatic_reduction","reason":reason,"at":row.at,"timestamp_basis":"replacement_created_at_or_attempt_ended_or_started_at","attempt_id":row.id,"turn_id":row.turn,"trigger":trigger,"state":row.outcome,"metrics":stats});
+        if let Some(fact) = row
+            .fact
+            .as_deref()
+            .and_then(crate::compaction::discard::decode)
+        {
+            item["compaction_outcome"] = json!(fact);
+        }
+        insert(&mut events, key, item);
     }
     for row in replacements {
         if covered_spills.contains(&row.id) {

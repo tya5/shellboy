@@ -119,6 +119,7 @@ pub(in crate::readback) fn read_display(
             failures: row.get(7)?,
             reason: budget.optional(row, 8)?,
             trigger: budget.optional(row, 9)?,
+            fact: budget.optional(row, 10)?,
         });
     }
     let mut replacements = Vec::new();

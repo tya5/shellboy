@@ -397,6 +397,10 @@ pub struct ApiError {
     pub hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub details: Option<Value>,
+    // In-memory capability only: provider JSON and persisted errors cannot mint it.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) compaction_cause: Option<Box<crate::compaction::discard::Outcome>>,
 }
 impl ApiError {
     /// Only source-store failure closes admission and stops owned resources.
@@ -410,6 +414,7 @@ impl ApiError {
             message: message.into(),
             hint: None,
             details: None,
+            compaction_cause: None,
         }
     }
     /// Conservative recovery guidance. Specific, state-aware hints take precedence.

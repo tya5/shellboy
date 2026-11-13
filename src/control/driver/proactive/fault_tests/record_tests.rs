@@ -214,8 +214,14 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         // The cancelled boundary is observed by the real next stage: the active
         // summary is entered and discarded as cancelled, with no provider POST.
         let record = &terminal.record;
-        assert_eq!(record["discard"]["phase"], "active_summary", "{record}");
-        assert_eq!(record["discard"]["reason"], "cancelled", "{record}");
+        assert_eq!(
+            record["compaction_outcome"]["phase"], "active_summary",
+            "{record}"
+        );
+        assert_eq!(
+            record["compaction_outcome"]["outcome"]["reason"], "cancelled",
+            "{record}"
+        );
         assert!(
             record["error"].is_object(),
             "typed cancellation error: {record}"

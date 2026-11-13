@@ -1379,7 +1379,7 @@ summary size policy remain separate concerns.
 ### 4.3 出力の上限【利用者決定】
 
 - 1 回の要約要求の出力の最大文字数を、Thread ごとに設定できるようにする。既定は 20,000。扱いは `auto_compact_at` と同じ（Thread → 接続 → 既定。`thread set` で設定、空文字で既定に戻す、`thread get` に有効値）。
-- 採用の条件は「要約の射影文字数が、元の射影文字数より小さい」（既存の `summary_not_shrinking`）。
+- 採用の条件は「要約の射影文字数が、元の射影文字数より小さい」（既存の `not_shrinking`）。
 - **上限を超えた出力の扱い：元より小さければ採用し、超過したことを記録に残す。再試行しない。**【Claude 推奨】再試行は範囲全体の再送になり、高くつくため。
 - 「元の 5%」と「下限 2,000」の規則は廃止する。
 - Current #303 configuration clarification: the supported owner-level
@@ -1511,3 +1511,15 @@ scrubs content, tool argument/result strings, or provider-opaque blocks. Existin
 provider-local ID normalization and signed/opaque reasoning eligibility remain
 unchanged. The Responses adapter receives canonical provider items, not internal
 replay bookkeeping; no provider-tolerance fallback or database migration applies.
+
+
+## Terminal Outcome Recording (#301 S1)
+
+Automatic terminal failures/rejections publish one bounded `compaction_outcome`
+under their original attempt identity in status (list and point), compact.list,
+and the existing thread.get last_compaction projection. The diagnostics event
+has the same name and fact. The [S1 recording contract](../development/issue-301-s1-recording-contract.md)
+defines its closed rejection/failure union, bounds, privacy and paired controls.
+Existing item reason/state and separately sanitized usage retain their meanings.
+No public provider code/message, old-name alias, historical fact reconstruction,
+progress heartbeat or adoption/retry/suppression change is introduced.

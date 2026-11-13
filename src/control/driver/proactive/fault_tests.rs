@@ -1296,7 +1296,7 @@ async fn completed_trigger_rejection(reason: &'static str) {
         crate::test_watchdog::watchdog("discard durable publication",async {
             loop {
                 let id=expected.clone();
-                let saved=control.store.database.call(move |db|Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.discard.reason') FROM model_attempt WHERE id=?1",[id],|r|r.get::<_,Option<String>>(0))?)).await.unwrap();
+                let saved=control.store.database.call(move |db|Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.compaction_outcome.outcome.reason') FROM model_attempt WHERE id=?1",[id],|r|r.get::<_,Option<String>>(0))?)).await.unwrap();
                 if saved.as_deref()==Some(reason) {break;}
                 tokio::task::yield_now().await;
             }
@@ -1305,11 +1305,11 @@ async fn completed_trigger_rejection(reason: &'static str) {
         let status_fact=control.store.database.call(move |db| {
             let page=crate::status::snapshot(db,&StatusArgs{thread_id:Some(scope),all:true,limit:200,..Default::default()},"fixture").unwrap();
             let current=page.items.iter().find(|row|row.id==id).unwrap();
-            let fact=current.compaction_discard.unwrap();
-            assert_eq!(serde_json::to_value(fact.reason).unwrap(),reason);
-            assert_eq!(fact.phase,crate::compaction::discard::DiscardPhase::ClosedSummary);
+            let fact=current.compaction_outcome.unwrap();
+            assert_eq!(serde_json::to_value(fact.outcome).unwrap()["reason"],reason);
+            assert_eq!(fact.phase,crate::compaction::discard::CompactionPhase::ClosedSummary);
             let point=crate::status::observation::prepare(crate::status::observation::read_status_tx(db,&[crate::status::observation::Key{kind:crate::status::observation::Kind::Attempt,id:id.clone()}],&mut Default::default()).unwrap());
-            assert_eq!(point["items"][0]["current"]["compaction_discard"],serde_json::to_value(fact).unwrap());
+            assert_eq!(point["items"][0]["current"]["compaction_outcome"],serde_json::to_value(fact).unwrap());
             assert!(!point.to_string().contains("PRIVATE_SENTINEL"));
             let saved=db.query_row("SELECT state,usage_json,response_id FROM model_attempt WHERE id=?1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
             assert_eq!(saved,("completed".into(),usage,response));
@@ -1319,11 +1319,11 @@ async fn completed_trigger_rejection(reason: &'static str) {
         control.shutdown().await.unwrap();
         drop(control);owner.shutdown().await.unwrap();server.abort();
         let text=std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
-        let facts=text.lines().map(|line|serde_json::from_str::<Value>(line).unwrap()).filter(|row|row["event"]=="compaction_discard").collect::<Vec<_>>();
+        let facts=text.lines().map(|line|serde_json::from_str::<Value>(line).unwrap()).filter(|row|row["event"]=="compaction_outcome").collect::<Vec<_>>();
         assert_eq!(facts.len(),1);
-        assert_eq!(facts[0]["compaction_discard"]["reason"],reason);
+        assert_eq!(facts[0]["compaction_outcome"]["outcome"]["reason"],reason);
         assert_eq!(facts[0]["ids"]["attempt_id"],attempt);
-        assert_eq!(facts[0]["compaction_discard"],serde_json::to_value(status_fact).unwrap());
+        assert_eq!(facts[0]["compaction_outcome"],serde_json::to_value(status_fact).unwrap());
         assert!(!facts[0].to_string().contains("PRIVATE_SENTINEL"));
     }).await.unwrap();
 }

@@ -1,5 +1,5 @@
 //! Fixed successful-summary adoption, retaining the caller's one transaction.
-use super::discard::{DiscardReason, rejected};
+use super::discard::{RejectionReason, rejected};
 use super::*;
 pub(super) struct SummaryAdoption {
     pub(super) automatic: Option<AutomaticStage>,
@@ -21,13 +21,13 @@ impl SummaryAdoption {
     ) -> Result<CompactResult, StorageError> {
         if cancel.is_cancelled() {
             return Err(StorageError::from(rejected(
-                DiscardReason::Cancelled,
+                RejectionReason::Cancelled,
                 "Compaction cancelled before adoption",
             )));
         }
         if cancel.is_cancelled() {
             return Err(StorageError::from(rejected(
-                DiscardReason::Cancelled,
+                RejectionReason::Cancelled,
                 "Compaction cancelled",
             )));
         }
@@ -43,11 +43,11 @@ impl SummaryAdoption {
                 .query_map([&self.snapshot.thread], |r| r.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             let reason = if current_generation != *generation {
-                Some(DiscardReason::NonappendGenerationChanged)
+                Some(RejectionReason::NonappendGenerationChanged)
             } else if !current.starts_with(selected) {
-                Some(DiscardReason::SelectedPrefixChanged)
+                Some(RejectionReason::SelectedPrefixChanged)
             } else if current.last() != cursor.as_ref() {
-                Some(DiscardReason::CurrentTailChanged)
+                Some(RejectionReason::CurrentTailChanged)
             } else {
                 None
             };
@@ -92,7 +92,7 @@ impl SummaryAdoption {
         path.extend(appended);
         if cancel.is_cancelled() {
             return Err(StorageError::from(rejected(
-                DiscardReason::Cancelled,
+                RejectionReason::Cancelled,
                 "Compaction cancelled",
             )));
         }
@@ -162,10 +162,20 @@ mod append_adoption_tests {
         })
         .await
         .unwrap();
-        let snapshot = Compactor::new(db.clone(), Arc::new(Config::default()))
+        let mut snapshot = Compactor::new(db.clone(), Arc::new(Config::default()))
             .snapshot("t", true)
             .await
             .unwrap();
+        if mode == "prefix" {
+            // Inject a mismatched captured prefix without bypassing monotonic
+            // generation triggers. Real path edits reject on generation first.
+            snapshot
+                .append_witness
+                .as_mut()
+                .unwrap()
+                .1
+                .push("missing".into());
+        }
         db.call(move |db| { let tx=db.transaction()?;
             match mode {
                 "batch" => {
@@ -175,6 +185,8 @@ mod append_adoption_tests {
                 "multi" => {
                     for id in ["tail-a","tail-b"] { history::append_node(&tx,"t",id,None,"user",&json!({"role":"user","content":id}),"now")?; }
                 }
+                "prefix" => {}
+                "cursor" => { tx.execute("UPDATE thread SET cursor_node_id=NULL WHERE id='t'",[])?; }
                 "hash" => { tx.execute("UPDATE node SET payload_revision=payload_revision+1 WHERE id='source'",[])?; }
                 "profile" => { tx.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id='t'",[])?; }
                 "epoch" => { tx.execute("UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id='t'",[])?; }
@@ -228,7 +240,23 @@ mod append_adoption_tests {
             matches!(mode, "append" | "batch" | "multi"),
             "{mode}: {accepted:?}"
         );
-        if accepted.is_err() {
+        if let Err(error) = accepted {
+            let reason = match mode {
+                "prefix" => RejectionReason::SelectedPrefixChanged,
+                "cursor" => RejectionReason::CurrentTailChanged,
+                "hash" => RejectionReason::SourceChanged,
+                "profile" => RejectionReason::ProfileChanged,
+                "epoch" => RejectionReason::EpochChanged,
+                "metadata" | "aba" | "range" => RejectionReason::NonappendGenerationChanged,
+                "cancel" => RejectionReason::Cancelled,
+                _ => panic!("unexpected rejection {mode}: {error:?}"),
+            };
+            let error = error.into_api_error();
+            assert_eq!(
+                discard::cause(&error),
+                discard::Outcome::Rejected { reason }
+            );
+            assert_eq!(error.code, ErrorCode::InvalidState);
             let replacements = db
                 .call(|db| {
                     Ok(db.query_row("SELECT count(*) FROM replacement", [], |r| {
@@ -247,6 +275,14 @@ mod append_adoption_tests {
             [],
             |r| r.get::<_, i64>(0),
         )? as u64)
+    }
+    #[tokio::test]
+    async fn prefix_change_has_exact_guard() {
+        adoption_case("prefix").await;
+    }
+    #[tokio::test]
+    async fn cursor_change_has_exact_guard() {
+        adoption_case("cursor").await;
     }
     #[tokio::test]
     async fn multiple_appends_preserve_tail() {

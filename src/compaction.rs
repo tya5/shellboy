@@ -29,6 +29,8 @@ mod keys;
 pub(crate) mod preview;
 pub use edit::ContextEditResult;
 pub(crate) mod a_state;
+#[cfg(test)]
+mod guard_tests;
 mod policy;
 mod range;
 mod single_request;
@@ -348,7 +350,7 @@ impl Compactor {
             let turn_fence=if let Some(turn)=&current_turn{Some((turn.clone(),db.query_row("SELECT generation FROM turn WHERE id=?1",[turn],|r|r.get::<_,i64>(0))?))}else{None};
             let run_fence=db.query_row("SELECT id FROM run WHERE thread_id=?1 AND state IN ('live','stopping') AND state='live'",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let stopping:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",[&thread],|r|r.get(0))?;
-            if stopping{return Err(StorageError::from(discard::rejected(discard::DiscardReason::RunStopped,"Compaction cancelled: Run is stopping")));}
+            if stopping{return Err(StorageError::from(discard::rejected(discard::RejectionReason::RunStopped,"Compaction cancelled: Run is stopping")));}
             let latest_complete_turn=db.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1",[&thread],|r|r.get::<_,String>(0)).optional()?;
             let protected=db.prepare("SELECT message_node_id FROM receipt WHERE target_thread_id=?1 AND state IN ('accepted','held')")?.query_map(params![thread],|r|r.get::<_,String>(0))?.collect::<Result<HashSet<_>,_>>()?;
             let rows=db.prepare("SELECT n.id,n.turn_id,n.payload_revision,n.payload_json,n.deleted_reason FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,i64>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?)))?.collect::<Result<Vec<_>,_>>()?;
@@ -493,7 +495,7 @@ impl Compactor {
                 let tx = db.transaction()?;
                 if cancel.is_cancelled() {
                     return Err(StorageError::from(discard::rejected(
-                        discard::DiscardReason::Cancelled,
+                        discard::RejectionReason::Cancelled,
                         "Compaction cancelled before adoption",
                     )));
                 }
@@ -695,7 +697,7 @@ impl Compactor {
                 let (result, elapsed) = if let Some(boundary) = boundary {
                     boundary.pause(cancel, wait).await.map_err(|_| {
                         discard::rejected(
-                            discard::DiscardReason::Cancelled,
+                            discard::RejectionReason::Cancelled,
                             "Summary cancelled; original path retained",
                         )
                     })?
@@ -705,7 +707,7 @@ impl Compactor {
                 let lease = client.admission_after_wait(result, None).map_err(|error| {
                     if error.kind == "cancelled" {
                         discard::rejected(
-                            discard::DiscardReason::Cancelled,
+                            discard::RejectionReason::Cancelled,
                             "Summary cancelled; original path retained",
                         )
                     } else {
@@ -889,7 +891,7 @@ struct SnapshotMatch {
     settings: Option<bool>,
 }
 fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageError> {
-    use discard::{DiscardReason as R, rejected};
+    use discard::{RejectionReason as R, rejected};
     let matches:Option<SnapshotMatch>=tx.query_row(
         "SELECT selection_revision=?2,profile_revision=?3,reasoning_epoch=?4,summary_max_chars IS ?5 FROM thread WHERE id=?1 AND deleted_at IS NULL",
         params![s.thread,s.revision as i64,s.profile_revision,s.epoch,s.summary_max_chars],
@@ -1738,7 +1740,7 @@ mod tests {
             .unwrap_err()
             .into_api_error();
         assert_eq!(
-            settings_rejected.details.unwrap()["compaction_discard_reason"],
+            serde_json::to_value(discard::cause(&settings_rejected)).unwrap()["reason"],
             "summary_settings_changed"
         );
         db.call(|db| {
@@ -1776,7 +1778,7 @@ mod tests {
         let rejected = rejected.unwrap_err().into_api_error();
         assert_eq!(rejected.code, ErrorCode::InvalidState);
         assert_eq!(
-            rejected.details.as_ref().unwrap()["compaction_discard_reason"],
+            serde_json::to_value(discard::cause(&rejected)).unwrap()["reason"],
             "selection_changed"
         );
         let count = db

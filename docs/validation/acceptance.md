@@ -11540,3 +11540,58 @@ Two initial expanded-test setup errors used an empty default API root; only thos
 synthetic pure-wire fixtures were corrected to explicit localhost roots, without
 changing production behavior or weakening preservation assertions.
 Final `cargo check --tests` and `cargo fmt --check` also exited 0 on this source.
+
+## #301 S1 Terminal Outcome Contract
+
+- RED-first public localhost provider/context/protocol fixtures exercise real
+  automatic reduction and require the same terminal fact in status, compact.list,
+  existing thread.get last_compaction and one diagnostics event. Original
+  production reports no new fact; test-only commits preserve that baseline.
+- Preservation vectors include unchanged POST admissions, deterministic two-slot
+  truth set, original return/path/epoch/committed facts and known/unknown usage.
+  Fixed large synthetic sources avoid housekeeping dominating summary weights;
+  any changed count must be compared to the original source, not retuned to pass.
+- Strict decoder/schema negatives cover extra/private fields, provider codes,
+  messages, future enums, unsafe/negative counts, invalid statuses, cross-field
+  combinations, oversized/deep JSON and forged serialized capabilities.
+- Same-token finalization preserves terminal facts and earlier committed stages;
+  stale/missing tokens cannot recreate observations. Canonical/bounded display
+  agrees, quarantines only malformed optional facts and leaves historical bytes.
+- Existing cancellation, append/nonappend/ABA, attachment/prune/provenance,
+  active-input, epoch, retry/halving and failure-slot controls remain required.
+  Authored tests alone do not establish all fifteen real guard injection cases.
+- Exact commands/exits, observed coverage gaps and source SHA are recorded in
+  the task handoff; independent code review and same-SHA normal/three-OS CI
+  remain landing gates. No parent metadata CI or source review transfers green.
+
+### S1a Recovery Source Checks (2026-11-13)
+
+Local macOS synthetic validation of the recording-only source passed:
+`cargo check --tests`, `cargo test --locked --lib compaction:: -- --nocapture`
+(171 passed), `cargo test --locked --lib s1_tests -- --nocapture` (6 passed),
+and the exact integration test
+`automatic_nonshrinking_summary_enters_recovery_without_adoption_or_resend`
+(1 passed). Formatting ran before these checks. Commands used the shared serial
+heavy/Rust slot with one build job/test thread and an 8192 MiB swap abort guard.
+
+The six public tests cover provider 401/429/500 with zero configured retries,
+protocol failure, final context refusal, and explicit owned-cause injection of
+all fifteen canonical rejection reasons through the common observation boundary.
+The latter checks identical status list/point, compact.list, thread.get and one
+log per cause, no HTTP request, and unchanged path/epoch/deterministic slots;
+it is not fifteen separate end-to-end runtime race reproductions. Real validator
+and append/prune/cancel tests separately check guard branches and precedence.
+
+Recovery retained the original missing-public-fact REDs in the test-only parent.
+It also reproduced the unfinished overflow test's incorrect synthetic-stage-fact
+expectation. Overflow has no Automatic stage token: its regression now requires
+no synthetic outcome while checking the exact original error, one summary request,
+usage, no adoption and recovery. Initial new prefix/metadata guard assertions
+failed because the real nonappend-generation trigger rejects first. Production
+ordering stayed unchanged; the metadata assertion now checks that actual first
+guard, and the prefix-only negative explicitly injects a mismatched captured
+witness without weakening or resetting generation triggers.
+
+These focused results do not establish full-suite/clippy success, independent
+source approval, exact-SHA normal/three-OS CI, deployment or live-provider recovery.
+Those remain separate qualification gates reported with the final source SHA.

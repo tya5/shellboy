@@ -510,7 +510,7 @@ pub(super) fn ensure_not_pruned(
     )?;
     if pruned {
         return Err(StorageError::from(discard::rejected(
-            discard::DiscardReason::SourcePruned,
+            discard::RejectionReason::SourcePruned,
             "This summary's originals were pruned (thread prune) and are not retained; it cannot be restored or re-summarized",
         )));
     }
@@ -533,7 +533,7 @@ mod prune_guard_tests {
         let error = ensure_not_pruned(&db, "gone").unwrap_err().into_api_error();
         assert_eq!(error.code, crate::protocol::ErrorCode::InvalidState);
         assert_eq!(
-            error.details.as_ref().unwrap()["compaction_discard_reason"],
+            serde_json::to_value(super::discard::cause(&error)).unwrap()["reason"],
             "source_pruned"
         );
         let message = format!("{error:?}");
