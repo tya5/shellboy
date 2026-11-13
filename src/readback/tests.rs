@@ -724,3 +724,72 @@ fn forked_thread_does_not_attribute_its_first_request_to_inherited_summaries() {
         );
     });
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_shell_public_pages_ignore_newer_terminal_history() {
+    use crate::{config::Config, control::db::Store, protocol::*, storage::DbWorker};
+    use std::sync::Arc;
+    crate::test_watchdog::watchdog("active shell public pages beyond history window", async {
+        let root = tempfile::tempdir().unwrap();
+        let database = DbWorker::open(root.path().join("db")).await.unwrap();
+        let store = Store::new(
+            database.clone(), Arc::new(Config::parse("").unwrap()),
+            root.path().into(), "test".into(),
+        );
+        database.call(|c| {
+            for t in ["t", "other"] {
+                c.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES(?1,'/','','p','m','2026-10-31T00:00:00Z')", [t])?;
+                c.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?1,'completed','2026-10-31T00:00:00Z')", [t])?;
+                c.execute("INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES(?1,?1,?1,'completed','2026-10-31T00:00:00Z')", [t])?;
+            }
+            let tx = c.transaction()?;
+            for state in ["starting", "running", "stopping"] {
+                for (id, owner) in [("a", "t"), ("b", "t"), ("foreign", "other")] {
+                    let id = format!("{state}-{id}");
+                    shell_row(&tx, &id, owner, "2026-10-30T00:00:00Z", "echo --token PRIVATE-SENTINEL", 0);
+                    tx.execute("UPDATE shell_execution SET state=?2,ended_at=NULL,exit_code=NULL WHERE id=?1", params![id,state])?;
+                }
+            }
+            for i in 0..2205 {
+                shell_row(&tx, &format!("terminal-{i:05}"), "t", "2026-10-31T00:00:00Z", "history", 0);
+            }
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        for thread in [None, Some("t"), Some("other")] {
+            for state in ["starting", "running", "stopping"] {
+                let mut a = args();
+                a.thread_id = thread.map(str::to_owned);
+                a.state = Some(state.into());
+                a.limit = 1;
+                let expected = if thread == Some("other") { 1 } else if thread.is_some() { 2 } else { 3 };
+                let mut ids = Vec::new();
+                loop {
+                    let page = store.execute(Request::new(uuid::Uuid::new_v4().to_string(), Command::ShellList(a.clone())), None).await.unwrap().result;
+                    assert_eq!(page["items"].as_array().unwrap().len(), 1, "old active row must be in first page: {page}");
+                    assert!(page["scanned"].as_u64().unwrap() <= 3);
+                    assert_eq!(page["scan_budget_reached"], false);
+                    assert!(!page.to_string().contains("PRIVATE-SENTINEL"));
+                    assert!(!page.to_string().contains("raw_command"));
+                    let item = &page["items"][0];
+                    assert_eq!(item["state"], state);
+                    assert_eq!(item["command_excerpt_redacted"], true);
+                    if let Some(thread) = thread { assert_eq!(item["thread_id"], thread); }
+                    ids.push(item["execution_id"].as_str().unwrap().to_owned());
+                    a.cursor = page["next_cursor"].as_str().map(str::to_owned);
+                    if a.cursor.is_none() { break; }
+                    assert!(ids.len() < expected, "cursor must make progress");
+                }
+                assert_eq!(ids.len(), expected);
+                let unique: std::collections::HashSet<_> = ids.iter().collect();
+                assert_eq!(unique.len(), expected);
+            }
+        }
+        database.call(|c| {
+            assert_eq!(c.query_row("SELECT count(*) FROM operation_receipt", [], |r| r.get::<_,i64>(0))?, 0);
+            assert_eq!(c.query_row("SELECT count(*) FROM shell_execution", [], |r| r.get::<_,i64>(0))?, 2214);
+            Ok(())
+        }).await.unwrap();
+        database.shutdown().await.unwrap();
+    }).await.unwrap();
+}
