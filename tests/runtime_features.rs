@@ -3886,34 +3886,54 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
     );
 }
 
-/// #303 §6.4 / R12: a provider 400 that is neither a refusal nor a context
-/// rejection is transient, so it is retried on the next eligible report, but
-/// never more than once per reported value (§2.3): one summary request per
-/// fresh report at or above the threshold, never a hidden same-report repeat.
+/// S2: an actual HTTP401 vetoes halving and deterministic recording, so each
+/// later eligible report gets its own single provider attempt. HTTP400 trials
+/// and minimum-outcome memory are covered by the dedicated S2a matrix.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
     let (summaries, records) = ax_growing_turn_summary_requests(|| {
         (
-            400,
+            401,
             json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
         )
     })
     .await;
-    // Tool reports 2..=18 are at or above the threshold (200 + index).
+    // Tool reports 2..=18 are at or above the threshold (200 + index). An
+    // actual 401 vetoes all halving/memory; each report still has one attempt.
     let eligible_reports = (0..19).filter(|index| *index >= 2).count();
-    assert_eq!(summaries, eligible_reports, "{records:#?}");
     assert_eq!(
-        records.len(),
-        eligible_reports,
-        "one attempt per report: {records:#?}"
+        summaries, eligible_reports,
+        "one request per report: {records:#?}"
     );
+    assert_eq!(records.len(), eligible_reports, "{records:#?}");
     for record in &records {
-        let usage = if record["summary"].is_object() {
-            &record["summary"]["summary_usage"]
-        } else {
-            &record["error"]["details"]["summary_usage"]
-        };
-        assert_eq!(usage["requests"], 1, "{record:#?}");
+        assert_eq!(
+            record["compaction_outcome"]["outcome"]["reason"],
+            "provider_error"
+        );
+        assert_eq!(
+            record["compaction_outcome"]["outcome"]["origin"],
+            "provider_response"
+        );
+        assert_eq!(record["compaction_outcome"]["outcome"]["http_status"], 401);
+        assert!(
+            record["compaction_outcome"]["outcome"]
+                .get("final_group_count")
+                .is_none()
+        );
+        assert!(
+            record["compaction_outcome"]["outcome"]
+                .get("provider_status")
+                .is_none()
+        );
+        assert_eq!(
+            record["error"]["details"]["model_requests"], 1,
+            "{record:#?}"
+        );
+        assert_eq!(
+            record["error"]["details"]["summary_usage"]["requests"], 1,
+            "{record:#?}"
+        );
     }
 }
 
@@ -4302,13 +4322,14 @@ async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
     assert!(slots.1.is_none(), "no active summary was attempted");
 }
 
-/// #303 §6.4: an `invalid_request_error` without refusal or context-limit
-/// classification is transient. It records no failed range, so the one new
-/// eligible report retries once (§2.3: one attempt per reported value).
+/// #303 §6.4: an `invalid_request_error` on a 500 response is transient. It
+/// records no failed range, so the one new eligible report retries once
+/// (§2.3: one attempt per reported value). Numeric 400 refusals are covered
+/// separately by the S2 halving/minimum-outcome tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_transient_summary_failure_retries_once_per_new_report() {
     let (summaries, _, slots) = bx_token_growth((
-        400,
+        500,
         json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}}),
     ))
     .await;

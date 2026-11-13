@@ -201,3 +201,8 @@ scope and privacy projection remain unchanged. Scoped/global active query-plan,
 terminal-growth and current-state pagination controls accompany the fix.
 This is a source candidate, not independently reviewed/CI-qualified main or an
 installed owner update. Exact execution evidence is reported separately.
+
+
+### S2a e527 Standard Failure Follow-Up
+
+The review-approved e527 correction passed the isolated indexed-cost test and its occurrence later passed in full standard. Full `scripts/check.sh` on exact e527 nevertheless exited101: 1394 passed, 2 failed, 19 ignored. Both failures were traced to HTTP400 fixtures that changed category under S2's numeric refusal rule: the per-report rejection test now uses an actual HTTP401 veto, and the transient retry test now uses HTTP500. The 400 deterministic trial control remains in the S2a matrix. Focused fully qualified tests have each passed one selected case. This is test-oracle/fixture correction only; no S2 production behavior changed. A new SHA, narrow delta rereview, full standard pass and then hosted CI remain required.
