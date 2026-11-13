@@ -5,7 +5,7 @@ use super::*;
 /// reuse one provider invocation, even when each request is a terminal veto.
 #[tokio::test]
 async fn provider_veto_is_one_invocation_per_real_scope() {
-    let result = ax_growing_turn_summary_requests(auth_veto_reply, 0).await;
+    let result = ax_growing_turn_summary_requests(auth_veto_reply, 0, None).await;
     assert_scope_trace(&result);
     assert_provider_scope_records(&result, 401, 1);
 }
@@ -122,7 +122,7 @@ async fn auth_not_found_and_rate_vetoes_share_provider_scope_without_halving() {
         (404, not_found_reply as fn() -> (u16, Value)),
         (429, rate_limit_reply as fn() -> (u16, Value)),
     ] {
-        let result = ax_growing_turn_summary_requests(reply, 0).await;
+        let result = ax_growing_turn_summary_requests(reply, 0, None).await;
         assert_eq!(
             result.summaries, 1,
             "HTTP {status}: one invocation in the real scope"
@@ -156,7 +156,7 @@ fn rate_limit_reply() -> (u16, Value) {
 /// the repeated same-scope report is suppressed without another invocation.
 #[tokio::test]
 async fn provider_scope_counts_invocation_not_transient_posts() {
-    let result = ax_growing_turn_summary_requests(retryable_server_error_reply, 2).await;
+    let result = ax_growing_turn_summary_requests(retryable_server_error_reply, 2, None).await;
     assert_eq!(
         result.summaries, 3,
         "one invocation has its configured retry vector: {:#?}",
@@ -171,4 +171,43 @@ fn retryable_server_error_reply() -> (u16, Value) {
         500,
         json!({"error":{"code":"server_error","message":"synthetic transient failure"}}),
     )
+}
+
+/// UnknownInvalid never suppresses, repairs, or overwrites the seeded slot.
+/// Values are synthetic; only storage type and bytes are checked in the fixture.
+#[tokio::test]
+async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
+    let cases = [
+        (FailureSlotSeed::Malformed64, "text", vec![b'g'; 64]),
+        (FailureSlotSeed::Uppercase64, "text", vec![b'A'; 64]),
+        (FailureSlotSeed::OversizeText, "text", vec![b'a'; 65_536]),
+        (FailureSlotSeed::Blob, "blob", vec![b'a'; 64]),
+    ];
+    for (seed, expected_type, expected_bytes) in cases {
+        let result = ax_growing_turn_summary_requests(auth_veto_reply, 0, Some(seed)).await;
+        assert_eq!(
+            result.summaries, 17,
+            "unknown slot permits every eligible provider call"
+        );
+        assert_eq!(result.records.len(), 17);
+        assert_eq!(
+            result.deterministic_failure_slots, 1,
+            "no second slot was created"
+        );
+        assert_eq!(
+            result.seeded_slot,
+            Some((expected_type.to_owned(), expected_bytes)),
+            "the original invalid slot must remain byte-for-byte and type-for-type unchanged"
+        );
+        assert!(
+            result.records.iter().all(|record| {
+                record["compaction_outcome"]["outcome"]["reason"] == "provider_error"
+                    && record["compaction_outcome"]["outcome"]["origin"] == "provider_response"
+                    && record["compaction_outcome"]["outcome"]["http_status"] == 401
+                    && record["error"]["details"]["model_requests"] == 1
+                    && record["error"]["details"]["summary_usage"]["requests"] == 1
+            }),
+            "unknown slot must not create suppressions or falsify request accounting"
+        );
+    }
 }
