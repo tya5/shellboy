@@ -163,6 +163,23 @@ pub enum ContextRole {
 pub const DEFAULT_SESSION_HEADER_NAMES: [&str; 2] =
     ["X-Shellboy-Session-Id", "x-litellm-session-id"];
 
+/// The raw inputs and resolved automatic-spill policy for one settings snapshot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SpillPolicy {
+    pub raw_thread: Option<bool>,
+    pub raw_connection: Option<bool>,
+    pub effective: bool,
+}
+impl SpillPolicy {
+    pub(crate) fn resolve(raw_thread: Option<bool>, raw_connection: Option<bool>) -> Self {
+        Self {
+            raw_thread,
+            raw_connection,
+            effective: raw_thread.or(raw_connection).unwrap_or(true),
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Connection {
@@ -203,6 +220,8 @@ pub struct Connection {
     pub auto_compact_target_percent: Option<u64>,
     #[serde(default, deserialize_with = "summary_chars_option")]
     pub summary_max_chars: Option<u64>,
+    /// Per-connection automatic spill override; absent inherits the built-in on default.
+    pub spill: Option<bool>,
     /// The `credentials.toml` beside the loaded configuration file (#269); never
     /// accepted from TOML. `None` when the connection did not come from a file.
     #[serde(skip)]
@@ -245,6 +264,7 @@ impl Default for Connection {
             auto_at_tokens: None,
             auto_compact_target_percent: None,
             summary_max_chars: None,
+            spill: None,
             credentials_file: None,
             stored_keys: StoredKeys::default(),
         }
@@ -260,6 +280,7 @@ impl fmt::Debug for Connection {
             .field("default_effort", &self.default_effort)
             .field("context_role", &self.context_role)
             .field("max_tokens", &self.max_tokens)
+            .field("spill", &self.spill)
             .field("headers", &"[redacted]")
             .field("extra_body", &"[redacted]")
             .field("extra_headers", &"[redacted]")
@@ -1161,5 +1182,28 @@ impl Compaction {
         thread
             .or_else(|| connection.and_then(|c| c.auto_at_tokens))
             .unwrap_or(self.auto_at_tokens)
+    }
+}
+
+#[cfg(test)]
+mod spill_policy_tests {
+    use super::SpillPolicy;
+
+    #[test]
+    fn thread_override_precedes_connection_then_builtin_on() {
+        for (thread, connection, expected) in [
+            (None, None, true),
+            (None, Some(true), true),
+            (None, Some(false), false),
+            (Some(true), Some(false), true),
+            (Some(false), Some(true), false),
+            (Some(true), None, true),
+            (Some(false), None, false),
+        ] {
+            let policy = SpillPolicy::resolve(thread, connection);
+            assert_eq!(policy.raw_thread, thread);
+            assert_eq!(policy.raw_connection, connection);
+            assert_eq!(policy.effective, expected);
+        }
     }
 }

@@ -92,10 +92,10 @@ impl History {
                     return Ok(Err(error));
                 }
                 let details = tx.query_row(
-                    "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path FROM thread WHERE id=?1",
+                    "SELECT cwd,profile_id,model_id,effort,parent_thread_id,agents_path,spill_override FROM thread WHERE id=?1",
                     [&id],
                     |row| {
-                        Ok(ThreadDetails { instruction_sources: None, archived_at: None, tags: Vec::new(), auto_compact_at: None, effective_auto_compact_at: None, auto_compact_target_percent:None,summary_max_chars:None,effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:None,effective_max_tokens:None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
+                        Ok(ThreadDetails { instruction_sources: None, archived_at: None, tags: Vec::new(), auto_compact_at: None, effective_auto_compact_at: None, auto_compact_target_percent:None,summary_max_chars:None,effective_auto_compact_target_percent:None,effective_summary_max_chars:None,max_tokens:None,spill:crate::storage::decode_spill_override(row.get_ref(6)?,6)?,effective_spill:true,effective_max_tokens:None, awaiting_replies: Vec::new(), last_end_message: None, last_input: None,  last_compaction:None, usage_totals:None, agents_path: row.get(5)?,
                             context_usage: None,
                             context: None,
                             thread_id: id.clone(),
@@ -450,9 +450,9 @@ pub fn fork_thread_kind(
         ));
     }
     let source = tx.query_row(
-        "SELECT cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,auto_compact_at,max_tokens FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        "SELECT cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,auto_compact_at,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",
         [&args.thread_id],
-        |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,i64>(5)?,row.get::<_,i64>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<i64>>(8)?)),
+        |row| Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,String>(2)?,row.get::<_,String>(3)?,row.get::<_,Option<String>>(4)?,row.get::<_,i64>(5)?,row.get::<_,i64>(6)?,row.get::<_,Option<i64>>(7)?,row.get::<_,Option<i64>>(8)?,crate::storage::decode_spill_override(row.get_ref(9)?,9)?)),
     ).optional().map_err(sql_error)?.ok_or_else(|| ApiError::new(ErrorCode::ThreadNotFound,"source Thread not found"))?;
     let ordinal: i64 = tx
         .query_row(
@@ -491,9 +491,10 @@ pub fn fork_thread_kind(
         (source.0, source.1)
     };
     let max_tokens = source.8;
+    let spill_override = source.9.map(i64::from);
     tx.execute(
-        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,auto_compact_at,max_tokens) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13,?14)",
-        params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now,source.7,max_tokens],
+        "INSERT INTO thread(id,parent_thread_id,branch_kind,cwd,agents_path,profile_id,model_id,effort,reasoning_epoch,profile_revision,cursor_node_id,selection_revision,updated_at,auto_compact_at,max_tokens,spill_override) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13,?14,?15)",
+        params![new_thread_id,args.thread_id,branch_kind,cwd,agents_path,source.2,source.3,source.4,source.5,source.6,args.node_id,now,source.7,max_tokens,spill_override],
     ).map_err(sql_error)?;
     tx.execute(
         "INSERT INTO thread_path(thread_id,ordinal,node_id) SELECT ?1,ordinal,node_id FROM thread_path WHERE thread_id=?2 AND ordinal<=?3 ORDER BY ordinal",

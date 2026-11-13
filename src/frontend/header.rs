@@ -157,6 +157,8 @@ pub(super) fn read_tx(db: &Connection, thread: &str) -> Result<RawHeader, Storag
         auto_compact_target_percent: None,
         summary_max_chars: None,
         max_tokens: None,
+        spill: None,
+        effective_spill: true,
         effective_auto_compact_target_percent: None,
         effective_summary_max_chars: None,
         effective_max_tokens: None,

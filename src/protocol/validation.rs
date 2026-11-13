@@ -394,6 +394,9 @@ impl ThreadSetArgs {
         if let Some(value) = &self.max_tokens {
             parse_max_tokens(value)?;
         }
+        if self.spill.as_deref().is_some_and(|value| !matches!(value, "on" | "off" | "")) {
+            return Err(invalid("spill must be on, off, or empty to inherit"));
+        }
         if self.connection.is_none()
             && self.cwd.is_none()
             && self.model.is_none()
@@ -404,6 +407,7 @@ impl ThreadSetArgs {
             && self.auto_compact_target_percent.is_none()
             && self.summary_max_chars.is_none()
             && self.max_tokens.is_none()
+            && self.spill.is_none()
             && self.parent_id.is_none()
         {
             Err(invalid("thread.set requires a change"))

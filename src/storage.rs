@@ -67,9 +67,50 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (42, "0042_notification_semantic_descriptor"),
     (43, "0043_thread_single_summary_settings"),
     (44, "0044_thread_max_tokens"),
+    (45, "0045_thread_spill_override"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
+
+pub(crate) fn decode_spill_override(
+    value: rusqlite::types::ValueRef<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<bool>> {
+    use rusqlite::types::{FromSqlError, Type, ValueRef};
+    match value {
+        ValueRef::Null => Ok(None),
+        ValueRef::Integer(0) => Ok(Some(false)),
+        ValueRef::Integer(1) => Ok(Some(true)),
+        other => Err(rusqlite::Error::FromSqlConversionFailure(
+            column,
+            Type::Integer,
+            Box::new(FromSqlError::InvalidType(other.data_type())),
+        )),
+    }
+}
+#[cfg(test)]
+mod spill_override_decode_tests {
+    use super::decode_spill_override;
+    use rusqlite::Connection;
+
+    #[test]
+    fn accepts_only_null_and_integer_zero_or_one() {
+        let db = Connection::open_in_memory().unwrap();
+        for (literal, expected) in [("NULL", None), ("0", Some(false)), ("1", Some(true))] {
+            let value = db.query_row(&format!("SELECT {literal}"), [], |row| {
+                decode_spill_override(row.get_ref(0)?, 0)
+            }).unwrap();
+            assert_eq!(value, expected, "{literal}");
+        }
+        for literal in ["2", "'bad'", "0.5"] {
+            let value = db.query_row(&format!("SELECT {literal}"), [], |row| {
+                decode_spill_override(row.get_ref(0)?, 0)
+            });
+            assert!(value.is_err(), "{literal}");
+        }
+    }
+}
+
 mod migrate;
 mod migration_integrity;
 mod vacuum;
@@ -1763,7 +1804,9 @@ mod schema_validation_tests {
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
         db.execute_batch(
-            "ALTER TABLE thread DROP COLUMN max_tokens;
+            "ALTER TABLE thread DROP COLUMN spill_override;
+             DELETE FROM schema_migration WHERE version=45;
+             ALTER TABLE thread DROP COLUMN max_tokens;
              DELETE FROM schema_migration WHERE version=44;
              ALTER TABLE thread DROP COLUMN summary_max_chars;
              ALTER TABLE thread DROP COLUMN auto_compact_target_percent;

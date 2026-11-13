@@ -1145,3 +1145,17 @@ fn disk_free_minimum_defaults_and_old_data_limits_still_load() {
     );
     assert!(Config::parse("[limits]\ndata_warning_bytes=100\ndata_max_bytes=100").is_err());
 }
+
+#[test]
+fn connection_spill_is_an_optional_native_boolean_without_a_global_key() {
+    let absent = Config::parse("[connections.proxy]\nbase_url='https://example.test/v1'\n").unwrap();
+    assert_eq!(absent.connections["proxy"].spill, None);
+    for value in [true, false] {
+        let config = Config::parse(&format!(
+            "[connections.proxy]\nbase_url='https://example.test/v1'\nspill={value}\n"
+        )).unwrap();
+        assert_eq!(config.connections["proxy"].spill, Some(value));
+    }
+    assert!(Config::parse("[connections.proxy]\nbase_url='https://example.test/v1'\nspill='off'\n").is_err());
+    assert!(Config::parse("[compaction]\nspill=false\n").is_err());
+}

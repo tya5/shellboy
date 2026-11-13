@@ -707,6 +707,29 @@ async fn thread_title_preserves_explicit_empty_reset() {
         Command::ThreadSet(a) if a.title.is_none()));
 }
 
+#[test]
+fn thread_spill_cli_accepts_real_argv_values() {
+    for value in ["on", "off", ""] {
+        let cli = Cli::try_parse_from([
+            "shellboy", "thread", "set", "--thread", "fixture", "--spill", value,
+        ])
+        .unwrap();
+        let command = cli
+            .into_command_with_stdin(cwd(), &mut &b""[..])
+            .await
+            .unwrap()
+            .unwrap();
+        let wire = serde_json::to_value(command).unwrap();
+        assert_eq!(wire["args"]["spill"], value);
+        assert_eq!(wire["args"]["thread_id"], "fixture");
+    }
+    let cli = Cli::try_parse_from([
+        "shellboy", "thread", "set", "--thread", "fixture", "--spill", "maybe",
+    ]).unwrap();
+    let error = cli.into_command_with_stdin(cwd(), &mut &b""[..]).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
+}
+
 #[tokio::test]
 async fn thread_set_max_tokens_passes_value_and_empty_restore() {
     assert!(

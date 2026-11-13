@@ -162,6 +162,7 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         auto_at_tokens,
         auto_compact_target_percent,
         summary_max_chars,
+        spill,
         credentials_file: _,
         stored_keys: _,
     } = connection;
@@ -204,6 +205,7 @@ fn connection_fields(out: &mut Fields, name: &str, connection: &Connection) {
         auto_compact_target_percent,
     );
     out.plain(&at("summary_max_chars"), summary_max_chars);
+    out.plain(&at("spill"), spill);
 }
 fn shell_fields(out: &mut Fields, shell: &Shell) {
     let Shell {

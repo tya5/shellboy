@@ -491,8 +491,16 @@ configured `auto_at_tokens` (default 200,000; `compact list` shows
 `reason: "proactive_threshold"`). You may change your own Thread's threshold with
 `shellboy thread set --auto-compact-at N` (`0` turns it off for this Thread, `''`
 returns to the configured value); `thread get` shows `auto_compact_at` and
-`effective_auto_compact_at`. It applies from the next request boundary. If an automatic
-summary fails deterministically (refused, empty, or not smaller than its source), the same
+`effective_auto_compact_at`. It applies from the next request boundary. The optional
+per-connection `spill` is a native TOML boolean; no global spill key exists. For an
+explicit Thread policy, use `shellboy thread set --spill on|off`, or `--spill ''` to
+inherit again. `thread get` shows nullable raw `spill` separately from boolean
+`effective_spill`; precedence is Thread, connection, built-in on. Null in a JSON
+`thread.set` is ordinary no-change, not clear. Child Threads, forks and rewinds copy
+the raw nullable override. Off means automatic spill bypass while automatic summary
+remains; it does not disable compaction. This runtime-off route is not accepted until
+the S2b integration gate is reviewed, so do not present persistence readback alone as
+proof that automatic-off routing is active. If an automatic summary fails deterministically (refused, empty, or not smaller than its source), the same
 range with the same settings is not tried again; transient failures (rate limits, server
 errors, cancellation) are retried at the next eligible report. An explicit
 `compact --summary --from NODE --to NODE` on a range that already failed this way is refused

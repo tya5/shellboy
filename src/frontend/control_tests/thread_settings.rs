@@ -31,6 +31,7 @@ async fn external_settings_notify_after_commit_and_refresh_metadata_without_resu
         auto_compact_target_percent: None,
         summary_max_chars: None,
         max_tokens: None,
+        spill: None,
         agents: None,
         thread_id: Some("thread".into()),
         title: title.map(str::to_owned),

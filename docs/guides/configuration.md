@@ -828,6 +828,7 @@ auto_at_tokens = 200000   # default; 0 disables
 
 [connections.proxy]
 auto_at_tokens = 120000   # optional per-connection override; 0 disables
+spill = false            # optional automatic-spill override; no [compaction].spill key
 ```
 
 Shellboy keeps conversations small during normal operation. It never blocks or
@@ -876,6 +877,29 @@ value wins over the configured ones, applies from the next request-boundary chec
 (never to a request already sent), stays when the Thread's connection changes and
 is inherited by child Threads; `thread get` shows it as `auto_compact_at` beside
 the value in use, `effective_auto_compact_at`.
+
+### Automatic spill preference (experimental)
+
+The optional connection setting `connections.<name>.spill` is a native TOML
+boolean. It defaults to unset; without a Thread or connection override, the
+built-in policy is on. There is deliberately no `[compaction].spill` global key.
+
+Set one Thread's override with `shellboy thread set --spill on` or
+`--spill off`. Use `--spill ''` to clear its override and inherit the selected
+connection/default; omitting `--spill` leaves the saved value unchanged. JSON
+null is ordinary Option omission, never a clear. `thread get` distinguishes
+raw `spill` (`null`, `true`, or `false`) from `effective_spill` (always boolean).
+Thread override wins over connection, which wins over the built-in on default.
+Child Threads, forks and rewind branches copy the parent's raw nullable value;
+later parent changes do not alter them. Changes apply at the next automatic
+invocation metadata sample and do not replace a provider client. Spill-only
+writes are not model/profile changes.
+
+Off is not a switch that disables all compaction: the intended automatic route
+keeps threshold admission and summaries while skipping automatic spill stages.
+That runtime behavior is gated on the separately reviewed S2b integration and
+is not established by the S6a persistence setting alone. Do not infer runtime
+acceptance from configuration readback.
 
 ### Retired summary controls
 

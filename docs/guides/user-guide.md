@@ -337,6 +337,29 @@ streaming stops are supported; Messages remains stream-only. Avoid setting the
 same native key in `extra_body` when `max_tokens` is configured: the duplicate
 is rejected, not silently overridden. See [configuration](configuration.md).
 
+### Automatic spill preference
+
+The connection may optionally set `spill = true` or `spill = false` under
+`[connections.<name>]`; there is no global `[compaction].spill` key. The built-in
+default is on. To override one conversation, use:
+
+```sh
+shellboy thread set --thread THREAD --spill off
+shellboy thread get --thread THREAD
+```
+
+Use `--spill on` to enable it explicitly, or `--spill ''` to clear the Thread
+override and inherit from its connection/default. Leaving the flag out preserves
+the current value. `thread get` shows raw `spill` (`null`, `true`, or `false`)
+and the always-resolved `effective_spill`. Thread settings override connection
+settings; children, forks and rewinds copy the raw setting at creation, so later
+changes to the parent do not change an existing child.
+
+Off is not a complete compaction disable: the intended policy keeps automatic
+summary work and skips automatic spill stages. Its runtime-off routing still
+requires the separately reviewed S2b integration; S6a persistence alone does not
+prove that automatic off is active.
+
 ## 5. Delegate to a child
 
 Simply saying "use subagents" does not guarantee that the model understands Shellboy's child-Thread operations. Guides are bundled with the executable; the model receives a short entry-point instruction and reads the guides itself when needed, not their full text in every prompt. No checkout or repository path is required. To explicitly request the procedures, name the guide IDs:

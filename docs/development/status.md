@@ -175,3 +175,17 @@ scope and privacy projection remain unchanged. Scoped/global active query-plan,
 terminal-growth and current-state pagination controls accompany the fix.
 This is a source candidate, not independently reviewed/CI-qualified main or an
 installed owner update. Exact execution evidence is reported separately.
+
+
+## S6a settings branch (in progress; not main state)
+
+`task/compaction-s6a-settings-6372` is based on `9baa554e2fc0f8a7dfdaf51e7de705835adce638`.
+The current branch adds settings/persistence for the S6a contract; it does not
+implement or qualify automatic runtime-off routing. That remains gated on S2b
+integration and separate review. Baseline public REDs were observed for real CLI
+parsing, `Request::from_value`, and synthetic-database `thread.get`; see the
+S6a entries in [acceptance](../validation/acceptance.md). Current guarded
+`cargo check --tests` did not run: the source-cargo helper selected
+`clean-package`, but `cargo clean` refused because shared `target-shared` lacks a
+valid `CACHEDIR.TAG`. No target metadata was repaired or bypassed; source build
+qualification is pending the approved cache-boundary correction.

@@ -178,6 +178,10 @@ words are the node kinds `history search --kind` already accepts, so a typical
 user has one vocabulary. `config check` and `index status` report it. See the
 index design for where it is applied.
 
+## Automatic spill override (S6a)
+
+`connections.<name>.spill` は省略可能なnative TOML boolean。global `[compaction].spill` は存在しない。未指定ならThread overrideを継承し、両方unsetなら組込みtrue。Threadとconnectionの実効値は `[compaction]` の既存limitsとは独立で、provider/model clientを差し替えない。`config.get` / `config.set` は既存のconnection leaf fieldとして表示・編集でき、connection設定変更は既存のcurrent Config snapshot境界に従う。
+
 ## Explicit summary limits (#73)
 
 The optional `[compaction]` section follows D-015 and the

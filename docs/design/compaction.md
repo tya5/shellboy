@@ -434,6 +434,24 @@ Children and forks copy it at creation; a connection change keeps it; `compact l
 (null if none) and `effective_auto_compact_at`; the TUI `/200K` shows the effective value.
 No restriction: the Thread's model may change its own value like other `thread set` fields.
 
+### Thread and connection automatic-spill preference (S6a)
+
+A nullable raw Thread override resolves before the selected connection's optional
+`spill` bool, then built-in `true`; there is no `[compaction].spill` key. CLI
+`thread set --spill on|off|''` sets/clears it; omission leaves it unchanged and
+JSON null follows ordinary Option no-change semantics. Create, child, fork and
+rewind copy raw nullable state, not the parent's effective bool. `thread get`
+exposes raw `spill` separately from always-present `effective_spill`.
+
+Spill off is not "disable compaction": automatic threshold admission and the
+existing summary stage remain; only automatic spill routing is skipped. An
+admitted invocation pins its sampled spill policy; subsequent settings affect the
+next invocation and never replace its provider client/model. Spill-only writes
+increment ordinary Thread revision but not profile_revision, reasoning_epoch or
+selection_revision. Native summary/adoption/owner guards remain authoritative.
+The runtime-off branch is not qualified until the separately reviewed S2b
+integration; metadata persistence alone does not complete or land the feature.
+
 Trigger: only the provider-reported `input_tokens` of the Thread's latest
 completed attempt for its current connection/model, read with the same query as
 `context_usage.last_successful_attempt`. No character or token estimate is used.

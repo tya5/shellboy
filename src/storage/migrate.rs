@@ -224,6 +224,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0044_thread_max_tokens.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 45,
+        sql: include_str!("../../migrations/0045_thread_spill_override.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -504,11 +509,12 @@ mod activity_migration_tests {
         let _startup = crate::storage::open_connection(&path, None, None, false).unwrap();
         let writer = crate::storage::DbWorker::open(&path).await.unwrap();
         writer.call(move |db| {
-            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,44);
+            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,45);
             assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=44",[],|r|r.get::<_,String>(0))?,"0044_thread_max_tokens");
-            // Existing Threads keep the connection value: the new column is unset.
-            let old:(Option<i64>,i64,i64)=db.query_row("SELECT max_tokens,auto_compact_target_percent,summary_max_chars FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-            assert_eq!(old,(None,80,24000));
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=45",[],|r|r.get::<_,String>(0))?,"0045_thread_spill_override");
+            // Existing Threads keep the connection value: both new columns are unset.
+            let old:(Option<i64>,i64,i64,Option<i64>)=db.query_row("SELECT max_tokens,auto_compact_target_percent,summary_max_chars,spill_override FROM thread WHERE id='old'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            assert_eq!(old,(None,80,24000,None));
             for bad in ["0","-1","1.5","'x'"] {
                 assert!(db.execute(&format!("UPDATE thread SET max_tokens={bad} WHERE id='old'"),[]).is_err(),"{bad}");
             }
@@ -539,6 +545,38 @@ mod activity_migration_tests {
             .await
             .unwrap();
         reopened.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn synthetic_schema44_upgrade_adds_checked_nullable_spill_override() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("synthetic44.sqlite");
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(include_str!("../../tests/fixtures/storage-current-schema43.sql"))
+                .unwrap();
+            db.execute_batch(include_str!("../../migrations/0044_thread_max_tokens.sql"))
+                .unwrap();
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now'),('unrelated','/other','','p','m','now')",[]).unwrap();
+            assert_eq!(db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), 44);
+        }
+        let worker = crate::storage::DbWorker::open(&path).await.unwrap();
+        worker.call(|db| {
+            assert_eq!(db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?, 45);
+            assert_eq!(db.query_row("SELECT spill_override FROM thread WHERE id='old'", [], |r| r.get::<_, Option<i64>>(0))?, None);
+            assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=45", [], |r| r.get::<_, String>(0))?, "0045_thread_spill_override");
+            assert_eq!(db.query_row("SELECT spill_override FROM thread WHERE id='unrelated'", [], |r| r.get::<_, Option<i64>>(0))?, None);
+            assert_eq!(db.query_row("SELECT count(*) FROM thread WHERE id IN ('old','unrelated')", [], |r| r.get::<_, i64>(0))?, 2);
+            db.execute("UPDATE thread SET spill_override=0 WHERE id='old'", [])?;
+            assert_eq!(db.query_row("SELECT spill_override FROM thread WHERE id='old'", [], |r| r.get::<_, i64>(0))?, 0);
+            db.execute("UPDATE thread SET spill_override=1 WHERE id='old'", [])?;
+            for bad in ["2", "'bad'", "0.5"] {
+                assert!(db.execute(&format!("UPDATE thread SET spill_override={bad} WHERE id='old'"), []).is_err(), "{bad}");
+            }
+            assert!(db.prepare("PRAGMA foreign_key_check")?.query([])?.next()?.is_none());
+            Ok(())
+        }).await.unwrap();
+        worker.shutdown().await.unwrap();
     }
 
     #[test]

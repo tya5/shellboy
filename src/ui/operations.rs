@@ -1514,6 +1514,7 @@ impl Form {
                             .clearable("auto_compact_target_percent")?,
                         summary_max_chars: form.clearable("summary_max_chars")?,
                         max_tokens: form.clearable("max_tokens")?,
+                        spill: None,
                         parent_id: form.clearable("parent")?,
                     })))
                 },

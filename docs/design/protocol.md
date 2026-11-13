@@ -12,6 +12,8 @@ Before 1.0.0, release-specific backward-compatibility paths are not part of the 
 
 `thread.set` のeffort未指定は変更なし、空文字はeffort解除とする。`thread.create` では未指定が継承/既定、空文字が明示的effortなしを表す。モデルへの空文字送信はしない。この区別はCLIの `--effort ''` でも利用できる。cwd/model/parent/対象IDの空文字は拒否する。本文空文字は空テキストと画像添付等の操作を許容し、送信内容の最終妥当性は添付選択も含めてControlが検査する。
 
+S6a automatic-spill settings (protocol v5, additive): `ThreadSetArgs.spill: Option<String>` omits for unchanged, accepts only `on`, `off`, or `""` to clear; JSON null deserializes as ordinary Option omission/no-change. `ThreadDetails.spill: Option<bool>` is the raw nullable Thread override, and `effective_spill: bool` is always resolved. The connection's native optional TOML boolean is `connections.<name>.spill`; there is no global compaction spill key. Resolution is Thread override, connection override, then built-in `true`. Invalid strings/JSON shapes are rejected before mutation. Schema45 persists one nullable constrained scalar; children, forks and rewind branches copy the raw value. Details: [compaction](compaction.md), [config](config.md), [storage](storage.md).
+
 成功/失敗は `Response<T>`。`success/failure` を利用し、受信時 `validate` を行う。片側だけを出力し、hint/details/run_id/turn_id/next_cursor等の未確定値は省略する。`MessageAccepted::validate` はpending時のID不在と割当済み時の両ID存在を検査する。各操作のcore結果をThread/Run/Turn/Shell/History/Attachment/Index/Storageのrecordで表し、provider payloadやwait snapshotのみJSON拡張値を許す。状態enumは原文のRun/Turn/attempt/shell/message/managed/index状態に対応し、Turnのfailedは論理DDLのCHECKに合わせて含める（引継ぎの遷移表は網羅列挙ではない）。API/proxy attempt errorはこの操作errorと区別する。
 
 wait条件は `type` tagの `turn_completed/run_ended/shell_ended/shell_output` のみ。timeout既定30,000ms、0を許容、非負u64。any判定、同snapshot成立集合、呼出元Run/Turn/shell自身のID待ち拒否（循環graphなし）、登録と状態確認の直列化、停止とは独立したRPC取消しはControl実装の責務であり、型fixtureだけで検証完了とは扱わない。

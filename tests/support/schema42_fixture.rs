@@ -17,9 +17,11 @@ pub(crate) fn open_schema42_fixture(path: &Path) -> Connection {
     db
 }
 
-/// Rewind a database freshly created by current production code (schema 44)
+/// Rewind a database freshly created by current production code (schema 45)
 /// to the schema-42 shape, so hand-built older fixtures can exercise upgrades.
-pub(crate) const REWIND_CURRENT_TO_42: &str = "ALTER TABLE thread DROP COLUMN max_tokens;
+pub(crate) const REWIND_CURRENT_TO_42: &str = "ALTER TABLE thread DROP COLUMN spill_override;
+ DELETE FROM schema_migration WHERE version=45;
+ ALTER TABLE thread DROP COLUMN max_tokens;
  DELETE FROM schema_migration WHERE version=44;
  ALTER TABLE thread DROP COLUMN summary_max_chars;
  ALTER TABLE thread DROP COLUMN auto_compact_target_percent;

@@ -220,6 +220,19 @@ fn only_changed_lines_differ_and_comments_and_order_survive() {
 }
 
 #[test]
+fn connection_spill_is_visible_and_editable_as_a_native_boolean() {
+    let text = "[connections.proxy]\nbase_url = \"https://proxy.example/v1\"\nspill = false\n";
+    let (_root, path, _) = fixture(text);
+    let values = read(&loaded(&path)).unwrap();
+    assert_eq!(values["file"]["values"]["connections.proxy.spill"], false);
+    let edited = edit_text(text, &[change("connections.proxy.spill", json!(true))]).unwrap();
+    assert!(edited.contains("spill = true"));
+    let cleared = edit_text(&edited, &[removal("connections.proxy.spill")]).unwrap();
+    assert!(!cleared.contains("spill ="));
+    assert_eq!(Config::parse(&cleared).unwrap().connections["proxy"].spill, None);
+}
+
+#[test]
 fn the_commented_template_keeps_every_other_line() {
     let edited = edit_text(TEMPLATE, &[change("default_model", json!("chosen"))]).unwrap();
     let before: Vec<&str> = TEMPLATE.lines().collect();

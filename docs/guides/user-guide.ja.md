@@ -317,6 +317,28 @@ Shellboyは上限カタログを問い合わせません。
 streamのみです。`max_tokens`指定時に`extra_body`へ同じAPI固有キーを重ねると、
 暗黙上書きせず拒否します。[設定ガイド](configuration.md)も参照してください。
 
+### 自動spillの設定
+
+接続には `[connections.<name>]` 内で任意の `spill = true` / `spill = false`
+を設定できます。`[compaction].spill` のような全体設定はありません。
+組込み既定値はonです。会話ごとに変更する場合は次を使います。
+
+```sh
+shellboy thread set --thread THREAD --spill off
+shellboy thread get --thread THREAD
+```
+
+`--spill on`で明示的に有効化し、`--spill ''`でThreadのoverrideを消して
+接続または組込み値を継承します。option自体を省略すると現在値を保ちます。
+`thread get`では生の`spill`（`null`、`true`、`false`）と、常に解決済みの
+`effective_spill`を別々に表示します。Thread設定が接続設定に優先し、子・fork・
+rewindは作成時の生の値をコピーするため、後から親を変更しても既存の子へは
+伝播しません。
+
+offはコンパクション全体を止めません。意図された動作ではautomatic summaryを
+続け、automatic spill段階だけをskipします。runtimeのoff経路は別途S2b統合の
+reviewが必要で、S6aの保存/readbackだけではoffが実行時に有効とは確認できません。
+
 ## 5. 子へ委譲する
 
 「サブエージェントを使って」と言うだけで、モデルがShellboyの子Thread操作を正確に理解する保証はありません。ガイドは実行ファイルに同梱されています。モデルには短い入口の案内が渡り、必要なときに自分でガイドを読みます。全文が毎回の指示に展開されるわけではなく、checkoutやリポジトリのパスも不要です。確実に手順を読ませたいときはガイドIDを書きます。

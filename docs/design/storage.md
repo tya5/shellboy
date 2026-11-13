@@ -1,5 +1,16 @@
 # SQLite migration と専用worker
 
+## Thread automatic-spill override (schema45, S6a)
+
+Migration45 adds only `thread.spill_override`, nullable INTEGER with
+`CHECK(spill_override IS NULL OR (typeof(spill_override)='integer' AND
+spill_override IN (0,1)))`. Existing rows remain NULL (inherit); 0 is explicit
+off and 1 explicit on. The current schema executes this migration in order and
+must converge with upgrade44->45. Readers strictly decode only NULL/0/1. Child
+creation, fork and rewind copy the source raw value in their existing transaction;
+no parent traversal or extra table is added. The migration is source/synthetic
+fixture only here, never an installed database operation.
+
 Schema21 adds derived event-retention indexes; it does not rewrite event or
 delivery data. See [GC](gc.md#dead-delivery-and-shell-event-retention-170).
 

@@ -4467,3 +4467,26 @@ only together on the existing provider_error/provider_response failed fact and
 are checked by the same bounded decoder/schema. Deserializing a saved ModelError
 cannot restore a live parser witness. Partial output, completed tool IDs, usage
 knownness, attempt identity and recovery CAS retain their existing rules.
+
+
+## Automatic spill preference (S6a, 2026-11-13)
+
+Decision: persist one nullable raw Thread boolean (`spill_override`) and one
+optional native boolean on each connection. Resolve raw Thread, then selected
+connection, then built-in `true`; do not add a global `[compaction].spill` key.
+`thread set --spill on|off|''` sets/clears, omission is unchanged, and JSON null
+uses ordinary Option no-change semantics. `thread.get` exposes raw nullable
+`spill` and resolved boolean `effective_spill`.
+
+Spill-only edits increment ordinary Thread revision but do not increment
+profile_revision, reasoning_epoch, or selection_revision. Create/fork/rewind copy
+the raw nullable value. The driver samples metadata at its existing automatic
+invocation boundary from `Config::current()` and the current Thread row; no new
+client, generation counter, or private RPC is introduced. Runtime `off` is
+intended to keep automatic summary while bypassing automatic spill, but must not
+be activated or claimed complete until separately reviewed S2b is integrated.
+
+Basis: final S6a contract `s6a-contract-final-6714.md` (SHA-256
+`dddf58c209595a5165a855180fbe3ab9b6f2a9a9c3ea8bc962a5f4a7e7475aec`) and its
+independent leader review. Revisit the runtime/landing gate only after exact-SHA
+S2b review and source tests; persistence readback is not runtime acceptance.

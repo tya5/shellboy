@@ -37,7 +37,7 @@ watchdogs remain unchanged.
 
 ## Current conversation storage
 
-The current database schema is conversation version 37; see its versioned migrations and the [storage design](storage.md). The schema sequence below is additive: versions 28–31 and 35–37 are not enumerated in this summary.
+The current database schema is conversation version 45; see its versioned migrations and the [storage design](storage.md). The schema sequence below is additive: versions 28–31 and 35–37 are not enumerated in this summary.
 
 Issue #170 adds schema21 derived event-retention lookup indexes and bounded
 maintenance of terminal-Run pending deliveries and unreferenced shell

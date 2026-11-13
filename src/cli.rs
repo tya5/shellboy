@@ -790,6 +790,9 @@ pub struct ThreadSetOptions {
     /// Model output limit (tokens, positive integer) for this Thread's requests, replacing the connection max_tokens; an empty string restores the connection or default value.
     #[arg(long, allow_hyphen_values = true)]
     pub max_tokens: Option<String>,
+    /// Automatic spill policy for this Thread; on/off, with an empty string to inherit.
+    #[arg(long)]
+    pub spill: Option<String>,
     /// Move this Thread under another live Thread; an empty string detaches it (no parent). Live Runs keep their owner.
     #[arg(long = "parent")]
     pub parent_id: Option<String>,
@@ -1428,6 +1431,7 @@ impl Cli {
                     auto_compact_target_percent: a.auto_compact_target_percent,
                     summary_max_chars: a.summary_max_chars,
                     max_tokens: a.max_tokens,
+                    spill: a.spill,
                     parent_id: a.parent_id,
                 })),
             },

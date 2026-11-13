@@ -227,6 +227,7 @@ async fn stream_input_layout_and_db_fairness() {
                                 auto_compact_target_percent: None,
                                 summary_max_chars: None,
                                 max_tokens: None,
+                                spill: None,
                                 agents: None,
                                 thread_id: Some(thread),
                                 connection: None,

@@ -1,4 +1,4 @@
--- Current conversation schema v14. Historical upgrades live in storage::migrate.
+-- Current conversation schema. Historical upgrades live in storage::migrate.
 -- Keep this definition equivalent to the completed historical migrations.
 
 CREATE TABLE app_meta(key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
@@ -793,4 +793,6 @@ ALTER TABLE thread ADD COLUMN summary_max_chars INTEGER CHECK(summary_max_chars 
 INSERT INTO schema_migration(version,name) VALUES(43,'0043_thread_single_summary_settings');
 ALTER TABLE thread ADD COLUMN max_tokens INTEGER CHECK(max_tokens IS NULL OR (typeof(max_tokens)='integer' AND max_tokens>=1));
 INSERT INTO schema_migration(version,name) VALUES(44,'0044_thread_max_tokens');
-PRAGMA user_version=44;
+ALTER TABLE thread ADD COLUMN spill_override INTEGER CHECK(spill_override IS NULL OR (typeof(spill_override)='integer' AND spill_override IN (0,1)));
+INSERT INTO schema_migration(version,name) VALUES(45,'0045_thread_spill_override');
+PRAGMA user_version=45;

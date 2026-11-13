@@ -11715,3 +11715,38 @@ These focused controls plus the guarded full standard command establish local S1
 validation, not full qualification. The final contract-matrix audit, independent
 exact-source review, and normal/all-OS CI on the same commit remain pending. Existing
 retry classifier and S2/S3 production code remain unchanged.
+
+
+## S6a public settings baseline RED (2026-11-13; not product qualification)
+
+Pinned source base: `9baa554e2fc0f8a7dfdaf51e7de705835adce638`.
+All three commands compiled on macOS arm64 and selected one test before the
+intended missing-surface assertion failed:
+
+- `cargo test --test integration thread_spill_cli_accepts_real_argv_values`:
+  Clap rejected actual `thread set --thread fixture --spill on` argv as an
+  unknown argument. Execution `38cc15c9-dc69-483d-acbe-4d4e89e72245`.
+- `cargo test --test integration thread_set_spill_wire_accepts_only_string_on_off_or_empty_clear`:
+  `Request::from_value` rejected valid string value `on` as invalid request
+  shape. Execution `d52f1923-94fb-4e32-85c7-e8c46ca32798`.
+- `cargo test --test integration control_db::public_thread_get_reports_raw_spill_and_effective_default -- --exact`:
+  current-worktree forced rebuild selected the test and failed because public
+  `thread.get` lacked the raw spill field. Execution `8b79d1c5-0169-4985-905e-ca2605234341`.
+
+The two earlier readback-filter invocations selected zero tests (executions
+`6b312780-c778-4a1d-a66e-f07c0091828a` and
+`a1e9edfc-645c-48f8-a80e-0ac2bf29efc4`); neither is counted as RED. These logs
+are baseline evidence only, not a passing implementation check.
+
+The first source-qualified `cargo check --tests` attempt did not reach Cargo:
+`run-source-cargo.py` recorded source SHA
+`04cd2ea526ae4e65c7be8a5a9a4f8208f89eb7ccc380685de6d5dc91759cd189`, selected
+`clean-package`, then `cargo clean -p shellboy` refused because
+`target-shared/CACHEDIR.TAG` is missing/invalid (receipt
+`.local/private-reports/rust-source/1794595541551324000-64434.json`). No
+implementation build result is available; do not bypass this guard. Separately,
+Python sqlite3 / SQLite 3.53.0 executed only `migrations/0045_thread_spill_override.sql`
+in an in-memory synthetic table: old row stayed NULL, 0/1 were accepted, and 2,
+non-numeric text and 0.5 were rejected. This checks the DDL/CHECK only; it does
+not verify Rust decoding, the migration runner, current-schema convergence or
+product build.
