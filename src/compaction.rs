@@ -28,6 +28,8 @@ mod edit;
 mod failure_memory;
 mod keys;
 pub(crate) mod preview;
+#[cfg(test)]
+mod retry_suppressed_tests;
 pub use edit::ContextEditResult;
 pub(crate) mod a_state;
 #[cfg(test)]
