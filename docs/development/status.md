@@ -155,6 +155,32 @@ exact-source review and this unit's own normal/three-OS CI are separate gates.
 No SSE parser/halving/suppression/adoption relaxation/progress UI or installed
 Core change belongs to this unit.
 
+### #301 S2a Refusal Halving (Unqualified Candidate)
+
+S1b is landed at `9baa554e2fc0f8a7dfdaf51e7de705835adce638`. The fresh S2a
+worktree is based on that exact tip. S2a currently adds complete actual HTTP
+400/413/422 and trusted 2xx SSE refusal classification, a bounded weighted
+whole-group retry to singleton, auth/quota veto before typed-context handling,
+and the new schema-bounded `rejected_at_minimum` outcome. Minimum failures write
+the original E through the existing deterministic slot; prior failure categories
+and suppression semantics remain unchanged. Existing context halving and weighted
+selection remain unchanged;
+provider-keyed memory/CAS (S2b) is not implemented.
+
+Synthetic public REDs were observed at the landed-S1b base. Focused S2a public,
+status-provenance and veto controls now pass, together with schema/decoder
+parity, weighted zero/skew bound, context regression and `cargo check --tests`.
+The first exact-SHA review requested changes. Follow-up source now gates numeric
+HTTP refusal halving on complete bounded body + provider classification, preserves
+terminal trusted SSE evidence, adds interrupted/truncated body negatives, maps an
+actual Retry-After 429 quota veto to provider_error with HTTP status, and regenerates
+the checked-in protocol schema. Focused controls and artifact parity pass. The full
+standard attempt initially caught stale T10 expectations for the newly contracted
+SSE halving; after updating those, a repeat reached a slow unrelated test and was
+stopped without a standard exit. Exact-source narrow rereview and a successful
+standard check remain pending; no hosted CI/landing is authorized yet. S2b remains
+separate and unimplemented. No provider, owner or private database operation.
+
 S1a schema-review follow-up is an UNQUALIFIED source-preparation candidate while
 local heavy builds are held by the 8192 MiB swap guard. The real schema mismatch
 RED is reproduced; shared schema/decoder constraints are authored but await hosted
@@ -189,3 +215,6 @@ S6a entries in [acceptance](../validation/acceptance.md). Current guarded
 `clean-package`, but `cargo clean` refused because shared `target-shared` lacks a
 valid `CACHEDIR.TAG`. No target metadata was repaired or bypassed; source build
 qualification is pending the approved cache-boundary correction.
+### S2a e527 Standard Failure Follow-Up
+
+The review-approved e527 correction passed the isolated indexed-cost test and its occurrence later passed in full standard. Full `scripts/check.sh` on exact e527 nevertheless exited101: 1394 passed, 2 failed, 19 ignored. Both failures were traced to HTTP400 fixtures that changed category under S2's numeric refusal rule: the per-report rejection test now uses an actual HTTP401 veto, and the transient retry test now uses HTTP500. The 400 deterministic trial control remains in the S2a matrix. Focused fully qualified tests have each passed one selected case. This is test-oracle/fixture correction only; no S2 production behavior changed. A new SHA, narrow delta rereview, full standard pass and then hosted CI remain required.

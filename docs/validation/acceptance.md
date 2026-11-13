@@ -11792,3 +11792,94 @@ The follow-up uses the exact locked API: the outer
 strict decoder still accepts only NULL and integer 0/1. Its negative oracle
 covers integer 2, negative integer, TEXT, REAL and BLOB. These checks are authored
 but unexecuted; request another one-shot SOURCE PREPARE only after source review.
+### #301 S2a Refusal Halving (Unqualified Candidate)
+
+Base: landed S1b `9baa554e2fc0f8a7dfdaf51e7de705835adce638`; source changes remain
+uncommitted in `task/compaction-s2-failure-halving-8478`. S2a does not implement
+S2b provider-scoped memory/CAS.
+
+Corrected public RED on the baseline (`cargo test --locked --lib s2_ --
+--nocapture`, execution `51f463d5-6475-49e1-9e54-de25740573a6`, exit101) showed
+HTTP400/413/422 and trusted SSE400 stopped after1 POST rather than the required
+three; actual401/403/404/429 plus typed context halved to3 rather than vetoing
+at1. This is intentional product RED evidence. The earlier 4-case run also
+reached the intended mismatches. One abandoned run hung on a quota fixture waiting
+for a follow-on request after terminal quota; it was stopped, not treated as a
+product result. The fixture was fixed to stop after the terminal local observation.
+
+Guarded S2a validations (serial Rust slot):
+- `cargo test --locked --lib s2_ -- --nocapture`, execution
+  `75e95859-b7fb-4d7c-9024-72f8bf706174`, exit0:5 passed. Includes exact3 POST
+  refusals for HTTP400/413/422 and HTTP200 trusted SSE400; 2 POST shorter-prefix
+  success; 1 POST ineligible floor; 1 POST each actual401/403/404/429 with
+  contradictory typed context; HTTP400 body code500 vs HTTP500 body code400
+  controls. The quota vector was added and passed separately below.
+- `cargo test --locked --lib s2_actual_auth_and_rate_status_veto_typed_context_halving
+  -- --nocapture`, execution `a63e7328-beef-4cab-aa87-364bea381da1`, exit0:1 test
+  passed all five status/quota vectors.
+- `cargo test --locked --lib compaction::discard::schema_contract_tests --
+  --nocapture`, execution `659fed61-a9a7-404f-8351-ae02d333a5ed`, exit0:3 passed,
+  including generated schema/decoder minimum-reason/status-pair vectors and privacy.
+- `cargo test --locked --lib compaction::single_request::tests:: -- --nocapture
+  && cargo test --locked --lib t5_context_terminal_has_one_public_outcome --
+  --nocapture`, execution `e72caa48-998e-4142-bbea-0582f8fef7b1`, exit0:11 selector
+  unit tests and1 public context-regression test passed. The later zero/skew exact
+  bound and schema rerun `75e95859-...` passed1 and3 tests respectively.
+- `cargo check --locked --tests`, execution `56f5539e-d7b0-4d16-b1b6-9475694d8266`,
+  exit0. It reported a temporary dead-code warning in the test-only compatibility
+  adapter; the adapter was gated `cfg(test)` afterward and needs recheck.
+
+These runs are on evolving source, not a committed/reviewed exact SHA. Formatting
+was applied, but `cargo fmt -- --check` initially exited1 before that formatting;
+rerun final formatter check and relevant tests after the last fixture/source edits.
+Independent source review, full standard check, normal CI, three-OS CI and landing
+remain pending. No real provider or installed owner was used.
+
+
+### S2a Review-Fix Follow-Up (Unqualified)
+
+The independent review of `1dd3a0942181f3cb43373e94f76b9c4d1e1f3ea4` required
+complete HTTP-body evidence, the published schema artifact, and actual Retry-After
+429 projection. Follow-up source changes gate numeric halving on
+`http_error_complete` + provider kind + matching actual status, or `terminal_received`
++ 2xx + trusted provider SSE witness. Local public cases exercise interrupted
+HTTP400 and byte-bounded truncated HTTP413; each stays at one POST, has no minimum
+counts and writes no deterministic E. A real local 429 Retry-After header case
+asserts one POST, `provider_error`/`provider_response`, HTTP429, and no stream pair.
+The original complete body typed quota case remains present. The checked-in
+`docs/reference/protocol.schema.json` was regenerated using `cargo run --locked --
+protocol schema`; exact artifact parity passed.
+
+Focused guarded results on evolving source: `cargo test --locked --lib t10_ --
+--nocapture` passed5; `cargo test --locked --lib s2_ -- --nocapture` passed7;
+`cargo test --locked --lib compaction::discard::schema_contract_tests --
+--nocapture` passed3; the schema artifact integration parity test passed1. These
+include the updated T10 SSE singleton expectations preserving S1b trusted pair
+provenance, complete HTTP400/413/422, terminal SSE400, retries/success/floor,
+actual auth/rate/quota vetoes, interrupted and truncated body negatives, and
+HTTP body-code distinction. `cargo fmt -- --check` and `cargo check --locked
+--tests` completed successfully in the standard sequence.
+
+Full standard attempt `87e20a86-af2f-4923-9428-700ad1a6f2bc` exited101 before
+reaching suite execution because Clippy rejected equal expectation branches in
+the new fixture; corrected. The next standard attempt
+`79687c55-c670-4ea9-a7c9-9ea775ebf14d` ran 2,602 tests but failed two T10
+public expectations, which were updated because S2 explicitly admits terminal
+2xx SSE numeric refusals. A follow-up complete standard run
+`ed853ebe-a60a-4c8d-8072-497d275b85f1` passed format/check preflight and unit
+tests through the observed output, but remained on one unrelated slow
+`frontend::tools::batch_tests::collected_source_lookup_uses_existing_index_without_unrelated_relation_scan` test and was stopped after 215s with signal15. It has no successful
+standard-script exit, and must not be counted as qualification. No CI was launched.
+Current follow-up source is not yet committed or independently reviewed; do not
+proceed to hosted CI or S2b until a successful standard exit and narrow rereview.
+
+
+### e527 Full-Standard Result and S2a Fixture Correction (Pending Rereview)
+
+The exact-SHA unchanged `sh scripts/check.sh` run `062c4177-849c-45f3-83d5-ad5c34ae63fd` terminated exit101 after 692.779s: 1394 passed, 2 failed, 19 ignored, 0 measured. Clippy/preflight passed. The isolated index-cost test had already passed 1/1 on unchanged e527 in 49.73s; max guarded swap was 1660.94 MiB. Its short process sample showed the test executing `Connection::execute`/SQLite B-tree insert operations in the 10,000-row transaction setup before the later measured SELECT; no test assertion failed. Full-suite occurrence also emitted `...collected_source_lookup_uses_existing_index_without_unrelated_relation_scan ... ok`. Original log and swap sample are preserved at `.local/private-reports/studio-current-20261113/s2a-e527-full-standard-retry.log` and `.local/private-reports/studio-current-20261113/s2a-e527-full-standard-retry-swap.tsv`.
+
+The two full-suite failures were old fixture/oracle expectations, not isolated proof of a source regression. `proactive_provider_rejection_of_summaries_is_not_repeated_either` used complete HTTP400 + `invalid_request_error`; under S2 this is a numeric refusal and reaches the 4 bounded summary attempts/minimum outcome. Full-suite run recorded 17 report records: one original-E provider attempt (4 requests) and 16 deterministic no-provider suppressions. The original expectation of 17 provider calls was not valid for that status. Its fixture now uses actual HTTP401 auth veto so the original purpose—one provider request per later eligible report—remains testable, with explicit HTTP401 provider provenance, no halving metadata, and one model request/summary usage request per record. Dedicated S2a HTTP400 trial/minimum controls remain separate and unchanged.
+
+`proactive_transient_summary_failure_retries_once_per_new_report` likewise used HTTP400+`invalid_request_error`, which is no longer transient under S2. It now uses HTTP500 to retain the intended transient retry purpose; no production behavior changed. Correctly selected exact focused commands both passed 1/1: `runtime_features::proactive_provider_rejection_of_summaries_is_not_repeated_either` (58.141s outer command) and `runtime_features::proactive_transient_summary_failure_retries_once_per_new_report` (0.676s). Earlier bare-name `--exact` attempts selected 0 tests and are not evidence; this was corrected with fully qualified names and explicit `running 1 test` output.
+
+Test-only follow-up is pending independent delta review and a new SHA. The earlier e527 full-standard failures remain preserved; do not transfer its failed status to a future candidate or treat review as qualification. Full standard and hosted CI for the follow-up SHA remain pending.
