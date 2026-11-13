@@ -298,13 +298,15 @@ impl Compactor {
                             let tx = db.transaction()?;
                             let wrote = remember_failure_qualified(
                                 &tx,
-                                &proof,
-                                &cancel,
-                                owner_lifetime.as_ref(),
-                                &thread,
-                                region,
-                                &observation,
-                                &value,
+                                QualifiedWrite {
+                                    snapshot: &proof,
+                                    cancel: &cancel,
+                                    owner_lifetime: owner_lifetime.as_ref(),
+                                    thread: &thread,
+                                    region,
+                                    observed: &observation,
+                                    value: &value,
+                                },
                             )?;
                             tx.commit()?;
                             Ok(wrote)
@@ -374,13 +376,15 @@ impl Compactor {
                     let tx = db.transaction()?;
                     let wrote = remember_failure_qualified(
                         &tx,
-                        &proof,
-                        &cancel,
-                        owner_lifetime.as_ref(),
-                        &thread,
-                        region,
-                        &observation,
-                        &identity.0,
+                        QualifiedWrite {
+                            snapshot: &proof,
+                            cancel: &cancel,
+                            owner_lifetime: owner_lifetime.as_ref(),
+                            thread: &thread,
+                            region,
+                            observed: &observation,
+                            value: &identity.0,
+                        },
                     )?;
                     tx.commit()?;
                     Ok(wrote)
@@ -788,16 +792,28 @@ pub(super) fn remember_failure(
 ) -> Result<bool, StorageError> {
     failure_memory::write(tx, &region.key(thread), observed, value)
 }
+pub(super) struct QualifiedWrite<'a> {
+    pub snapshot: &'a Snapshot,
+    pub cancel: &'a CancellationToken,
+    pub owner_lifetime: Option<&'a CancellationToken>,
+    pub thread: &'a str,
+    pub region: Region,
+    pub observed: &'a failure_memory::SlotRead,
+    pub value: &'a str,
+}
 pub(super) fn remember_failure_qualified(
     tx: &rusqlite::Transaction<'_>,
-    snapshot: &Snapshot,
-    cancel: &CancellationToken,
-    owner_lifetime: Option<&CancellationToken>,
-    thread: &str,
-    region: Region,
-    observed: &failure_memory::SlotRead,
-    value: &str,
+    write: QualifiedWrite<'_>,
 ) -> Result<bool, StorageError> {
+    let QualifiedWrite {
+        snapshot,
+        cancel,
+        owner_lifetime,
+        thread,
+        region,
+        observed,
+        value,
+    } = write;
     if cancel.is_cancelled() || owner_lifetime.is_some_and(CancellationToken::is_cancelled) {
         return Ok(false);
     }
@@ -980,13 +996,15 @@ mod tests {
             let tx = db.unchecked_transaction()?;
             assert!(remember_failure_qualified(
                 &tx,
-                &first_proof,
-                &first_cancel,
-                Some(&first_owner_lifetime),
-                "t",
-                Region::Closed,
-                &observation,
-                &first_f_value,
+                QualifiedWrite {
+                    snapshot: &first_proof,
+                    cancel: &first_cancel,
+                    owner_lifetime: Some(&first_owner_lifetime),
+                    thread: "t",
+                    region: Region::Closed,
+                    observed: &observation,
+                    value: &first_f_value,
+                },
             )?);
             tx.commit()?;
             assert!(failure_memory::blocks(
@@ -1032,13 +1050,15 @@ mod tests {
             assert!(
                 !remember_failure_qualified(
                     &tx,
-                    &stale_proof,
-                    &stale_cancel,
-                    Some(&stale_owner_lifetime),
-                    "t",
-                    Region::Closed,
-                    &failure_memory::SlotRead::Absent,
-                    &stale_f,
+                    QualifiedWrite {
+                        snapshot: &stale_proof,
+                        cancel: &stale_cancel,
+                        owner_lifetime: Some(&stale_owner_lifetime),
+                        thread: "t",
+                        region: Region::Closed,
+                        observed: &failure_memory::SlotRead::Absent,
+                        value: &stale_f,
+                    },
                 )?,
                 "obsolete Run snapshot cannot save a new provider key"
             );
