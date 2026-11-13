@@ -288,6 +288,8 @@ models) read on 2026-11-01; no real provider call has been made.
   setting also maps to Responses `max_output_tokens` and Chat Completions
   `max_completion_tokens`; those APIs omit their limit when unset. This is an
   output limit, not an assertion about a provider's context or supported limits.
+  A Thread may override it (`thread.max_tokens`, schema 44; see the per-Thread
+  output limit section below).
 - Conversation mapping from the Responses-shaped items: system and developer
   items before the first user message become `system`; developer items after it
   (event notices, context lines) are sent as user messages (`context_role` does
@@ -345,8 +347,8 @@ provider terminal fact:
   response.
 - Anthropic Messages: `status = incomplete` and `stop_reason = max_tokens`.
 
-Only these exact cases use error kind `output_limit` and its connection-setting
-remedy. The response remains incomplete: retain the provider raw response and
+Only these exact cases use error kind `output_limit` and its remedy (raise the
+Thread or connection `max_tokens`). The response remains incomplete: retain the provider raw response and
 available partial text/items; never convert truncation into success or silently
 retry it. These terminal limit responses are not automatically retried. Other
 incomplete/finish/stop reasons are not guessed as output exhaustion: this
@@ -556,3 +558,27 @@ When `max_tokens` is set, also supplying the same native key in `extra_body` is
 an explicit configuration/send error, even for an equal value or null. Other
 API keys are not newly reserved. Existing Messages reserved-field rules remain
 unchanged; this does not add aliases or silently choose between duplicate limits.
+
+### Per-Thread output limit
+
+`thread.max_tokens` (nullable positive integer, schema 44, set by `thread set
+--max-tokens N`, `''` clears) overrides the connection for that Thread's
+conversation requests. Precedence: Thread value, then connection `max_tokens`,
+then the Messages default 32768; Responses and Chat Completions otherwise send
+no Shellboy-owned limit (an `extra_body` native key still passes through). Child
+Threads and forks copy the value at creation. Summary requests do not use it;
+their length is owned by `summary_max_chars`.
+
+Carrier: the driver reads the value into its per-request snapshot and sets it on
+the canonical Responses-shaped request as `max_output_tokens`. The HTTP client
+removes that field before encoding and passes the resolved limit to the dialect
+encoder, which writes the native key. The attempt manifest records the override
+(`max_tokens`) so request inspection rebuilds the same body.
+
+Clash rule: a Thread value counts as a configured limit, so the connection's
+`extra_body` must not contain the same native key. `thread set` refuses with
+`config_invalid` a `--max-tokens` value or `--connection` switch that would
+create the clash, naming the key. Paths that do not go through `thread set`
+(a later configuration edit, or a child/fork created on another connection) are
+caught at send time with `invalid_config`, whose message names the key and
+`thread set --max-tokens ''`. Shellboy never picks one of the two values.

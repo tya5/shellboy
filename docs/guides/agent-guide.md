@@ -879,8 +879,11 @@ One Thread can use its own output limit without changing the saved connection:
 `shellboy thread set --max-tokens N` (positive integer) replaces the connection
 value for that Thread's conversation requests from the next model request, and
 `--max-tokens ''` restores it. `shellboy thread get` shows `max_tokens` (the
-Thread's own value or `null`) and `effective_max_tokens` (the value sent; absent
-when no limit field is sent). Child Threads and forks start with the same value.
+Thread's own value or `null`) and `effective_max_tokens` (the Thread, connection
+or Messages default value Shellboy sends; omitted from both `thread get` and the
+`thread set` result when none applies, even if the connection's `extra_body`
+passes its own limit key). If the connection's `extra_body` already has the
+native limit key, `thread set --max-tokens` is refused with `config_invalid`. Child Threads and forks start with the same value.
 Summary requests keep the connection value. If you hit `output_limit` on long
 answers in one Thread, raise the Thread value instead of editing the connection;
 still choose a value the endpoint/model supports.

@@ -1002,10 +1002,16 @@ Shellboy upper bound; the provider's limit applies. It is saved in the database,
 not in the configuration file, is inherited by child Threads and forks, survives
 `--connection` changes, and applies from the next model request. `thread get` shows
 `max_tokens` (the Thread's own value, `null` if none) and `effective_max_tokens`
-(the value sent; absent when no limit field is sent). Compaction summary requests
+(the Thread, connection or Messages default value Shellboy sends). Both `thread
+get` and the `thread set` result omit `effective_max_tokens` when none of these
+applies; a native limit key in `extra_body` is passed through unchanged and is
+not reported there. Compaction summary requests
 keep using the connection value; their length is set by `summary_max_chars`.
-If the connection's `extra_body` carries the same native key, a request with a
-Thread value fails with `invalid_config` instead of choosing one of them.
+If the connection's `extra_body` carries the same native key, `thread set`
+refuses the `--max-tokens` value (or a `--connection` switch to such a
+connection) with `config_invalid`; a clash created another way (a later
+configuration edit) fails the request with `invalid_config` naming the key.
+Shellboy never chooses one of them.
 
 ### Provider output-limit completion
 

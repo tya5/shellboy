@@ -2809,6 +2809,9 @@ async fn max_tokens_store() -> (TempDir, Store) {
         [connections.messages]
         api="anthropic_messages"
         base_url="http://127.0.0.1:3/v1"
+        [connections.passthrough]
+        base_url="http://127.0.0.1:4/v1"
+        extra_body={max_output_tokens=777}
     "#,
     )
     .unwrap();
@@ -2923,5 +2926,69 @@ async fn thread_max_tokens_rejects_non_positive_or_non_integer_and_is_inherited(
     );
     assert_eq!(get_thread(&store, &fork_id).await["max_tokens"], 9000);
     assert_eq!(get_thread(&store, &thread).await["max_tokens"], Value::Null);
+    store.database.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn thread_max_tokens_refuses_a_clash_with_connection_extra_body_limit() {
+    let (_root, store) = max_tokens_store().await;
+    let thread = create(&store, None).await.thread_id;
+    execute(&store, set_max_tokens(&thread, "9000")).await;
+    let refused = |error: ApiError| {
+        assert_eq!(error.code, ErrorCode::ConfigInvalid);
+        assert!(
+            error.message.contains("extra_body.max_output_tokens")
+                && error.message.contains("passthrough")
+                && error.message.contains("--max-tokens ''"),
+            "{}",
+            error.message
+        );
+    };
+    // Switching to a connection whose extra_body carries the native key is refused.
+    refused(
+        store
+            .execute(request(switch_connection(&thread, "passthrough")), None)
+            .await
+            .unwrap_err(),
+    );
+    let got = get_thread(&store, &thread).await;
+    assert_eq!(
+        (got["connection"].clone(), got["max_tokens"].clone()),
+        ("plain".into(), 9000.into())
+    );
+    // Clearing the Thread value in the same call makes the switch valid.
+    let switched = execute(
+        &store,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(thread.clone()),
+            connection: Some("passthrough".into()),
+            max_tokens: Some(String::new()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert_eq!(switched.result["connection"], "passthrough");
+    // extra_body passthrough is not a Shellboy-sent limit; set and get agree.
+    assert!(
+        switched.result.get("effective_max_tokens").is_none(),
+        "{}",
+        switched.result
+    );
+    assert!(
+        get_thread(&store, &thread)
+            .await
+            .get("effective_max_tokens")
+            .is_none()
+    );
+    // Setting a Thread value on that connection is refused too; other edits still work.
+    refused(
+        store
+            .execute(request(set_max_tokens(&thread, "9000")), None)
+            .await
+            .unwrap_err(),
+    );
+    assert_eq!(get_thread(&store, &thread).await["max_tokens"], Value::Null);
+    execute(&store, switch_connection(&thread, "limited")).await;
+    execute(&store, set_max_tokens(&thread, "9000")).await;
     store.database.shutdown().await.unwrap();
 }

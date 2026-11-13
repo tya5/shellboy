@@ -204,8 +204,11 @@ pub fn configure_shell_description(request: &mut Value, enabled: bool) {
         }
     }
 }
-/// Canonical request field carrying a Thread's `max_tokens` override. The HTTP
-/// client removes it and sends the limit in each dialect's own field.
+/// Canonical request field carrying a Thread's `max_tokens` override. It reuses
+/// the Responses key `max_output_tokens` because the canonical request is
+/// Responses-shaped; the HTTP client removes it and sends the limit in each
+/// dialect's own field (so it never reaches the wire under this name for Chat
+/// or Messages, and Responses gets it from the encoder, not passthrough).
 pub const THREAD_OUTPUT_LIMIT_FIELD: &str = "max_output_tokens";
 /// Set the Thread's output-limit override on a canonical conversation request.
 /// `None` keeps the connection value. Summary requests never call this.

@@ -1370,8 +1370,15 @@ impl Store {
                         serde_json::json!(details.effective_auto_compact_target_percent);
                     result.result["effective_summary_max_chars"] =
                         serde_json::json!(details.effective_summary_max_chars);
-                    result.result["effective_max_tokens"] =
-                        serde_json::json!(details.effective_max_tokens);
+                    // Absent when no limit is configured, exactly as `thread get`.
+                    match details.effective_max_tokens {
+                        Some(limit) => result.result["effective_max_tokens"] = limit.into(),
+                        None => {
+                            if let Some(object) = result.result.as_object_mut() {
+                                object.remove("effective_max_tokens");
+                            }
+                        }
+                    }
                 }
                 Ok(result)
             }
@@ -1776,6 +1783,9 @@ impl Store {
                 params![id, value],
             )
             .map_err(sql_error)?;
+        }
+        if args.max_tokens.is_some() || args.connection.is_some() {
+            reject_output_limit_clash(config, args, &current)?;
         }
         if let Some(value) = &args.max_tokens {
             let value = crate::protocol::validation::parse_max_tokens(value)?;
@@ -2318,6 +2328,33 @@ fn target(id: Option<&str>, caller: Option<&Origin>) -> Result<String> {
                 "external operations must specify --thread",
             )
         })
+}
+
+/// A Thread output limit next to the same native key in the connection's
+/// `extra_body` would fail every request; refuse the change that creates it.
+fn reject_output_limit_clash(
+    config: &crate::config::Config,
+    args: &ThreadSetArgs,
+    current: &ThreadDetails,
+) -> Result<()> {
+    let limit = match &args.max_tokens {
+        Some(value) => crate::protocol::validation::parse_max_tokens(value)?.map(|v| v as u64),
+        None => current.max_tokens,
+    };
+    let name = args.connection.as_deref().unwrap_or(&current.connection);
+    let Some(key) = config
+        .connections
+        .get(name)
+        .and_then(|connection| connection.output_limit_collision_key_for(limit))
+    else {
+        return Ok(());
+    };
+    Err(error(
+        ErrorCode::ConfigInvalid,
+        format!(
+            "connection {name} sets extra_body.{key}, which duplicates this Thread's max_tokens; clear the Thread value (thread set --max-tokens '') or remove extra_body.{key} from the connection"
+        ),
+    ))
 }
 
 pub fn thread_details(connection: &Connection, id: &str) -> Result<ThreadDetails> {
