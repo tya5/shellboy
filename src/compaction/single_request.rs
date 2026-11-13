@@ -229,18 +229,43 @@ impl Compactor {
         );
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
+        let provider_identity = if automatic.is_some() {
+            self.owner_instance_id.as_deref().and_then(|owner| {
+                let run = snapshot.run_fence.as_deref()?;
+                let (turn, generation) = snapshot.turn_fence.as_ref()?;
+                let generation = u64::try_from(*generation).ok()?;
+                Some(failure_memory::provider_turn_key(
+                    &identity.0,
+                    run,
+                    turn,
+                    generation,
+                    owner,
+                ))
+            })
+        } else {
+            None
+        };
         let thread = snapshot.thread.clone();
-        let lookup = identity.clone();
-        let blocked = self
+        let slot_key = region.key(&thread);
+        let observed = self
             .database
-            .call(move |db| same_failed_range(db, &thread, region, &lookup))
+            .call(move |db| failure_memory::read(db, &slot_key))
             .await
             .map_err(storage_error)?;
-        if blocked {
-            return Err(invalid(
-                "This summary range already failed deterministically; original path retained",
-            )
-            .hint("Change the range or the summary output limit, or switch the model or connection, to try again"));
+        if failure_memory::blocks(&observed, &identity.0, provider_identity.as_deref()) {
+            let message = match &observed {
+                failure_memory::SlotRead::Exact(saved) if saved == &identity.0 => {
+                    "This summary range already failed deterministically; original path retained"
+                }
+                _ => {
+                    "This provider summary invocation already failed in the current Run/Turn; original path retained"
+                }
+            };
+            return Err(discard::failed(
+                discard::FailureReason::RetrySuppressed,
+                discard::FailureOrigin::Preparation,
+                message,
+            ));
         }
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
@@ -256,17 +281,51 @@ impl Compactor {
         let dispatched = match dispatched {
             Ok(result) => result,
             Err(error) => {
-                let deterministic = discard::cause(&error).deterministic();
-                if deterministic {
+                let cause = discard::cause(&error);
+                let stored_value = if cause.deterministic() {
+                    Some(identity.0.clone())
+                } else if matches!(
+                    cause,
+                    discard::Outcome::Failed {
+                        reason: discard::FailureReason::ProviderError,
+                        origin: discard::FailureOrigin::ProviderResponse,
+                        ..
+                    }
+                ) {
+                    provider_identity.clone()
+                } else {
+                    None
+                };
+                if let Some(value) = stored_value {
                     let thread = snapshot.thread.clone();
                     let proof = snapshot.clone();
+                    let observation = observed.clone();
+                    let cancel = cancel.clone();
+                    let owner_lifetime = self.owner_lifetime.clone();
                     self.database
                         .call(move |db| {
                             let tx = db.transaction()?;
-                            validate(&tx, &proof)?;
-                            remember_failure(&tx, &thread, region, &identity)?;
+                            if cancel.is_cancelled()
+                                || owner_lifetime
+                                    .as_ref()
+                                    .is_some_and(CancellationToken::is_cancelled)
+                            {
+                                tx.rollback()?;
+                                return Ok(false);
+                            }
+                            if let Err(authority) = validate(&tx, &proof) {
+                                match authority {
+                                    StorageError::Operation(_) => {
+                                        tx.rollback()?;
+                                        return Ok(false);
+                                    }
+                                    error => return Err(error),
+                                }
+                            }
+                            let wrote =
+                                remember_failure(&tx, &thread, region, &observation, &value)?;
                             tx.commit()?;
-                            Ok(())
+                            Ok(wrote)
                         })
                         .await
                         .map_err(storage_error)?;
@@ -325,13 +384,32 @@ impl Compactor {
         if projected >= source_chars {
             let thread = snapshot.thread.clone();
             let proof = snapshot.clone();
+            let observation = observed.clone();
+            let cancel = cancel.clone();
+            let owner_lifetime = self.owner_lifetime.clone();
             self.database
                 .call(move |db| {
                     let tx = db.transaction()?;
-                    validate(&tx, &proof)?;
-                    remember_failure(&tx, &thread, region, &identity)?;
+                    if cancel.is_cancelled()
+                        || owner_lifetime
+                            .as_ref()
+                            .is_some_and(CancellationToken::is_cancelled)
+                    {
+                        tx.rollback()?;
+                        return Ok(false);
+                    }
+                    if let Err(authority) = validate(&tx, &proof) {
+                        match authority {
+                            StorageError::Operation(_) => {
+                                tx.rollback()?;
+                                return Ok(false);
+                            }
+                            error => return Err(error),
+                        }
+                    }
+                    let wrote = remember_failure(&tx, &thread, region, &observation, &identity.0)?;
                     tx.commit()?;
-                    Ok(())
+                    Ok(wrote)
                 })
                 .await
                 .map_err(storage_error)?;
@@ -617,7 +695,7 @@ pub(super) enum Region {
     Active,
 }
 impl Region {
-    fn key(self, thread: &str) -> String {
+    pub(super) fn key(self, thread: &str) -> String {
         let kind = match self {
             Self::Closed => "closed",
             Self::Active => "active",
@@ -714,26 +792,22 @@ pub(super) fn remember_failure(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     region: Region,
-    identity: &FailureIdentity,
-) -> Result<(), StorageError> {
-    tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        params![region.key(thread),identity.0])?;
-    Ok(())
+    observed: &failure_memory::SlotRead,
+    value: &str,
+) -> Result<bool, StorageError> {
+    failure_memory::write(tx, &region.key(thread), observed, value)
 }
+#[cfg(test)]
 pub(super) fn same_failed_range(
     db: &rusqlite::Connection,
     thread: &str,
     region: Region,
     identity: &FailureIdentity,
 ) -> Result<bool, StorageError> {
-    let saved: Option<String> = db
-        .query_row(
-            "SELECT value FROM app_meta WHERE key=?1",
-            [region.key(thread)],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(saved.as_deref() == Some(identity.0.as_str()))
+    Ok(matches!(
+        failure_memory::read(db, &region.key(thread))?,
+        failure_memory::SlotRead::Exact(saved) if saved == identity.0
+    ))
 }
 
 /// Fixed model-facing notice for an active-Turn summary (#181): covered tools
@@ -1034,10 +1108,12 @@ mod tests {
             let mut db = rusqlite::Connection::open(&path).unwrap();
             db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
                 .unwrap();
+            let closed = failure_memory::read(&db, &Region::Closed.key("t")).unwrap();
+            let active = failure_memory::read(&db, &Region::Active.key("t")).unwrap();
             let tx = db.transaction().unwrap();
             // A failed reduced request records the captured ORIGINAL identity.
-            remember_failure(&tx, "t", Region::Closed, &original).unwrap();
-            remember_failure(&tx, "t", Region::Active, &smaller).unwrap();
+            remember_failure(&tx, "t", Region::Closed, &closed, &original.0).unwrap();
+            remember_failure(&tx, "t", Region::Active, &active, &smaller.0).unwrap();
             tx.commit().unwrap();
         }
         let mut db = rusqlite::Connection::open(path).unwrap();
@@ -1074,8 +1150,9 @@ mod tests {
             same_failed_range(&db, "t", Region::Closed, &original).unwrap(),
             "success does not invent a failure or overwrite prior evidence"
         );
+        let closed = failure_memory::read(&db, &Region::Closed.key("t")).unwrap();
         let tx = db.transaction().unwrap();
-        remember_failure(&tx, "t", Region::Closed, &smaller).unwrap();
+        remember_failure(&tx, "t", Region::Closed, &closed, &smaller.0).unwrap();
         tx.commit().unwrap();
         assert!(
             !same_failed_range(&db, "t", Region::Closed, &original).unwrap(),

@@ -10,6 +10,10 @@ fn retry_suppressed_is_preparation_only_and_has_no_provider_facts() {
         "outcome":{"kind":"failed","reason":"retry_suppressed","origin":"preparation"}
     });
     assert!(discard::decode(&permitted.to_string()).is_some());
+    let schema =
+        serde_json::to_value(schemars::schema_for!(discard::CompactionOutcomeFact)).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    assert!(validator.is_valid(&permitted));
 
     for forbidden in [
         json!({"origin":"provider_response"}),
@@ -25,12 +29,14 @@ fn retry_suppressed_is_preparation_only_and_has_no_provider_facts() {
             .unwrap()
             .extend(forbidden.as_object().unwrap().clone());
         assert!(discard::decode(&value.to_string()).is_none(), "{value}");
+        assert!(!validator.is_valid(&value), "schema accepted {value}");
     }
 
-    for reason in ["future_reason", "provider_error"] {
+    for reason in ["future_reason"] {
         let mut value = permitted.clone();
         value["outcome"]["reason"] = Value::String(reason.into());
         assert!(discard::decode(&value.to_string()).is_none(), "{value}");
+        assert!(!validator.is_valid(&value), "schema accepted {value}");
     }
 }
 

@@ -78,6 +78,8 @@ pub struct Compactor {
     clients: Arc<HttpClients>,
     database: DbWorker,
     config: Arc<Config>,
+    owner_instance_id: Option<Arc<str>>,
+    owner_lifetime: Option<CancellationToken>,
 }
 #[derive(Clone, Debug)]
 struct Source {
@@ -325,9 +327,24 @@ impl Compactor {
             database,
             config,
             clients,
+            owner_instance_id: None,
+            owner_lifetime: None,
             #[cfg(test)]
             fail_remeasurement: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    pub(crate) fn with_owner_instance(
+        database: DbWorker,
+        config: Arc<Config>,
+        clients: Arc<HttpClients>,
+        owner_instance_id: String,
+        owner_lifetime: CancellationToken,
+    ) -> Self {
+        let mut compactor = Self::with_clients(database, config, clients);
+        compactor.owner_instance_id = Some(Arc::from(owner_instance_id));
+        compactor.owner_lifetime = Some(owner_lifetime);
+        compactor
     }
 
     pub(crate) fn pinned(&self, snapshot: Arc<crate::model::http::ClientSnapshot>) -> Self {

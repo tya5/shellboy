@@ -1,5 +1,101 @@
-//! Test-first contract for the private S2b failure-memory storage boundary.
-//! The typed reader and CAS writer are implemented in the following source commit.
+//! Private bounded storage and compare-and-swap primitives for failure memory.
+use super::*;
+
+pub(super) const SLOT_READ_SQL: &str = "SELECT typeof(value),length(CAST(value AS BLOB)),CASE WHEN typeof(value)='text' AND length(CAST(value AS BLOB))=64 THEN CAST(value AS BLOB) ELSE NULL END FROM app_meta WHERE key=?1";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum SlotRead {
+    Absent,
+    Exact(String),
+    UnknownInvalid,
+}
+
+pub(super) fn read(db: &Connection, key: &str) -> Result<SlotRead, StorageError> {
+    let row: Option<(String, Option<i64>, Option<Vec<u8>>)> = db
+        .query_row(SLOT_READ_SQL, [key], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })
+        .optional()?;
+    let Some((storage_type, byte_length, projected)) = row else {
+        return Ok(SlotRead::Absent);
+    };
+    if storage_type != "text" || byte_length != Some(64) {
+        return Ok(SlotRead::UnknownInvalid);
+    }
+    let Some(value) = projected else {
+        return Ok(SlotRead::UnknownInvalid);
+    };
+    if value.len() != 64
+        || !value
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+    {
+        return Ok(SlotRead::UnknownInvalid);
+    }
+    let Ok(value) = String::from_utf8(value) else {
+        return Ok(SlotRead::UnknownInvalid);
+    };
+    Ok(SlotRead::Exact(value))
+}
+
+pub(super) fn blocks(
+    observed: &SlotRead,
+    failure_identity: &str,
+    provider_key: Option<&str>,
+) -> bool {
+    matches!(observed, SlotRead::Exact(saved) if saved == failure_identity || Some(saved.as_str()) == provider_key)
+}
+
+pub(super) fn write(
+    tx: &rusqlite::Transaction<'_>,
+    key: &str,
+    observed: &SlotRead,
+    value: &str,
+) -> Result<bool, StorageError> {
+    if !valid_digest(value) || matches!(observed, SlotRead::UnknownInvalid) {
+        return Ok(false);
+    }
+    let changed = match observed {
+        SlotRead::Absent => tx.execute(
+            "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO NOTHING",
+            params![key, value],
+        )?,
+        SlotRead::Exact(expected) => tx.execute(
+            "UPDATE app_meta SET value=?3 WHERE key=?1 AND typeof(value)='text' AND length(CAST(value AS BLOB))=64 AND value COLLATE BINARY=?2",
+            params![key, expected, value],
+        )?,
+        SlotRead::UnknownInvalid => 0,
+    };
+    Ok(changed == 1)
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+pub(super) fn provider_turn_key(
+    failure_identity: &str,
+    run_id: &str,
+    turn_id: &str,
+    generation: u64,
+    owner_instance_id: &str,
+) -> String {
+    crate::digest::sha256_hex(
+        serde_json::to_vec(&json!([
+            "compaction-provider-turn-v1",
+            failure_identity,
+            run_id,
+            turn_id,
+            generation,
+            owner_instance_id
+        ]))
+        .expect("provider turn identity serializes"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -17,7 +113,7 @@ mod tests {
         db.execute(
             "INSERT INTO app_meta(key,value) VALUES
              ('exact',?1),('malformed',?2),('uppercase',?3),('oversize',?4),
-             ('blob',?5),('integer',?6),('null',NULL)",
+             ('blob',?5),('integer',?6),('null',NULL),('invalid_utf8',CAST(x'ff' || zeroblob(63) AS TEXT))",
             rusqlite::params![
                 "a".repeat(64),
                 format!("{}g", "a".repeat(63)),
@@ -44,47 +140,123 @@ mod tests {
     }
 
     #[test]
-    fn sql_projection_gates_value_materialization_by_storage_type_and_byte_length() {
-        // This assertion binds the production reader itself to a CASE projection:
-        // only a text value with exactly 64 SQLite bytes may leave the query.
+    fn sql_projection_gates_value_by_type_and_exact_byte_length() {
         assert!(SLOT_READ_SQL.contains("typeof(value)='text'"));
         assert!(SLOT_READ_SQL.contains("length(CAST(value AS BLOB))=64"));
-        assert!(SLOT_READ_SQL.contains("THEN value ELSE NULL END"));
+        assert!(SLOT_READ_SQL.contains("THEN CAST(value AS BLOB) ELSE NULL END"));
+    }
+
+    #[test]
+    fn exact_memory_only_blocks_matching_persistent_or_provider_digest() {
+        let e = "a".repeat(64);
+        let provider = "b".repeat(64);
+        assert!(blocks(&SlotRead::Exact(e.clone()), &e, Some(&provider)));
+        assert!(blocks(
+            &SlotRead::Exact(provider.clone()),
+            &e,
+            Some(&provider)
+        ));
+        assert!(!blocks(
+            &SlotRead::Exact("c".repeat(64)),
+            &e,
+            Some(&provider)
+        ));
+        assert!(!blocks(&SlotRead::UnknownInvalid, &e, Some(&provider)));
+        assert!(!blocks(&SlotRead::Absent, &e, Some(&provider)));
     }
 
     #[test]
     fn cas_insert_and_exact_replacement_misses_preserve_concurrent_values() {
         let mut db = db();
         let tx = db.transaction().unwrap();
-        assert!(write(&tx, "absent", &SlotRead::Absent, &"a".repeat(64)).unwrap());
+        assert!(write(&tx, "slot", &SlotRead::Absent, &"a".repeat(64)).unwrap());
         tx.commit().unwrap();
 
         db.execute(
-            "UPDATE app_meta SET value=?1 WHERE key='absent'",
+            "UPDATE app_meta SET value=?1 WHERE key='slot'",
             [&"b".repeat(64)],
         )
         .unwrap();
         let tx = db.transaction().unwrap();
-        assert!(!write(&tx, "absent", &SlotRead::Absent, &"c".repeat(64)).unwrap());
+        assert!(!write(&tx, "slot", &SlotRead::Absent, &"c".repeat(64)).unwrap());
         tx.commit().unwrap();
-        assert_eq!(
-            read(&db, "absent").unwrap(),
-            SlotRead::Exact("b".repeat(64))
-        );
+        assert_eq!(read(&db, "slot").unwrap(), SlotRead::Exact("b".repeat(64)));
 
         let observed = SlotRead::Exact("b".repeat(64));
         db.execute(
-            "UPDATE app_meta SET value=?1 WHERE key='absent'",
+            "UPDATE app_meta SET value=?1 WHERE key='slot'",
             [&"d".repeat(64)],
         )
         .unwrap();
         let tx = db.transaction().unwrap();
-        assert!(!write(&tx, "absent", &observed, &"e".repeat(64)).unwrap());
+        assert!(!write(&tx, "slot", &observed, &"e".repeat(64)).unwrap());
+        tx.commit().unwrap();
+        assert_eq!(read(&db, "slot").unwrap(), SlotRead::Exact("d".repeat(64)));
+
+        let observed = SlotRead::Exact("d".repeat(64));
+        for replacement in [
+            rusqlite::types::Value::Blob(vec![b'x'; 64]),
+            rusqlite::types::Value::Text("x".repeat(65_536)),
+            rusqlite::types::Value::Text(format!("{}g", "x".repeat(63))),
+            rusqlite::types::Value::Text("X".repeat(64)),
+        ] {
+            db.execute(
+                "UPDATE app_meta SET value=?1 WHERE key='slot'",
+                [&replacement],
+            )
+            .unwrap();
+            let tx = db.transaction().unwrap();
+            assert!(!write(&tx, "slot", &observed, &"f".repeat(64)).unwrap());
+            tx.commit().unwrap();
+            let saved: rusqlite::types::Value = db
+                .query_row("SELECT value FROM app_meta WHERE key='slot'", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(
+                saved, replacement,
+                "replacement must survive stale exact observation"
+            );
+        }
+
+        db.execute("DELETE FROM app_meta WHERE key='slot'", [])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(!write(&tx, "slot", &observed, &"f".repeat(64)).unwrap());
         tx.commit().unwrap();
         assert_eq!(
-            read(&db, "absent").unwrap(),
-            SlotRead::Exact("d".repeat(64))
+            read(&db, "slot").unwrap(),
+            SlotRead::Absent,
+            "stale update cannot resurrect deletion"
         );
+    }
+
+    #[test]
+    fn absent_insert_cas_loses_to_concurrent_valid_or_invalid_row() {
+        let mut db = db();
+        for replacement in [
+            rusqlite::types::Value::Text("a".repeat(64)),
+            rusqlite::types::Value::Text("x".repeat(65_536)),
+            rusqlite::types::Value::Blob(vec![b'x'; 64]),
+            rusqlite::types::Value::Text(format!("{}g", "x".repeat(63))),
+        ] {
+            db.execute(
+                "INSERT INTO app_meta(key,value) VALUES('slot',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [&replacement],
+            ).unwrap();
+            let tx = db.transaction().unwrap();
+            assert!(!write(&tx, "slot", &SlotRead::Absent, &"b".repeat(64)).unwrap());
+            tx.commit().unwrap();
+            let saved: rusqlite::types::Value = db
+                .query_row("SELECT value FROM app_meta WHERE key='slot'", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(
+                saved, replacement,
+                "insert-if-absent must preserve any concurrent row"
+            );
+        }
     }
 
     #[test]
@@ -134,6 +306,10 @@ mod tests {
         assert!(
             base.bytes()
                 .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        );
+        assert_ne!(
+            base,
+            provider_turn_key("other-e", "run", "turn", 4, "owner")
         );
         assert_ne!(
             base,

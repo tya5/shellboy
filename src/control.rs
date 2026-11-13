@@ -345,10 +345,13 @@ impl Control {
         store.index.set_diagnostics(owner.diagnostics.clone());
         store.clients.set_diagnostics(owner.diagnostics.clone());
         let index = store.index.clone();
-        let compactor = crate::compaction::Compactor::with_clients(
+        let owner_lifetime = CancellationToken::new();
+        let compactor = crate::compaction::Compactor::with_owner_instance(
             owner.db.clone(),
             config.clone(),
             store.clients.clone(),
+            owner.instance_id.clone(),
+            owner_lifetime.clone(),
         );
         let attachments = Arc::new(crate::attachments::AttachmentService::new(
             owner.db.clone(),
@@ -393,7 +396,7 @@ impl Control {
             change_clock: Arc::new(change_clock::ChangeClock::new()),
             text_changed: Notify::new(),
             shell_output_changed: Notify::new(),
-            stop: CancellationToken::new(),
+            stop: owner_lifetime,
             diagnostics: owner.diagnostics.clone(),
             storage_failed: AtomicBool::new(false),
             active_requests: AtomicUsize::new(0),
