@@ -305,25 +305,16 @@ impl Compactor {
                     self.database
                         .call(move |db| {
                             let tx = db.transaction()?;
-                            if cancel.is_cancelled()
-                                || owner_lifetime
-                                    .as_ref()
-                                    .is_some_and(CancellationToken::is_cancelled)
-                            {
-                                tx.rollback()?;
-                                return Ok(false);
-                            }
-                            if let Err(authority) = validate(&tx, &proof) {
-                                match authority {
-                                    StorageError::Operation(_) => {
-                                        tx.rollback()?;
-                                        return Ok(false);
-                                    }
-                                    error => return Err(error),
-                                }
-                            }
-                            let wrote =
-                                remember_failure(&tx, &thread, region, &observation, &value)?;
+                            let wrote = remember_failure_qualified(
+                                &tx,
+                                &proof,
+                                &cancel,
+                                owner_lifetime.as_ref(),
+                                &thread,
+                                region,
+                                &observation,
+                                &value,
+                            )?;
                             tx.commit()?;
                             Ok(wrote)
                         })
@@ -390,24 +381,16 @@ impl Compactor {
             self.database
                 .call(move |db| {
                     let tx = db.transaction()?;
-                    if cancel.is_cancelled()
-                        || owner_lifetime
-                            .as_ref()
-                            .is_some_and(CancellationToken::is_cancelled)
-                    {
-                        tx.rollback()?;
-                        return Ok(false);
-                    }
-                    if let Err(authority) = validate(&tx, &proof) {
-                        match authority {
-                            StorageError::Operation(_) => {
-                                tx.rollback()?;
-                                return Ok(false);
-                            }
-                            error => return Err(error),
-                        }
-                    }
-                    let wrote = remember_failure(&tx, &thread, region, &observation, &identity.0)?;
+                    let wrote = remember_failure_qualified(
+                        &tx,
+                        &proof,
+                        &cancel,
+                        owner_lifetime.as_ref(),
+                        &thread,
+                        region,
+                        &observation,
+                        &identity.0,
+                    )?;
                     tx.commit()?;
                     Ok(wrote)
                 })
@@ -797,7 +780,28 @@ pub(super) fn remember_failure(
 ) -> Result<bool, StorageError> {
     failure_memory::write(tx, &region.key(thread), observed, value)
 }
-#[cfg(test)]
+pub(super) fn remember_failure_qualified(
+    tx: &rusqlite::Transaction<'_>,
+    snapshot: &Snapshot,
+    cancel: &CancellationToken,
+    owner_lifetime: Option<&CancellationToken>,
+    thread: &str,
+    region: Region,
+    observed: &failure_memory::SlotRead,
+    value: &str,
+) -> Result<bool, StorageError> {
+    if cancel.is_cancelled() || owner_lifetime.is_some_and(CancellationToken::is_cancelled) {
+        return Ok(false);
+    }
+    if let Err(authority) = validate(tx, snapshot) {
+        return match authority {
+            StorageError::Operation(_) => Ok(false),
+            error => Err(error),
+        };
+    }
+    remember_failure(tx, thread, region, observed, value)
+}
+
 pub(super) fn same_failed_range(
     db: &rusqlite::Connection,
     thread: &str,
