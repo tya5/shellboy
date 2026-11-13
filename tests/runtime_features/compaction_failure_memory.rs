@@ -291,13 +291,14 @@ async fn legal_new_run_reopens_provider_failure_memory() {
         150,
         auth_veto_reply(),
         Some(&first_run),
+        Some(&first_scope.1),
     )
     .await;
+    let all_events = proactive_events(&control, &target).await;
     assert_eq!(
         second, 1,
-        "a legal new Run is not inhibited by the prior Run's provider key"
+        "a distinct live Run/Turn is not inhibited by the prior Run's provider key: {all_events:#?}"
     );
-    let all_events = proactive_events(&control, &target).await;
     let second_attempt = all_events
         .iter()
         .filter(|event| event["metrics"]["summary_usage"]["requests"] == 1)

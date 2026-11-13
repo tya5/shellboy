@@ -4116,7 +4116,8 @@ async fn proactive_third_turn(
     second: u64,
     summary_reply: (u16, Value),
 ) -> usize {
-    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None).await
+    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None, None)
+        .await
 }
 
 async fn proactive_third_turn_after_run(
@@ -4126,6 +4127,7 @@ async fn proactive_third_turn_after_run(
     second: u64,
     summary_reply: (u16, Value),
     prior_run: Option<&str>,
+    prior_turn: Option<&str>,
 ) -> usize {
     for (n, tokens) in [(0, 50), (1, second)] {
         send(control, thread, &format!("task {n}")).await;
@@ -4157,6 +4159,25 @@ async fn proactive_third_turn_after_run(
     let mut summaries = 0;
     loop {
         let next = incoming(control, receive).await;
+        if let (Some(prior_run), Some(prior_turn)) = (prior_run, prior_turn) {
+            let target = thread.to_owned();
+            let scope: (String, String, String) = control.store.database.call(move |db| {
+                db.query_row(
+                    "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
+                    [target],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                ).map_err(Into::into)
+            }).await.unwrap();
+            assert_eq!(scope.2, "live", "provider accounting belongs to a live Run");
+            assert_ne!(
+                scope.0, prior_run,
+                "actual candidate Run differs before accounting"
+            );
+            assert_ne!(
+                scope.1, prior_turn,
+                "actual candidate Turn differs before accounting"
+            );
+        }
         if next.body["tools"] == json!([]) {
             summaries += 1;
             assert!(summaries <= 4, "bounded summary requests");
