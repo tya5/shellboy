@@ -3912,6 +3912,167 @@
         },
         {
           "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "provider_error"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "refused"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  },
+                  "http_status": {
+                    "type": "null"
+                  },
+                  "origin": {
+                    "const": "output_validation"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "empty"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  },
+                  "http_status": {
+                    "type": "null"
+                  },
+                  "origin": {
+                    "const": "output_validation"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "not_shrinking"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  },
+                  "http_status": {
+                    "type": "null"
+                  },
+                  "origin": {
+                    "const": "output_validation"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "cancelled"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  },
+                  "http_status": {
+                    "type": "null"
+                  },
+                  "origin": {
+                    "const": "cancellation"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "unclassified"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  },
+                  "http_status": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ],
           "properties": {
             "final_group_count": {
               "format": "uint64",

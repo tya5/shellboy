@@ -11626,3 +11626,19 @@ records commands/exit codes, generates schema from that source and runs the real
 schema parity test. Failed commands fail the job and logs/artifacts are retained.
 This is source preparation only, not normal/full/three-OS qualification. Applying
 its generated artifact creates a later source SHA requiring its own review/checks.
+
+Hosted source preparation completed successfully on exact source
+`3ff3dc5d415f7d21a40b4772baf1f4155f3f5b3a` in
+[run 43437256151](https://github.com/tya5/shellboy/actions/runs/43437256151).
+Only the source-prepare job ran; toolchain, format, schema generation and the real
+schema/decoder parity test each exited 0 (1 parity test passed, none failed).
+The expected/checkout/event SHA manifest matched. Artifact 14044043449 ZIP digest
+`7f142c3e13396a4c5200a6acad026991e4b3131aee69317d1308825cdf1ae428`
+was verified against downloaded bytes. Its generated schema was adopted byte-for-
+byte: 253656 bytes, SHA256
+`ab9c0873063053b296bb197e41974b269ce8a2974714f6e1f07f72a0a8f8f513`.
+The only semantic JSON delta is the six failed-variant reason conditionals.
+This is artifact-generation/parity evidence, NOT normal/full/three-OS qualification
+of the artifact-adoption commit or a later merged tree. Independent artifact-delta
+review and final exact-source qualification remain required; no local heavy restart
+or earlier SHA's full-suite result is implied.
