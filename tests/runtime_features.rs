@@ -3987,6 +3987,7 @@ pub(super) enum FailureSlotSeed {
     Uppercase64,
     OversizeText,
     Blob,
+    InvalidUtf8,
 }
 
 async fn ax_growing_turn_summary_requests(
@@ -4006,16 +4007,25 @@ async fn ax_growing_turn_summary_requests(
         if let Some(seed) = slot_seed {
             let thread_id = target.clone();
             control.store.database.call(move |db| {
-                let value = match seed {
-                    FailureSlotSeed::Malformed64 => rusqlite::types::Value::Text("g".repeat(64)),
-                    FailureSlotSeed::Uppercase64 => rusqlite::types::Value::Text("A".repeat(64)),
-                    FailureSlotSeed::OversizeText => rusqlite::types::Value::Text("a".repeat(65_536)),
-                    FailureSlotSeed::Blob => rusqlite::types::Value::Blob(vec![0x61; 64]),
-                };
-                db.execute(
-                    "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
-                    rusqlite::params![format!("compact.deterministic_range_failure.closed.{thread_id}"), value],
-                )?;
+                let key = format!("compact.deterministic_range_failure.closed.{thread_id}");
+                if matches!(seed, FailureSlotSeed::InvalidUtf8) {
+                    db.execute(
+                        "INSERT INTO app_meta(key,value) VALUES(?1,CAST(x'ff' || zeroblob(63) AS TEXT))",
+                        [key],
+                    )?;
+                } else {
+                    let value = match seed {
+                        FailureSlotSeed::Malformed64 => rusqlite::types::Value::Text("g".repeat(64)),
+                        FailureSlotSeed::Uppercase64 => rusqlite::types::Value::Text("A".repeat(64)),
+                        FailureSlotSeed::OversizeText => rusqlite::types::Value::Text("a".repeat(65_536)),
+                        FailureSlotSeed::Blob => rusqlite::types::Value::Blob(vec![0x61; 64]),
+                        FailureSlotSeed::InvalidUtf8 => unreachable!(),
+                    };
+                    db.execute(
+                        "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+                        rusqlite::params![key, value],
+                    )?;
+                }
                 Ok(())
             }).await.unwrap();
         }

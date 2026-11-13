@@ -278,6 +278,25 @@ mod tests {
         assert!(!write(&tx, "slot", &observed, &"b".repeat(64)).unwrap());
         tx.commit().unwrap();
         assert_eq!(read(&db, "slot").unwrap(), SlotRead::Exact("a".repeat(64)));
+
+        db.execute("DELETE FROM app_meta WHERE key='slot'", [])
+            .unwrap();
+        db.execute(
+            "INSERT INTO app_meta(key,value) VALUES('slot',CAST(x'ff' || zeroblob(63) AS TEXT))",
+            [],
+        )
+        .unwrap();
+        let invalid_utf8 = read(&db, "slot").unwrap();
+        assert_eq!(invalid_utf8, SlotRead::UnknownInvalid);
+        db.execute(
+            "UPDATE app_meta SET value=?1 WHERE key='slot'",
+            [&"c".repeat(64)],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        assert!(!write(&tx, "slot", &invalid_utf8, &"d".repeat(64)).unwrap());
+        tx.commit().unwrap();
+        assert_eq!(read(&db, "slot").unwrap(), SlotRead::Exact("c".repeat(64)));
     }
 
     #[test]
@@ -325,5 +344,39 @@ mod tests {
             provider_turn_key("e", "run", "turn", 4, "other-owner")
         );
         assert_eq!(base, provider_turn_key("e", "run", "turn", 4, "owner"));
+
+        let e = "e".repeat(64);
+        let stable_f = provider_turn_key(&e, "run", "turn", 4, "owner");
+        assert_ne!(
+            stable_f, e,
+            "provider key uses a separate domain from persistent E"
+        );
+        assert!(blocks(&SlotRead::Exact(e.clone()), &e, Some(&stable_f)));
+        assert!(blocks(
+            &SlotRead::Exact(stable_f.clone()),
+            &e,
+            Some(&stable_f)
+        ));
+        assert!(
+            blocks(&SlotRead::Exact(e.clone()), &e, None),
+            "persistent E remains cross-scope"
+        );
+        assert!(!blocks(&SlotRead::Exact(stable_f.clone()), &e, None));
+
+        for changed_f in [
+            provider_turn_key(&e, "other-run", "turn", 4, "owner"),
+            provider_turn_key(&e, "run", "other-turn", 4, "owner"),
+            provider_turn_key(&e, "run", "turn", 5, "owner"),
+            provider_turn_key(&e, "run", "turn", 4, "other-owner"),
+            provider_turn_key(&"f".repeat(64), "run", "turn", 4, "owner"),
+        ] {
+            assert_ne!(stable_f, changed_f);
+            assert!(!blocks(
+                &SlotRead::Exact(stable_f.clone()),
+                &e,
+                Some(&changed_f)
+            ));
+        }
+        assert!(!blocks(&SlotRead::UnknownInvalid, &e, Some(&stable_f)));
     }
 }

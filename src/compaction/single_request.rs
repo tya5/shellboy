@@ -1159,6 +1159,33 @@ mod tests {
             "same-kind overwrite deliberately has no permanent-history guarantee"
         );
         assert!(same_failed_range(&db, "t", Region::Active, &smaller).unwrap());
+        let original_e = failure_identity("t", &snapshot, 0..3, limit).unwrap();
+        let mut later_run_same_snapshot = snapshot.clone();
+        later_run_same_snapshot.run_fence = Some("legal-later-run".into());
+        later_run_same_snapshot.turn_fence = Some(("its-own-current-turn".into(), 7));
+        assert_eq!(
+            original_e.0,
+            failure_identity("t", &later_run_same_snapshot, 0..3, limit)
+                .unwrap()
+                .0,
+            "real Run/Turn/generation lifetime is provider scope, not deterministic E"
+        );
+        let original_provider_key = failure_memory::provider_turn_key(
+            &original_e.0,
+            "first-run",
+            "first-turn",
+            6,
+            "same-owner",
+        );
+        let reopened_provider_key = failure_memory::provider_turn_key(
+            &original_e.0,
+            "legal-later-run",
+            "its-own-current-turn",
+            7,
+            "same-owner",
+        );
+        assert_ne!(original_provider_key, reopened_provider_key);
+
         let mut changed_endpoints = snapshot.clone();
         changed_endpoints.groups[0].sources[0].id = "different-first-source".into();
         assert_ne!(

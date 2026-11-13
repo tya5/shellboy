@@ -182,6 +182,11 @@ async fn unknown_slot_values_allow_provider_calls_and_remain_untouched() {
         (FailureSlotSeed::Uppercase64, "text", vec![b'A'; 64]),
         (FailureSlotSeed::OversizeText, "text", vec![b'a'; 65_536]),
         (FailureSlotSeed::Blob, "blob", vec![b'a'; 64]),
+        (
+            FailureSlotSeed::InvalidUtf8,
+            "text",
+            [vec![0xff], vec![0; 63]].concat(),
+        ),
     ];
     for (seed, expected_type, expected_bytes) in cases {
         let result = ax_growing_turn_summary_requests(auth_veto_reply, 0, Some(seed)).await;
