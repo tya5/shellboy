@@ -4441,3 +4441,29 @@ command/exit-code evidence and retained artifacts. Standard native jobs are disa
 for this mode; its job name cannot satisfy the existing three-native-job reuse gate.
 It grants no deployment or landing authority. The generated artifact must enter a
 new reviewed source SHA before standard/all-OS qualification; no old green transfers.
+
+### #301 S1b Stream Terminal Witness
+
+S1b implements only the reviewed shared raw-stream terminal recognition and
+provider-status provenance extension to the existing S1a Failed fact. The witness
+is an owned exact three-ASCII-digit `error.code` string, range100..599, with the
+closed `stream_error_code` source. It is not HTTP status, Retry-After, a quota
+parser input, context-limit inference, prose matching or retry authority. Duplicate
+relevant keys withhold the pair while preserving terminality. First complete
+terminal wins over same/later chunk suffix; preterminal malformed/oversize input
+remains the original failure and existing byte cap applies to consumed prefix only.
+Responses adds absent-type/top-level nonnull error object/string recognition;
+Chat's existing nonnull-error terminal behavior is preserved, not reclassified as
+new. Genuine EOF retry/partial/tool behavior is unchanged. S2 still owns halving/
+input-refusal policy and S3 owns adoption/path/epoch changes.
+
+### #301 S1b Authenticated Stream Status Projection
+
+The S1b witness crosses only the trusted stream parser -> private ModelError
+capability -> source-owned outcome path. Its numeric provider assertion is
+independent from actual HTTP status and never feeds transient retry, Retry-After,
+quota gating or context-limit classification. Both pair fields are serialized
+only together on the existing provider_error/provider_response failed fact and
+are checked by the same bounded decoder/schema. Deserializing a saved ModelError
+cannot restore a live parser witness. Partial output, completed tool IDs, usage
+knownness, attempt identity and recovery CAS retain their existing rules.

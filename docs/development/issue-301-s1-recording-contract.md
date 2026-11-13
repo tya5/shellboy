@@ -163,3 +163,45 @@ only the final observation adds phase and elapsed measurements.
 Machine evidence must name the exact test/command/exit/source SHA and distinguish
 setup failures from intended missing-fact REDs. Original REDs remain preserved
 in a test-only commit. No parent metadata CI result qualifies a new S1 commit.
+
+## S1b Stream Error Provenance (Extension Of The Same Fact)
+
+For a terminal stream provider error only, the existing Failed outcome may also
+carry an optional paired witness:
+
+```text
+provider_status?: 100..599
+provider_status_source?: stream_error_code
+```
+
+The pair is issued only by bounded raw SSE parsing of an error object's `code`
+string containing exactly three ASCII digits in range. It is not coerced from JSON
+numbers, HTTP response status, another `status` member, Retry-After, nested causes
+or provider prose. Both members are present together or both absent; the pair is
+valid only for `provider_error` / `provider_response`. Missing, malformed or
+ambiguous duplicate relevant keys omit this optional witness. The actual HTTP
+status remains separate in `http_status`; HTTP200 plus embedded provider400 means
+both values are recorded independently. The source enum is closed and no arbitrary
+provider code/message enters the public fact.
+
+The witness lives in the same bounded compaction_outcome fact and passes the same
+strict schema/decoder cross-field validation at status page/point, compact.list,
+thread.get and the single diagnostic event. ModelError retains a privately owned
+witness across the actual parsing/error/save path; saved/deserialized provider
+JSON cannot mint parser/retry authority. S1b changes only raw stream terminal
+recognition and this bounded provenance: retry classification, actual-header rate
+gating, partial-output policy, summary range/trial logic, suppression slots,
+adoption/path/epoch/cancellation authority and owner boundaries stay unchanged.
+
+Unrecognized Responses untyped terminal envelopes become terminal at the raw
+frame boundary; Chat preserves its already-terminal nonnull-error behavior and
+adds equivalent bounded status provenance. Genuine EOF without an error envelope
+keeps the existing retry vector. S2 owns reviewed range shrink/halving; S3 owns
+adoption relaxation. Numeric400 is not context-limit classification.
+
+The downstream S1b stream terminal witness is the same typed optional addition;
+its exact source boundary, event ordering, status pair, retry/partial preservation,
+negative vectors and S2/S3 exclusions are specified in the reviewed S1b stream
+error contract. The generated protocol schema must be regenerated from the real
+`protocol::schema_json()` after that source change; do not hand-maintain a divergent
+copy. No old raw record backfill is added.

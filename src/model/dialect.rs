@@ -164,15 +164,38 @@ impl Stream {
         }
         let (chunks, error) = match chat.decoder.decode(
             bytes,
-            |value| value.get("error").is_some_and(|error| !error.is_null()),
+            |decoded| {
+                decoded
+                    .value
+                    .get("error")
+                    .is_some_and(|error| !error.is_null())
+                    || (decoded.untyped_error_candidate && decoded.value.get("type").is_none())
+            },
             true,
         ) {
             Ok(chunks) => (chunks, None),
             Err(failure) => (failure.events, Some(failure.error)),
         };
         let mut events = Vec::new();
-        for chunk in chunks {
-            let converted = chat.item(&chunk);
+        for decoded in chunks {
+            let provider_status = crate::model::stream_error::status_from_event(
+                &decoded.value,
+                decoded.duplicate_relevant_key,
+            );
+            let has_error = decoded
+                .value
+                .get("error")
+                .is_some_and(|error| !error.is_null())
+                || decoded.untyped_error_candidate;
+            let duplicate_untyped_null = decoded.untyped_error_candidate
+                && decoded.value.get("type").is_none()
+                && decoded.value.get("error").is_none_or(Value::is_null);
+            let chunk = decoded.value;
+            let converted = if duplicate_untyped_null {
+                Ok(vec![json!({"type":"error","error":null})])
+            } else {
+                chat.item(&chunk)
+            };
             if let Some(usage) = &chat.usage {
                 // Usage can arrive before DONE; retain reported facts if transport ends.
                 self.inner.failed_response = Some(
@@ -182,6 +205,9 @@ impl Stream {
             for event in converted? {
                 let wire = format!("data: {}\n\n", event);
                 events.extend(self.inner.push(wire.as_bytes())?);
+                if has_error {
+                    self.inner.attach_stream_provider_status(provider_status);
+                }
             }
         }
         if let Some(error) = error {
@@ -216,14 +242,15 @@ impl Stream {
         }
         let (chunks, error) = match messages.decoder.decode(
             bytes,
-            |value| value["type"] == "error" || value["type"] == "message_stop",
+            |decoded| decoded.value["type"] == "error" || decoded.value["type"] == "message_stop",
             true,
         ) {
             Ok(chunks) => (chunks, None),
             Err(failure) => (failure.events, Some(failure.error)),
         };
         let mut events = Vec::new();
-        for chunk in chunks {
+        for decoded in chunks {
+            let chunk = decoded.value;
             let converted = messages.item(&chunk);
             if let Some(usage) = messages.usage() {
                 // Usage can arrive before the end; keep reported facts if the transport ends.

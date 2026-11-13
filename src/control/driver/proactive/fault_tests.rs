@@ -1043,8 +1043,22 @@ async fn send(control: &Arc<Control>, thread: &str, text: &str) {
 }
 
 async fn proactive_owner(root: &std::path::Path, url: &str, extra: &str) -> DataOwner {
+    proactive_owner_retries(root, url, extra, 0, false).await
+}
+async fn proactive_owner_retries(
+    root: &std::path::Path,
+    url: &str,
+    extra: &str,
+    retries: u32,
+    chat: bool,
+) -> DataOwner {
     let config = root.join("config.toml");
-    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries=0\n{extra}")).unwrap();
+    let api = if chat {
+        "api=\"chat_completions\"\n"
+    } else {
+        ""
+    };
+    std::fs::write(&config,format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\n{api}base_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=1\n{extra}")).unwrap();
     DataOwner::start(Some(config), Some(root.join("data")), root.into())
         .await
         .unwrap()
@@ -1055,10 +1069,14 @@ fn answer_with_usage(text: &str, input_tokens: u64) -> Value {
         json!({"input_tokens":input_tokens,"output_tokens":1,"total_tokens":input_tokens+1});
     body
 }
+fn chat_answer_with_usage(text: &str, input_tokens: u64) -> Value {
+    json!({"id":uuid::Uuid::new_v4().to_string(),"choices":[{"index":0,"message":{"role":"assistant","content":text},"finish_reason":"stop"}],"usage":{"prompt_tokens":input_tokens,"completion_tokens":1,"total_tokens":input_tokens+1}})
+}
 
 struct Incoming {
     body: Value,
     reply: oneshot::Sender<(u16, Value)>,
+    release: Option<oneshot::Sender<()>>,
 }
 async fn proxy() -> (
     String,
@@ -1096,12 +1114,30 @@ async fn proxy() -> (
                     }
                 };
                 let (reply, receive) = oneshot::channel();
-                if send.send(Incoming { body, reply }).await.is_err() {
+                let (release, wait_release) = oneshot::channel();
+                if send
+                    .send(Incoming {
+                        body,
+                        reply,
+                        release: Some(release),
+                    })
+                    .await
+                    .is_err()
+                {
                     return;
                 }
                 if let Ok((status, body)) = receive.await {
-                    let body = body.to_string();
-                    let _ = stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
+                    if let Some(raw) = body.get("_test_sse_body").and_then(Value::as_str) {
+                        let hold = body["_test_hold_sse_open"] == true;
+                        let connection = if hold { "keep-alive" } else { "close" };
+                        let _ = stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: text/event-stream\r\nConnection: {connection}\r\n\r\n{raw}").as_bytes()).await;
+                        if hold {
+                            let _ = wait_release.await;
+                        }
+                    } else {
+                        let body = body.to_string();
+                        let _ = stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).as_bytes()).await;
+                    }
                 }
             });
         }

@@ -389,6 +389,8 @@ impl Compactor {
                         reason: discard::FailureReason::Unclassified,
                         origin: discard::FailureOrigin::Preparation,
                         http_status: None,
+                        provider_status: None,
+                        provider_status_source: None,
                         final_group_count: None,
                         final_source_nodes: None,
                     },
@@ -401,6 +403,8 @@ impl Compactor {
                     reason: discard::FailureReason::Unclassified,
                     origin: discard::FailureOrigin::Preparation,
                     http_status: None,
+                    provider_status: None,
+                    provider_status_source: None,
                     final_group_count: None,
                     final_source_nodes: None,
                 },
@@ -503,6 +507,8 @@ impl Compactor {
                                         .facts
                                         .status
                                         .filter(|s| (100..=599).contains(s)),
+                                    provider_status: None,
+                                    provider_status_source: None,
                                     final_group_count: Some(groups as u64).filter(|n| *n > 0),
                                     final_source_nodes: Some(nodes).filter(|n| *n > 0),
                                 },

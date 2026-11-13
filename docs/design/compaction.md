@@ -1523,3 +1523,12 @@ defines its closed rejection/failure union, bounds, privacy and paired controls.
 Existing item reason/state and separately sanitized usage retain their meanings.
 No public provider code/message, old-name alias, historical fact reconstruction,
 progress heartbeat or adoption/retry/suppression change is introduced.
+
+S1b extends the same bounded outcome only with a paired stream-origin numeric
+provider status/source. It records exact three-ASCII-digit `error.code` values
+100..599 from an accepted SSE terminal frame; it never maps that embedded number
+to actual HTTP status, context-limit policy, quota/header cooldown or prose-derived
+classification. Missing, malformed or ambiguous code yields no pair. HTTP status
+and stream provider status remain independent. The immutable S1b producer/parser,
+first-terminal byte boundary, closed pair schema and retry-preservation contract is
+documented in [the recording contract](../development/issue-301-s1-recording-contract.md#s1b-stream-error-provenance-extension-of-the-same-fact).

@@ -4071,6 +4071,186 @@
                   }
                 }
               }
+            },
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "properties": {
+                      "provider_status": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "provider_status"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "provider_status_source": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "provider_status_source"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "properties": {
+                  "origin": {
+                    "const": "provider_response"
+                  },
+                  "provider_status": {
+                    "maximum": 599,
+                    "minimum": 100,
+                    "type": "integer"
+                  },
+                  "provider_status_source": {
+                    "const": "stream_error_code"
+                  },
+                  "reason": {
+                    "const": "provider_error"
+                  }
+                },
+                "required": [
+                  "provider_status",
+                  "provider_status_source"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "context_limit_terminal"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "refused"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "empty"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "not_shrinking"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "cancelled"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "unclassified"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
             }
           ],
           "properties": {
@@ -4107,6 +4287,25 @@
             },
             "origin": {
               "$ref": "#/definitions/FailureOrigin"
+            },
+            "provider_status": {
+              "format": "uint16",
+              "maximum": 599,
+              "minimum": 100,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "provider_status_source": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/StreamProviderStatusSource"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "reason": {
               "$ref": "#/definitions/FailureReason"
@@ -7498,6 +7697,12 @@
       ],
       "title": "StorageStatus",
       "type": "object"
+    },
+    "StreamProviderStatusSource": {
+      "enum": [
+        "stream_error_code"
+      ],
+      "type": "string"
     },
     "ThreadArchiveArgs": {
       "additionalProperties": false,

@@ -2,6 +2,41 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t10_responses_untyped_error_is_terminal_with_separate_status_provenance() {
+    terminal_public_case("sse_terminal_responses").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t10_responses_embedded_429_over_http_200_does_not_become_rate_status() {
+    terminal_public_case("sse_terminal_429_responses").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t10_chat_untyped_error_preserves_terminal_status_provenance() {
+    terminal_public_case("sse_terminal_chat").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t11_responses_genuine_eof_retains_bounded_retry_vector() {
+    terminal_public_case("sse_eof_responses").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t11_responses_genuine_eof_with_zero_retry_budget_posts_once() {
+    terminal_public_case("sse_eof_r0_responses").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t11_chat_genuine_eof_with_zero_retry_budget_posts_once() {
+    terminal_public_case("sse_eof_r0_chat").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn t11_chat_genuine_eof_retains_bounded_retry_vector() {
+    terminal_public_case("sse_eof_chat").await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn t5_provider_failure_has_one_public_outcome() {
     terminal_public_case("provider").await;
 }
@@ -28,24 +63,72 @@ async fn t5_provider_500_preserves_zero_retry_budget() {
 
 async fn terminal_public_case(case: &str) {
     let context = case == "context";
+    let sse_terminal = matches!(
+        case,
+        "sse_terminal_responses" | "sse_terminal_chat" | "sse_terminal_429_responses"
+    );
+    let sse_eof = case.starts_with("sse_eof_");
+    let zero_retry_eof = case.contains("_r0_");
+    let stream_case = sse_terminal || sse_eof;
+    let chat_api = case.ends_with("_chat");
+    let retry_limit = if stream_case && !zero_retry_eof { 2 } else { 0 };
+    let embedded_status = if case == "sse_terminal_429_responses" {
+        429
+    } else {
+        400
+    };
+    let expected_summary_posts = if context || (sse_eof && !zero_retry_eof) {
+        3
+    } else {
+        1
+    };
     crate::test_watchdog::watchdog("S1 public terminal contract", async {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
-        let owner = proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
+        let owner = if stream_case {
+            proactive_owner_retries(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n", retry_limit, chat_api).await
+        } else {
+            proactive_owner(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await
+        };
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
+        let first = |text: &str, input| if chat_api { chat_answer_with_usage(text, input) } else { answer_with_usage(text, input) };
         send(&control, &target, &"A".repeat(8192)).await;
-        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage(&"C".repeat(8192), 100))).unwrap();
+        let initial = incoming(&control, &mut receive).await;
+        initial.reply.send((200, first(&"C".repeat(8192), 100))).unwrap();
         settled(&control, &target).await;
         send(&control, &target, &"B".repeat(8192)).await;
-        incoming(&control, &mut receive).await.reply.send((200, answer_with_usage(&"D".repeat(8192), 200))).unwrap();
+        let initial = incoming(&control, &mut receive).await;
+        initial.reply.send((200, first(&"D".repeat(8192), 200))).unwrap();
         settled(&control, &target).await;
         send(&control, &target, "trigger summary").await;
         let mut summary_posts = 0;
+        let mut held_sse_release = None;
         loop {
-            let next = incoming(&control, &mut receive).await;
-            if next.body["tools"] == json!([]) {
+            let mut next = incoming(&control, &mut receive).await;
+            let automatic_summary = if chat_api {
+                next.body.get("tools").and_then(Value::as_array).is_none_or(Vec::is_empty)
+            } else {
+                next.body["tools"] == json!([])
+            };
+            if automatic_summary {
                 summary_posts += 1;
+                if sse_terminal || sse_eof {
+                    let raw = if sse_eof {
+                        if chat_api {
+                            String::from("data: {\"id\":\"eof\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}\n\n")
+                        } else {
+                            String::from("data: {\"type\":\"response.created\",\"response\":{\"id\":\"eof\",\"status\":\"in_progress\"}}\n\n")
+                        }
+                    } else {
+                        format!("data: {{\"error\":{{\"code\":\"{embedded_status}\",\"message\":\"SECRET_PROVIDER_MESSAGE\"}}}}\n\n")
+                    };
+                    if !sse_eof {
+                        held_sse_release = next.release.take();
+                    }
+                    next.reply.send((200,json!({"_test_sse_body":raw,"_test_hold_sse_open":!sse_eof}))).unwrap();
+                    continue;
+                }
                 let code = if context { "context_length_exceeded" } else { "SECRET_PROVIDER_CODE" };
                 let response = if case == "protocol" {
                     (200, json!({"status":"completed","output":"SECRET_PROVIDER_MESSAGE"}))
@@ -54,7 +137,11 @@ async fn terminal_public_case(case: &str) {
                 };
                 next.reply.send(response).unwrap();
             } else {
-                next.reply.send((200, answer_with_usage("conversation continues", 10))).unwrap();
+                if let Some(release) = held_sse_release.take() {
+                    let _ = release.send(());
+                }
+                let response = if chat_api { chat_answer_with_usage("conversation continues", 10) } else { answer_with_usage("conversation continues", 10) };
+                next.reply.send((200, response)).unwrap();
                 break;
             }
         }
@@ -74,18 +161,24 @@ async fn terminal_public_case(case: &str) {
         owner.shutdown().await.unwrap();
         server.abort();
         let log = std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
-        assert_eq!(summary_posts, if context {3} else {1}, "fixed original-source admission vector");
+        assert_eq!(summary_posts, expected_summary_posts, "fixed original-source admission vector");
         eprintln!("paired pre-S1 vector case={case}: summary_posts={summary_posts}");
-        let expected = match case { "context" => "context_limit_terminal", "protocol" => "unclassified", _ => "provider_error" };
+        let expected = match case { "context" => "context_limit_terminal", "protocol" | "sse_eof_responses" | "sse_eof_chat" | "sse_eof_r0_responses" | "sse_eof_r0_chat" => "unclassified", _ => "provider_error" };
         let items = list["items"].as_array().unwrap();
         let item = items.iter().find(|v| v["kind"] == "automatic_reduction").expect("real automatic attempt must remain listed");
         let fact = &item["compaction_outcome"];
         assert_eq!(fact["outcome"]["kind"], "failed", "missing classified terminal public fact: {list:#}");
         assert_eq!(fact["outcome"]["reason"], expected);
         assert_eq!(fact["phase"], "closed_summary");
-        assert_eq!(fact["outcome"]["origin"], if case == "protocol" { "protocol" } else { "provider_response" });
-        if case == "protocol" {
+        assert_eq!(fact["outcome"]["origin"], if expected == "unclassified" { "protocol" } else { "provider_response" });
+        if sse_terminal {
+            assert_eq!(fact["outcome"]["http_status"], 200);
+            assert_eq!(fact["outcome"]["provider_status"], embedded_status);
+            assert_eq!(fact["outcome"]["provider_status_source"], "stream_error_code");
+        } else if case == "protocol" || sse_eof {
             assert!(fact["outcome"].get("http_status").is_none());
+            assert!(fact["outcome"].get("provider_status").is_none());
+            assert!(fact["outcome"].get("provider_status_source").is_none());
         } else {
             assert_eq!(fact["outcome"]["http_status"], match case { "context" => 400, "provider429" => 429, "provider500" => 500, _ => 401 });
         }

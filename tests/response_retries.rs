@@ -2801,3 +2801,96 @@ async fn successful_connection_probe_releases_queued_threads_without_serializing
     .unwrap();
     fixture.close().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn terminal_sse_error_vetoes_partial_retries_but_preserves_partial_facts() {
+    for retry_partial in [false, true] {
+        let mut fixture = Fixture::with_partial_policy(2, 1, 5_000, retry_partial).await;
+        let partial = format!(
+            "data: {}\n\ndata: {}\n\ndata: {}\n\n",
+            json!({"type":"response.output_text.delta","delta":"visible partial text"}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"partial-call","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
+            json!({"error":{"code":"400","message":"SECRET_STREAM_ERROR"}}),
+        );
+        fixture
+            .incoming()
+            .await
+            .reply
+            .send(Reply::partial(&partial, false))
+            .ok()
+            .unwrap();
+        assert_eq!(fixture.settled().await, "recovery_wait");
+        let attempts = fixture.attempts().await;
+        assert_eq!(
+            attempts.len(),
+            1,
+            "terminal stream failure cannot retry under either partial policy"
+        );
+        let failure = attempts[0].1.as_ref().unwrap();
+        assert_eq!(failure["partial_text"], "visible partial text");
+        assert_eq!(failure["completed_items"]["0"]["call_id"], "partial-call");
+        assert_eq!(failure["error"]["stream_provider_status"]["value"], 400);
+        assert_eq!(
+            failure["error"]["stream_provider_status"]["source"],
+            "stream_error_code"
+        );
+        let tools: i64 = fixture
+            .control
+            .store
+            .database
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            tools, 0,
+            "partial completed tool items are recorded but never executed"
+        );
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn genuine_eof_partial_output_obeys_retry_partial_and_never_executes_saved_tools() {
+    for (retry_partial, expected_attempts) in [(false, 1usize), (true, 3usize)] {
+        let mut fixture = Fixture::with_partial_policy(2, 1, 5_000, retry_partial).await;
+        let body = format!(
+            "data: {}\n\ndata: {}\n\n",
+            json!({"type":"response.output_text.delta","delta":"S1B_PARTIAL_SENTINEL"}),
+            json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"S1B_PARTIAL_CALL","name":"shell","arguments":"{\"command\":\"echo never\"}"}}),
+        );
+        for _ in 0..expected_attempts {
+            let request = fixture.incoming().await;
+            assert!(!request.body.to_string().contains("S1B_PARTIAL_SENTINEL"));
+            assert!(!request.body.to_string().contains("S1B_PARTIAL_CALL"));
+            request
+                .reply
+                .send(Reply::http(200, "text/event-stream", &body, ""))
+                .ok()
+                .unwrap();
+        }
+        assert_eq!(fixture.settled().await, "recovery_wait");
+        let attempts = fixture.attempts().await;
+        assert_eq!(attempts.len(), expected_attempts);
+        let last = attempts.last().unwrap().1.as_ref().unwrap();
+        assert_eq!(last["partial_text"], "S1B_PARTIAL_SENTINEL");
+        assert_eq!(last["completed_items"]["0"]["call_id"], "S1B_PARTIAL_CALL");
+        let tool_executions: i64 = fixture
+            .control
+            .store
+            .database
+            .call(|db| {
+                Ok(db.query_row("SELECT count(*) FROM shell_execution", [], |row| row.get(0))?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            tool_executions, 0,
+            "partial completed tool items are retained but not run"
+        );
+        fixture.no_more_requests().await;
+        fixture.close().await;
+    }
+}

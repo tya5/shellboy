@@ -6,6 +6,8 @@ pub mod dialect;
 pub mod http;
 pub mod opaque;
 mod reconcile;
+mod stream_error;
+pub use stream_error::{StreamProviderStatus, StreamProviderStatusSource};
 pub(crate) mod retry_class;
 pub mod usage_limit;
 pub mod wire_bytes;
@@ -75,6 +77,8 @@ pub struct ModelError {
     pub provider_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<u16>,
+    #[serde(default, skip_deserializing, skip_serializing_if = "Option::is_none")]
+    pub(crate) stream_provider_status: Option<StreamProviderStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub http_observation: Option<Box<http::HttpObservation>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -89,6 +93,7 @@ impl ModelError {
             status: None,
             http_observation: None,
             usage_limit: None,
+            stream_provider_status: None,
         }
     }
     pub fn is_context_limit(&self) -> bool {
@@ -146,6 +151,7 @@ impl ModelError {
                 .collect(),
             provider_code: error.get("code").and_then(Value::as_str).map(str::to_owned),
             status,
+            stream_provider_status: None,
             http_observation: None,
             usage_limit: usage_limit::UsageLimit::parse_for_status(
                 value,
@@ -154,6 +160,19 @@ impl ModelError {
             )
             .map(Box::new),
         }
+    }
+
+    fn stream_provider(event: &Value, duplicate_relevant_key: bool) -> Self {
+        let kind = event.get("type").and_then(Value::as_str);
+        let payload = if matches!(kind, Some("response.failed" | "response.incomplete")) {
+            event.get("response").unwrap_or(event)
+        } else {
+            event
+        };
+        let mut error = Self::provider(None, payload);
+        error.stream_provider_status =
+            stream_error::status_from_event(event, duplicate_relevant_key);
+        error
     }
 }
 
@@ -508,9 +527,15 @@ impl ModelResponse {
     }
 }
 
+#[derive(Clone)]
+struct DecodedEvent {
+    value: Value,
+    duplicate_relevant_key: bool,
+    untyped_error_candidate: bool,
+}
 struct DecodeFailure {
     error: ModelError,
-    events: Vec<Value>,
+    events: Vec<DecodedEvent>,
 }
 
 #[derive(Debug, Default)]
@@ -518,6 +543,7 @@ pub struct SseDecoder {
     line: Vec<u8>,
     data: Vec<u8>,
     total: usize,
+    parsed_total: usize,
     after_cr: bool,
     first_line_seen: bool,
     json_events: usize,
@@ -526,22 +552,24 @@ pub struct SseDecoder {
 impl SseDecoder {
     pub fn push(&mut self, bytes: &[u8]) -> Result<Vec<Value>, ModelError> {
         self.push_until(bytes, |_| false)
+            .map(|events| events.into_iter().map(|event| event.value).collect())
             .map_err(|failure| failure.error)
     }
     /// Stop at a complete terminal frame before interpreting any trailing bytes.
     fn push_until(
         &mut self,
         bytes: &[u8],
-        mut terminal: impl FnMut(&Value) -> bool,
-    ) -> Result<Vec<Value>, DecodeFailure> {
+        mut terminal: impl FnMut(&DecodedEvent) -> bool,
+    ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
         self.decode(bytes, &mut terminal, false)
     }
     fn decode(
         &mut self,
         bytes: &[u8],
-        mut terminal: impl FnMut(&Value) -> bool,
+        mut terminal: impl FnMut(&DecodedEvent) -> bool,
         stop_done: bool,
-    ) -> Result<Vec<Value>, DecodeFailure> {
+    ) -> Result<Vec<DecodedEvent>, DecodeFailure> {
+        let mut events = Vec::new();
         self.total = self
             .total
             .checked_add(bytes.len())
@@ -549,14 +577,20 @@ impl SseDecoder {
                 error: ModelError::new("input_limit", "Response length overflow"),
                 events: vec![],
             })?;
-        if self.total > MAX_RESPONSE_BYTES {
-            return Err(DecodeFailure {
-                error: ModelError::new("input_limit", "Response byte limit exceeded"),
-                events: vec![],
-            });
-        }
-        let mut events = Vec::new();
         for &byte in bytes {
+            let Some(parsed_total) = self.parsed_total.checked_add(1) else {
+                return Err(DecodeFailure {
+                    error: ModelError::new("input_limit", "Response length overflow"),
+                    events,
+                });
+            };
+            self.parsed_total = parsed_total;
+            if self.parsed_total > MAX_RESPONSE_BYTES {
+                return Err(DecodeFailure {
+                    error: ModelError::new("input_limit", "Response byte limit exceeded"),
+                    events,
+                });
+            }
             if self.after_cr {
                 self.after_cr = false;
                 if byte == b'\n' {
@@ -587,21 +621,27 @@ impl SseDecoder {
                 if !self.data.is_empty() {
                     self.data.pop();
                     if self.data != b"[DONE]" {
-                        let event = match serde_json::from_slice(&self.data) {
-                            Ok(event) => event,
-                            Err(_) => {
-                                return Err(DecodeFailure {
-                                    error: ModelError::new(
-                                        "protocol",
-                                        "Malformed UTF-8/JSON in SSE",
-                                    ),
-                                    events,
-                                });
-                            }
-                        };
+                        let (event, duplicate_relevant_key, untyped_error_candidate) =
+                            match stream_error::parse_frame(&self.data) {
+                                Ok(parsed) => parsed,
+                                Err(_) => {
+                                    return Err(DecodeFailure {
+                                        error: ModelError::new(
+                                            "protocol",
+                                            "Malformed UTF-8/JSON in SSE",
+                                        ),
+                                        events,
+                                    });
+                                }
+                            };
                         self.json_events += 1;
-                        let stop = terminal(&event);
-                        events.push(event);
+                        let decoded = DecodedEvent {
+                            value: event,
+                            duplicate_relevant_key,
+                            untyped_error_candidate,
+                        };
+                        let stop = terminal(&decoded);
+                        events.push(decoded);
                         if stop {
                             self.data.clear();
                             break;
@@ -698,26 +738,30 @@ impl ResponseStream {
         if self.terminal.is_some() {
             return Ok(Vec::new());
         }
-        let decoded = self.decoder.push_until(bytes, |event| {
+        let decoded = self.decoder.push_until(bytes, |decoded| {
+            let event = &decoded.value;
             matches!(
                 event.get("type").and_then(Value::as_str),
                 Some("response.completed" | "response.failed" | "response.incomplete" | "error")
-            )
+            ) || stream_error::recognized_untyped_error(event)
+                || (decoded.untyped_error_candidate && event.get("type").is_none())
         });
-        let (events, decode_error) = match decoded {
+        let (decoded_events, decode_error) = match decoded {
             Ok(events) => (events, None),
             Err(failure) => (failure.events, Some(failure.error)),
         };
         if decode_error.is_some() {
-            self.failed_response = events
+            self.failed_response = decoded_events
                 .iter()
                 .rev()
-                .find_map(|event| event.get("response"))
+                .find_map(|event| event.value.get("response"))
                 .cloned();
         }
+        let mut events = Vec::with_capacity(decoded_events.len());
         // Apply the valid prefix before returning a later frame decode failure.
-        for event in &events {
-            let classification = classify_stream_event(event);
+        for decoded in decoded_events {
+            let event = decoded.value;
+            let classification = classify_stream_event(&event);
             self.output_observed |= classification != StreamEventKind::Metadata;
             if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                 match classification {
@@ -786,27 +830,39 @@ impl ResponseStream {
                     self.terminal = Some(Ok(response.clone()));
                 }
                 Some("response.failed" | "response.incomplete") => {
-                    let response = event.get("response").unwrap_or(event);
+                    let response = event.get("response").unwrap_or(&event);
                     self.failed_response = Some(response.clone());
                     let error = if response.get("error").is_some_and(|v| !v.is_null()) {
-                        ModelError::provider(None, response)
-                    } else {
-                        if event.get("type").and_then(Value::as_str) == Some("response.incomplete")
-                        {
-                            output_limit_error(response).unwrap_or_else(|| {
-                                ModelError::new("incomplete", "Proxy did not complete response")
-                            })
-                        } else {
+                        ModelError::stream_provider(&event, decoded.duplicate_relevant_key)
+                    } else if event.get("type").and_then(Value::as_str)
+                        == Some("response.incomplete")
+                    {
+                        output_limit_error(response).unwrap_or_else(|| {
                             ModelError::new("incomplete", "Proxy did not complete response")
-                        }
+                        })
+                    } else {
+                        ModelError::new("incomplete", "Proxy did not complete response")
                     };
                     self.terminal = Some(Err(error));
                 }
                 Some("error") => {
-                    self.terminal = Some(Err(ModelError::provider(None, event)));
+                    self.terminal = Some(Err(ModelError::stream_provider(
+                        &event,
+                        decoded.duplicate_relevant_key,
+                    )));
+                }
+                None if stream_error::recognized_untyped_error(&event)
+                    || (decoded.untyped_error_candidate && event.get("type").is_none()) =>
+                {
+                    self.failed_response = Some(event.clone());
+                    self.terminal = Some(Err(ModelError::stream_provider(
+                        &event,
+                        decoded.duplicate_relevant_key,
+                    )));
                 }
                 _ => {}
             }
+            events.push(event);
         }
         if let Some(error) = decode_error {
             return Err(error);
@@ -820,6 +876,11 @@ impl ResponseStream {
     }
     pub fn is_terminal(&self) -> bool {
         self.terminal.is_some()
+    }
+    pub(crate) fn attach_stream_provider_status(&mut self, status: Option<StreamProviderStatus>) {
+        if let Some(Err(error)) = &mut self.terminal {
+            error.stream_provider_status = status;
+        }
     }
     pub(crate) fn failed_response(&self) -> Option<&Value> {
         self.failed_response.as_ref()
@@ -953,5 +1014,203 @@ mod embedding_failure_tests {
                     .invalid_configuration
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod s1b_stream_error_tests {
+    use super::*;
+
+    #[test]
+    fn t10_absent_type_top_level_error_is_a_first_terminal_frame() {
+        let envelope =
+            b"data: {\"error\":{\"code\":\"400\",\"message\":\"SECRET_PROVIDER_MESSAGE\"}}\n\n";
+        let mut stream = ResponseStream::default();
+        stream.push(envelope).unwrap();
+        assert!(
+            stream.is_terminal(),
+            "recognized untyped top-level error must stop at its complete frame"
+        );
+        let error = stream.finish(false).unwrap_err();
+        assert_eq!(error.kind, "provider");
+        assert_eq!(
+            error.status, None,
+            "embedded status is not actual HTTP status"
+        );
+    }
+
+    #[test]
+    fn stream_status_accepts_only_exact_ascii_code_strings() {
+        for (code, expected) in [
+            ("100", Some(100)),
+            ("200", Some(200)),
+            ("400", Some(400)),
+            ("429", Some(429)),
+            ("599", Some(599)),
+            ("099", None),
+            ("600", None),
+            ("0400", None),
+            ("400 ", None),
+            (" 400", None),
+            ("+400", None),
+            ("4e2", None),
+            ("400.0", None),
+            ("٤٠٠", None),
+            ("context_length_exceeded", None),
+        ] {
+            let body = format!("data: {{\"error\":{{\"code\":\"{code}\"}}}}\n\n");
+            let mut stream = ResponseStream::default();
+            stream.push(body.as_bytes()).unwrap();
+            let error = stream.finish(false).unwrap_err();
+            assert_eq!(error.kind, "provider", "{code}");
+            assert_eq!(
+                error.status, None,
+                "embedded code is never actual HTTP status"
+            );
+            assert_eq!(
+                error.stream_provider_status.map(|status| status.value),
+                expected,
+                "{code}"
+            );
+            assert_eq!(
+                error.stream_provider_status.map(|status| status.source),
+                expected.map(|_| StreamProviderStatusSource::StreamErrorCode),
+                "{code}"
+            );
+        }
+        for code in [json!(400), json!(400.0), Value::Null, json!(true)] {
+            let body = json!({"error":{"code":code}}).to_string();
+            let frame = format!("data: {body}\n\n");
+            let mut stream = ResponseStream::default();
+            stream.push(frame.as_bytes()).unwrap();
+            assert!(
+                stream
+                    .finish(false)
+                    .unwrap_err()
+                    .stream_provider_status
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_error_code_withholds_status_but_keeps_terminal_error() {
+        let bytes = b"data: {\"error\":{\"code\":\"401\",\"code\":\"400\"}}\n\n";
+        let mut stream = ResponseStream::default();
+        stream.push(bytes).unwrap();
+        assert!(stream.is_terminal());
+        let error = stream.finish(false).unwrap_err();
+        assert_eq!(error.kind, "provider");
+        assert!(error.stream_provider_status.is_none());
+    }
+
+    #[test]
+    fn typed_response_failed_error_uses_only_its_nested_error_code() {
+        let mut stream = ResponseStream::default();
+        stream.push(b"data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"401\",\"status\":599}}}\n\n").unwrap();
+        let error = stream.finish(false).unwrap_err();
+        assert_eq!(error.kind, "provider");
+        assert_eq!(error.status, None);
+        assert_eq!(
+            error.stream_provider_status.map(|status| status.value),
+            Some(401)
+        );
+    }
+
+    #[test]
+    fn duplicate_root_error_keeps_terminality_but_withholds_provider_status() {
+        let bytes = b"data: {\"error\":{\"code\":\"400\"},\"error\":null}\n\n";
+        let mut stream = ResponseStream::default();
+        stream.push(bytes).unwrap();
+        assert!(stream.is_terminal());
+        let error = stream.finish(false).unwrap_err();
+        assert_eq!(error.kind, "provider");
+        assert!(error.stream_provider_status.is_none());
+    }
+
+    #[test]
+    fn typed_error_stays_terminal_but_unknown_present_type_and_nested_error_do_not() {
+        let mut typed = ResponseStream::default();
+        typed
+            .push(b"data: {\"type\":\"error\",\"error\":{\"code\":\"429\"}}\n\n")
+            .unwrap();
+        assert_eq!(
+            typed
+                .finish(false)
+                .unwrap_err()
+                .stream_provider_status
+                .map(|s| s.value),
+            Some(429)
+        );
+        for body in [
+            b"data: {\"type\":\"future\",\"error\":{\"code\":\"400\"}}\n\n".as_slice(),
+            b"data: {\"type\":null,\"error\":{\"code\":\"400\"}}\n\n".as_slice(),
+            b"data: {\"response\":{\"error\":{\"code\":\"400\"}}}\n\n".as_slice(),
+            b"data: {\"error\":null}\n\n".as_slice(),
+        ] {
+            let mut stream = ResponseStream::default();
+            stream.push(body).unwrap();
+            assert!(
+                !stream.is_terminal(),
+                "unexpected terminal for {:?}",
+                String::from_utf8_lossy(body)
+            );
+            assert_eq!(stream.finish(false).unwrap_err().kind, "incomplete");
+        }
+    }
+
+    #[test]
+    fn completion_before_error_remains_success_and_preterminal_bad_frame_remains_protocol() {
+        let mut stream = ResponseStream::default();
+        stream.push(b"data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\ndata: {\"error\":{\"code\":\"400\"}}\n\n").unwrap();
+        assert!(stream.finish(false).is_ok());
+        let mut stream = ResponseStream::default();
+        assert_eq!(
+            stream
+                .push(b"data: not-json\n\ndata: {\"error\":{\"code\":\"400\"}}\n\n")
+                .unwrap_err()
+                .kind,
+            "protocol"
+        );
+    }
+
+    #[test]
+    fn response_byte_cap_is_charged_only_through_the_terminal_prefix() {
+        let terminal = b"data: {\"error\":{\"code\":\"400\"}}\n\n";
+        let mut stream = ResponseStream::default();
+        stream.decoder.parsed_total = MAX_RESPONSE_BYTES - terminal.len();
+        let mut bytes = terminal.to_vec();
+        bytes.extend_from_slice(b"data: not-json\n\n");
+        stream.push(&bytes).unwrap();
+        assert!(stream.is_terminal());
+        assert_eq!(stream.decoder.parsed_total, MAX_RESPONSE_BYTES);
+        assert_eq!(stream.decoder.total, bytes.len());
+        let mut preterminal = SseDecoder {
+            parsed_total: MAX_RESPONSE_BYTES,
+            ..Default::default()
+        };
+        assert_eq!(preterminal.push(b"x").unwrap_err().kind, "input_limit");
+    }
+
+    #[test]
+    fn t10_first_terminal_ignores_malformed_same_chunk_suffix() {
+        let bytes = b"data: {\"error\":{\"code\":\"400\"}}\n\ndata: not-json\n\n";
+        let mut stream = ResponseStream::default();
+        stream.push(bytes).unwrap();
+        assert!(
+            stream.is_terminal(),
+            "first complete terminal frame owns the chunk"
+        );
+        assert_eq!(stream.finish(false).unwrap_err().kind, "provider");
+    }
+
+    #[test]
+    fn t11_real_eof_without_terminal_remains_incomplete_control() {
+        let mut stream = ResponseStream::default();
+        stream
+            .push(b"data: {\"id\":\"m\",\"choices\":[]}\n\n")
+            .unwrap();
+        let error = stream.finish(false).unwrap_err();
+        assert_eq!(error.kind, "incomplete");
     }
 }

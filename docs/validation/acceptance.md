@@ -11658,3 +11658,60 @@ current saved state changes and bounded filtered empty pages. The global plan
 can scan/sort the active partial index; it is not constant-work in the number
 of active executions. Hosted all-OS CI, independent review and installation are
 separate pending gates; no real-user/provider behavior is asserted here.
+
+### #301 S1b Stream Error Provenance (Source Checks In Progress)
+
+The reviewed contract specifies one raw-frame terminal extractor shared by
+Responses lookahead/handler and Chat normalization, exact paired numeric status
+provenance, and no retry/halving/suppression/adoption change. An authentic
+corrected source RED at the landed06670 baseline compiled and failed2 intended
+T10 assertions (untyped Responses frame was not terminal; same-chunk malformed
+data suffix overrode it); its EOF control passed. Command:
+`cargo test --locked --lib model::s1b_red_tests -- --nocapture`, exit101, peak
+swap1915.4MiB, guard not hit. Earlier initial fixture/cwd attempts are preserved
+as setup errors, not counted as product REDs.
+
+Current S1b focused validation on the fresh own worktree reports: parser/status /
+first-terminal controls8/8 passed; generated-schema / paired-witness contract
+controls3/3 passed; real automatic-compaction localhost public tests10/10 passed,
+including Responses+Chat T10 one-POST provider_status400 with HTTP200 in the same
+public fact, and Responses+Chat T11 EOF exactly3 scoped summary POSTs under R=2.
+Linker warning about large `__eh_frame` remains disclosed. Conversation-level terminal-error tests for both `response_retry_partial`
+settings and partial-EOF retry controls in `tests/response_retries.rs` passed in the
+full standard run below. They verify retained partial text/completed-item identity,
+zero shell execution, retry_partial false ->1 and true/R=2 ->3 without replaying
+partial bytes. These assertions retain existing policy rather than introduce a new one.
+
+An initial Chat public test stalled because its synthetic fixture classified an
+omitted Chat `tools` field as a normal request; the Chat adapter omits empty tools
+for summary calls. The bounded test classifier was corrected to treat missing or
+empty Chat tools as the summary request, then the Chat T10 public control passed.
+A temporary diagnostic filter typo selected zero tests and an intermediate
+compile found a misplaced debug trace; neither is passed test evidence. Raw logs
+are preserved separately. Full standard check, protocol schema regeneration/golden,
+clippy and final exact-SHA independent review/three-OS CI are not yet claimed.
+
+Current S1b source validation is distinct from S1a/full-suite qualification:
+- Corrected RED `s1b-terminal-red-corrected` on landed06670 baseline:1 EOF control
+  passed;2 T10 terminal assertions failed; exit101. The untyped top-level error
+  remained nonterminal and a same-chunk malformed data suffix returned protocol.
+  Compile succeeded; peak swap1915.4MiB, no guard stop. Earlier wrong-cwd and
+  malformed test-frame attempts remain setup evidence only.
+- Guarded `s1b-parser-and-schema-focused`: parser/status/first-terminal8 passed;
+  S1a/S1b schema contract3 passed, including provider status pair differential
+  vectors and non-deserializable ModelError witness; fmt passed.
+- Guarded `s1b-public-focused2`: all ten S1a/S1b localhost public outcomes passed;
+  Responses/Chat T10 each exactly1 summary POST and same provider_error public fact
+  with actual HTTP200 / embedded provider400 stream_error_code; Responses/Chat T11
+  genuine EOF each exactly3 summary POSTs under R=2, no inferred provider status.
+- Guarded request-layer integration `s1b-partial-retry-controls2`: one terminal
+  SSE with partial text+completed tool identity passes under both retry_partial
+  settings with exactly1 POST, original partial facts retained, zero tool
+  executions. Genuine EOF partial-output controls pass retry_partial=false ->1
+  and retry_partial=true/R=2 ->3, no partial-byte/tool-ID replay and zero tool
+  execution. Commands/individual results are retained in the named guarded logs.
+
+These focused controls plus the guarded full standard command establish local S1b
+validation, not full qualification. The final contract-matrix audit, independent
+exact-source review, and normal/all-OS CI on the same commit remain pending. Existing
+retry classifier and S2/S3 production code remain unchanged.

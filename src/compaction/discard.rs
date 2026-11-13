@@ -83,7 +83,7 @@ impl FailureReason {
 // remains equivalent to absence, as in the existing serde Option contract.
 fn constrain_failure_schema(schema: &mut schemars::Schema) {
     use serde_json::json;
-    let rules: Vec<_> = FailureReason::ALL
+    let mut rules: Vec<_> = FailureReason::ALL
         .into_iter()
         .filter_map(|reason| {
             let mut properties = serde_json::Map::new();
@@ -106,6 +106,32 @@ fn constrain_failure_schema(schema: &mut schemars::Schema) {
             })
         })
         .collect();
+    rules.push(json!({
+        "if": {
+            "anyOf": [
+                {"properties":{"provider_status":{"type":"number"}},"required":["provider_status"]},
+                {"properties":{"provider_status_source":{"type":"string"}},"required":["provider_status_source"]}
+            ]
+        },
+        "then": {
+            "required":["provider_status","provider_status_source"],
+            "properties":{
+                "reason":{"const":"provider_error"},
+                "origin":{"const":"provider_response"},
+                "provider_status":{"type":"integer","minimum":100,"maximum":599},
+                "provider_status_source":{"const":"stream_error_code"}
+            }
+        }
+    }));
+    for reason in FailureReason::ALL
+        .into_iter()
+        .filter(|reason| *reason != FailureReason::ProviderError)
+    {
+        rules.push(json!({
+            "if":{"properties":{"reason":{"const":reason}},"required":["reason"]},
+            "then":{"properties":{"provider_status":{"type":"null"},"provider_status_source":{"type":"null"}}}
+        }));
+    }
     schema.insert("allOf".into(), json!(rules));
 }
 
@@ -135,6 +161,11 @@ pub enum Outcome {
         #[schemars(range(min = 100, max = 599))]
         http_status: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
+        #[schemars(range(min = 100, max = 599))]
+        provider_status: Option<u16>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        provider_status_source: Option<crate::model::StreamProviderStatusSource>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         #[schemars(range(min = 1, max = 9007199254740991u64))]
         final_group_count: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -163,6 +194,8 @@ impl Outcome {
                 reason,
                 origin,
                 http_status,
+                provider_status,
+                provider_status_source,
                 final_group_count,
                 final_source_nodes,
             } => {
@@ -171,6 +204,17 @@ impl Outcome {
                     .is_none_or(|required| origin == required)
                     && http_status
                         .is_none_or(|s| (100..=599).contains(&s) && reason.allows_http_status())
+                    && provider_status.is_some() == provider_status_source.is_some()
+                    && provider_status.is_none_or(|status| {
+                        (100..=599).contains(&status)
+                            && reason == FailureReason::ProviderError
+                            && origin == FailureOrigin::ProviderResponse
+                    })
+                    && provider_status_source.is_none_or(|source| {
+                        source == crate::model::StreamProviderStatusSource::StreamErrorCode
+                            && reason == FailureReason::ProviderError
+                            && origin == FailureOrigin::ProviderResponse
+                    })
                     && [final_group_count, final_source_nodes]
                         .into_iter()
                         .all(|n| {
@@ -211,6 +255,8 @@ pub(super) fn failed(
             reason,
             origin,
             http_status: None,
+            provider_status: None,
+            provider_status_source: None,
             final_group_count: None,
             final_source_nodes: None,
         },
@@ -229,6 +275,8 @@ pub(crate) fn cause(error: &crate::protocol::ApiError) -> Outcome {
                 FailureOrigin::Internal
             },
             http_status: None,
+            provider_status: None,
+            provider_status_source: None,
             final_group_count: None,
             final_source_nodes: None,
         })
@@ -377,6 +425,20 @@ pub(super) fn model_cause(error: &crate::model::ModelError, status: Option<u16>)
         origin,
         http_status: status
             .filter(|s| reason == FailureReason::ProviderError && (100..=599).contains(s)),
+        provider_status: if reason == FailureReason::ProviderError
+            && origin == FailureOrigin::ProviderResponse
+        {
+            error.stream_provider_status.map(|witness| witness.value)
+        } else {
+            None
+        },
+        provider_status_source: if reason == FailureReason::ProviderError
+            && origin == FailureOrigin::ProviderResponse
+        {
+            error.stream_provider_status.map(|witness| witness.source)
+        } else {
+            None
+        },
         final_group_count: None,
         final_source_nodes: None,
     }
@@ -438,8 +500,49 @@ mod outcome_contract_tests {
     }
     #[test]
     fn strict_union_quarantines_unsafe_numbers_fields_and_cross_field_facts() {
+        let generated: serde_json::Value =
+            serde_json::from_str(&crate::protocol::schema_json()).unwrap();
+        let schema = serde_json::json!({"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/definitions/CompactionOutcomeFact","definitions":generated["definitions"]});
+        let validator = jsonschema::validator_for(&schema).unwrap();
         let valid = json!({"phase":"closed_summary","elapsed_ms":17,"outcome":{"kind":"failed","reason":"provider_error","origin":"provider_response","http_status":401}});
         assert!(decode(&valid.to_string()).is_some());
+        let paired = json!({"phase":"closed_summary","elapsed_ms":1,"outcome":{"kind":"failed","reason":"provider_error","origin":"provider_response","http_status":200,"provider_status":400,"provider_status_source":"stream_error_code"}});
+        assert!(decode(&paired.to_string()).is_some());
+        assert!(validator.is_valid(&paired), "valid paired stream witness");
+        for bad_pair in [
+            json!({"provider_status":400}),
+            json!({"provider_status_source":"stream_error_code"}),
+            json!({"provider_status":99,"provider_status_source":"stream_error_code"}),
+            json!({"provider_status":600,"provider_status_source":"stream_error_code"}),
+            json!({"provider_status":400,"provider_status_source":"future"}),
+        ] {
+            let mut candidate = paired.clone();
+            candidate["outcome"]
+                .as_object_mut()
+                .unwrap()
+                .remove("provider_status");
+            candidate["outcome"]
+                .as_object_mut()
+                .unwrap()
+                .remove("provider_status_source");
+            candidate["outcome"]
+                .as_object_mut()
+                .unwrap()
+                .extend(bad_pair.as_object().unwrap().clone());
+            assert!(
+                decode(&candidate.to_string()).is_none(),
+                "decoder accepted {candidate}"
+            );
+            assert!(
+                !validator.is_valid(&candidate),
+                "schema accepted {candidate}"
+            );
+        }
+        let mut wrong_pair_reason = paired.clone();
+        wrong_pair_reason["outcome"]["reason"] = json!("refused");
+        wrong_pair_reason["outcome"]["origin"] = json!("output_validation");
+        assert!(decode(&wrong_pair_reason.to_string()).is_none());
+        assert!(!validator.is_valid(&wrong_pair_reason));
         for (key, value) in [
             ("provider_code", json!("SECRET")),
             ("message", json!("SECRET")),
@@ -517,6 +620,8 @@ mod outcome_contract_tests {
                         origin,
                         http_status: status
                             .filter(|s| kind == "provider" && (100..=599).contains(s)),
+                        provider_status: None,
+                        provider_status_source: None,
                         final_group_count: None,
                         final_source_nodes: None,
                     }
@@ -649,6 +754,21 @@ mod retention_contract_tests {
 
 #[cfg(test)]
 mod schema_contract_tests {
+    #[test]
+    fn deserialized_model_error_cannot_mint_stream_status_authority() {
+        let mut error =
+            crate::model::ModelError::provider(None, &serde_json::json!({"error":{"code":"400"}}));
+        error.stream_provider_status = Some(crate::model::StreamProviderStatus {
+            value: 400,
+            source: crate::model::StreamProviderStatusSource::StreamErrorCode,
+        });
+        let serialized = serde_json::to_value(&error).unwrap();
+        assert_eq!(serialized["stream_provider_status"]["value"], 400);
+        let restored: crate::model::ModelError = serde_json::from_value(serialized).unwrap();
+        assert!(restored.stream_provider_status.is_none());
+        assert_eq!(restored.status, None);
+    }
+
     use super::*;
     #[test]
     fn generated_schema_matches_terminal_decoder_vectors() {
