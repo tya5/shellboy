@@ -3893,9 +3893,9 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
     );
 }
 
-/// S2: an actual HTTP401 vetoes halving and deterministic recording, so each
-/// later eligible report gets its own single provider attempt. HTTP400 trials
-/// and minimum-outcome memory are covered by the dedicated S2a matrix.
+/// S2b retires the former per-report HTTP401 oracle: the veto remains a
+/// provider failure with no halving or deterministic E write, while subsequent
+/// reports in the same real owner/Run/Turn/generation scope are suppressed.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
     let result = ax_growing_turn_summary_requests(
@@ -3908,44 +3908,58 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
         0,
     )
     .await;
-    let summaries = result.summaries;
-    let records = result.records;
-    // Tool reports 2..=18 are at or above the threshold (200 + index). An
-    // actual 401 vetoes all halving/memory; each report still has one attempt.
     let eligible_reports = (0..19).filter(|index| *index >= 2).count();
+    assert_eq!(eligible_reports, 17);
     assert_eq!(
-        summaries, eligible_reports,
-        "one request per report: {records:#?}"
+        result.summaries, 1,
+        "one provider invocation per real scope"
     );
-    assert_eq!(records.len(), eligible_reports, "{records:#?}");
-    for record in &records {
-        assert_eq!(
-            record["compaction_outcome"]["outcome"]["reason"],
-            "provider_error"
-        );
-        assert_eq!(
-            record["compaction_outcome"]["outcome"]["origin"],
-            "provider_response"
-        );
-        assert_eq!(record["compaction_outcome"]["outcome"]["http_status"], 401);
-        assert!(
-            record["compaction_outcome"]["outcome"]
-                .get("final_group_count")
-                .is_none()
-        );
-        assert!(
-            record["compaction_outcome"]["outcome"]
-                .get("provider_status")
-                .is_none()
-        );
-        assert_eq!(
-            record["error"]["details"]["model_requests"], 1,
-            "{record:#?}"
-        );
-        assert_eq!(
-            record["error"]["details"]["summary_usage"]["requests"], 1,
-            "{record:#?}"
-        );
+    assert_eq!(
+        result.deterministic_failure_slots, 0,
+        "401 is never deterministic E memory"
+    );
+    assert_eq!(
+        result.records.len(),
+        eligible_reports,
+        "one report outcome each"
+    );
+
+    let provider_errors: Vec<_> = result
+        .records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "provider_error")
+        .collect();
+    assert_eq!(provider_errors.len(), 1, "one actual HTTP response outcome");
+    let outcome = &provider_errors[0]["compaction_outcome"]["outcome"];
+    assert_eq!(outcome["origin"], "provider_response");
+    assert_eq!(outcome["http_status"], 401);
+    assert!(outcome.get("provider_status").is_none());
+    assert!(outcome.get("final_group_count").is_none());
+    assert!(outcome.get("final_source_nodes").is_none());
+    assert_eq!(provider_errors[0]["error"]["details"]["model_requests"], 1);
+    assert_eq!(
+        provider_errors[0]["error"]["details"]["summary_usage"]["requests"],
+        1
+    );
+
+    let suppressed: Vec<_> = result
+        .records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed")
+        .collect();
+    assert_eq!(
+        suppressed.len(),
+        16,
+        "one truthful outcome per later report"
+    );
+    for record in suppressed {
+        let outcome = &record["compaction_outcome"]["outcome"];
+        assert_eq!(outcome["origin"], "preparation");
+        assert!(outcome.get("http_status").is_none());
+        assert!(outcome.get("final_group_count").is_none());
+        assert!(outcome.get("final_source_nodes").is_none());
+        assert_eq!(record["error"]["details"]["model_requests"], 0);
+        assert_eq!(record["error"]["details"]["summary_usage"]["requests"], 0);
     }
 }
 
@@ -3962,6 +3976,7 @@ struct AxFixtureResult {
     report_scopes: Vec<(String, String, i64)>,
     initial_path_ids: Vec<String>,
     final_path_ids: Vec<String>,
+    deterministic_failure_slots: usize,
 }
 
 async fn ax_growing_turn_summary_requests(
@@ -4023,6 +4038,17 @@ async fn ax_growing_turn_summary_requests(
             Ok(ids)
         }).await.unwrap();
         let owner_instance_id = owner.instance_id.clone();
+        let slot_thread = target.clone();
+        let deterministic_failure_slots = control.store.database.call(move |db| {
+            db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
+                params![
+                    format!("compact.deterministic_range_failure.closed.{slot_thread}"),
+                    format!("compact.deterministic_range_failure.active.{slot_thread}"),
+                ],
+                |row| row.get::<_, usize>(0),
+            )
+        }).await.unwrap();
         eprintln!("summary_requests={summaries} records={records:#?}");
         // The failure record is automatic-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
@@ -4030,7 +4056,7 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids }
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, deterministic_failure_slots }
     }).await.unwrap()
 }
 
