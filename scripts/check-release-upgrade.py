@@ -244,6 +244,12 @@ def check_spill_override_schema(db, target):
 
 
 def apply_migration(db, version):
+    if version == 46:
+        # The Rust startup converter owns fact migration. SQL-only staging is
+        # sound only for an empty fact set, never a replacement implementation.
+        facts = db.execute("SELECT count(*) FROM app_meta WHERE CAST(key AS BLOB)>=? AND CAST(key AS BLOB)<?",
+                           (b'compact.a_state.', b'compact.a_state/')).fetchone()[0]
+        assert facts == 0, 'migration 46 facts require the native startup converter'
     if version != 39:
         sql=DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
         db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
@@ -265,7 +271,7 @@ def prepare_schema(db, target):
     start = db.execute('PRAGMA user_version').fetchone()[0]
     if start == target:
         return
-    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, CURRENT_SCHEMA_VERSION - 1) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
+    assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, CURRENT_SCHEMA_VERSION) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         apply_migration(db, version)
@@ -279,11 +285,11 @@ def parse_args(argv=None):
     parser.add_argument('--new', type=Path, required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--old-version', choices=tuple(PUBLIC_SCHEMA), default='0.10.0')
-    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, CURRENT_SCHEMA_VERSION), default=None,
+    parser.add_argument('--start-schema', type=int, choices=(14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, CURRENT_SCHEMA_VERSION), default=None,
                         help='defaults to the public old schema; 16/17 can stage derived indexes on a stopped schema 14 copy')
     parser.add_argument('--expected-version', default=CARGO_VERSION, help='defaults to the Cargo.toml package version')
-    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION,
-                        help='45 for the per-Thread automatic-spill override; 44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
+    parser.add_argument('--expected-new-schema', type=int, choices=(14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION,
+                        help='46 for canonical fact scope identity; 45 for the per-Thread automatic-spill override; 44 for the per-Thread output limit; 43 for Thread summary settings; 42 for notification semantic metadata; 40 for the non-append selection witness; 39 for independent Runs; 38 for the human-reply pending index; 34 for the Thread tag table and cwd list index; 33 for the index space int8 scale column; 32 for the Thread archive column and partial list indexes; 31 for the per-Thread summary parameter columns; 30 for the per-Thread compaction threshold column; 29 for the active-attempt recovery index; earlier versions retain historical release checks')
     args = parser.parse_args(argv)
     public_schema = PUBLIC_SCHEMA[args.old_version]
     if args.start_schema is None:

@@ -236,3 +236,18 @@ deletion, catch-all SQL error handling or runtime compatibility was added. The
 new schema45 fixture places valid facts on both sides of an invalid UTF-8 TEXT
 key and an unknown-version row; a separate second-row SQL abort proves earlier
 conversions and the migration checkpoint still roll back atomically.
+
+### Upgrade Fixture Boundary After Schema 46
+
+The first full normal 336 check stopped in Python fixture tests: catalogue range
+oracles still rejected 46, an expected-current assertion was pinned to 45, and
+a moving current-minus-one whitelist dropped synthetic schema 44. The correction
+preserves explicit prior fixture versions and pins the spill check to its actual
+45 introduction rather than moving it with the current version.
+
+SQL-only fixture staging must not claim to run the Rust data converter. It may
+advance the data-only 46 checkpoint only for a fixture with no fact rows; otherwise
+it refuses before checkpoint advancement and requires native startup. The negative
+fixture proves original facts/version/ledger stay unchanged. No Python duplicate
+of v1 conversion, real data migration, relaxed corruption assertion or runtime
+compatibility branch is introduced. Original full-check failures remain evidence.

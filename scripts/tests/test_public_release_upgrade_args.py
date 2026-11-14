@@ -42,7 +42,9 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(43, "0043_thread_single_summary_settings")', names)
         self.assertIn('(44, "0044_thread_max_tokens")', names)
         self.assertIn('(45, "0045_thread_spill_override")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 45)
+        self.assertIn('(46, "0046_scope_identity_v2")', names)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 46)
+        self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
 
@@ -58,11 +60,10 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0045_thread_spill_override'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0046_scope_identity_v2'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
-        # Exercise the real migration checks with registry metadata advanced past 45.
-        with patch.object(upgrade, 'CURRENT_SCHEMA_VERSION', 46):
-            upgrade.check_migration(db, before_45, 44, 45)
+        # The spill constraint remains pinned to 45 even after data-only 46.
+        upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)
         columns = [tuple(row) for row in db.execute('PRAGMA table_info(thread)')]
         fresh = sqlite3.connect(':memory:')
         current_sql = (ROOT / 'src/storage/current.sql').read_text()
@@ -78,6 +79,20 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(), [])
         db.close()
         fresh.close()
+
+    def test_sql_only_staging_rejects_fact_conversion_without_advancing_checkpoint(self):
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
+        db.executescript((ROOT / 'src/storage/current.sql').read_text())
+        db.execute('DELETE FROM schema_migration WHERE version=46')
+        db.execute('PRAGMA user_version=45')
+        old = '{"version":1,"scope_generation":0,"boundary_generation":0,"connection":"c","model":"m","first":null,"last_reset_origin":null}'
+        db.execute("INSERT INTO app_meta VALUES('compact.a_state.t',?)", (old,))
+        with self.assertRaisesRegex(AssertionError, 'native startup converter'):
+            upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
+        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 45)
+        self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=46').fetchone()[0], 0)
+        self.assertEqual(db.execute("SELECT value FROM app_meta WHERE key='compact.a_state.t'").fetchone()[0], old)
 
     def test_migration_registry_version_derivation_rejects_empty_duplicate_and_gap(self):
         for registry in ("", '(1, "m1"),\n(1, "duplicate")', '(1, "m1"),\n(3, "gap")'):
