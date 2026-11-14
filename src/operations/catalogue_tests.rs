@@ -27,6 +27,24 @@ fn executable_commands(
 }
 
 #[test]
+fn thread_set_spill_has_a_real_typed_cli_binding_and_clear_choice() {
+    let spec = OperationId::ThreadSet.spec();
+    let field = spec
+        .field(FieldId::SpillPolicy)
+        .expect("ThreadSet spill field");
+    assert_eq!(field.field.kind, FieldType::Choice);
+    assert_eq!(
+        field.field.default_origin,
+        DefaultOrigin::TargetThreadSettings
+    );
+    assert_eq!(field.choices, vec!["on", "off", ""]);
+    let binding = OperationId::ThreadSet.primary_cli();
+    assert!(binding.arguments.iter().any(|argument| {
+        argument.spelling == "--spill" && argument.field == FieldId::SpillPolicy
+    }));
+}
+
+#[test]
 fn fresh_clap_executable_paths_and_every_option_match_the_catalogue_bindings() {
     let mut parser = Cli::command();
     parser.build();

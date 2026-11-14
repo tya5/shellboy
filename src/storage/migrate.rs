@@ -915,8 +915,8 @@ mod activity_migration_tests {
             );
             assert_eq!(
                 crate::storage::SCHEMA_VERSION,
-                44,
-                "schema 44 adds the per-Thread output limit"
+                crate::storage::MIGRATION_NAMES.last().unwrap().0,
+                "current schema follows the complete migration registry"
             );
             assert_eq!(
                 db.query_row(

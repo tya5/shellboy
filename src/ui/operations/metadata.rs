@@ -79,6 +79,7 @@ impl Form {
             "auto_compact_at" => FieldId::AutoCompactAt,
             "auto_compact_target_percent" => FieldId::AutoCompactTargetPercent,
             "summary_max_chars" => FieldId::SummaryMaxChars,
+            "spill" => FieldId::SpillPolicy,
             "max_tokens" => FieldId::MaxTokens,
             "title" | "title_mode" => FieldId::Title,
             "descendants" => FieldId::Descendants,
@@ -1244,6 +1245,7 @@ fn field_label_for(id: FieldId, language: crate::config::UiLanguage) -> &'static
             "Supplementary metadata file"
         ),
         FieldId::RagScopes => local!(language, "検索する資料領域", "Document spaces to search"),
+        FieldId::SpillPolicy => local!(language, "自動spill設定", "Automatic spill policy"),
         FieldId::Reference => local!(language, "原文の版付きref", "Versioned original ref"),
     }
 }
@@ -1459,6 +1461,11 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             language,
             "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
             "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
+        ),
+        FieldId::SpillPolicy => local!(
+            language,
+            "Threadの自動spill設定です。on/offを指定します。CLIの空文字は接続設定または組み込み既定onへ継承します。offでも自動要約は続き、手動・overflow spillは変わりません。",
+            "Thread-level automatic spill override: on/off; an empty CLI value inherits the connection or built-in on default. Off skips only automatic spill; automatic summary and manual/overflow spill remain available."
         ),
         FieldId::AutoCompactTargetPercent => match language {
             crate::config::UiLanguage::Ja => {

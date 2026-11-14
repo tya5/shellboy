@@ -223,6 +223,7 @@ pub(crate) enum FieldId {
     Effort,
     AutoCompactAt,
     AutoCompactTargetPercent,
+    SpillPolicy,
     MaxTokens,
     Title,
     Descendants,
@@ -701,6 +702,14 @@ pub(crate) const FIELD_SPECS: &[FieldSpec] = &[
         label: "自動要約の目標割合",
         help: "自動要約後の目標サイズを、このThreadに適用される入力トークン閾値に対する割合（1〜100の整数）で指定します。要約出力の文字数比率ではありません。CLIの空文字は接続または[compaction]の値へ戻します。手動summaryの絶対文字数上限（max_chars）とは別です。",
         kind: FieldType::Unsigned,
+        discovery: Discovery::None,
+    },
+    FieldSpec {
+        id: FieldId::SpillPolicy,
+        default_origin: DefaultOrigin::TargetThreadSettings,
+        label: "自動spill設定",
+        help: "Threadの自動spill設定です。on/offを指定します。CLIの空文字（--spill \"\"）は接続設定または組み込み既定onへ継承します。offでも自動要約は続きます。",
+        kind: FieldType::Choice,
         discovery: Discovery::None,
     },
     FieldSpec {
@@ -1420,7 +1429,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
     OperationSpec {
         id: OperationId::ThreadSet,
         label: "会話 · 設定",
-        meaning: "Threadの表示タイトル、作業場所、接続、モデル、推論設定、出力上限、指示ファイル、親Thread、自動要約設定、summary文字数上限を変更します。",
+        meaning: "Threadの表示タイトル、作業場所、接続、モデル、推論設定、出力上限、指示ファイル、親Thread、自動要約設定、summary文字数上限、自動spill設定を変更します。",
         effect: Effect::SavedMutation,
         confirmation: Confirmation::None,
         route: Route::Owner,
@@ -1434,6 +1443,7 @@ pub(crate) const SPECS: &[OperationSpec] = &[
             FieldId::AutoCompactAt,
             FieldId::AutoCompactTargetPercent,
             FieldId::SummaryMaxChars,
+            FieldId::SpillPolicy,
             FieldId::MaxTokens,
             FieldId::Parent,
             FieldId::Agents,
@@ -2265,6 +2275,8 @@ impl OperationSpec {
             vec![
                 "deferred", "maximal", "spill", "summary", "trim", "omit", "restore",
             ]
+        } else if id == FieldId::SpillPolicy {
+            vec!["on", "off", ""]
         } else if id == FieldId::AttachmentKind {
             vec!["file", "image"]
         } else if id == FieldId::Awaiting {

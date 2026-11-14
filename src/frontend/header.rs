@@ -457,7 +457,8 @@ mod tests {
                 INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('e','r','u','e','running','/','{}','UTF-8','UTF-8','open','now');")?;
             input(&tx,"path","\u{1b}[31mfirst\u{1b}[0m\r\n selected request",true,"later","applied")?;
             input(&tx,"pending","do not choose this earlier pending message",false,"earlier","accepted")?;
-            let expected=crate::control::db::thread_details(&tx,"t").unwrap();
+            let mut expected=crate::control::db::thread_details(&tx,"t").unwrap();
+            expected.effective_spill = crate::config::SpillPolicy::resolve(expected.spill, None).effective;
             let trace=crate::frontend::sql_trace::Statements::new(&tx);
             let raw=read_tx(&tx,"t")?;
             assert_eq!(trace.count(),3,"one header and two bounded witness statements");
@@ -971,7 +972,9 @@ mod header_scalar_bound_tests {
         db.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('child','/','','p','m','now')").unwrap();
         db.execute("INSERT INTO run(id,thread_id,state,created_at) VALUES('child-run','child','live','now')",[]).unwrap();
         db.execute("INSERT INTO shell_execution(id,owner_run_id,turn_id,operation_id,state,cwd,shell_json,input_encoding,output_encoding,stdin_state,started_at)VALUES('e',?1,?2,'operation','running','/','{}','UTF-8','UTF-8','open','now')",params![run,turn]).unwrap();
-        let expected = crate::control::db::thread_details(&db, "t").unwrap();
+        let mut expected = crate::control::db::thread_details(&db, "t").unwrap();
+        expected.effective_spill =
+            crate::config::SpillPolicy::resolve(expected.spill, None).effective;
         let trace = Statements::new(&db);
         let raw = read_tx(&db, "t").unwrap();
         assert_eq!(
