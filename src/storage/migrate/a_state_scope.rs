@@ -65,20 +65,31 @@ fn convert(bytes: &[u8]) -> Option<String> {
 
 /// Caller owns the existing Immediate migration transaction and its checkpoint.
 pub(super) fn convert_rows(tx: &Connection) -> Result<(), StorageError> {
-    let mut previous = String::new();
-    loop {
-        // Iterate keys only; do not materialize unbounded values or all rows.
-        let key: Option<String> = tx.query_row(
-            "SELECT key FROM app_meta WHERE typeof(key)='text' AND length(CAST(key AS BLOB))<=?4 AND key>?1 AND key>=?2 AND key<?3 ORDER BY key LIMIT 1",
-            params![previous, PREFIX, "compact.a_state/", (PREFIX.len() + 256) as i64], |r| r.get(0),
+    let mut lower_bound = Some(i64::MIN);
+    while let Some(cursor) = lower_bound {
+        // Rowid advances even when a TEXT key contains invalid UTF-8. Decode only
+        // bounded raw bytes; malformed keys must not abort unrelated upgrades.
+        let row: Option<(i64, Option<String>)> = tx.query_row(
+            "SELECT rowid,CASE WHEN typeof(key)='text' AND length(CAST(key AS BLOB))<=?2 THEN key END FROM app_meta WHERE rowid>=?1 ORDER BY rowid LIMIT 1",
+            params![cursor, (PREFIX.len() + 256) as i64],
+            |row| {
+                let key = match row.get_ref(1)? {
+                    ValueRef::Text(bytes) => std::str::from_utf8(bytes).ok()
+                        .filter(|key| key.strip_prefix(PREFIX).is_some_and(old_id))
+                        .map(str::to_owned),
+                    _ => None,
+                };
+                Ok((row.get(0)?, key))
+            },
         ).optional()?;
-        let Some(key) = key else {
+        let Some((rowid, key)) = row else {
             break;
         };
-        previous.clone_from(&key);
-        let Some(thread) = key.strip_prefix(PREFIX).filter(|s| old_id(s)) else {
+        lower_bound = rowid.checked_add(1);
+        let Some(key) = key else {
             continue;
         };
+        let thread = &key[PREFIX.len()..];
         let live: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND deleted_at IS NULL)",
             [thread],
@@ -229,6 +240,15 @@ mod tests {
             params![extra.to_string(), format!("{PREFIX}extra")],
         )
         .unwrap();
+        for (rowid, name) in [(i64::MIN, "edge-min"), (i64::MAX, "edge-max")] {
+            db.execute("INSERT INTO thread(id,deleted_at) VALUES(?1,NULL)", [name])
+                .unwrap();
+            db.execute(
+                "INSERT INTO app_meta(rowid,key,value) VALUES(?1,?2,?3)",
+                params![rowid, format!("{PREFIX}{name}"), v1(Value::Null)],
+            )
+            .unwrap();
+        }
         let before = raw_rows(&db);
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -237,7 +257,10 @@ mod tests {
         tx.commit().unwrap();
         let after = raw_rows(&db);
         for (old, new) in before.iter().zip(&after) {
-            if old.0 == format!("{PREFIX}valid") {
+            if ["valid", "edge-min", "edge-max"]
+                .iter()
+                .any(|name| old.0 == format!("{PREFIX}{name}"))
+            {
                 assert_ne!(old.2, new.2);
             } else {
                 assert_eq!(old, new, "byte AND SQLite type must survive");
@@ -262,6 +285,12 @@ mod tests {
             [v1(json!({"attempt":"original","input_tokens":0}))],
         )
         .unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('u','/','','p','m','now')",[]).unwrap();
+        db.execute(
+            "INSERT INTO app_meta VALUES('compact.a_state.u',?1)",
+            [v1(Value::Null)],
+        )
+        .unwrap();
         db
     }
 
@@ -269,7 +298,7 @@ mod tests {
     fn forward46_ledger_conversion_and_sql_fault_share_immediate_rollback() {
         let mut db = schema45();
         let before = raw_rows(&db);
-        db.execute_batch("CREATE TRIGGER reject_scope_conversion BEFORE UPDATE ON app_meta WHEN OLD.key='compact.a_state.t' BEGIN SELECT RAISE(ABORT,'injected scope conversion failure'); END;").unwrap();
+        db.execute_batch("CREATE TRIGGER reject_scope_conversion BEFORE UPDATE ON app_meta WHEN OLD.key='compact.a_state.u' BEGIN SELECT RAISE(ABORT,'injected scope conversion failure'); END;").unwrap();
         let error = super::super::run(&mut db, 45, &|_, _| {}, &|| {}).unwrap_err();
         assert!(
             error
@@ -333,5 +362,97 @@ mod tests {
         let after = raw_rows(&db);
         super::super::run(&mut db, 46, &|_, _| {}, &|| {}).unwrap();
         assert_eq!(raw_rows(&db), after);
+    }
+    #[test]
+    fn forward46_invalid_utf8_text_key_does_not_block_later_valid_rows() {
+        let mut db = schema45();
+        db.execute("DELETE FROM app_meta WHERE key='compact.a_state.u'", [])
+            .unwrap();
+        let mut invalid_key = PREFIX.as_bytes().to_vec();
+        invalid_key.extend_from_slice(&[0xff, 0x80]);
+        db.execute(
+            "INSERT INTO app_meta(key,value) VALUES(CAST(?1 AS TEXT),?2)",
+            params![invalid_key, v1(Value::Null)],
+        )
+        .unwrap();
+        let bad_rowid = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO app_meta VALUES('compact.a_state.u',?1)",
+            [v1(Value::Null)],
+        )
+        .unwrap();
+        db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('unknown','/','','p','m','now')",[]).unwrap();
+        let mut unknown_json: Value = serde_json::from_str(&v1(Value::Null)).unwrap();
+        unknown_json["version"] = json!(9);
+        let unknown = unknown_json.to_string();
+        db.execute(
+            "INSERT INTO app_meta VALUES('compact.a_state.unknown',?1)",
+            [&unknown],
+        )
+        .unwrap();
+        let raw_key_row = |db: &Connection| -> (String, Vec<u8>, String, Vec<u8>) {
+            db.query_row("SELECT typeof(key),CAST(key AS BLOB),typeof(value),CAST(value AS BLOB) FROM app_meta WHERE rowid=?1",[bad_rowid],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).unwrap()
+        };
+        let original = raw_key_row(&db);
+        assert_eq!(original.0, "text");
+        assert!(std::str::from_utf8(&original.1).is_err());
+        let before = db
+            .query_row(
+                "SELECT rowid FROM app_meta WHERE key='compact.a_state.t'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap();
+        let after = db
+            .query_row(
+                "SELECT rowid FROM app_meta WHERE key='compact.a_state.u'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert!(before < bad_rowid && bad_rowid < after);
+        super::super::run(&mut db, 45, &|_, _| {}, &|| {}).unwrap();
+        assert_eq!(
+            raw_key_row(&db),
+            original,
+            "malformed raw key and value retain exact type and bytes"
+        );
+        for thread in ["t", "u"] {
+            assert!(
+                crate::compaction::a_state::read(&db, thread)
+                    .unwrap()
+                    .is_some(),
+                "both valid rows convert across invalid key"
+            );
+        }
+        assert_eq!(
+            db.query_row(
+                "SELECT value FROM app_meta WHERE key='compact.a_state.unknown'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            unknown
+        );
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            46
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT count(*) FROM schema_migration WHERE version=46",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        let t = crate::compaction::a_state::read(&db, "t").unwrap();
+        let u = crate::compaction::a_state::read(&db, "u").unwrap();
+        super::super::run(&mut db, 46, &|_, _| {}, &|| {}).unwrap();
+        assert_eq!(raw_key_row(&db), original);
+        assert_eq!(crate::compaction::a_state::read(&db, "t").unwrap(), t);
+        assert_eq!(crate::compaction::a_state::read(&db, "u").unwrap(), u);
     }
 }

@@ -225,3 +225,14 @@ raw values retain their bytes and SQLite type, while real SQL errors roll back
 the same Immediate transaction and ledger checkpoint. Applied migrations 1-45
 are unchanged. Implementation review and native qualification remain separate
 from the accepted contract; no installed/user database operation is authorized.
+
+### Raw Migration Key Traversal Correction
+
+Independent de99 review found that decoding the migration key as String before
+checking UTF-8 could make malformed persisted TEXT keys abort global startup.
+Traversal now advances by rowid independently of key encoding and validates a
+bounded raw ValueRef before allocating a key String. No lossy conversion,
+deletion, catch-all SQL error handling or runtime compatibility was added. The
+new schema45 fixture places valid facts on both sides of an invalid UTF-8 TEXT
+key and an unknown-version row; a separate second-row SQL abort proves earlier
+conversions and the migration checkpoint still roll back atomically.
