@@ -225,7 +225,9 @@ The shared typed raw-override snapshot now feeds both child creation and
 fork/rewind branches. It carries target/output overrides along with threshold,
 max-token and spill values without resolving NULL defaults. Registered history
 and public Store regressions cover inheritance, clearing, parent independence
-and transactional rollback. The initial guarded production library compile
-passed on the source preparation; final committed focused validation is still
-pending and no CI/landing/runtime deployment is claimed. The separate long-model
-identity/conversion work remains design/RED-fixture preparation outside this unit.
+and transactional rollback. Guarded native validation of the committed source
+passed production library check, integration test build and six selected tests
+(6 passed, 0 failed, 0 ignored). Exact final documentation-commit validation is
+recorded separately in the handoff; no CI, independent approval, landing or
+runtime deployment is claimed. The separate long-model identity/conversion work
+remains design/RED-fixture preparation outside this unit.

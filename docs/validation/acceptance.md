@@ -11926,7 +11926,10 @@ not S6a Rust behavior. Full S6a Rust tests and normal CI retry remain pending.
 
 Source scope: one raw override snapshot shared by child creation, fork and rewind;
 no schema/migration or GC authority change. Initial guarded `cargo check --lib
---locked` exited 0 on source preparation. Final committed validation is pending:
+--locked` exited 0 on source preparation. On committed source
+`1f3b8a586c2f4bede469c49f6b7b6c4fd5517a1c`, formatting, production check,
+integration build and the following six tests passed (6 selected, 0 failures,
+0 ignored). These results do not qualify other SHAs or replace independent review:
 `history::fork_and_rewind_inherit_raw_summary_overrides_without_flattening_null`,
 `history::fork_override_snapshot_is_independent_and_rolls_back_atomically`,
 `control_db::fork_inherits_raw_summary_overrides_and_clear_restores_connection_defaults`,
