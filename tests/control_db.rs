@@ -3221,3 +3221,87 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     );
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn fork_inherits_raw_summary_overrides_and_clear_restores_connection_defaults() {
+    let (_root, store) = store().await;
+    let parent = create(&store, None).await.thread_id;
+    let source_parent = parent.clone();
+    store
+        .database
+        .call(move |db| {
+            let tx = db.transaction()?;
+            shellboy::history::append_node(
+                &tx,
+                &source_parent,
+                "fork-settings-source",
+                None,
+                "user",
+                &serde_json::json!({"role":"user","content":"source"}),
+                "now",
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    execute(
+        &store,
+        set_summary_parameters(&parent, Some("4000"), Some("80")),
+    )
+    .await;
+    let result = execute(
+        &store,
+        Command::ThreadFork(ThreadForkArgs {
+            agents: None,
+            thread_id: parent.clone(),
+            node_id: "fork-settings-source".into(),
+            cwd: None,
+        }),
+    )
+    .await;
+    let branch = result.result["thread_id"].as_str().unwrap().to_owned();
+    let inherited = get_thread(&store, &branch).await;
+    assert_eq!(inherited["summary_max_chars"], 4000);
+    assert_eq!(inherited["auto_compact_target_percent"], 80);
+    execute(&store, set_summary_parameters(&parent, Some(""), Some(""))).await;
+    assert_eq!(get_thread(&store, &branch).await["summary_max_chars"], 4000);
+    execute(
+        &store,
+        Command::ThreadSet(Box::new(ThreadSetArgs {
+            thread_id: Some(branch.clone()),
+            connection: Some("other".into()),
+            ..Default::default()
+        })),
+    )
+    .await;
+    assert_eq!(
+        get_thread(&store, &branch).await["effective_summary_max_chars"],
+        4000
+    );
+    let cleared = execute(&store, set_summary_parameters(&branch, Some(""), Some(""))).await;
+    assert_eq!(cleared.result["summary_max_chars"], Value::Null);
+    assert_eq!(cleared.result["auto_compact_target_percent"], Value::Null);
+    assert_eq!(cleared.result["effective_summary_max_chars"], 12000);
+    assert_eq!(cleared.result["effective_auto_compact_target_percent"], 3);
+    let cleared_branch = execute(
+        &store,
+        Command::ThreadFork(ThreadForkArgs {
+            agents: None,
+            thread_id: branch.clone(),
+            node_id: "fork-settings-source".into(),
+            cwd: None,
+        }),
+    )
+    .await;
+    let null_child = get_thread(&store, cleared_branch.result["thread_id"].as_str().unwrap()).await;
+    assert_eq!(null_child["summary_max_chars"], Value::Null);
+    assert_eq!(null_child["auto_compact_target_percent"], Value::Null);
+    assert_eq!(null_child["effective_summary_max_chars"], 12000);
+    assert_eq!(null_child["effective_auto_compact_target_percent"], 3);
+    assert_eq!(
+        get_thread(&store, &parent).await["effective_summary_max_chars"],
+        10000
+    );
+    store.database.shutdown().await.unwrap();
+}

@@ -145,3 +145,16 @@ with a "pruned ... not retained" message, and a tombstoned body records
 `searchable` excludes the node. Summary and spill nodes, edges and
 `replacement_source` rows remain, so `history get` of a summary still lists
 source IDs.
+
+## Raw Thread override inheritance
+
+Child creation, fork, rewind branches and edited-request forks copy the source
+Thread's raw automatic threshold, target percentage, summary character limit,
+model output-token limit and spill override within their existing creation
+transaction. NULL stays NULL and continues to inherit the selected connection's
+current defaults; resolved defaults are not frozen into the new Thread. Explicit
+zero automatic threshold and explicit false spill remain explicit overrides.
+Later changes or clearing in the source Thread do not alter existing branches.
+The shared raw-override constructor is not authority to copy GC fact state,
+active jobs, Runs, leases or processes. Existing path/group, attachment, current
+identity and transaction rollback rules remain unchanged.

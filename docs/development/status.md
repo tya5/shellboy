@@ -218,3 +218,14 @@ qualification is pending the approved cache-boundary correction.
 ### S2a e527 Standard Failure Follow-Up
 
 The review-approved e527 correction passed the isolated indexed-cost test and its occurrence later passed in full standard. Full `scripts/check.sh` on exact e527 nevertheless exited101: 1394 passed, 2 failed, 19 ignored. Both failures were traced to HTTP400 fixtures that changed category under S2's numeric refusal rule: the per-report rejection test now uses an actual HTTP401 veto, and the transient retry test now uses HTTP500. The 400 deterministic trial control remains in the S2a matrix. Focused fully qualified tests have each passed one selected case. This is test-oracle/fixture correction only; no S2 production behavior changed. A new SHA, narrow delta rereview, full standard pass and then hosted CI remain required.
+
+### Raw Thread Override Inheritance Repair
+
+The shared typed raw-override snapshot now feeds both child creation and
+fork/rewind branches. It carries target/output overrides along with threshold,
+max-token and spill values without resolving NULL defaults. Registered history
+and public Store regressions cover inheritance, clearing, parent independence
+and transactional rollback. The initial guarded production library compile
+passed on the source preparation; final committed focused validation is still
+pending and no CI/landing/runtime deployment is claimed. The separate long-model
+identity/conversion work remains design/RED-fixture preparation outside this unit.

@@ -375,10 +375,13 @@ Issue #303 supersedes the historical Issue #73/D-015 bounded map/reduce
 contract. Closed, manual and active summaries use one typed request and one owned
 transactional adoption path; `segment_chars`, `reduce_rounds`, request budgets,
 per-part cache generation, and stage-specific usage fields are retired. Configuration
-remains strict and rejects those removed keys. Migration 43 archives persisted
-per-Thread segment/reduce values before removing the columns; migrations 40–42
-remain immutable. The global auto-compaction target setting is independent and
-retained. Historical `history get --parts` remains read-only for existing saved
+remains strict and rejects those removed keys. The applied migration 43 removes
+per-Thread segment/reduce columns without archiving or translating their saved
+values. Existing history, receipts and usage JSON are not rewritten. Values
+already removed by that migration are not recoverable from the current schema
+alone; any preservation or recovery change requires a separate authorized
+forward migration. Migrations 40–43 remain immutable. The global auto-compaction
+target setting is independent and retained. Historical `history get --parts` remains read-only for existing saved
 cache records; current summaries neither create nor consume map/reduce parts.
 
 

@@ -1665,15 +1665,12 @@ impl Store {
         let config = &self.config.current();
         let inherited = if let Some(parent) = &args.parent_id {
             Some(tx.query_row(
-                "SELECT cwd,agents_path,profile_id,model_id,effort,auto_compact_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1 AND deleted_at IS NULL",
+                "SELECT cwd,agents_path,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",
                 [parent],
                 |row| Ok((
                     row.get::<_,String>(0)?, row.get::<_,String>(1)?,
                     row.get::<_,String>(2)?, row.get::<_,String>(3)?,
-                    row.get::<_,Option<String>>(4)?, row.get::<_,Option<i64>>(5)?,
-                    row.get::<_,Option<i64>>(6)?, row.get::<_,Option<i64>>(7)?,
-                    row.get::<_,Option<i64>>(8)?,
-                    crate::storage::decode_spill_override(row.get_ref(9)?, 9)?,
+                    row.get::<_,Option<String>>(4)?,
                 )))
                 .optional().map_err(sql_error)?
                 .ok_or_else(|| error(ErrorCode::ThreadNotFound,"parent Thread not found"))?)
@@ -1743,14 +1740,15 @@ impl Store {
                 }
             })
             .filter(|value| !value.is_empty());
+        let overrides =
+            history::thread_overrides::ThreadOverrides::inherit(tx, args.parent_id.as_deref())
+                .map_err(sql_error)?;
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute(
-            "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at,auto_compact_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-            params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now,
-                inherited.as_ref().and_then(|p|p.5), inherited.as_ref().and_then(|p|p.6),
-                inherited.as_ref().and_then(|p|p.7), inherited.as_ref().and_then(|p|p.8),
-                inherited.as_ref().and_then(|p|p.9).map(i64::from)],
+            "INSERT INTO thread(id,parent_thread_id,cwd,agents_path,profile_id,model_id,effort,updated_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![id,args.parent_id,cwd.to_string_lossy(),agents,profile,model,effort,now],
         ).map_err(sql_error)?;
+        overrides.apply(tx, &id).map_err(sql_error)?;
         bump_roots(tx)?;
         Ok(id)
     }

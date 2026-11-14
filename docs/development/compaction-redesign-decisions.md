@@ -179,3 +179,31 @@ stale pre-boundary completion does not become #A and does not reset/retry; the
 next request captures the current boundary. Preserve scope ABA guards. Required
 race fixture ordering: old request start → boundary commit → old completion
 ignored → new request start/completion records #A.
+
+
+## 2026-11-14 - Migration 43 factual correction (source preparation)
+
+The earlier pre-release paragraph claiming persisted old Thread columns remain
+untouched is historical and is superseded by the final applied migration 43.
+`0043_thread_single_summary_settings.sql` adds the two current override columns
+and drops `segment_chars` and `reduce_rounds` without archival or translation.
+It does not rewrite history, receipts or usage JSON. This note corrects the
+contract description; it does not approve that loss as a new preservation policy.
+
+Do not edit the applied migration or infer that removed values can be recovered
+from the current schema. Preservation of values still present in an older
+synthetic schema and recovery from a separately authorized source are distinct
+forward-migration tasks. No user database, installed owner or migration is
+executed by this documentation correction.
+
+
+## 2026-11-14 - Raw overrides on branches
+
+The new target/output overrides were copied by child creation but omitted by
+fork/rewind, unlike the threshold and later output-token/spill overrides. No
+explicit reset policy was found. The selected correction is one typed raw
+override snapshot shared by creation and branches, preserving NULL rather than
+flattening connection defaults. The alternative of resetting only the two newer
+settings would retain an undocumented exception. Parent changes remain isolated
+and a copy failure rolls back branch creation. This does not inherit GC owner
+state or alter the public settings/schema contract.

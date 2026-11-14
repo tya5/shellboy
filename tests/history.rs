@@ -1005,3 +1005,121 @@ async fn adjacent_described_commands_larger_than_preview_budget_reach_exact_tail
         database.shutdown().await.unwrap();
     }).await.unwrap();
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RawBranchOverrides {
+    auto_at: Option<i64>,
+    target_percent: Option<i64>,
+    summary_chars: Option<i64>,
+    max_tokens: Option<i64>,
+    spill: Option<i64>,
+}
+
+impl RawBranchOverrides {
+    fn inherited() -> Self {
+        Self {
+            auto_at: None,
+            target_percent: None,
+            summary_chars: None,
+            max_tokens: None,
+            spill: None,
+        }
+    }
+    fn explicit() -> Self {
+        Self {
+            auto_at: Some(0),
+            target_percent: Some(80),
+            summary_chars: Some(4000),
+            max_tokens: Some(2048),
+            spill: Some(0),
+        }
+    }
+    fn write(self, db: &Connection, thread: &str) -> rusqlite::Result<()> {
+        db.execute("UPDATE thread SET auto_compact_at=?2,auto_compact_target_percent=?3,summary_max_chars=?4,max_tokens=?5,spill_override=?6 WHERE id=?1",
+            params![thread,self.auto_at,self.target_percent,self.summary_chars,self.max_tokens,self.spill])?;
+        Ok(())
+    }
+    fn read(db: &Connection, thread: &str) -> rusqlite::Result<Self> {
+        db.query_row("SELECT auto_compact_at,auto_compact_target_percent,summary_max_chars,max_tokens,spill_override FROM thread WHERE id=?1",[thread],|row|Ok(Self {
+            auto_at: row.get(0)?, target_percent: row.get(1)?, summary_chars: row.get(2)?, max_tokens: row.get(3)?, spill: row.get(4)?,
+        }))
+    }
+}
+
+#[tokio::test]
+async fn fork_and_rewind_inherit_raw_summary_overrides_without_flattening_null() {
+    for kind in ["fork", "rewind"] {
+        for expected in [
+            RawBranchOverrides::inherited(),
+            RawBranchOverrides::explicit(),
+        ] {
+            let (_root, db, _history) = repository().await;
+            append(
+                &db,
+                "source",
+                "user",
+                json!({"role":"user","content":"source"}),
+            )
+            .await;
+            let kind = kind.to_owned();
+            db.call(move |db| {
+                let tx = db.transaction()?;
+                expected.write(&tx, "thread")?;
+                tx.execute("UPDATE thread SET profile_revision=9 WHERE id='thread'",[])?;
+                let source_path = path(&tx, "thread")?;
+                shellboy::history::fork_thread_kind(&tx, &ThreadForkArgs { agents: None, thread_id: "thread".into(), node_id: "source".into(), cwd: None }, "branch", "now", &kind)
+                    .map_err(StorageError::from)?;
+                assert_eq!(RawBranchOverrides::read(&tx,"branch")?,expected);
+                assert_eq!(RawBranchOverrides::read(&tx,"thread")?,expected);
+                let base:(String,String,Option<String>,i64,i64,String)=tx.query_row("SELECT profile_id,model_id,effort,reasoning_epoch,profile_revision,branch_kind FROM thread WHERE id='branch'",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?)))?;
+                assert_eq!(base,("proxy".into(),"fixture".into(),Some("custom".into()),7,9,kind));
+                assert_eq!(path(&tx,"branch")?,source_path);
+                assert_eq!(tx.query_row("SELECT count(*) FROM run WHERE thread_id='branch'",[],|r|r.get::<_,i64>(0))?,0);
+                assert_eq!(tx.query_row("SELECT count(*) FROM app_meta WHERE key='compact.a_state.branch'",[],|r|r.get::<_,i64>(0))?,0);
+                let changed = if expected == RawBranchOverrides::inherited() { RawBranchOverrides::explicit() } else { RawBranchOverrides::inherited() };
+                changed.write(&tx,"thread")?;
+                assert_eq!(RawBranchOverrides::read(&tx,"branch")?,expected,"parent changes or clear do not mutate the branch");
+                tx.commit()?;
+                Ok(())
+            }).await.unwrap();
+            db.shutdown().await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn fork_override_snapshot_is_independent_and_rolls_back_atomically() {
+    for kind in ["fork", "rewind"] {
+        let (_root, db, _history) = repository().await;
+        append(
+            &db,
+            "source",
+            "user",
+            json!({"role":"user","content":"source"}),
+        )
+        .await;
+        let kind = kind.to_owned();
+        db.call(move |db| {
+            RawBranchOverrides::explicit().write(db,"thread")?;
+            let original_path=path(db,"thread")?;
+            db.execute_batch("CREATE TRIGGER reject_branch_overrides BEFORE UPDATE OF summary_max_chars ON thread WHEN NEW.id='branch' BEGIN SELECT RAISE(ABORT,'injected override copy failure'); END;")?;
+            {
+                let tx=db.transaction()?;
+                let error=shellboy::history::fork_thread_kind(&tx,&ThreadForkArgs {agents:None,thread_id:"thread".into(),node_id:"source".into(),cwd:None},"branch","now",&kind).unwrap_err();
+                assert!(error.message.contains("injected override copy failure"),"{error:?}");
+                tx.rollback()?;
+            }
+            assert_eq!(db.query_row("SELECT count(*) FROM thread WHERE id='branch'",[],|r|r.get::<_,i64>(0))?,0);
+            assert_eq!(db.query_row("SELECT count(*) FROM thread_path WHERE thread_id='branch'",[],|r|r.get::<_,i64>(0))?,0);
+            assert_eq!(RawBranchOverrides::read(db,"thread")?,RawBranchOverrides::explicit());
+            assert_eq!(path(db,"thread")?,original_path);
+            db.execute_batch("DROP TRIGGER reject_branch_overrides")?;
+            let tx=db.transaction()?;
+            shellboy::history::fork_thread_kind(&tx,&ThreadForkArgs {agents:None,thread_id:"thread".into(),node_id:"source".into(),cwd:None},"branch","now",&kind).map_err(StorageError::from)?;
+            tx.commit()?;
+            assert_eq!(RawBranchOverrides::read(db,"branch")?,RawBranchOverrides::explicit());
+            Ok(())
+        }).await.unwrap();
+        db.shutdown().await.unwrap();
+    }
+}

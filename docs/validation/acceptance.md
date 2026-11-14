@@ -11921,3 +11921,16 @@ Rust paths, Python py_compile for touched scripts, and `git diff --check`. No Ca
 or target access occurred. The original 223/2F/13E receipt remains execution
 `e0a3d73c-428b-4563-b05c-28f00e90ff2e`; this was preflight source-failure evidence,
 not S6a Rust behavior. Full S6a Rust tests and normal CI retry remain pending.
+
+## Raw Thread Override Inheritance Repair (2026-11-14)
+
+Source scope: one raw override snapshot shared by child creation, fork and rewind;
+no schema/migration or GC authority change. Initial guarded `cargo check --lib
+--locked` exited 0 on source preparation. Final committed validation is pending:
+`history::fork_and_rewind_inherit_raw_summary_overrides_without_flattening_null`,
+`history::fork_override_snapshot_is_independent_and_rolls_back_atomically`,
+`control_db::fork_inherits_raw_summary_overrides_and_clear_restores_connection_defaults`,
+the two existing `control_db::thread_summary_parameters_*` regressions and the
+existing persistence fork/AGENTS regression. They are registered in the ordinary
+integration target. No real provider, installed owner or user data is involved.
+Migration 43 documentation is corrected to state actual value loss, not recovery.
