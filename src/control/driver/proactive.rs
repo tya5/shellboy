@@ -5,7 +5,45 @@ use super::*;
 #[cfg(test)]
 mod fault_tests;
 
+#[cfg(test)]
+mod spill_route_tests {
+    use super::{SpillRoute, spill_route};
+
+    #[test]
+    fn off_skips_a_routing_and_all_automatic_spill_stages() {
+        for a in [None, Some(0), Some(50), Some(100)] {
+            assert_eq!(spill_route(false, a, 50), SpillRoute::SummaryWithoutSpill);
+        }
+    }
+
+    #[test]
+    fn on_preserves_existing_a_threshold_split() {
+        assert_eq!(spill_route(true, Some(50), 50), SpillRoute::SpillOnly);
+        assert_eq!(
+            spill_route(true, Some(51), 50),
+            SpillRoute::SpillThenSummary
+        );
+    }
+}
+
 pub(super) const REASON: &str = "proactive_threshold";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpillRoute {
+    SpillOnly,
+    SpillThenSummary,
+    SummaryWithoutSpill,
+}
+
+fn spill_route(effective: bool, a_input_tokens: Option<u64>, target: u64) -> SpillRoute {
+    if !effective {
+        SpillRoute::SummaryWithoutSpill
+    } else if a_input_tokens.is_some_and(|a| a <= target) {
+        SpillRoute::SpillOnly
+    } else {
+        SpillRoute::SpillThenSummary
+    }
+}
 
 /// Kept as a caller handle; no durable progress/marks policy lives here.
 /// One automatic attempt's identity for the #226 recoverable record.
@@ -146,24 +184,33 @@ pub(super) async fn maybe_compact(
 ) -> Result<bool, ApiError> {
     // One decision per fresh provider report; no character forecast or marks.
     let thread = snapshot.thread.clone();
+    let config = control.store.config.clone();
     let data = control
         .store
         .database
         .call(move |db| {
-            let settings: (Option<i64>, Option<i64>) = db.query_row(
-                "SELECT auto_compact_at,auto_compact_target_percent FROM thread WHERE id=?1",
+            let settings: (Option<i64>, Option<i64>, String, Option<bool>, i64) = db.query_row(
+                "SELECT auto_compact_at,auto_compact_target_percent,profile_id,spill_override,revision FROM thread WHERE id=?1",
                 [&thread],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, crate::storage::decode_spill_override(r.get_ref(3)?, 3)?, r.get(4)?)),
             )?;
             let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
                 crate::compaction::context_usage::read_context_usage_tx(db, &thread, None)?,
             );
-            let state = crate::compaction::a_state::read(db, &thread)?;
-            Ok((
-                settings,
-                usage,
-                crate::compaction::a_state::reading(state.as_ref()),
-            ))
+            let current = config.current();
+            let connection_spill = current.connections.get(&settings.2).and_then(|c| c.spill);
+            let spill = crate::config::SpillPolicy::resolve(settings.3, connection_spill);
+            let a = if spill.effective {
+                let state = crate::compaction::a_state::read(db, &thread)?;
+                Some(match crate::compaction::a_state::reading(state.as_ref()) {
+                    crate::compaction::a_state::Reading::LegacyAbsent
+                    | crate::compaction::a_state::Reading::AwaitingFirst => 0,
+                    crate::compaction::a_state::Reading::Known(n) => n,
+                })
+            } else {
+                None
+            };
+            Ok((settings, usage, spill, a))
         })
         .await
         .map_err(storage_error)?;
@@ -207,11 +254,7 @@ pub(super) async fn maybe_compact(
     if input < threshold || report["next_request_pending"] == true {
         return Ok(false);
     }
-    use crate::compaction::a_state::Reading;
-    let a = match data.2 {
-        Reading::LegacyAbsent | Reading::AwaitingFirst => 0,
-        Reading::Known(n) => n,
-    };
+    let a = data.3;
     let target = ((threshold as u128 * percent as u128) / 100) as u64;
     let compactor = control.compactor.pinned(snapshot.clients.clone());
     let automatic = Automatic {
@@ -239,11 +282,28 @@ pub(super) async fn maybe_compact(
         turn_id: Some(snapshot.turn.clone()),
         ..Default::default()
     };
+    let sampled_profile = data.0.2.clone();
+    let sampled_revision = data.0.4;
+    let guard_thread = thread.clone();
     let can_run=control.store.database.call(move |db| {
         let tx=db.transaction()?;
+        let current: Option<(String, i64)> = tx.query_row("SELECT profile_id,revision FROM thread WHERE id=?1",[&guard_thread],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+        if current != Some((sampled_profile, sampled_revision)) { return Ok(false); }
         let consumed:bool=tx.query_row("SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",[&id],|r|r.get(0))?;
         if consumed {return Ok(false);}
-        crate::compaction::attempt_begin_tx(&tx,&id,&token,REASON,&trigger,&Value::Null)?;
+        crate::compaction::attempt_begin_tx(
+            &tx,
+            &id,
+            &token,
+            REASON,
+            if data.2.effective {
+                crate::compaction::ABoundaryObservation::Observe
+            } else {
+                crate::compaction::ABoundaryObservation::Unobserved
+            },
+            &trigger,
+            &Value::Null,
+        )?;
         tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
         // Retire old target/guard metadata, never the historical attempt record.
         for key in [crate::compaction::CompactionKeys::new(&thread).automatic_target(),crate::compaction::CompactionKeys::new(&thread).automatic_guard(),crate::compaction::CompactionKeys::new(&thread).automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
@@ -262,7 +322,8 @@ pub(super) async fn maybe_compact(
     // terminal record aggregates it with the summary (compact list reads it).
     let mut committed_spill: Option<crate::compaction::CompactResult> = None;
     let result: Result<crate::compaction::CompactResult, ApiError> = async {
-        if a <= target {
+        let route = spill_route(data.2.effective, a, target);
+        if route == SpillRoute::SpillOnly {
             let spilled = automatic
                 .observed(
                     control,
@@ -284,32 +345,35 @@ pub(super) async fn maybe_compact(
             }
             return Ok(spilled);
         }
-        // Choose the summary region once, then spill only inside that region.
+        // With spill disabled, keep the same summary/adoption path but skip
+        // both automatic spill stages and the #A range-selection read.
         let active = !compactor.has_closed_summary(&snapshot.thread).await?;
-        let spill_phase = if active {
-            "active_spill"
-        } else {
-            "closed_spill"
-        };
-        let spilled = automatic
-            .observed(
-                control,
-                spill_phase,
-                compactor.spill_staged_cancellable(
-                    &snapshot.thread,
-                    active,
-                    u64::MAX,
-                    slot.stop.clone(),
-                    Some(automatic.stage(spill_phase)),
-                ),
-            )
-            .await?;
-        #[cfg(test)]
-        if !spilled.no_target {
-            fault_tests::checkpoint(control, slot, spill_phase).await?;
-        }
-        if !spilled.no_target {
-            committed_spill = Some(spilled);
+        if route == SpillRoute::SpillThenSummary {
+            let spill_phase = if active {
+                "active_spill"
+            } else {
+                "closed_spill"
+            };
+            let spilled = automatic
+                .observed(
+                    control,
+                    spill_phase,
+                    compactor.spill_staged_cancellable(
+                        &snapshot.thread,
+                        active,
+                        u64::MAX,
+                        slot.stop.clone(),
+                        Some(automatic.stage(spill_phase)),
+                    ),
+                )
+                .await?;
+            #[cfg(test)]
+            if !spilled.no_target {
+                fault_tests::checkpoint(control, slot, spill_phase).await?;
+            }
+            if !spilled.no_target {
+                committed_spill = Some(spilled);
+            }
         }
         summary_stage(
             control,

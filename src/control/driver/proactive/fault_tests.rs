@@ -148,6 +148,40 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
+    for scenario in [Scenario::ClosedSummary, Scenario::ActiveSummary] {
+        let fx = prepare_with_options(Fault::Cancellation, scenario, true, true).await;
+        let Fx {
+            control,
+            target,
+            mut receive,
+            server,
+            ..
+        } = fx;
+        assert!(receive.try_recv().is_err());
+        let path: Vec<String> = control
+            .store
+            .database
+            .call({
+                let target = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([target], |row| row.get(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+        assert!(!path.is_empty(), "summary adoption retains a real path");
+        control.shutdown().await.unwrap();
+        server.abort();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn closed_spill_uses_effective_thread_target_and_captures_real_stage() {
     crate::test_watchdog::watchdog("closed spill trigger tuple", async {
         boundary(Fault::Cancellation, Scenario::ClosedSpill).await;
@@ -202,6 +236,15 @@ async fn prepare_with_thread_override(
     scenario: Scenario,
     set_thread_percent: bool,
 ) -> Fx {
+    prepare_with_options(fault, scenario, set_thread_percent, false).await
+}
+
+async fn prepare_with_options(
+    fault: Fault,
+    scenario: Scenario,
+    set_thread_percent: bool,
+    spill_off: bool,
+) -> Fx {
     eprintln!(
         "automatic boundary {fault:?} scenario={scenario:?} T=200 P={} A=100 input=200 target={}",
         scenario.target_percent(),
@@ -224,6 +267,17 @@ async fn prepare_with_thread_override(
                 Some(scenario.target_percent().to_string()),
                 None,
             ))),
+        )
+        .await;
+    }
+    if spill_off {
+        request(
+            &control,
+            Command::ThreadSet(Box::new(ThreadSetArgs {
+                thread_id: Some(target.clone()),
+                spill: Some("off".into()),
+                ..Default::default()
+            })),
         )
         .await;
     }
@@ -279,21 +333,23 @@ async fn prepare_with_thread_override(
     let checkpoint_reached = Arc::new(AtomicBool::new(false));
     let release_checkpoint = Arc::new(tokio::sync::Notify::new());
     let stage = scenario.stage();
-    *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
-        stage,
-        kind: match fault {
-            Fault::Cancellation => 0,
-            Fault::Storage => 1,
-            Fault::Remeasurement => 2,
-            Fault::Persistent => 4,
-            Fault::RejectFinal => 6,
-            Fault::RejectFact => 8,
-            Fault::RetiredWritesAbsent => 9,
-        },
-        reached: reached.clone(),
-        checkpoint_reached: checkpoint_reached.clone(),
-        release_checkpoint: release_checkpoint.clone(),
-    });
+    if !spill_off {
+        *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
+            stage,
+            kind: match fault {
+                Fault::Cancellation => 0,
+                Fault::Storage => 1,
+                Fault::Remeasurement => 2,
+                Fault::Persistent => 4,
+                Fault::RejectFinal => 6,
+                Fault::RejectFact => 8,
+                Fault::RetiredWritesAbsent => 9,
+            },
+            reached: reached.clone(),
+            checkpoint_reached: checkpoint_reached.clone(),
+            release_checkpoint: release_checkpoint.clone(),
+        });
+    }
     let kind = if scenario.summary() {
         "summary"
     } else {
@@ -398,14 +454,25 @@ async fn prepare_with_thread_override(
             .send((200, answer("Short adopted summary.")))
             .unwrap();
     }
+    if spill_off {
+        crate::test_watchdog::watchdog("spill-off summary attempt finishes", async {
+            while !terminal_record_written(&control).await {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
     // RejectFact has no checkpoint: the trigger fires inside the stage's
     // adoption transaction, before the driver's terminal writer runs. The
     // rejected-stage observation point is after that terminal write.
-    while !if fault == Fault::RejectFact {
-        reached.load(Ordering::SeqCst) && terminal_record_written(&control).await
-    } else {
-        checkpoint_reached.load(Ordering::SeqCst)
-    } {
+    while !spill_off
+        && !if fault == Fault::RejectFact {
+            reached.load(Ordering::SeqCst) && terminal_record_written(&control).await
+        } else {
+            checkpoint_reached.load(Ordering::SeqCst)
+        }
+    {
         if let Ok(unexpected) = receive.try_recv() {
             let body = unexpected.body.clone();
             let trigger = control.store.database.call(move |db| {
@@ -440,36 +507,50 @@ async fn prepare_with_thread_override(
         "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
         [], |row| row.get::<_, String>(0))?)).await.unwrap();
     let saved: Value = serde_json::from_str(&saved).unwrap();
-    assert_trigger_evidence(&saved["trigger"], scenario);
-    // This read occurs at the committed stage checkpoint, before owner shutdown
-    // can write terminal state. Every injected postcommit interruption is still
-    // provisional at this exact lifecycle boundary. A rejected stage fact is
-    // read after the driver's own terminal write for the failed stage.
-    let phase = if fault == Fault::RejectFact {
-        ObservationPhase::AfterRejectedStageTransaction
-    } else {
-        ObservationPhase::AtCommittedCheckpoint
-    };
-    let expected_outcome = expected_outcome(fault, scenario, phase);
-    assert_eq!(
-        saved["outcome"], expected_outcome,
-        "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
-    );
-    if fault == Fault::RejectFact {
+    if spill_off {
+        assert!(saved["trigger"]["a_input_tokens"].is_null());
+        assert_eq!(saved["outcome"], "adopted");
+        assert!(saved["committed_stages"]["closed_spill"].is_null());
+        assert!(saved["committed_stages"]["active_spill"].is_null());
+        assert!(saved["committed_stages"][scenario.stage()].is_object());
         assert!(
-            saved["committed_stages"][scenario.stage()].is_null(),
-            "rejected stage leaves no stage fact: {saved}"
+            receive.try_recv().is_err(),
+            "one summary POST only; no automatic spill continuation"
         );
     } else {
+        assert_trigger_evidence(&saved["trigger"], scenario);
+    }
+    if !spill_off {
+        // This read occurs at the committed stage checkpoint, before owner shutdown
+        // can write terminal state. Every injected postcommit interruption is still
+        // provisional at this exact lifecycle boundary. A rejected stage fact is
+        // read after the driver's own terminal write for the failed stage.
+        let phase = if fault == Fault::RejectFact {
+            ObservationPhase::AfterRejectedStageTransaction
+        } else {
+            ObservationPhase::AtCommittedCheckpoint
+        };
+        let expected_outcome = expected_outcome(fault, scenario, phase);
+        assert_eq!(
+            saved["outcome"], expected_outcome,
+            "actual terminal outcome for {fault:?} {scenario:?}: {saved}"
+        );
+        if fault == Fault::RejectFact {
+            assert!(
+                saved["committed_stages"][scenario.stage()].is_null(),
+                "rejected stage leaves no stage fact: {saved}"
+            );
+        } else {
+            assert!(
+                saved["committed_stages"][scenario.stage()].is_object(),
+                "selected stage fact is persisted: {saved}"
+            );
+        }
         assert!(
-            saved["committed_stages"][scenario.stage()].is_object(),
-            "selected stage fact is persisted: {saved}"
+            receive.try_recv().is_err(),
+            "no provider continuation before the selected checkpoint"
         );
     }
-    assert!(
-        receive.try_recv().is_err(),
-        "no provider continuation before the selected checkpoint"
-    );
     Fx {
         root,
         url,

@@ -724,6 +724,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
                 &begin.0,
                 &begin.1,
                 REASON,
+                crate::compaction::ABoundaryObservation::Observe,
                 &json!({}),
                 &Value::Null,
             )?;

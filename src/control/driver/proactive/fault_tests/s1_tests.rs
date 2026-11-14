@@ -390,7 +390,15 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
         control.store.database.call(move |db| {
             let tx = db.transaction()?;
             tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,'guard-turn',0,0,'fixture','fixture',0,'completed','{}','2026-11-01T00:00:00Z')", [&attempt])?;
-            crate::compaction::attempt_begin_tx(&tx, &attempt, &attempt, REASON, &json!({}), &Value::Null)?;
+            crate::compaction::attempt_begin_tx(
+                &tx,
+                &attempt,
+                &attempt,
+                REASON,
+                crate::compaction::ABoundaryObservation::Observe,
+                &json!({}),
+                &Value::Null,
+            )?;
             tx.commit()?;
             Ok(())
         }).await.unwrap();

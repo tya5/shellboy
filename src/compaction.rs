@@ -22,7 +22,8 @@ pub(crate) mod context_usage;
 pub mod discard;
 mod retry;
 pub(crate) use attempt::{
-    AutomaticStage, begin_tx as attempt_begin_tx, finish_tx as attempt_finish_tx,
+    ABoundaryObservation, AutomaticStage, begin_tx as attempt_begin_tx,
+    finish_tx as attempt_finish_tx,
 };
 mod edit;
 mod failure_memory;
