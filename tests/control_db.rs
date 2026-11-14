@@ -3115,7 +3115,7 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     )
     .unwrap();
     assert_eq!(parent.spill, None);
-    assert_eq!(parent.effective_spill, false);
+    assert!(!parent.effective_spill);
 
     let connection_on: ThreadDetails = serde_json::from_value(
         execute(
@@ -3134,7 +3134,7 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     )
     .unwrap();
     assert_eq!(connection_on.spill, None);
-    assert_eq!(connection_on.effective_spill, true);
+    assert!(connection_on.effective_spill);
 
     let before = thread_revisions(&store, &parent.thread_id).await;
     let turned_off = execute(
@@ -3169,7 +3169,7 @@ async fn spill_precedence_inheritance_revision_and_rollback_are_public() {
     )
     .unwrap();
     assert_eq!(child.spill, Some(false));
-    assert_eq!(child.effective_spill, false);
+    assert!(!child.effective_spill);
 
     let failed = store
         .execute(
