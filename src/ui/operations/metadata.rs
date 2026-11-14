@@ -834,8 +834,8 @@ fn operation_meaning_for(id: OperationId, language: crate::config::UiLanguage) -
         ),
         OperationId::ThreadSet => local!(
             language,
-            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、出力上限、指示ファイル、親Thread、自動要約設定、summary文字数上限を変更します。",
-            "Change a Thread's display title, working folder, connection, model, reasoning effort, output limit, instruction file, parent, proactive compaction settings, and summary character limit."
+            "Threadの表示タイトル、作業場所、接続、モデル、推論設定、出力上限、指示ファイル、親Thread、自動要約設定、summary文字数上限、自動spill設定を変更します。",
+            "Change a Thread's display title, working folder, connection, model, reasoning effort, output limit, instruction file, parent, proactive compaction settings, summary character limit, and automatic spill policy."
         ),
         OperationId::MessageReply => local!(
             language,
@@ -1462,11 +1462,19 @@ fn field_help_for(id: FieldId, language: crate::config::UiLanguage) -> &'static 
             "このThreadだけの自動要約の閾値（トークン）です。0で停止、CLIの空文字（フォームではnone）で接続または[compaction]の値へ戻します。",
             "Proactive compaction threshold in tokens for this Thread only. 0 turns it off; an empty CLI value returns to the connection value."
         ),
-        FieldId::SpillPolicy => local!(
-            language,
-            "Threadの自動spill設定です。on/offを指定します。CLIの空文字は接続設定または組み込み既定onへ継承します。offでも自動要約は続き、手動・overflow spillは変わりません。",
-            "Thread-level automatic spill override: on/off; an empty CLI value inherits the connection or built-in on default. Off skips only automatic spill; automatic summary and manual/overflow spill remain available."
-        ),
+        FieldId::SpillPolicy => match language {
+            crate::config::UiLanguage::Ja => {
+                crate::operations::OperationId::ThreadSet
+                    .spec()
+                    .field(id)
+                    .expect("ThreadSet exposes the automatic spill policy")
+                    .field
+                    .help
+            }
+            crate::config::UiLanguage::En => {
+                "Thread-level automatic spill override: on/off; an empty CLI value inherits the connection or built-in on default. Off skips only automatic spill; automatic summary and manual/overflow spill remain available."
+            }
+        },
         FieldId::AutoCompactTargetPercent => match language {
             crate::config::UiLanguage::Ja => {
                 crate::operations::OperationId::ThreadSet
