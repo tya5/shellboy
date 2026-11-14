@@ -2172,7 +2172,8 @@
         "empty",
         "not_shrinking",
         "cancelled",
-        "unclassified"
+        "unclassified",
+        "retry_suppressed"
       ],
       "type": "string"
     },
@@ -4101,6 +4102,34 @@
               "if": {
                 "properties": {
                   "reason": {
+                    "const": "retry_suppressed"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "final_group_count": {
+                    "type": "null"
+                  },
+                  "final_source_nodes": {
+                    "type": "null"
+                  },
+                  "http_status": {
+                    "type": "null"
+                  },
+                  "origin": {
+                    "const": "preparation"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
                     "const": "rejected_at_minimum"
                   }
                 },
@@ -4336,6 +4365,28 @@
                 "properties": {
                   "reason": {
                     "const": "unclassified"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "provider_status": {
+                    "type": "null"
+                  },
+                  "provider_status_source": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "retry_suppressed"
                   }
                 },
                 "required": [

@@ -233,13 +233,6 @@ async fn terminal_public_case(case: &str) {
             let rows = statement.query_map(params![format!("compact.deterministic_range_failure.closed.{scope}"),format!("compact.deterministic_range_failure.active.{scope}")], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         }).await.unwrap();
-        if case == "context" || case.starts_with("s2_") {
-            assert_eq!(
-                failure_slots.len(),
-                if context && !s2_veto || s2_minimum && !s2_success { 1 } else { 0 },
-                "only qualifying deterministic context/minimum failures write the original E slot",
-            );
-        }
         control.shutdown().await.unwrap();
         drop(control);
         owner.shutdown().await.unwrap();
@@ -250,6 +243,7 @@ async fn terminal_public_case(case: &str) {
         let expected = match case { "context" => "context_limit_terminal", "sse_terminal_responses" | "sse_terminal_chat" | "s2_minimum_http400" | "s2_minimum_http400_body500" | "s2_minimum_http413" | "s2_minimum_http422" | "s2_minimum_sse400" => "rejected_at_minimum", "protocol" | "sse_eof_responses" | "sse_eof_chat" | "sse_eof_r0_responses" | "sse_eof_r0_chat" => "unclassified", _ => "provider_error" };
         let items = list["items"].as_array().unwrap();
         if s2_success {
+            assert!(failure_slots.is_empty(), "successful later trial must not leave provider or deterministic memory from an earlier HTTP 400");
             let completed = items.iter().find(|v| v["kind"] == "automatic_reduction").expect("automatic reduction outcome");
             assert_eq!(completed["state"], "adopted");
             assert_eq!(completed["compaction_outcome"], Value::Null);
@@ -259,11 +253,34 @@ async fn terminal_public_case(case: &str) {
         let item = items.iter().find(|v| v["kind"] == "automatic_reduction").expect("real automatic attempt must remain listed");
         let fact = &item["compaction_outcome"];
         assert_eq!(fact["outcome"]["kind"], "failed", "missing classified terminal public fact: {list:#}");
+        let memory_kind = match (
+            fact["outcome"]["reason"].as_str(),
+            fact["outcome"]["origin"].as_str(),
+        ) {
+            (Some("context_limit_terminal" | "rejected_at_minimum"), _) => "deterministic_e",
+            (Some("provider_error"), Some("provider_response")) => "provider_scope",
+            _ => "none",
+        };
+        if case == "context" || case.starts_with("s2_") {
+            assert_eq!(
+                failure_slots.len(),
+                usize::from(memory_kind != "none"),
+                "slot presence must follow the terminal outcome's typed failure class: {case}, {fact:#?}"
+            );
+        }
         if s2_incomplete {
             assert_ne!(fact["outcome"]["reason"], "rejected_at_minimum");
             assert!(fact["outcome"].get("final_group_count").is_none());
             assert!(fact["outcome"].get("final_source_nodes").is_none());
-            assert!(failure_slots.is_empty(), "incomplete response must not persist original E");
+            if case == "s2_truncated_http413" {
+                assert_eq!(memory_kind, "none", "truncated response is unclassified, not provider-response evidence: {fact:#?}");
+                assert!(failure_slots.is_empty(), "truncated response cannot create E or provider scope memory");
+                assert!(fact["outcome"].get("http_status").is_none());
+            } else {
+                assert_eq!(memory_kind, "provider_scope", "complete HTTP 400 refusal is terminal ProviderResponse, but not deterministic E: {fact:#?}");
+                assert_eq!(fact["outcome"]["http_status"], 400);
+                assert!(fact["outcome"].get("provider_status").is_none());
+            }
         } else if s2_header_quota {
             assert_eq!(fact["outcome"]["reason"], "provider_error");
             assert_eq!(fact["outcome"]["origin"], "provider_response");

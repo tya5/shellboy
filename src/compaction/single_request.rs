@@ -229,18 +229,34 @@ impl Compactor {
         );
         let identity = failure_identity(&snapshot.thread, &snapshot, original.clone(), limit)
             .ok_or_else(|| invalid("No summary range"))?;
+        let provider_identity = if automatic.is_some() {
+            self.owner_instance_id
+                .as_deref()
+                .and_then(|owner| provider_identity(&identity, &snapshot, owner))
+        } else {
+            None
+        };
         let thread = snapshot.thread.clone();
-        let lookup = identity.clone();
-        let blocked = self
+        let slot_key = region.key(&thread);
+        let observed = self
             .database
-            .call(move |db| same_failed_range(db, &thread, region, &lookup))
+            .call(move |db| failure_memory::read(db, &slot_key))
             .await
             .map_err(storage_error)?;
-        if blocked {
-            return Err(invalid(
-                "This summary range already failed deterministically; original path retained",
-            )
-            .hint("Change the range or the summary output limit, or switch the model or connection, to try again"));
+        if failure_memory::blocks(&observed, &identity.0, provider_identity.as_deref()) {
+            let message = match &observed {
+                failure_memory::SlotRead::Exact(saved) if saved == &identity.0 => {
+                    "This summary range already failed deterministically; original path retained"
+                }
+                _ => {
+                    "This provider summary invocation already failed in the current Run/Turn; original path retained"
+                }
+            };
+            return Err(discard::failed(
+                discard::FailureReason::RetrySuppressed,
+                discard::FailureOrigin::Preparation,
+                message,
+            ));
         }
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
@@ -256,17 +272,44 @@ impl Compactor {
         let dispatched = match dispatched {
             Ok(result) => result,
             Err(error) => {
-                let deterministic = discard::cause(&error).deterministic();
-                if deterministic {
+                let cause = discard::cause(&error);
+                let stored_value = if cause.deterministic() {
+                    Some(identity.0.clone())
+                } else if matches!(
+                    cause,
+                    discard::Outcome::Failed {
+                        reason: discard::FailureReason::ProviderError,
+                        origin: discard::FailureOrigin::ProviderResponse,
+                        ..
+                    }
+                ) {
+                    provider_identity.clone()
+                } else {
+                    None
+                };
+                if let Some(value) = stored_value {
                     let thread = snapshot.thread.clone();
                     let proof = snapshot.clone();
+                    let observation = observed.clone();
+                    let cancel = cancel.clone();
+                    let owner_lifetime = self.owner_lifetime.clone();
                     self.database
                         .call(move |db| {
                             let tx = db.transaction()?;
-                            validate(&tx, &proof)?;
-                            remember_failure(&tx, &thread, region, &identity)?;
+                            let wrote = remember_failure_qualified(
+                                &tx,
+                                QualifiedWrite {
+                                    snapshot: &proof,
+                                    cancel: &cancel,
+                                    owner_lifetime: owner_lifetime.as_ref(),
+                                    thread: &thread,
+                                    region,
+                                    observed: &observation,
+                                    value: &value,
+                                },
+                            )?;
                             tx.commit()?;
-                            Ok(())
+                            Ok(wrote)
                         })
                         .await
                         .map_err(storage_error)?;
@@ -325,13 +368,26 @@ impl Compactor {
         if projected >= source_chars {
             let thread = snapshot.thread.clone();
             let proof = snapshot.clone();
+            let observation = observed.clone();
+            let cancel = cancel.clone();
+            let owner_lifetime = self.owner_lifetime.clone();
             self.database
                 .call(move |db| {
                     let tx = db.transaction()?;
-                    validate(&tx, &proof)?;
-                    remember_failure(&tx, &thread, region, &identity)?;
+                    let wrote = remember_failure_qualified(
+                        &tx,
+                        QualifiedWrite {
+                            snapshot: &proof,
+                            cancel: &cancel,
+                            owner_lifetime: owner_lifetime.as_ref(),
+                            thread: &thread,
+                            region,
+                            observed: &observation,
+                            value: &identity.0,
+                        },
+                    )?;
                     tx.commit()?;
-                    Ok(())
+                    Ok(wrote)
                 })
                 .await
                 .map_err(storage_error)?;
@@ -617,7 +673,7 @@ pub(super) enum Region {
     Active,
 }
 impl Region {
-    fn key(self, thread: &str) -> String {
+    pub(super) fn key(self, thread: &str) -> String {
         let kind = match self {
             Self::Closed => "closed",
             Self::Active => "active",
@@ -628,6 +684,23 @@ impl Region {
 /// Capture ONCE before halving: original endpoints and request settings.
 #[derive(Clone)]
 pub(super) struct FailureIdentity(String);
+pub(super) fn provider_identity(
+    identity: &FailureIdentity,
+    snapshot: &Snapshot,
+    owner_instance_id: &str,
+) -> Option<String> {
+    let run = snapshot.run_fence.as_deref()?;
+    let (turn, generation) = snapshot.turn_fence.as_ref()?;
+    let generation = u64::try_from(*generation).ok()?;
+    Some(failure_memory::provider_turn_key(
+        &identity.0,
+        run,
+        turn,
+        generation,
+        owner_instance_id,
+    ))
+}
+
 pub(super) fn failure_identity(
     thread: &str,
     snapshot: &Snapshot,
@@ -714,26 +787,56 @@ pub(super) fn remember_failure(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     region: Region,
-    identity: &FailureIdentity,
-) -> Result<(), StorageError> {
-    tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-        params![region.key(thread),identity.0])?;
-    Ok(())
+    observed: &failure_memory::SlotRead,
+    value: &str,
+) -> Result<bool, StorageError> {
+    failure_memory::write(tx, &region.key(thread), observed, value)
 }
+pub(super) struct QualifiedWrite<'a> {
+    pub snapshot: &'a Snapshot,
+    pub cancel: &'a CancellationToken,
+    pub owner_lifetime: Option<&'a CancellationToken>,
+    pub thread: &'a str,
+    pub region: Region,
+    pub observed: &'a failure_memory::SlotRead,
+    pub value: &'a str,
+}
+pub(super) fn remember_failure_qualified(
+    tx: &rusqlite::Transaction<'_>,
+    write: QualifiedWrite<'_>,
+) -> Result<bool, StorageError> {
+    let QualifiedWrite {
+        snapshot,
+        cancel,
+        owner_lifetime,
+        thread,
+        region,
+        observed,
+        value,
+    } = write;
+    if cancel.is_cancelled() || owner_lifetime.is_some_and(CancellationToken::is_cancelled) {
+        return Ok(false);
+    }
+    if let Err(authority) = validate(tx, snapshot) {
+        return match authority {
+            StorageError::Operation(_) => Ok(false),
+            error => Err(error),
+        };
+    }
+    remember_failure(tx, thread, region, observed, value)
+}
+
+#[cfg(test)]
 pub(super) fn same_failed_range(
     db: &rusqlite::Connection,
     thread: &str,
     region: Region,
     identity: &FailureIdentity,
 ) -> Result<bool, StorageError> {
-    let saved: Option<String> = db
-        .query_row(
-            "SELECT value FROM app_meta WHERE key=?1",
-            [region.key(thread)],
-            |r| r.get(0),
-        )
-        .optional()?;
-    Ok(saved.as_deref() == Some(identity.0.as_str()))
+    Ok(matches!(
+        failure_memory::read(db, &region.key(thread))?,
+        failure_memory::SlotRead::Exact(saved) if saved == identity.0
+    ))
 }
 
 /// Fixed model-facing notice for an active-Turn summary (#181): covered tools
@@ -842,6 +945,190 @@ mod tests {
                 .collect(),
         )
     }
+    #[tokio::test]
+    async fn same_captured_e_reopens_for_new_real_run_and_turn_scope() {
+        let (_root, db) = super::super::tests::database().await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('completed-run','t','completed','now');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('source-turn','t','completed-run','completed','now');",
+            )?;
+            history::append_node(
+                &tx,
+                "t",
+                "stable-source",
+                Some("source-turn"),
+                "message",
+                &json!({"role":"user","content":"same authorized source"}),
+                "now",
+            )?;
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('run-one','t','live','now');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn-one','t','run-one','running','now');",
+            )?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+
+        let config = Arc::new(Config::default());
+        let owner_lifetime = CancellationToken::new();
+        let owner = String::from("synthetic-owner-lifetime");
+        let compactor = Compactor::with_owner_instance(
+            db.clone(),
+            config.clone(),
+            Arc::new(crate::model::http::HttpClients::new(&config)),
+            owner.clone(),
+            owner_lifetime.clone(),
+        );
+        let first = compactor.snapshot("t", true).await.unwrap();
+        let limit = OutputLimit(20_000);
+        let first_e = failure_identity("t", &first, 0..1, limit).expect("actual stored source");
+        let first_f = provider_identity(&first_e, &first, &owner).expect("captured live scope");
+        let first_e_value = first_e.0.clone();
+        let first_proof = first.clone();
+        let first_f_value = first_f.clone();
+        let first_cancel = CancellationToken::new();
+        let first_owner_lifetime = owner_lifetime.clone();
+        db.call(move |db| {
+            let observation = failure_memory::read(db, &Region::Closed.key("t"))?;
+            assert_eq!(observation, failure_memory::SlotRead::Absent);
+            let tx = db.unchecked_transaction()?;
+            assert!(remember_failure_qualified(
+                &tx,
+                QualifiedWrite {
+                    snapshot: &first_proof,
+                    cancel: &first_cancel,
+                    owner_lifetime: Some(&first_owner_lifetime),
+                    thread: "t",
+                    region: Region::Closed,
+                    observed: &observation,
+                    value: &first_f_value,
+                },
+            )?);
+            tx.commit()?;
+            assert!(failure_memory::blocks(
+                &failure_memory::read(db, &Region::Closed.key("t"))?,
+                &first_e_value,
+                Some(&first_f_value),
+            ));
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute("UPDATE run SET state='completed' WHERE id='run-one'", [])?;
+            tx.execute("UPDATE turn SET state='completed' WHERE id='turn-one'", [])?;
+            tx.execute_batch(
+                "INSERT INTO run(id,thread_id,state,created_at)VALUES('run-two','t','live','later');
+                 INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('turn-two','t','run-two','preparing','later');",
+            )?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let second = compactor.snapshot("t", true).await.unwrap();
+        let second_e =
+            failure_identity("t", &second, 0..1, limit).expect("same actual stored source");
+        let second_f =
+            provider_identity(&second_e, &second, &owner).expect("new captured live scope");
+        assert_eq!(
+            first_e.0, second_e.0,
+            "E stays fixed across legal Run/Turn reopening"
+        );
+        assert_ne!(
+            first_f, second_f,
+            "new real Run/Turn scope reopens provider memory"
+        );
+        let stale_proof = first.clone();
+        let stale_f = provider_identity(&second_e, &second, &owner).unwrap();
+        let stale_cancel = CancellationToken::new();
+        let stale_owner_lifetime = owner_lifetime.clone();
+        db.call(move |db| {
+            let tx = db.unchecked_transaction()?;
+            assert!(
+                !remember_failure_qualified(
+                    &tx,
+                    QualifiedWrite {
+                        snapshot: &stale_proof,
+                        cancel: &stale_cancel,
+                        owner_lifetime: Some(&stale_owner_lifetime),
+                        thread: "t",
+                        region: Region::Closed,
+                        observed: &failure_memory::SlotRead::Absent,
+                        value: &stale_f,
+                    },
+                )?,
+                "obsolete Run snapshot cannot save a new provider key"
+            );
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let new_scope_slot = db
+            .call(|db| failure_memory::read(db, &Region::Closed.key("t")))
+            .await
+            .unwrap();
+        assert_eq!(
+            new_scope_slot,
+            failure_memory::SlotRead::Exact(first_f.clone())
+        );
+        assert!(!failure_memory::blocks(
+            &new_scope_slot,
+            &second_e.0,
+            Some(&second_f)
+        ));
+
+        db.call(|db| {
+            db.execute("UPDATE turn SET generation=9 WHERE id='turn-two'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let changed_generation = compactor.snapshot("t", true).await.unwrap();
+        let generation_e = failure_identity("t", &changed_generation, 0..1, limit).unwrap();
+        let generation_f = provider_identity(&generation_e, &changed_generation, &owner).unwrap();
+        assert_eq!(
+            second_e.0, generation_e.0,
+            "generation does not alter persistent E"
+        );
+        assert_ne!(
+            second_f, generation_f,
+            "new actual Turn generation reopens provider memory"
+        );
+        assert!(!failure_memory::blocks(
+            &new_scope_slot,
+            &generation_e.0,
+            Some(&generation_f)
+        ));
+
+        db.call(|db| {
+            db.execute("UPDATE thread SET summary_max_chars=10000 WHERE id='t'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        let changed_settings = compactor.snapshot("t", true).await.unwrap();
+        let changed_thread_limit = changed_settings
+            .summary_max_chars
+            .map(|value| u64::try_from(value).unwrap());
+        let changed_limit = resolved_limit(
+            None,
+            changed_thread_limit,
+            config.connections.get(&changed_settings.profile),
+            &config.compaction,
+        );
+        let changed_limit_e =
+            failure_identity("t", &changed_settings, 0..1, changed_limit).unwrap();
+        assert_ne!(
+            generation_e.0, changed_limit_e.0,
+            "changed persisted summary setting changes E"
+        );
+        db.shutdown().await.unwrap();
+    }
+
     #[test]
     fn one_request_contains_whole_selected_range_and_output_instruction() {
         let snapshot = fixture(&[40, 60, 80]);
@@ -1034,10 +1321,12 @@ mod tests {
             let mut db = rusqlite::Connection::open(&path).unwrap();
             db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);")
                 .unwrap();
+            let closed = failure_memory::read(&db, &Region::Closed.key("t")).unwrap();
+            let active = failure_memory::read(&db, &Region::Active.key("t")).unwrap();
             let tx = db.transaction().unwrap();
             // A failed reduced request records the captured ORIGINAL identity.
-            remember_failure(&tx, "t", Region::Closed, &original).unwrap();
-            remember_failure(&tx, "t", Region::Active, &smaller).unwrap();
+            remember_failure(&tx, "t", Region::Closed, &closed, &original.0).unwrap();
+            remember_failure(&tx, "t", Region::Active, &active, &smaller.0).unwrap();
             tx.commit().unwrap();
         }
         let mut db = rusqlite::Connection::open(path).unwrap();
@@ -1074,14 +1363,51 @@ mod tests {
             same_failed_range(&db, "t", Region::Closed, &original).unwrap(),
             "success does not invent a failure or overwrite prior evidence"
         );
+        let closed = failure_memory::read(&db, &Region::Closed.key("t")).unwrap();
         let tx = db.transaction().unwrap();
-        remember_failure(&tx, "t", Region::Closed, &smaller).unwrap();
+        remember_failure(&tx, "t", Region::Closed, &closed, &smaller.0).unwrap();
         tx.commit().unwrap();
         assert!(
             !same_failed_range(&db, "t", Region::Closed, &original).unwrap(),
             "same-kind overwrite deliberately has no permanent-history guarantee"
         );
         assert!(same_failed_range(&db, "t", Region::Active, &smaller).unwrap());
+        let original_e = failure_identity("t", &snapshot, 0..3, limit).unwrap();
+        let mut later_run_same_snapshot = snapshot.clone();
+        later_run_same_snapshot.run_fence = Some("legal-later-run".into());
+        later_run_same_snapshot.turn_fence = Some(("its-own-current-turn".into(), 7));
+        assert_eq!(
+            original_e.0,
+            failure_identity("t", &later_run_same_snapshot, 0..3, limit)
+                .unwrap()
+                .0,
+            "real Run/Turn/generation lifetime is provider scope, not deterministic E"
+        );
+        let original_provider_key = failure_memory::provider_turn_key(
+            &original_e.0,
+            "first-run",
+            "first-turn",
+            6,
+            "same-owner",
+        );
+        let reopened_provider_key = failure_memory::provider_turn_key(
+            &original_e.0,
+            "legal-later-run",
+            "its-own-current-turn",
+            7,
+            "same-owner",
+        );
+        assert_ne!(original_provider_key, reopened_provider_key);
+
+        let mut changed_endpoints = snapshot.clone();
+        changed_endpoints.groups[0].sources[0].id = "different-first-source".into();
+        assert_ne!(
+            failure_identity("t", &snapshot, 0..3, limit).unwrap().0,
+            failure_identity("t", &changed_endpoints, 0..3, limit)
+                .unwrap()
+                .0,
+            "E commits to the source endpoint IDs without exposing the digest"
+        );
         assert_eq!(
             db.query_row("SELECT count(*) FROM app_meta", [], |r| r.get::<_, i64>(0))
                 .unwrap(),

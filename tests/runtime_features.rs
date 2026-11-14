@@ -8,6 +8,8 @@ use shellboy::{
     protocol::*,
 };
 use std::{sync::Arc, time::Duration};
+#[path = "runtime_features/compaction_failure_memory.rs"]
+mod compaction_failure_memory;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -3869,8 +3871,13 @@ async fn proactive_partial_spill_with_oversized_current_does_not_retry_summary()
 /// so no active summary is attempted either.
 #[tokio::test]
 async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows() {
-    let (summaries, records) = ax_growing_turn_summary_requests(|| (200, answer(" "))).await;
-    assert_eq!(summaries, 1, "one closed summary request: {records:#?}");
+    let result = ax_growing_turn_summary_requests(|| (200, answer(" ")), 0, None).await;
+    assert_eq!(
+        result.summaries, 1,
+        "one closed summary request: {:#?}",
+        result.records
+    );
+    let records = result.records;
     let failed: Vec<&Value> = records
         .iter()
         .filter(|record| {
@@ -3888,53 +3895,75 @@ async fn proactive_rejected_summaries_are_not_repeated_as_the_current_turn_grows
     );
 }
 
-/// S2: an actual HTTP401 vetoes halving and deterministic recording, so each
-/// later eligible report gets its own single provider attempt. HTTP400 trials
-/// and minimum-outcome memory are covered by the dedicated S2a matrix.
+/// S2b retires the former per-report HTTP401 oracle: the veto remains a
+/// provider failure with no halving or deterministic E write, while subsequent
+/// reports in the same real owner/Run/Turn/generation scope are suppressed.
 #[tokio::test]
 async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
-    let (summaries, records) = ax_growing_turn_summary_requests(|| {
-        (
-            401,
-            json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
-        )
-    })
+    let result = ax_growing_turn_summary_requests(
+        || {
+            (
+                401,
+                json!({"error":{"code":"invalid_request_error","message":"synthetic rejection"}}),
+            )
+        },
+        0,
+        None,
+    )
     .await;
-    // Tool reports 2..=18 are at or above the threshold (200 + index). An
-    // actual 401 vetoes all halving/memory; each report still has one attempt.
     let eligible_reports = (0..19).filter(|index| *index >= 2).count();
+    assert_eq!(eligible_reports, 17);
     assert_eq!(
-        summaries, eligible_reports,
-        "one request per report: {records:#?}"
+        result.summaries, 1,
+        "one provider invocation per real scope"
     );
-    assert_eq!(records.len(), eligible_reports, "{records:#?}");
-    for record in &records {
-        assert_eq!(
-            record["compaction_outcome"]["outcome"]["reason"],
-            "provider_error"
-        );
-        assert_eq!(
-            record["compaction_outcome"]["outcome"]["origin"],
-            "provider_response"
-        );
-        assert_eq!(record["compaction_outcome"]["outcome"]["http_status"], 401);
+    assert_eq!(
+        result.failure_memory_slots, 1,
+        "the actual provider failure is retained only as a bounded private slot"
+    );
+    assert_eq!(
+        result.records.len(),
+        eligible_reports,
+        "one report outcome each"
+    );
+
+    let provider_errors: Vec<_> = result
+        .records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "provider_error")
+        .collect();
+    assert_eq!(provider_errors.len(), 1, "one actual HTTP response outcome");
+    let outcome = &provider_errors[0]["compaction_outcome"]["outcome"];
+    assert_eq!(outcome["origin"], "provider_response");
+    assert_eq!(outcome["http_status"], 401);
+    assert!(outcome.get("provider_status").is_none());
+    assert!(outcome.get("final_group_count").is_none());
+    assert!(outcome.get("final_source_nodes").is_none());
+    assert_eq!(provider_errors[0]["error"]["details"]["model_requests"], 1);
+    assert_eq!(
+        provider_errors[0]["error"]["details"]["summary_usage"]["requests"],
+        1
+    );
+
+    let suppressed: Vec<_> = result
+        .records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed")
+        .collect();
+    assert_eq!(
+        suppressed.len(),
+        16,
+        "one truthful outcome per later report"
+    );
+    for record in suppressed {
+        let outcome = &record["compaction_outcome"]["outcome"];
+        assert_eq!(outcome["origin"], "preparation");
+        assert!(outcome.get("http_status").is_none());
+        assert!(outcome.get("final_group_count").is_none());
+        assert!(outcome.get("final_source_nodes").is_none());
         assert!(
-            record["compaction_outcome"]["outcome"]
-                .get("final_group_count")
-                .is_none()
-        );
-        assert!(
-            record["compaction_outcome"]["outcome"]
-                .get("provider_status")
-                .is_none()
-        );
-        assert_eq!(
-            record["error"]["details"]["model_requests"], 1,
-            "{record:#?}"
-        );
-        assert_eq!(
-            record["error"]["details"]["summary_usage"]["requests"], 1,
-            "{record:#?}"
+            record["error"].get("details").is_none(),
+            "suppression must omit request and usage facts: {record:#?}"
         );
     }
 }
@@ -3945,22 +3974,78 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
 /// threshold 200. Returns the summary (tool-free) request count and every
 /// proactive attempt record. An explicit compact afterwards is not subject
 /// to the automatic failure record.
+struct AxFixtureResult {
+    summaries: usize,
+    records: Vec<Value>,
+    owner_instance_id: String,
+    report_scopes: Vec<(String, String, i64)>,
+    initial_path_ids: Vec<String>,
+    final_path_ids: Vec<String>,
+    failure_memory_slots: usize,
+    seeded_slot: Option<(String, Vec<u8>)>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum FailureSlotSeed {
+    Malformed64,
+    Uppercase64,
+    OversizeText,
+    Blob,
+    InvalidUtf8,
+}
+
 async fn ax_growing_turn_summary_requests(
     summary_reply: fn() -> (u16, Value),
-) -> (usize, Vec<Value>) {
+    retries: u8,
+    slot_seed: Option<FailureSlotSeed>,
+) -> AxFixtureResult {
     crate::test_watchdog::watchdog("proactive growing Turn summary requests", async move {
         let root = tempfile::tempdir().unwrap();
         let (url, mut receive, server) = proxy().await;
         let options = "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
-        let owner = proactive_owner(root.path(), &url, options).await;
+        let config = root.path().join("config.toml");
+        std::fs::write(&config, format!("default_connection=\"fixture\"\ndefault_model=\"fixture\"\n[connections.fixture]\nbase_url={url:?}\nresponse_max_retries={retries}\nresponse_retry_max_delay_ms=10\n{options}")).unwrap();
+        let owner = DataOwner::start(Some(config), Some(root.path().join("data")), root.path().into()).await.unwrap();
         let control = Control::new(&owner, root.path().into());
         let target = thread(&control).await;
+        if let Some(seed) = slot_seed {
+            let thread_id = target.clone();
+            control.store.database.call(move |db| {
+                let key = format!("compact.deterministic_range_failure.closed.{thread_id}");
+                if matches!(seed, FailureSlotSeed::InvalidUtf8) {
+                    db.execute(
+                        "INSERT INTO app_meta(key,value) VALUES(?1,CAST(x'ff' || zeroblob(63) AS TEXT))",
+                        [key],
+                    )?;
+                } else {
+                    let value = match seed {
+                        FailureSlotSeed::Malformed64 => rusqlite::types::Value::Text("g".repeat(64)),
+                        FailureSlotSeed::Uppercase64 => rusqlite::types::Value::Text("A".repeat(64)),
+                        FailureSlotSeed::OversizeText => rusqlite::types::Value::Text("a".repeat(65_536)),
+                        FailureSlotSeed::Blob => rusqlite::types::Value::Blob(vec![0x61; 64]),
+                        FailureSlotSeed::InvalidUtf8 => unreachable!(),
+                    };
+                    db.execute(
+                        "INSERT INTO app_meta(key,value) VALUES(?1,?2)",
+                        rusqlite::params![key, value],
+                    )?;
+                }
+                Ok(())
+            }).await.unwrap();
+        }
         for text in ["hi", "yo"] {
             send(&control, &target, text).await;
             incoming(&control, &mut receive).await.reply.send((200, answer("ok"))).unwrap();
             settled(&control, &target).await;
         }
         send(&control, &target, &"protected current ".repeat(70_000)).await;
+        let path_thread = target.clone();
+        let initial_path_ids = control.store.database.call(move |db| {
+            let mut statement = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?;
+            let rows = statement.query_map([path_thread], |row| row.get::<_, String>(0))?;
+            let ids = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(ids)
+        }).await.unwrap();
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":"nope","arguments":"{}"}]});
         let mut summaries = 0;
         for index in 0..=19 {
@@ -3976,11 +4061,43 @@ async fn ax_growing_turn_summary_requests(
         }
         settled(&control, &target).await;
         let mut records = Vec::new();
+        let mut report_scopes = Vec::new();
         for event in proactive_events(&control, &target).await {
             let attempt = event["attempt_id"].as_str().unwrap().to_owned();
-            let record: String = control.store.database.call(move |db| Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get(0))?)).await.unwrap();
+            let (record, scope): (String, (String, String, i64)) = control.store.database.call(move |db| Ok((
+                db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [&attempt], |r| r.get(0))?,
+                db.query_row("SELECT t.run_id,m.turn_id,m.generation FROM model_attempt m JOIN turn t ON t.id=m.turn_id WHERE m.id=?1", [attempt], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?,
+            ))).await.unwrap();
             records.push(serde_json::from_str::<Value>(&record).unwrap());
+            report_scopes.push(scope);
         }
+        let path_thread = target.clone();
+        let final_path_ids = control.store.database.call(move |db| {
+            let mut statement = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?;
+            let rows = statement.query_map([path_thread], |row| row.get::<_, String>(0))?;
+            let ids = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(ids)
+        }).await.unwrap();
+        let owner_instance_id = owner.instance_id.clone();
+        let slot_thread = target.clone();
+        let failure_memory_slots = control.store.database.call(move |db| {
+            Ok(db.query_row(
+                "SELECT count(*) FROM app_meta WHERE key IN (?1,?2)",
+                rusqlite::params![
+                    format!("compact.deterministic_range_failure.closed.{slot_thread}"),
+                    format!("compact.deterministic_range_failure.active.{slot_thread}"),
+                ],
+                |row| row.get::<_, i64>(0).map(|count| count as usize),
+            )?)
+        }).await.unwrap();
+        let slot_thread = target.clone();
+        let seeded_slot = control.store.database.call(move |db| {
+            Ok(db.query_row(
+                "SELECT typeof(value),CAST(value AS BLOB) FROM app_meta WHERE key=?1",
+                [format!("compact.deterministic_range_failure.closed.{slot_thread}")],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)),
+            ).optional()?)
+        }).await.unwrap();
         eprintln!("summary_requests={summaries} records={records:#?}");
         // The failure record is automatic-only: an explicit compact still issues a summary.
         request(&control, Command::Compact(ThreadTarget { thread_id: Some(target.clone()) })).await;
@@ -3988,12 +4105,21 @@ async fn ax_growing_turn_summary_requests(
         assert_eq!(explicit.body["tools"], json!([]), "explicit compact is not blocked");
         let _ = explicit.reply.send((200, answer("explicit summary")));
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        (summaries, records)
+        AxFixtureResult { summaries, records, owner_instance_id, report_scopes, initial_path_ids, final_path_ids, failure_memory_slots, seeded_slot }
     }).await.unwrap()
 }
 
-/// Two completed Turns (input 50 then `second`), then a third request. Returns
-/// how many summary (tool-free) requests preceded the third ordinary request.
+/// Repeated Turns may produce summary requests even during warmup; trace those
+/// separately from ordinary model requests so provider accounting is truthful.
+#[derive(Default)]
+struct ProactiveTrace {
+    summary_requests: usize,
+    summary_scopes: Vec<(String, String)>,
+    summary_bodies: Vec<Value>,
+    admission_report: Option<Value>,
+    a_state_report: Option<Value>,
+}
+
 async fn proactive_third_turn(
     control: &Arc<Control>,
     receive: &mut mpsc::Receiver<Incoming>,
@@ -4001,34 +4127,174 @@ async fn proactive_third_turn(
     second: u64,
     summary_reply: (u16, Value),
 ) -> usize {
-    for (n, tokens) in [(0, 50), (1, second)] {
+    proactive_third_turn_after_run(control, receive, thread, second, summary_reply, None)
+        .await
+        .summary_requests
+}
+
+async fn live_run_turn_scope(control: &Control, thread: &str) -> (String, String, String) {
+    let target = thread.to_owned();
+    control
+        .store
+        .database
+        .call(move |db| {
+            db.query_row(
+                "SELECT r.id,t.id,r.state FROM run r JOIN turn t ON t.run_id=r.id WHERE r.thread_id=?1 AND r.state IN ('live','stopping') AND t.state IN ('preparing','running','waiting','recovery_wait') ORDER BY t.rowid DESC LIMIT 1",
+                [target],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .map_err(Into::into)
+        })
+        .await
+        .unwrap()
+}
+
+async fn proactive_third_turn_after_run(
+    control: &Arc<Control>,
+    receive: &mut mpsc::Receiver<Incoming>,
+    thread: &str,
+    second: u64,
+    summary_reply: (u16, Value),
+    prior_scope: Option<(&str, &str)>,
+) -> ProactiveTrace {
+    let mut trace = ProactiveTrace::default();
+    // A is the first known input report in this boundary: make the new Run's
+    // first real report exceed the configured 80-token summary target.
+    let first_report = if prior_scope.is_some() { 150 } else { 50 };
+    for (n, tokens) in [(0, first_report), (1, second)] {
         send(control, thread, &format!("task {n}")).await;
-        incoming(control, receive)
-            .await
-            .reply
-            .send((200, answer_with_usage("saved answer", tokens)))
-            .unwrap();
+        loop {
+            let next = incoming(control, receive).await;
+            let scope = live_run_turn_scope(control, thread).await;
+            assert_eq!(scope.2, "live", "each warmup request belongs to a live Run");
+            if let Some((prior_run, prior_turn)) = prior_scope {
+                assert_ne!(scope.0, prior_run, "warmup Run is distinct before counting");
+                assert_ne!(
+                    scope.1, prior_turn,
+                    "warmup Turn is distinct before counting"
+                );
+            }
+            if next.body["tools"] == json!([]) {
+                trace.summary_requests += 1;
+                assert!(
+                    trace.summary_requests <= 8,
+                    "bounded warmup summary requests"
+                );
+                trace.summary_scopes.push((scope.0, scope.1));
+                trace.summary_bodies.push(next.body.clone());
+                next.reply.send(summary_reply.clone()).unwrap();
+                continue;
+            }
+            assert_current_context_once(
+                &next.body,
+                &current_context(control, thread).await,
+                "warmup ordinary request",
+            );
+            next.reply
+                .send((200, answer_with_usage("saved answer", tokens)))
+                .unwrap();
+            break;
+        }
         settled(control, thread).await;
     }
+    if let Some((prior_run, _)) = prior_scope {
+        let target = thread.to_owned();
+        trace.admission_report = Some(
+            control.store.database.call(move |db| {
+                let report = db.query_row(
+                    "SELECT a.id,a.state,json_extract(a.usage_json,'$.input_tokens'),
+                        json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL,
+                        ((EXISTS(SELECT 1 FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id
+                            WHERE tr.thread_id=t.id AND r.created_at>a.started_at))
+                         OR (EXISTS(SELECT 1 FROM output_item o WHERE o.attempt_id=a.id)
+                             AND NOT EXISTS(SELECT 1 FROM output_item o JOIN thread_path p
+                                 ON p.thread_id=t.id AND p.node_id=o.node_id WHERE o.attempt_id=a.id))),
+                        u.run_id,a.turn_id,u.state
+                     FROM thread t JOIN turn u ON u.thread_id=t.id JOIN model_attempt a ON a.turn_id=u.id
+                     WHERE t.id=?1 AND a.state='completed' AND a.profile_id=t.profile_id AND a.model_id=t.model_id
+                     ORDER BY a.rowid DESC LIMIT 1",
+                    [target],
+                    |row| Ok(json!({
+                        "attempt_id": row.get::<_,String>(0)?, "attempt_state": row.get::<_,String>(1)?,
+                        "input_tokens": row.get::<_,Option<i64>>(2)?, "automatic_trim_attempt_present": row.get::<_,bool>(3)?,
+                        "next_request_pending": row.get::<_,bool>(4)?, "run_id": row.get::<_,String>(5)?,
+                        "turn_id": row.get::<_,String>(6)?, "turn_state": row.get::<_,String>(7)?
+                    })),
+                ).optional()?;
+                Ok(report.unwrap_or(Value::Null))
+            }).await.unwrap()
+        );
+        let target = thread.to_owned();
+        trace.a_state_report = Some(control.store.database.call(move |db| {
+            let row = db.query_row(
+                "SELECT json_extract(value,'$.first.attempt'),json_extract(value,'$.first.input_tokens'),
+                    (SELECT t.run_id FROM model_attempt m JOIN turn t ON t.id=m.turn_id
+                     WHERE m.id=json_extract(app_meta.value,'$.first.attempt'))
+                 FROM app_meta WHERE key=?1",
+                [format!("compact.a_state.{target}")],
+                |row| Ok(json!({
+                    "attempt_id": row.get::<_,Option<String>>(0)?,
+                    "input_tokens": row.get::<_,Option<i64>>(1)?,
+                    "run_id": row.get::<_,Option<String>>(2)?
+                })),
+            ).optional()?;
+            Ok(row.unwrap_or(Value::Null))
+        }).await.unwrap());
+        let report = trace.admission_report.as_ref().unwrap();
+        assert_ne!(
+            report["run_id"], prior_run,
+            "latest eligible report belongs to the new Run: {report:#?}"
+        );
+        assert!(
+            report["input_tokens"]
+                .as_i64()
+                .is_some_and(|tokens| tokens >= 100),
+            "fresh report meets configured threshold: {report:#?}"
+        );
+        assert_eq!(
+            report["next_request_pending"], false,
+            "latest report has no newer replacement: {report:#?}"
+        );
+        assert_eq!(
+            report["automatic_trim_attempt_present"], false,
+            "latest report is not already consumed: {report:#?}"
+        );
+    }
     send(control, thread, "current task").await;
-    let mut summaries = 0;
     loop {
         let next = incoming(control, receive).await;
+        let scope = live_run_turn_scope(control, thread).await;
+        assert_eq!(scope.2, "live", "provider accounting belongs to a live Run");
+        if let Some((prior_run, prior_turn)) = prior_scope {
+            assert_ne!(
+                scope.0, prior_run,
+                "actual candidate Run differs before accounting"
+            );
+            assert_ne!(
+                scope.1, prior_turn,
+                "actual candidate Turn differs before accounting"
+            );
+        }
         if next.body["tools"] == json!([]) {
-            summaries += 1;
-            assert!(summaries <= 4, "bounded summary requests");
+            trace.summary_requests += 1;
+            assert!(trace.summary_requests <= 8, "bounded summary requests");
+            trace.summary_scopes.push((scope.0, scope.1));
+            trace.summary_bodies.push(next.body.clone());
             next.reply.send(summary_reply.clone()).unwrap();
             continue;
         }
-        let context = current_context(control, thread).await;
-        assert_current_context_once(&next.body, &context, "after proactive summary");
+        assert_current_context_once(
+            &next.body,
+            &current_context(control, thread).await,
+            "after proactive summary",
+        );
         next.reply
             .send((200, answer_with_usage("last answer", 10)))
             .unwrap();
         break;
     }
     settled(control, thread).await;
-    summaries
+    trace
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -4324,19 +4590,36 @@ async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
     assert!(slots.1.is_none(), "no active summary was attempted");
 }
 
-/// #303 §6.4: an `invalid_request_error` on a 500 response is transient. It
-/// records no failed range, so the one new eligible report retries once
-/// (§2.3: one attempt per reported value). Numeric 400 refusals are covered
-/// separately by the S2 halving/minimum-outcome tests.
+/// A terminal 500 provider response is invocation-scoped in S2b even when its
+/// embedded body says invalid_request_error. The later eligible report is still
+/// recorded as an attempt, but is suppressed in the same Run/Turn. The closed
+/// slot holds the exact provider-scope digest, not the deterministic E identity.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_transient_summary_failure_retries_once_per_new_report() {
-    let (summaries, _, slots) = bx_token_growth((
+async fn proactive_provider_500_is_suppressed_once_per_same_run_scope() {
+    let (summaries, attempts, slots) = bx_token_growth((
         500,
         json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}}),
     ))
     .await;
-    assert_eq!(summaries, 2, "one summary request per eligible report");
-    assert_eq!(slots, (None, None), "a transient failure records no range");
+    assert_eq!(summaries, 1, "one provider dispatch in the unchanged scope");
+    assert_eq!(
+        attempts.len(),
+        2,
+        "both eligible reports retain their attempts"
+    );
+    assert!(
+        slots.0.as_deref().is_some_and(|digest| {
+            digest.len() == 64
+                && digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }),
+        "closed slot stores a valid provider-scope digest: {slots:?}"
+    );
+    assert!(
+        slots.1.is_none(),
+        "only the closed provider scope was exercised: {slots:?}"
+    );
 }
 
 /// Two completed Turns (first known report 50 > target 20, then 150 >= the

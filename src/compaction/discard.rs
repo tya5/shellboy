@@ -52,9 +52,10 @@ pub enum FailureReason {
     NotShrinking,
     Cancelled,
     Unclassified,
+    RetrySuppressed,
 }
 impl FailureReason {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::ProviderError,
         Self::ContextLimitTerminal,
         Self::RejectedAtMinimum,
@@ -63,6 +64,7 @@ impl FailureReason {
         Self::NotShrinking,
         Self::Cancelled,
         Self::Unclassified,
+        Self::RetrySuppressed,
     ];
     fn required_origin(self) -> Option<FailureOrigin> {
         match self {
@@ -70,6 +72,7 @@ impl FailureReason {
                 Some(FailureOrigin::OutputValidation)
             }
             Self::Cancelled => Some(FailureOrigin::Cancellation),
+            Self::RetrySuppressed => Some(FailureOrigin::Preparation),
             _ => None,
         }
     }
@@ -504,6 +507,7 @@ mod outcome_contract_tests {
             FailureReason::NotShrinking,
             FailureReason::Cancelled,
             FailureReason::Unclassified,
+            FailureReason::RetrySuppressed,
         ] {
             let deterministic = matches!(
                 reason,
@@ -519,6 +523,8 @@ mod outcome_contract_tests {
                 FailureOrigin::OutputValidation
             } else if reason == FailureReason::Cancelled {
                 FailureOrigin::Cancellation
+            } else if reason == FailureReason::RetrySuppressed {
+                FailureOrigin::Preparation
             } else {
                 FailureOrigin::Internal
             };
