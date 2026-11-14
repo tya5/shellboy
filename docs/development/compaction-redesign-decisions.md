@@ -251,3 +251,15 @@ it refuses before checkpoint advancement and requires native startup. The negati
 fixture proves original facts/version/ledger stay unchanged. No Python duplicate
 of v1 conversion, real data migration, relaxed corruption assertion or runtime
 compatibility branch is introduced. Original full-check failures remain evidence.
+
+### Preflight Before Any Synthetic Staging Write
+
+The first SQL-only refusal was inside apply_migration(46), after schema44 callers
+could already commit45. Independent review correctly rejected that partial
+mutation. One shared empty-facts check now also runs in prepare_schema after
+existing start/target validation and before any staging migration whenever the
+requested range crosses46. Direct46 uses the same helper. Fact-bearing44/45
+refusals preserve the entire original schema, ledger, version and raw facts;
+44->45 and empty44/45->46 remain positive controls. No historical transaction
+wrapper or second data converter is added. The completed9733 full native pass
+is preserved at its own SHA, not transferred to this successor.

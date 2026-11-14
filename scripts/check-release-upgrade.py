@@ -243,13 +243,17 @@ def check_spill_override_schema(db, target):
     assert "spill_override IN (0,1)" in sql, 'migration 45 spill override constraint missing'
 
 
+def require_empty_scope_facts_for_sql_staging(db):
+    # Only native startup owns fact conversion. Refuse before any prior upgrade
+    # is committed, not merely when the loop eventually reaches migration 46.
+    facts = db.execute("SELECT count(*) FROM app_meta WHERE CAST(key AS BLOB)>=? AND CAST(key AS BLOB)<?",
+                       (b'compact.a_state.', b'compact.a_state/')).fetchone()[0]
+    assert facts == 0, 'migration 46 facts require the native startup converter'
+
+
 def apply_migration(db, version):
     if version == 46:
-        # The Rust startup converter owns fact migration. SQL-only staging is
-        # sound only for an empty fact set, never a replacement implementation.
-        facts = db.execute("SELECT count(*) FROM app_meta WHERE CAST(key AS BLOB)>=? AND CAST(key AS BLOB)<?",
-                           (b'compact.a_state.', b'compact.a_state/')).fetchone()[0]
-        assert facts == 0, 'migration 46 facts require the native startup converter'
+        require_empty_scope_facts_for_sql_staging(db)
     if version != 39:
         sql=DERIVED[version].read_text() if version in DERIVED else next(MIGRATIONS.glob(f'{version:04d}_*.sql')).read_text()
         db.executescript('BEGIN IMMEDIATE;\n' + sql + '\nCOMMIT;')
@@ -272,6 +276,8 @@ def prepare_schema(db, target):
     if start == target:
         return
     assert start in (14, 17, 19, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, CURRENT_SCHEMA_VERSION) and target in (14, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, CURRENT_SCHEMA_VERSION) and start <= target, 'unexpected synthetic fixture schema'
+    if start < 46 <= target:
+        require_empty_scope_facts_for_sql_staging(db)
     before, records = ledger(db), snapshot(db)
     for version in range(start + 1, target + 1):
         apply_migration(db, version)

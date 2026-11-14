@@ -80,19 +80,51 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.close()
         fresh.close()
 
-    def test_sql_only_staging_rejects_fact_conversion_without_advancing_checkpoint(self):
-        db = sqlite3.connect(':memory:')
-        self.addCleanup(db.close)
-        db.executescript((ROOT / 'src/storage/current.sql').read_text())
-        db.execute('DELETE FROM schema_migration WHERE version=46')
-        db.execute('PRAGMA user_version=45')
-        old = '{"version":1,"scope_generation":0,"boundary_generation":0,"connection":"c","model":"m","first":null,"last_reset_origin":null}'
-        db.execute("INSERT INTO app_meta VALUES('compact.a_state.t',?)", (old,))
-        with self.assertRaisesRegex(AssertionError, 'native startup converter'):
-            upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 45)
-        self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=46').fetchone()[0], 0)
-        self.assertEqual(db.execute("SELECT value FROM app_meta WHERE key='compact.a_state.t'").fetchone()[0], old)
+    def test_sql_only_staging_refuses_44_and_45_facts_before_any_upgrade(self):
+        for start in (44, 45):
+            with self.subTest(start=start):
+                db = sqlite3.connect(':memory:')
+                self.addCleanup(db.close)
+                db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+                upgrade.prepare_schema(db, start)
+                old = '{"version":1,"scope_generation":0,"boundary_generation":0,"connection":"c","model":"m","first":null,"last_reset_origin":null}'
+                db.execute("INSERT INTO app_meta VALUES('compact.a_state.t',?)", (old,))
+                db.commit()
+                schema = db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall()
+                ledger = upgrade.ledger(db)
+                raw = db.execute('SELECT typeof(key),CAST(key AS BLOB),typeof(value),CAST(value AS BLOB) FROM app_meta ORDER BY rowid').fetchall()
+                with self.assertRaisesRegex(AssertionError, 'native startup converter'):
+                    upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], start)
+                self.assertEqual(upgrade.ledger(db), ledger)
+                self.assertEqual(db.execute('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').fetchall(), schema)
+                self.assertEqual(db.execute('SELECT typeof(key),CAST(key AS BLOB),typeof(value),CAST(value AS BLOB) FROM app_meta ORDER BY rowid').fetchall(), raw)
+                # Direct staging entry uses the exact same guard.
+                with self.assertRaisesRegex(AssertionError, 'native startup converter'):
+                    upgrade.apply_migration(db, 46)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], start)
+                self.assertEqual(upgrade.ledger(db), ledger)
+                if start == 44:
+                    upgrade.prepare_schema(db, 45)
+                    self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 45)
+                    self.assertEqual(db.execute("SELECT value FROM app_meta WHERE key='compact.a_state.t'").fetchone()[0], old)
+
+    def test_empty_schema44_and45_staging_converges_without_a_second_converter(self):
+        for start in (44, 45):
+            with self.subTest(start=start):
+                db = sqlite3.connect(':memory:')
+                self.addCleanup(db.close)
+                db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
+                upgrade.prepare_schema(db, start)
+                before = upgrade.ledger(db)
+                upgrade.prepare_schema(db, 46)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 46)
+                self.assertEqual(upgrade.ledger(db)[:len(before)], before)
+                self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=46').fetchone()[0], 1)
+                self.assertEqual(db.execute("SELECT count(*) FROM app_meta WHERE key GLOB 'compact.a_state.*'").fetchone()[0], 0)
+                after = upgrade.ledger(db)
+                upgrade.prepare_schema(db, 46)
+                self.assertEqual(upgrade.ledger(db), after)
 
     def test_migration_registry_version_derivation_rejects_empty_duplicate_and_gap(self):
         for registry in ("", '(1, "m1"),\n(1, "duplicate")', '(1, "m1"),\n(3, "gap")'):
