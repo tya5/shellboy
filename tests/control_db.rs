@@ -3305,3 +3305,39 @@ async fn fork_inherits_raw_summary_overrides_and_clear_restores_connection_defau
     );
     store.database.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn long_public_model_selection_round_trips_without_normalization() {
+    let (_root, store) = store().await;
+    for model in ["m".repeat(257), "m".repeat(8192), "\u{e9}".repeat(257)] {
+        let created = execute(
+            &store,
+            Command::ThreadCreate(ThreadCreateArgs {
+                agents: None,
+                parent_id: None,
+                connection: None,
+                cwd: None,
+                model: Some(model.clone()),
+                effort: None,
+            }),
+        )
+        .await;
+        let thread = created.result["thread_id"].as_str().unwrap();
+        assert_eq!(get_thread(&store, thread).await["model"], model);
+        for auto in ["0", "1000"] {
+            let changed = execute(
+                &store,
+                Command::ThreadSet(Box::new(ThreadSetArgs {
+                    thread_id: Some(thread.into()),
+                    model: Some(model.clone()),
+                    auto_compact_at: Some(auto.into()),
+                    ..Default::default()
+                })),
+            )
+            .await;
+            assert_eq!(changed.result["model"], model);
+            assert_eq!(get_thread(&store, thread).await["model"], model);
+        }
+    }
+    store.database.shutdown().await.unwrap();
+}

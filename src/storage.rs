@@ -68,6 +68,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (43, "0043_thread_single_summary_settings"),
     (44, "0044_thread_max_tokens"),
     (45, "0045_thread_spill_override"),
+    (46, "0046_scope_identity_v2"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -1814,7 +1815,8 @@ mod schema_validation_tests {
         db.execute_batch(CURRENT_SCHEMA).unwrap();
         assert_eq!(validate_schema(&db).unwrap(), SCHEMA_VERSION);
         db.execute_batch(
-            "ALTER TABLE thread DROP COLUMN spill_override;
+            "DELETE FROM schema_migration WHERE version=46;
+             ALTER TABLE thread DROP COLUMN spill_override;
              DELETE FROM schema_migration WHERE version=45;
              ALTER TABLE thread DROP COLUMN max_tokens;
              DELETE FROM schema_migration WHERE version=44;

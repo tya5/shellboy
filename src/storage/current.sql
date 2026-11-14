@@ -795,4 +795,5 @@ ALTER TABLE thread ADD COLUMN max_tokens INTEGER CHECK(max_tokens IS NULL OR (ty
 INSERT INTO schema_migration(version,name) VALUES(44,'0044_thread_max_tokens');
 ALTER TABLE thread ADD COLUMN spill_override INTEGER CHECK(spill_override IS NULL OR (typeof(spill_override)='integer' AND spill_override IN (0,1)));
 INSERT INTO schema_migration(version,name) VALUES(45,'0045_thread_spill_override');
-PRAGMA user_version=45;
+INSERT INTO schema_migration(version,name) VALUES(46,'0046_scope_identity_v2');
+PRAGMA user_version=46;

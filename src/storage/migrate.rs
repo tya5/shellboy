@@ -2,6 +2,8 @@
 use super::{StorageError, migration_integrity::Impact, validate_schema};
 use rusqlite::Connection;
 
+mod a_state_scope;
+
 pub(super) struct Migration {
     pub version: i64,
     pub sql: &'static str,
@@ -229,6 +231,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0045_thread_spill_override.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 46,
+        sql: include_str!("../../migrations/0046_scope_identity_v2.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(
@@ -274,6 +281,9 @@ pub(super) fn run(
                 )?;
             } else {
                 transaction.execute_batch(migration.sql)?;
+            }
+            if migration.version == 46 {
+                a_state_scope::convert_rows(&transaction)?;
             }
             if migration.version == 4 {
                 migrate_attachment_sources(&transaction)?;
@@ -509,7 +519,7 @@ mod activity_migration_tests {
         let _startup = crate::storage::open_connection(&path, None, None, false).unwrap();
         let writer = crate::storage::DbWorker::open(&path).await.unwrap();
         writer.call(move |db| {
-            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,45);
+            assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,crate::storage::SCHEMA_VERSION);
             assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=44",[],|r|r.get::<_,String>(0))?,"0044_thread_max_tokens");
             assert_eq!(db.query_row("SELECT name FROM schema_migration WHERE version=45",[],|r|r.get::<_,String>(0))?,"0045_thread_spill_override");
             // Existing Threads keep the connection value: both new columns are unset.
@@ -571,7 +581,7 @@ mod activity_migration_tests {
             .call(|db| {
                 assert_eq!(
                     db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-                    45
+                    crate::storage::SCHEMA_VERSION
                 );
                 assert_eq!(
                     db.query_row(

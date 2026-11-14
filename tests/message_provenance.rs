@@ -293,7 +293,7 @@ async fn independently_pinned_schema41_upgrades_through_worker_to42() {
     drop(db);
     let worker = DbWorker::open(&path).await.unwrap();
     worker.call(|db| {
-        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,45);
+        assert_eq!(db.query_row("PRAGMA user_version",[],|r|r.get::<_,i64>(0))?,shellboy::storage::SCHEMA_VERSION);
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=42 AND name='0042_notification_semantic_descriptor'",[],|r|r.get::<_,i64>(0))?,1);
         assert_eq!(db.query_row("SELECT count(*) FROM pragma_foreign_key_check",[],|r|r.get::<_,i64>(0))?,0);
         Ok(())

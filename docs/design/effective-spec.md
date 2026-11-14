@@ -614,3 +614,17 @@ Both available descriptor strings are counted in the existing shared 4 MiB
 text/reasoning response ledger. Existing 1 MiB source and atomic node/deferred
 suffix policy remain. #274 spill links/pages/truncation stay unchanged; there is no
 call-ID global join, adjacency/prose association, generic reader or body recovery.
+
+### Bounded Scope Identity (Forward Source Repair)
+
+Automatic input-usage facts use one framed SHA-256 identity for the exact
+connection/model name tuple. Provider-facing names are unchanged and acquire no
+internal 256-byte restriction. Runtime facts recognize format v2 only. Forward
+migration 46 converts valid v1 facts inside the existing startup migration
+transaction, preserving scope/boundary counters, first-known usage (including
+zero), unknown usage, attempt and reset provenance. Historical nonempty IDs of
+at most 256 UTF-8 bytes are not required to be UUIDs. Invalid or non-TEXT raw rows
+remain byte/type-exact and invalid, not reset or silently treated as zero. SQL
+failure rolls conversion and its migration checkpoint back together. This does
+not authorize installed data migration or solve the separate ordinary-response
+failure-domain isolation work.

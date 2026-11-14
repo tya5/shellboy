@@ -231,3 +231,14 @@ passed production library check, integration test build and six selected tests
 recorded separately in the handoff; no CI, independent approval, landing or
 runtime deployment is claimed. The separate long-model identity/conversion work
 remains design/RED-fixture preparation outside this unit.
+
+### Canonical Scope Identity Preparation
+
+The successor identity branch carries typed framed identities, current-only v2
+facts and forward migration 46 with a startup-only v1 converter. Valid causal
+fields are preserved; invalid raw rows stay unchanged. Registered synthetic
+conversion/ledger rollback and public long-model admission/completion regressions
+are authored. Initial compile caught and corrected a SQLite usize parameter;
+initial test build caught an incorrect fixture DTO method. Original failures are
+preserved. Focused final-SHA validation and independent implementation review are
+pending; no full, CI, installed migration or deployment qualification is claimed.

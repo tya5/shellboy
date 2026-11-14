@@ -207,3 +207,21 @@ flattening connection defaults. The alternative of resetting only the two newer
 settings would retain an undocumented exception. Parent changes remain isolated
 and a copy failure rolls back branch creation. This does not inherit GC owner
 state or alter the public settings/schema contract.
+
+## 2026-11-14 - Canonical scope identity / forward migration 46
+
+A private public-name-length bound in GC factual state rejected otherwise valid
+ordinary requests even with automatic compaction disabled. The chosen correction
+uses one domain-tagged JSON tuple digest for all names, not truncation, a larger
+arbitrary bound or a long-name-only special path. Scope/boundary generations and
+original first-known evidence are preserved rather than resetting derived state:
+reset-to-zero could revive an old request token after ABA.
+
+The leader assigned current-main migration 46 after inspecting tracked max 45;
+the unlanded scheduler reservation moves separately to 47 with its existing owner.
+No scheduler code or placeholder is included. Historical format parsing exists
+only in the startup conversion module; runtime accepts current v2 only. Invalid
+raw values retain their bytes and SQLite type, while real SQL errors roll back
+the same Immediate transaction and ledger checkpoint. Applied migrations 1-45
+are unchanged. Implementation review and native qualification remain separate
+from the accepted contract; no installed/user database operation is authorized.

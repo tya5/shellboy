@@ -11937,3 +11937,17 @@ the two existing `control_db::thread_summary_parameters_*` regressions and the
 existing persistence fork/AGENTS regression. They are registered in the ordinary
 integration target. No real provider, installed owner or user data is involved.
 Migration 43 documentation is corrected to state actual value loss, not recovery.
+
+## Canonical Scope Identity Source Unit
+
+Forward migration 46/current schema/runtime format v2 must be reviewed together.
+Registered `compaction::a_state` and `storage::migrate::a_state_scope` tests cover
+bounded long names, fixed independent framing vectors, ABA/first-known/rollback,
+exact historical IDs, invalid non-TEXT preservation and conversion/checkpoint
+atomicity. Driver preparation covers public ThreadSet with 257/8192-byte and
+multibyte names under automatic threshold zero/enabled, exact request and saved
+model names, synthetic completed response/path/receipt adoption and no GC attempt.
+Integration `control_db::long_public_model_selection_round_trips_without_normalization`
+covers real public create/set/get. These tests are authored; final native and
+independent implementation results are recorded separately, not inferred from
+contract approval or the distinct fork/docs b60 CI.

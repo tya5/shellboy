@@ -12,11 +12,34 @@ pub(crate) struct State {
     version: u8,
     scope_generation: u64,
     boundary_generation: u64,
-    connection: String,
-    model: String,
+    scope_identity: ScopeIdentity,
     last_reset_origin: Option<String>,
     first: Option<Report>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(transparent)]
+pub(crate) struct ScopeIdentity(String);
+
+impl ScopeIdentity {
+    pub(crate) fn new(connection: &str, model: &str) -> Result<Self, ApiError> {
+        if connection.is_empty() || model.is_empty() {
+            return Err(bad());
+        }
+
+        let framed =
+            serde_json::to_vec(&("shellboy.compaction.a-state.scope.v2", connection, model))
+                .expect("a tuple of strings serializes to JSON");
+        Ok(Self(crate::digest::sha256_hex(framed)))
+    }
+    fn valid(&self) -> bool {
+        self.0.len() == 64
+            && self
+                .0
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Report {
@@ -48,11 +71,10 @@ fn next(value: u64) -> Result<u64, ApiError> {
 impl State {
     pub(crate) fn new(connection: &str, model: &str) -> Result<Self, ApiError> {
         let state = Self {
-            version: 1,
+            version: 2,
             scope_generation: 0,
             boundary_generation: 0,
-            connection: connection.into(),
-            model: model.into(),
+            scope_identity: ScopeIdentity::new(connection, model)?,
             last_reset_origin: None,
             first: None,
         };
@@ -60,9 +82,8 @@ impl State {
         Ok(state)
     }
     fn validate(&self) -> Result<(), ApiError> {
-        if self.version != 1
-            || !id_ok(&self.connection)
-            || !id_ok(&self.model)
+        if self.version != 2
+            || !self.scope_identity.valid()
             || self.last_reset_origin.as_deref().is_some_and(|v| !id_ok(v))
             || self.first.as_ref().is_some_and(|v| !id_ok(&v.attempt))
         {
@@ -90,18 +111,15 @@ impl State {
         }
     }
     pub(crate) fn change_scope(&mut self, connection: &str, model: &str) -> Result<bool, ApiError> {
-        if !id_ok(connection) || !id_ok(model) {
-            return Err(bad());
-        }
-        if self.connection == connection && self.model == model {
+        let identity = ScopeIdentity::new(connection, model)?;
+        if self.scope_identity == identity {
             return Ok(false);
         }
         let generation = next(self.scope_generation)?;
         let boundary = next(self.boundary_generation)?;
         self.scope_generation = generation;
         self.boundary_generation = boundary;
-        self.connection = connection.into();
-        self.model = model.into();
+        self.scope_identity = identity;
         self.first = None;
         self.last_reset_origin = None;
         Ok(true)
@@ -142,8 +160,7 @@ impl State {
         }
         if started.scope != self.scope_generation
             || started.boundary != self.boundary_generation
-            || connection != self.connection
-            || model != self.model
+            || ScopeIdentity::new(connection, model)? != self.scope_identity
             // No usage is not evidence and leaves the first-known slot available.
             || input_tokens.is_none()
             || self.first.as_ref().is_some_and(|first| first.input_tokens.is_some())
@@ -263,6 +280,42 @@ pub(crate) fn cleanup_tx(db: &rusqlite::Connection, thread: &str) -> Result<(), 
 mod tests {
     use super::*;
     #[test]
+    fn public_model_scope_identity_supports_long_valid_names() {
+        for model in [
+            "m".repeat(256),
+            "m".repeat(257),
+            "m".repeat(8192),
+            "\u{e9}".repeat(257),
+        ] {
+            let state = State::new("connection", &model)
+                .expect("public model names must not inherit the GC fact identifier bound");
+            assert!(serde_json::to_vec(&state).unwrap().len() <= MAX_BYTES);
+        }
+    }
+
+    #[test]
+    fn scope_identity_distinguishes_common_prefix_and_tuple_boundaries() {
+        let prefix = "m".repeat(8192);
+        let model_a = format!("{prefix}a");
+        let model_b = format!("{prefix}b");
+        let mut state = State::new("connection", &model_a).unwrap();
+        let first = state.token();
+        assert!(!state.change_scope("connection", &model_a).unwrap());
+        assert!(state.change_scope("connection", &model_b).unwrap());
+        assert_ne!(state.token(), first);
+        assert!(state.change_scope("connection", &model_a).unwrap());
+        assert_ne!(
+            state.token(),
+            first,
+            "scope ABA must not revive old request authority"
+        );
+
+        let mut tuple = State::new("ab", "c").unwrap();
+        assert!(tuple.change_scope("a", "bc").unwrap());
+        assert!(!tuple.change_scope("a", "bc").unwrap());
+    }
+
+    #[test]
     fn first_completion_after_boundary_scope_aba_and_unknown_are_facts() {
         let mut s = State::new("A", "model").unwrap();
         let started = s.token();
@@ -381,7 +434,9 @@ mod tests {
         assert!(read(&db, "t").is_err());
         db.execute("UPDATE app_meta SET value='{}'", []).unwrap();
         assert!(read(&db, "t").is_err());
-        assert!(State::new(&"x".repeat(MAX_ID_BYTES + 1), "m").is_err());
+        let mut invalid_identity = State::new("c", "m").unwrap();
+        invalid_identity.scope_identity.0 = "X".repeat(64);
+        assert!(save(&db, "t", &invalid_identity).is_err());
         let mut s = State::new("c", "m").unwrap();
         s.scope_generation = u64::MAX;
         let before = s.clone();
@@ -589,5 +644,49 @@ mod transactional_reset_tests {
             })
         );
         assert_eq!(state.reading(), Reading::Known(222));
+    }
+}
+
+#[cfg(test)]
+mod scope_identity_tests {
+    use super::*;
+    #[test]
+    fn scope_identity_encoding_matches_domain_framed_vectors() {
+        for (connection, model, expected) in [
+            (
+                "connection",
+                "m".repeat(257),
+                "adda2836860392c146dfa8e806ce52178ee504eb3bc38a29fb734ed1110a831b",
+            ),
+            (
+                "ab",
+                "c".into(),
+                "7abb0019aca29653202236174a4eda539f3e05e23844cd966829410089a1659f",
+            ),
+            (
+                "a",
+                "bc".into(),
+                "702f4e6af84033454c32e35a549492851fe5631aba646e246ce468948b4c4a80",
+            ),
+            (
+                "connection",
+                "\u{e9}".repeat(257),
+                "d8109cd9aed37a27cb7898cf89039f1b58bde4631dfdddcf2bba14e073b4ff98",
+            ),
+        ] {
+            assert_eq!(ScopeIdentity::new(connection, &model).unwrap().0, expected);
+        }
+        assert_ne!(
+            ScopeIdentity::new("c", "\u{e9}").unwrap(),
+            ScopeIdentity::new("c", "e\u{301}").unwrap()
+        );
+    }
+    #[test]
+    fn runtime_rejects_v1_instead_of_adding_a_compatibility_path() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+            .unwrap();
+        db.execute("INSERT INTO app_meta VALUES('compact.a_state.t',?1)",[r#"{"version":1,"scope_generation":0,"boundary_generation":0,"connection":"c","model":"m","last_reset_origin":null,"first":null}"#]).unwrap();
+        assert!(read(&db, "t").is_err());
     }
 }

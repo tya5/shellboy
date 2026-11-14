@@ -1937,3 +1937,69 @@ async fn extra_instructions_raw_json_and_saved_raw_snapshot_never_become_interna
         close(control, owner).await;
     }
 }
+
+#[tokio::test]
+async fn ordinary_admission_and_completion_preserve_long_model_names_with_gc_enabled_and_disabled()
+{
+    for auto in [0, 1000] {
+        for model in ["m".repeat(257), "m".repeat(8192), "\u{e9}".repeat(257)] {
+            let (_root, owner, control, accepted) = fixture("http://127.0.0.1:1/v1").await;
+            control
+                .store
+                .execute(
+                    Request::new(
+                        format!("{}:{}", owner.instance_id, id()),
+                        Command::ThreadSet(Box::new(ThreadSetArgs {
+                            thread_id: Some(accepted.thread_id.clone()),
+                            model: Some(model.clone()),
+                            auto_compact_at: Some(auto.to_string()),
+                            ..Default::default()
+                        })),
+                    ),
+                    None,
+                )
+                .await
+                .unwrap();
+            let snapshot = ready(&control, &accepted).await;
+            assert_eq!(snapshot.model, model);
+            let mut prepared = control
+                .attachments
+                .prepare_at_revision(
+                    &accepted.thread_id,
+                    CancellationToken::new(),
+                    false,
+                    snapshot.selection,
+                )
+                .await
+                .unwrap();
+            let (request, _) =
+                super::request::prepare_request(&snapshot, None, &mut prepared).unwrap();
+            let prepared = Arc::new(prepared);
+            let attempt = id();
+            assert!(
+                admit_attempt(&control, &snapshot, &attempt, prepared.clone(), 0, 0)
+                    .await
+                    .unwrap()
+            );
+            assert_eq!(request["model"], model);
+            let response=model::ModelResponse::completed(json!({"id":"long-model-response","status":"completed","usage":{"input_tokens":123,"output_tokens":1},"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"synthetic answer"}]}]}),true).unwrap();
+            assert!(
+                adopt_response(&control, &snapshot, &attempt, &response, prepared, None)
+                    .await
+                    .unwrap()
+            );
+            let thread = accepted.thread_id.clone();
+            control.store.database.call(move |db| {
+                let saved:(String,String)=db.query_row("SELECT model_id,state FROM model_attempt WHERE id=?1",[&attempt],|r|Ok((r.get(0)?,r.get(1)?)))?;
+                assert_eq!(saved,(model,"completed".into()));
+                assert_eq!(crate::compaction::a_state::read(db,&thread)?.unwrap().reading(),crate::compaction::a_state::Reading::Known(123));
+                assert_eq!(db.query_row("SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='assistant_response'",[&thread],|r|r.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM receipt WHERE state='applied'",[],|r|r.get::<_,i64>(0))?,1);
+                assert_eq!(db.query_row("SELECT count(*) FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL",[],|r|r.get::<_,i64>(0))?,0,"ordinary admission/completion must not create a GC attempt");
+                Ok(())
+            }).await.unwrap();
+            drop(snapshot);
+            close(control, owner).await;
+        }
+    }
+}
