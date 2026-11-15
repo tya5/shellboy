@@ -344,6 +344,13 @@ with `summary_limit` for manual and automatic results. The release-upgrade check
 schema 30 to 31. Not verified: Windows/Linux local runs (CI is recorded with the final SHA), a
 live provider, and any claim that a particular size is cheaper (only the method is documented).
 
+For CORE301 GC strict FINISH, the registered `compact_list_records_the_summary_parameters_in_effect`
+reader checks that the six persisted summary metrics reach `compact list` (`source_characters`,
+`summary_characters`, `summary_limit`, `model_requests`, `summary_usage`, `spilled_groups`) and
+that retired `segment_chars` / `reduce_rounds` remain absent. The threshold integration reader
+separately checks the 20,000-character summary limit. These are same-source acceptance assertions,
+not values inferred from old receipt batches.
+
 ## Per-Thread auto-compaction threshold (#229)
 
 macOS ARM64 through `rust-slot`, disposable DBs and the loopback provider proxy. Store tests

@@ -22,33 +22,33 @@ This section describes the current-main native proactive GC implementation contr
   - Commit-boundary controls are paired: `record_after_rejected_final_write` remains the rollback negative: strict FINISH rejection leaves no summary replacement/path/stage, keeps two earlier spills, path prefix/epoch and append revision. `uncalibrated_*` provide legitimate strict-adoption positives with postcommit injector outcomes. Exact RejectFinal and positive site evidence are separate receipts; neither is inferred from the other.
 
 - C5, only live authorities: remove unused GC target-CAS types/branches (production passed `None` and no product caller exists), unused caller-selected capture variants, and temporary `eprintln!` hooks. `begin_gc_tx` and `provisional_gc_matches` share one exact provisional receipt predicate. Do not remove or weaken original attempt state/token FINISH, source/profile/epoch/nonappend/tool/protection checks, failure-memory compare-and-set, writer join/retirement, or Run Stop custody.
-- C5-1/2 adopted RunStop policy: the source witness returns only its actual
+- C5-1/2/C6-1 adopted RunStop policy and observation contract: the source witness returns only its actual
   `RejectionReason`; it never cancels a Run token. The existing Run owner alone controls
   cancellation. If that token is already cancelled when the reason is consumed, the result
   is `Cancelled`; otherwise the observed witness reason remains `RunStopped`. RunStop has
-  two legitimate orderings: (a) token-first gives `Cancelled`; (b) DB-witness-first observes
-  the committed `state='stopping'` before the post-commit `Control::stop_run` callback
-  cancels the existing token, so the durable reason is `RunStopped` and the attempt outcome
-  may be `failed`. In both orders Run Stop must finish, issue no new conversation POST,
-  retain earlier committed spills, avoid summary adoption and leave failure memory unchanged.
-  This exact DB/token window is in `control.rs` RunStop effects and `live.rs::cancel_run`;
-  the two labels do not create separate cancellation authorities. Rejected alternatives:
-  no `WitnessRejection`/provenance wrapper, no reread of `stop_reason`, no global or
-  per-job token cancel, no flag/registry/actor, and no reply-grace or latency change.
-  The old cancellation-label assertion is superseded by two separate deterministic-order
-  controls; neither is a one-of assertion. Tests retain Stop completion, post count, path,
-  spill and failure-memory assertions. Risk: diagnostics differ by which authoritative
-  observation reaches the consumer first; the stopped Run itself still terminates normally.
-- C5 selected spill ordering: in `SpillThenSummary` with an active Turn, the coordinator may
-  commit an eligible closed spill, then it must run the shared closed-summary planner before
-  considering active spill. Only an uncancelled closed `NoTarget` permits active spill, then
-  active summary. A closed-summary failure or suppression is not `NoTarget` and cannot spill
-  active R. This preserves the single typed planner, closed-to-active summary fallback,
-  strict selected-R reads and earlier independently committed spills. Rejected alternative:
-  treating closed-spill `NoTarget` as evidence that closed-summary has no target caused the
-  994 exact control to spill 18 active groups after closed deterministic failure. The test
-  keeps the zero-active-spill assertion; active spill/summary fallback remains a separate
-  positive case.
+  two correlated outcomes are valid: `(cancelled, cancelled)` when owner-token cancellation
+  reaches GC first, or `(failed, run_stopped)` when the committed DB witness reaches GC first.
+  The Run reducer's DB commit and later owner cancellation are separate steps; reply-grace is
+  not a barrier for the durable GC receipt. Integration assertions accept only those exact
+  pairs, retaining phase, Stop completion, no-new-POST, path/spill and no-failure-memory
+  checks. Unit mapping controls still assert each reason-only mapping exactly. Do not force
+  scheduler order or add token hooks/barriers. Rejected alternatives remain: no
+  `WitnessRejection`/provenance wrapper, reread of `stop_reason`, global/per-job cancellation,
+  flag, registry, actor, or reply-grace/latency change.
+- C6-2 selected spill routing: `SpillThenSummary` commits any eligible closed spill, then
+  runs the shared closed-summary planner; active spill is allowed only after its uncancelled
+  `NoTarget`, followed by active summary. Failure/suppression never falls through. This keeps
+  strict selected-R reads, latest-tool-group exclusion and earlier spill commits. Counterexample:
+  treating closed-spill `NoTarget` as closed-summary `NoTarget` spilled 18 active groups after
+  deterministic closed failure; the negative asserts zero active spills. A one-place stage
+  sequence refactor is deferred: existing checkpoints/adoption effects differ and no new
+  source defect justifies that re-decomposition.
+- C6-3/C6-4 source/readback contracts: strict FINISH compares the batched current selected-R
+  facts against each stamp's `source.clone`; the captured group-complete decision is asserted
+  equal to each source fact before the classifier runs. Summary FINISH/readback carries the six
+  existing metrics (`source_characters`, `summary_characters`, `summary_limit`, `model_requests`,
+  `summary_usage`, `spilled_groups`) through the attempt summary object to compact-list metrics.
+  Do not infer these values from missing/old `summary` rows or invent defaults.
 - RejectFinal fault semantics: strict summary FINISH and replacement/path adoption are one
   transaction. `fault_tests::checkpoint` is invoked only after the stage method returns:
   for native summary that return follows writer-owned replacement/path/stage/FINISH COMMIT.
