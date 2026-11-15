@@ -863,10 +863,16 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         let request_turn=uuid::Uuid::new_v4().to_string();
         let old_run=(!active).then(||uuid::Uuid::new_v4().to_string());
         let old_turn=(!active).then(||uuid::Uuid::new_v4().to_string());
+        if !active{
+            let earlier_run=uuid::Uuid::new_v4().to_string();let earlier_turn=uuid::Uuid::new_v4().to_string();
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','fixture','fixture')",rusqlite::params![earlier_run,target_for_seed])?;
+            tx.execute("INSERT INTO turn(id,thread_id,run_id,state,generation,created_at,ended_at)VALUES(?1,?2,?3,'completed',0,'fixture','fixture')",rusqlite::params![earlier_turn,target_for_seed,earlier_run])?;
+            for(kind,role,text)in[("user","user","earlier request ".repeat(20_000)),("assistant_response","assistant","earlier answer ".repeat(20_000))]{let node=uuid::Uuid::new_v4().to_string();crate::history::append_node(&tx,&target_for_seed,&node,Some(&earlier_turn),kind,&json!({"role":role,"content":[{"type":"input_text","text":text}]}),"fixture")?;}
+        }
         if let (Some(old_run),Some(old_turn))=(&old_run,&old_turn){
             tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','fixture','fixture')",rusqlite::params![old_run,target_for_seed])?;
             tx.execute("INSERT INTO turn(id,thread_id,run_id,state,generation,created_at,ended_at)VALUES(?1,?2,?3,'completed',0,'fixture','fixture')",rusqlite::params![old_turn,target_for_seed,old_run])?;
-            for(kind,role,text)in[("user","user","prior request"),("assistant_response","assistant","prior answer")]{let node=uuid::Uuid::new_v4().to_string();crate::history::append_node(&tx,&target_for_seed,&node,Some(old_turn),kind,&json!({"role":role,"content":[{"type":"input_text","text":text}]}),"fixture")?;}
+            for(kind,role,text)in[("user","user","prior request ".repeat(20_000)),("assistant_response","assistant","prior answer ".repeat(20_000))]{let node=uuid::Uuid::new_v4().to_string();crate::history::append_node(&tx,&target_for_seed,&node,Some(old_turn),kind,&json!({"role":role,"content":[{"type":"input_text","text":text}]}),"fixture")?;}
         }
         tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?2,'live','fixture')",rusqlite::params![run,target_for_seed])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES(?1,?2,?3,'running',0,'fixture')",rusqlite::params![request_turn,target_for_seed,run])?;
@@ -889,12 +895,12 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
                 crate::history::append_node(&tx,&target_for_seed,&call_node,Some(&request_turn),"assistant_response",&call_payload,"fixture")?;
                 tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_id,item_type,status,payload_json,node_id)VALUES(?1,0,?2,'function_call','completed',?3,?4)",rusqlite::params![group_attempt,call,item.to_string(),call_node])?;
                 tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?2,0,'shell','{}','completed')",rusqlite::params![group,call])?;
-                let result_payload=json!({"role":"tool","group_id":group,"call_id":call,"content":"ok"});
+                let result_payload=json!({"role":"tool","group_id":group,"call_id":call,"content":"tool output ".repeat(10_000)});
                 crate::history::append_node(&tx,&target_for_seed,&result_node,Some(&request_turn),"tool_result",&result_payload,"fixture")?;
                 tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?2,?3,'completed')",rusqlite::params![group,call,result_node])?;
             }
         }else{
-            insert_attempt(&tx,&attempt,&source_turn)?;
+            insert_attempt(&tx,&attempt,&request_turn)?;
             let node=uuid::Uuid::new_v4().to_string();
             crate::history::append_node(&tx,&target_for_seed,&node,Some(&request_turn),"user",&json!({"role":"user","content":[{"type":"input_text","text":"current request"}]}),"fixture")?;
         }
@@ -985,7 +991,11 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         let attempt = attempt.clone();
         move |db| Ok(serde_json::from_str(&db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1", [attempt], |r| r.get::<_, String>(0))?).unwrap())
     }).await.unwrap();
-    assert_eq!(facts["outcome"], "unknown");
+    assert_eq!(
+        facts["outcome"], "adopted",
+        "strict summary FINISH committed before the postcommit fault hook"
+    );
+    assert_eq!(facts["provisional"], false);
     let recorded = facts["committed_stages"].as_object().unwrap();
     assert_eq!(
         recorded.keys().map(String::as_str).collect::<Vec<_>>(),
