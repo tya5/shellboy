@@ -84,6 +84,15 @@ Deleting a retained space took 137 s before this change and 0.85 s after it: del
 
 検索結果の従来のnode_id/excerpt/distance/spansを維持し、基本provenanceとして保存kind・作成時刻・source_revisionを返す。原文getでも同じprovenanceを取得できる。Turn／Run／生成元Threadを確定できる場合はIDを返し、不明なものへ仮IDや最新Runを付けない。生成元の任意IDは記録されたTurnとのjoinで確定できる範囲に限る。共有nodeの生成元と採用先を混同しない。Thread指定時は `thread_scope: {thread_id, on_current_path}` を各hitに返し、現在pathに採用されたnodeと、圧縮元として対象になったnodeを区別する。Thread未指定時はこのfieldを省略し、全体検索から採用先を推定しない。nodeに存在しない更新時刻は捏造しない。
 
+Saved history provenance additionally has optional `attempt_id` for an
+`assistant_response` node only when existing `output_item.node_id` rows name
+exactly one distinct `attempt_id`; the read uses `output_item_node`. No owner or
+ambiguous owners are omitted. A unique malformed owner is a strict `invalid_state`,
+not downgraded to absence. The attempt ID is an association only: canonical saved
+identity remains `(node_id, item_identity)` and search hits retain their current
+provenance projection. The bounded query projects owner IDs only, never
+`payload_json`; no table, index, migration, writer or side cache is added.
+
 削除済み／payload回収済みnodeとstale索引は検索対象から除く。Threadの論理削除だけで共有nodeまで削除扱いにはしないため、別Threadやliveなsource関係で保持されるnodeは全体検索で見つかり得る。削除Threadだけが所有し、現在の保持rootへ到達しないnodeはGC前でも検索から除く（下記G7）。生成元Threadが論理削除されても保存済みのorigin IDは改変せず、現在そのThreadへ操作可能であるという保証を付けない。指定Thread自体が削除済みならThreadNotFound。GC後は検索に出なくても、metadataが残るnodeはget／relationsでprovenanceとtombstoneを確認できる。
 
 spansは意味検索で選ばれた索引チャンクの原文範囲であり、キーワードの完全一致箇所ではない。body_kindごとの抽出テキストに対するUnicode scalarの開始・排他的終端、索引元のsource_revision・content_hash（そのchunk抽出テキストUTF-8のSHA-256）を返す。元JSON全体やtool raw bytesに対するbyte offsetとは扱わない。本文／rawの世代・encodingが変わった旧索引を現在の原文と偽って返さない。

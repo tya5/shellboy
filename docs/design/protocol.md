@@ -75,7 +75,7 @@ P3照合修正: ShellReadArgs.encodingをOptionへ変更し、省略時にexecut
 
 検索はfilter後にL2距離で順位を決め、chunkをnode単位にまとめる。同じ内容の異なるnodeは統合しない。各hitはnode_id/excerpt/distance/spans/provenanceを持つ。spansはsource_revision/content_hash/body_kind/start/endを持ち、抽出本文のUnicode scalar位置 `[start,end)` を示す意味検索chunk範囲である。語の一致範囲ではなく、threshold指定もない。Thread限定時だけthread_scope={thread_id,on_current_path}を返し、採用path上ならtrue、completed出典としてだけ対象ならfalse。globalではこのfieldを省略し、所属を推定しない。
 
-`NodeProvenance` はkind/created_at/source_revisionと任意turn_id/run_id/origin_thread_id。未確定のIDを生成せず省略し、originを共有nodeの全所属と同一視しない。`HistoryBody.provenance` is required and is derived from the saved node.
+`NodeProvenance` はkind/created_at/source_revisionと任意turn_id/run_id/origin_thread_idを持つ。履歴のassistant_response nodeに限り、既存output_itemのnode associationが一意な場合は任意attempt_idを投影する。association無し／曖昧なら省略し、唯一のowner IDが不正ならinvalid_stateとする。未確定のIDを生成せず省略し、originを共有nodeの全所属と同一視しない。`HistoryBody.provenance` is required and is derived from the saved node. 詳細は[検索・関係設計](search-and-relations.md#provenanceと区間)に従う。
 
 `HistoryRelationsArgs` はnode_id、必須relation（previous/next/sources/replacements）、limit既定50・最大200、任意cursor。`Page<RelationItem>` の各要素はnode_id/provenanceと、置換関係に限るreplacement_id/source_revision/source_hashを持つ。previous/nextは会話辺、sourcesはcompleted置換出力→出典、replacementsは出典→completed置換出力である。relation item直下のsource_revision/hashは置換記録時の出典witness、provenance.source_revisionは返却nodeの現在版であり区別する。cursorは対象node・relation・revisionとwatermarkに束縛し、追加関係を途中pageへ混入させない。履歴変更・無制限の祖先/子孫探索は含めない。採用経路は既存history.listで取得する。
 
