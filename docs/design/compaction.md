@@ -55,6 +55,27 @@ This section describes the current-main native proactive GC implementation contr
   existing metrics (`source_characters`, `summary_characters`, `summary_limit`, `model_requests`,
   `summary_usage`, `spilled_groups`) through the attempt summary object to compact-list metrics.
   Do not infer these values from missing/old `summary` rows or invent defaults.
+- C7.1 strict-Clippy cleanup preserves live authorities in explicit typed facts. One
+  `ThreadPlanFacts` value represents each batched thread-state row; `ActiveGroupFacts`
+  retains complete/protected/work/spill-tool/user decisions. Profile/model/effort and
+  origin/request generation fences remain in `CapturedSummaryInput`; only unused duplicate
+  per-row labels and derived aggregate source characters are removed. The boxed
+  `GcCaptureOutcome::Captured` bounds transport size and is unboxed only at DbWorker's
+  post-commit writer installation. Producer result payloads already travel through the
+  existing result channel; writer completion status remains an acknowledgement and join /
+  retirement custody is unchanged. A failed completion admission now forwards its typed
+  storage cause when no producer error is available.
+- C7.2 summary stage has an explicit owner context for the existing Control, Compactor,
+  per-Thread boundary, Automatic attempt and Run token, plus a typed Closed/Active mode.
+  Closed summary always runs first; only true closed `NoTarget` permits active spill and
+  active summary. The stage returns one result carrying both
+  `summary: Result<CompactResult, ApiError>` and any actually committed active spill,
+  replacing the prior bool plus mutable out-parameter. The committed spill
+  survives a later summary error/cancellation or postcommit checkpoint error and is included
+  in the terminal aggregate. The active-Stop regression on parent C7.1 is now a passing
+  C8 control: preserve `summary_rejected`, prior path/spill, epoch, and no-summary/no-POST
+  facts when strict summary is rejected after spill commit. Failure/suppression does not fall through. Existing fault
+  checkpoints remain after the actual committed stages.
 - RejectFinal fault semantics: strict summary FINISH and replacement/path adoption are one
   transaction. `fault_tests::checkpoint` is invoked only after the stage method returns:
   for native summary that return follows writer-owned replacement/path/stage/FINISH COMMIT.

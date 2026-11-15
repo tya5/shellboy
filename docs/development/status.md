@@ -3,37 +3,56 @@
 ## CORE301 current-main GC port candidate (not main state)
 
 The isolated worktree `task/core301-single-request-port-63724` is based on
-`c0c1d82767f061c60c2f4d46673a3cfa30560145`. The current source/test repair is
-committed as `fc3019daec8d042141df6f84ce9b60aeaf90670b`; it preserves the
-reason-only witness/owner-token boundary, the one selected-source facts
-authority, shared summary metrics/readback, closed-summary-before-active
-fallback, atomic adoption/FINISH and prior C6 correlated RunStop outcomes.
-C7 fixes top-level terminal attempt projection to use the same immutable typed
-compaction cause as the saved phase fact; later owner-token state remains an
-unwind/next-work responsibility, not a cause rewriter.
+`c0c1d82767f061c60c2f4d46673a3cfa30560145`. C7 terminal projection is source commit
+`fc3019daec8d042141df6f84ce9b60aeaf90670b`; the C7 docs/status SHA was
+`43d3e5724b494947bfca86223d9981fa09e9280f`. C7.1 strict-Clippy cleanup/source ownership
+refactor is committed separately as `7790e363d1662138928284c1edf99f108f11c83e`;
+this C7.1 documentation update will have its own final SHA.
 
-Native qualification is SHA-specific. The preceding complete C6 candidate
-`75145faacff384463b0ccde51913b63061c6cceb` passed guarded `cargo test --locked`
-(exit 0; 2,644 library and 1,415 integration tests passed; cleanup confirmed),
-but that result is not transferable to the C7 source change. The new C7 focused
-receipts are `core301-terminal-projection-unit-recheck.log` (three exact consumer
-controls, 1/1 each, plus fmt/check) and
-`core301-terminal-projection-existing-controls.log` (13 exact Stop/metrics/
-routing/source-facts controls, 1/1 each, `matrix_failed=0`; cleanup confirmed).
-The full normal native on the new complete SHA is still pending.
+C7 native at 43d3 passed guarded full `cargo test --locked` (exit 0; 2,647 library and
+1,415 integration tests passed; cleanup confirmed) and bounded source review accepted the
+third-pair fix. Those native/review results do not transfer to C7.1/C8. Strict Clippy on
+C7.1 initially exposed 34 diagnostics. Source-classified fixes now use named facts, remove
+only unused duplicate data/probes, keep the public spill helper, preserve the writer ack /
+result channel, and make stage side-effects an owned result. C7.1 source/test commit is
+`7790e363d1662138928284c1edf99f108f11c83e`.
 
-Current HTTP source and migration bytes remain unchanged from the c0 base. The
-original fb/f497 reds and later receipts remain in the private evidence ledger;
-zero-test selectors are excluded. Independent bounded review closure, new-SHA
-full native, three-OS qualification, CI and main landing are not established.
-The 20:15 candidate-commit target was met at f751; the concrete terminal-cause
-P2 reopened quality closure at 20:17. Keep 21:45 native/review and 23:00
-landing as targets, report forecast risk early, and do not waive a gate for time.
+C7.1's 17-selector matrix exposed one real active-Stop regression: an active spill committed,
+then a RunStopped summary rejection returned early and lost the committed spill from the
+attempt summary, omitting `summary_rejected`. Original reason/path/stage facts remained
+correct. C8 now returns `SummaryStageOutcome { summary: Result<...>, committed_active_spill }`
+on every normal/error/checkpoint branch and merges the committed spill before projecting
+the terminal summary. This fix is committed as `a5f9b0afd6c02ef0e5314a65720c110d2df29430`.
 
-Next: commit the C7 design/status delta, then run guarded full `cargo test
---locked` on that complete SHA with source frozen through terminal cleanup. After
-its result, obtain only the bounded review delta for typed terminal projection;
-no full review replay, CI or three-OS run until P2 closure.
+Guarded fmt/check plus exact active/closed RunStop, postcommit Storage and RejectFinal rollback
+controls pass 1/1 on C8: execution `85188a4a-2266-4327-afa4-79964bc59f6a`, log
+`core301-c8-spill-return-recheck2.log`, exit 0/cleanup confirmed. The active-stop
+`summary_rejected` assertion now passes. Guarded `cargo clippy --locked --all-targets -- -D warnings`
+passes on C8: execution `7bc4ee19-d6a9-4fcb-8f36-0a25219f19bb`, log
+`core301-c8-clippy-final.log`, exit 0/cleanup confirmed. C8's complete exact matrix and full
+standard script remain pending.
+
+The first full `sh scripts/check.sh` on 43d3 failed strict Clippy (exit 101) before the
+all-target test or `test-db-observation` selector; its immutable log is
+`core301-standard-check-43d3e572-63724.log`. Structural fixes now address those 34
+warnings without blanket allowances; the 43d3 full native is green but cannot qualify the
+new C8 SHA. The full standard check has not yet completed on C8.
+
+HTTP source and migrations remain unchanged from c0. Original fb/f497/994 reds and
+corrected earlier receipts remain preserved; zero-test selectors are excluded.
+Independent review of the C8 stage ownership/fact changes, C8 `scripts/check.sh`, a
+new C8 full native, CI/three-OS qualification and main landing are not established.
+
+The 21:45 native/review target is no longer feasible for the reopened C7.1 SHA. Recovery
+commit checkpoint 21:30 and full standard-check checkpoint 22:15 remain execution
+checkpoints, not guaranteed completions. A new full native after check, bounded review,
+and three-OS workflow do not fit before 23:00 without skipping evidence; 23:00 landing is
+at severe risk and is not claimed or silently shifted.
+
+Next: finish the admitted C8 fix controls, commit the spill-custody fix and design/status
+separately, then run the entire `sh scripts/check.sh` on that exact clean SHA and
+freeze source until terminal cleanup. If green, run new full normal native and bounded
+review delta before any CI/three-OS request.
 
 ## v0.11.0 preparation
 
