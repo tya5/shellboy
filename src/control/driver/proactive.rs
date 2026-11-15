@@ -208,7 +208,7 @@ enum SummaryStageMode {
 
 #[derive(Debug)]
 struct SummaryStageOutcome {
-    summary: crate::compaction::CompactResult,
+    summary: Result<crate::compaction::CompactResult, ApiError>,
     committed_active_spill: Option<crate::compaction::CompactResult>,
 }
 
@@ -218,7 +218,7 @@ async fn summary_stage(
     owner: SummaryStageOwner<'_, '_>,
     mode: SummaryStageMode,
     _slot: &DriverSlot,
-) -> Result<SummaryStageOutcome, ApiError> {
+) -> SummaryStageOutcome {
     let SummaryStageOwner {
         control,
         compactor,
@@ -230,7 +230,7 @@ async fn summary_stage(
     let thread_boundary = control.boundary(thread).await;
     let admission_wait = tokio_util::sync::CancellationToken::new();
     let closed_stage = "closed_summary";
-    let closed = boundary
+    let closed = match boundary
         .pause(
             &admission_wait,
             automatic.observed(
@@ -246,7 +246,21 @@ async fn summary_stage(
             ),
         )
         .await
-        .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
+    {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            return SummaryStageOutcome {
+                summary: Err(error),
+                committed_active_spill: None,
+            };
+        }
+        Err(_) => {
+            return SummaryStageOutcome {
+                summary: Err(invalid("GC boundary reacquisition cancelled")),
+                committed_active_spill: None,
+            };
+        }
+    };
     let mut committed_active_spill = None;
     let (_stage, summary) = match mode {
         SummaryStageMode::Active {
@@ -254,7 +268,7 @@ async fn summary_stage(
         } if closed.no_target => {
             if spill_after_no_target {
                 let active_spill = "active_spill";
-                let spilled = automatic
+                let spilled = match automatic
                     .observed(
                         control,
                         active_spill,
@@ -266,17 +280,31 @@ async fn summary_stage(
                             Some(automatic.stage(active_spill)),
                         ),
                     )
-                    .await?;
-                #[cfg(test)]
-                if !spilled.no_target {
-                    fault_tests::checkpoint(control, _slot, active_spill).await?;
-                }
+                    .await
+                {
+                    Ok(spilled) => spilled,
+                    Err(error) => {
+                        return SummaryStageOutcome {
+                            summary: Err(error),
+                            committed_active_spill: None,
+                        };
+                    }
+                };
                 if !spilled.no_target {
                     committed_active_spill = Some(spilled);
                 }
+                #[cfg(test)]
+                if committed_active_spill.is_some()
+                    && let Err(error) = fault_tests::checkpoint(control, _slot, active_spill).await
+                {
+                    return SummaryStageOutcome {
+                        summary: Err(error),
+                        committed_active_spill,
+                    };
+                }
             }
             let active_stage = "active_summary";
-            let result = boundary
+            let result = match boundary
                 .pause(
                     &admission_wait,
                     automatic.observed(
@@ -292,19 +320,38 @@ async fn summary_stage(
                     ),
                 )
                 .await
-                .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(error)) => {
+                    return SummaryStageOutcome {
+                        summary: Err(error),
+                        committed_active_spill,
+                    };
+                }
+                Err(_) => {
+                    return SummaryStageOutcome {
+                        summary: Err(invalid("GC boundary reacquisition cancelled")),
+                        committed_active_spill,
+                    };
+                }
+            };
             (active_stage, result)
         }
         _ => (closed_stage, closed),
     };
     #[cfg(test)]
-    if !summary.no_target {
-        fault_tests::checkpoint(control, _slot, _stage).await?;
+    if !summary.no_target
+        && let Err(error) = fault_tests::checkpoint(control, _slot, _stage).await
+    {
+        return SummaryStageOutcome {
+            summary: Err(error),
+            committed_active_spill,
+        };
     }
-    Ok(SummaryStageOutcome {
-        summary,
+    SummaryStageOutcome {
+        summary: Ok(summary),
         committed_active_spill,
-    })
+    }
 }
 
 pub(super) async fn maybe_compact_with_run_stop(
@@ -528,11 +575,11 @@ pub(super) async fn maybe_compact_with_run_stop(
             mode,
             slot,
         )
-        .await?;
+        .await;
         if outcome.committed_active_spill.is_some() {
             committed_spill = outcome.committed_active_spill;
         }
-        Ok(outcome.summary)
+        outcome.summary
     }
     .await;
     // A retiring owner must not remove a newer owner's witness.

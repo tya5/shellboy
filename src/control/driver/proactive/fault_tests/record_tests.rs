@@ -984,7 +984,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
             },
             mode,
             &slot,
-            ).await.map(|outcome| outcome.summary)
+            ).await.summary
         };
         tokio::pin!(work);
         let request=tokio::select!{
