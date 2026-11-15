@@ -940,15 +940,14 @@ impl Compactor {
             }
             let _dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return None;}};
             let guard=tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();let _=result_tx.send(Err(invalid("GC cancelled by explicit Run Stop")));return None;},guard=boundary_for_job.clone().lock_owned()=>guard};
-            let apply_capture=captured.clone();let apply_config=config.clone();let apply_usage=usage.clone();
+            let apply_capture=captured.clone();let apply_config=config.clone();let apply_usage=usage.clone();let apply_cancel=cancel.clone();
             let adopted=db.adopt_gc_candidate(job_id,guard,move|tx,result|{
-                let node=summary::adopt_gc_result_tx(tx,&apply_config,&apply_capture,result,&apply_usage)?;
+                let node=summary::adopt_gc_result_tx(tx,&apply_config,&apply_capture,result,&apply_usage,&apply_cancel)?;
                 let selected=result.selected.clone();let source_ids=apply_capture.groups[selected.clone()].iter().flat_map(|g|g.stamps.iter().map(|s|s.id.clone())).collect::<Vec<_>>();
                 let source_chars=apply_capture.groups[selected.clone()].iter().try_fold(0u64,|sum,g|sum.checked_add(u64::try_from(g.projection_weight).ok()?)).ok_or_else(||StorageError::InvalidInput("GC source projection overflow".into()))?;
-                let drop=apply_capture.active_turn;
                 let result_value=CompactResult{source_characters:Some(source_chars),summary_characters:Some(result.response.text.chars().count() as u64),summary_limit:Some(output_limit.0),model_requests:Some(apply_usage.requests as usize),source_nodes:source_ids.len(),summary_node_id:Some(node.clone()),original_node_ids:source_ids,summary_usage:Some(apply_usage.clone()),..Default::default()};
                 let (selection_revision,reasoning_epoch):(i64,i64)=tx.query_row("SELECT selection_revision,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[&apply_capture.thread],|row|Ok((row.get(0)?,row.get(1)?)))?;
-                let fact=GcStageFact{selection_revision,reasoning_epoch,summary_node_id:node,source_nodes:result_value.source_nodes as u64,spilled_groups:result_value.spilled_groups as u64,drop_all_reasoning:drop,captured_reasoning_epoch:apply_capture.epoch,source_characters:result_value.source_characters,summary_characters:result_value.summary_characters,summary_limit:result_value.summary_limit,model_requests:result_value.model_requests.map(|n|n as u64),summary_usage:result_value.summary_usage.clone()};
+                let fact=GcStageFact{selection_revision,reasoning_epoch,summary_node_id:node,source_nodes:result_value.source_nodes as u64,spilled_groups:result_value.spilled_groups as u64,drop_all_reasoning:false,captured_reasoning_epoch:apply_capture.epoch,source_characters:result_value.source_characters,summary_characters:result_value.summary_characters,summary_limit:result_value.summary_limit,model_requests:result_value.model_requests.map(|n|n as u64),summary_usage:result_value.summary_usage.clone()};
                 Ok((result_value,fact))
             }).await;
             match adopted{Ok(value)=>{let _=result_tx.send(Ok(value));}Err(error)=>{let _=result_tx.send(Err(storage_error(error)));}}

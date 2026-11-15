@@ -529,7 +529,6 @@ impl Compactor {
         let adoption = SummaryAdoption {
             automatic,
             removed_characters: (source_chars - projected) as u64,
-            drop_all_reasoning,
             snapshot,
             sources,
             payload,

@@ -328,6 +328,56 @@ pub(crate) fn reasoning_keep(
         .collect())
 }
 
+/// Current replay projection after selecting `path`, without writing it. The
+/// adopter uses this to stamp generated summary metadata before storing S; the
+/// actual path write recomputes the same projection transactionally below.
+pub(crate) fn reasoning_projection_for_path(
+    db: &Connection,
+    thread_id: &str,
+    path: &[String],
+) -> Result<(i64, Vec<String>), StorageError> {
+    let previous_path = selected_ids(db, thread_id)?;
+    let epoch: i64 = db.query_row(
+        "SELECT reasoning_epoch FROM thread WHERE id=?1",
+        [thread_id],
+        |row| row.get(0),
+    )?;
+    if let Some(edit_point) = edit_invalidates_kept_reasoning(db, &previous_path, path)? {
+        let keep = reasoning_kept_before(db, thread_id, epoch, &path[..edit_point])?;
+        return Ok((
+            epoch
+                .checked_add(1)
+                .ok_or_else(|| StorageError::InvalidInput("reasoning epoch exhausted".into()))?,
+            keep,
+        ));
+    }
+    let previous_keep = reasoning_keep(db, thread_id, epoch)?;
+    let keep = path
+        .iter()
+        .filter(|id| previous_keep.contains(*id))
+        .cloned()
+        .collect();
+    Ok((epoch, keep))
+}
+
+fn reasoning_kept_before(
+    db: &Connection,
+    thread_id: &str,
+    epoch: i64,
+    unchanged: &[String],
+) -> Result<Vec<String>, StorageError> {
+    let previous = reasoning_keep(db, thread_id, epoch)?;
+    let mut kept = Vec::new();
+    for id in unchanged {
+        if let Some(saved) = output_epoch(db, id)?
+            && (saved == Some(epoch) || previous.contains(id))
+        {
+            kept.push(id.clone());
+        }
+    }
+    Ok(kept)
+}
+
 /// #182 positional drop: reasoning strictly before the earliest edited
 /// position stays byte-identical (whatever was sendable there remains so);
 /// reasoning saved at or after it is never sent again. Implemented as a new
@@ -342,15 +392,7 @@ fn restart_reasoning_after(
         [thread_id],
         |row| row.get(0),
     )?;
-    let previous = reasoning_keep(tx, thread_id, epoch)?;
-    let mut kept = Vec::new();
-    for id in unchanged {
-        if let Some(saved) = output_epoch(tx, id)?
-            && (saved == Some(epoch) || previous.contains(id))
-        {
-            kept.push(id.clone());
-        }
-    }
+    let kept = reasoning_kept_before(tx, thread_id, epoch, unchanged)?;
     tx.execute(
         "UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",
         [thread_id],

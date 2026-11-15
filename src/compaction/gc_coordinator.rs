@@ -420,28 +420,36 @@ impl WriterGcCoordinator {
                 "GC adoption candidate is absent".into(),
             ));
         };
+        let cancel = job.cancel.clone();
         let outcome: Result<T, crate::storage::StorageError> =
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let tx = db.transaction()?;
+                if cancel.is_cancelled() {
+                    return Err(crate::storage::StorageError::from(
+                        super::discard::rejected(
+                            super::discard::RejectionReason::Cancelled,
+                            "GC cancelled before final adoption",
+                        ),
+                    ));
+                }
                 let (value, fact) = apply(&tx, candidate)?;
+                if cancel.is_cancelled() {
+                    return Err(crate::storage::StorageError::from(
+                        super::discard::rejected(
+                            super::discard::RejectionReason::Cancelled,
+                            "GC cancelled during final adoption",
+                        ),
+                    ));
+                }
                 super::attempt::record_gc_stage_tx(&tx, stage, &fact)?;
                 super::attempt::finish_gc_tx(&tx, stage)?;
-                if fact.drop_all_reasoning {
-                    let captured_epoch = fact.captured_reasoning_epoch;
-                    let current: i64 = tx.query_row(
-                        "SELECT reasoning_epoch FROM thread WHERE id=?1",
-                        [&stage.thread_id],
-                        |row| row.get(0),
-                    )?;
-                    if captured_epoch.checked_add(1) != Some(current) {
-                        return Err(crate::storage::StorageError::InvalidInput(
-                            "active GC reasoning epoch changed during FINISH".into(),
-                        ));
-                    }
-                    tx.execute(
-                        "DELETE FROM app_meta WHERE key=?1",
-                        [crate::history::reasoning_keep_key(&stage.thread_id)],
-                    )?;
+                if cancel.is_cancelled() {
+                    return Err(crate::storage::StorageError::from(
+                        super::discard::rejected(
+                            super::discard::RejectionReason::Cancelled,
+                            "GC cancelled before final commit",
+                        ),
+                    ));
                 }
                 tx.commit()?;
                 Ok(value)

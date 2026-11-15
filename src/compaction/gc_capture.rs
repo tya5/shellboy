@@ -851,7 +851,7 @@ fn merge_source_group_ranges<'a>(
     }
     ranges
 }
-fn native_tool_span_splits(
+pub(super) fn native_tool_span_splits(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     start: i64,
