@@ -17,7 +17,34 @@ macro_rules! record_test {
         }
     };
 }
-record_test!(record_after_storage_fault, Fault::Storage);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn record_after_storage_fault() {
+    record_boundaries(Fault::Storage).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pre_finish_rejection_and_postcommit_storage_share_the_active_summary_cell() {
+    let (rejected, committed) = crate::test_watchdog::watchdog(
+        "pre-FINISH rollback versus postcommit adoption",
+        async {
+            let rejected = record_boundary(Fault::RejectFact, Scenario::ActiveSummary).await;
+            let committed = record_boundary(Fault::Storage, Scenario::ActiveSummary).await;
+            (rejected, committed)
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(rejected["outcome"], "failed", "pre-FINISH rollback: {rejected}");
+    assert!(rejected["committed_stages"]["active_summary"].is_null());
+    assert_eq!(committed["outcome"], "adopted", "postcommit FINISH remains durable: {committed}");
+    assert!(committed["committed_stages"]["active_summary"].is_object());
+    assert_eq!(
+        rejected["trigger"],
+        committed["trigger"],
+        "same scenario uses the exact immutable trigger tuple"
+    );
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn connection_target_percent_is_inherited_when_thread_is_unset() {
     boundary_with_thread_override(Fault::Storage, Scenario::ClosedSpill, false).await;
@@ -58,11 +85,19 @@ record_test!(
     Fault::RetiredWritesAbsent
 );
 record_test!(record_after_rejected_final_write, Fault::RejectFinal);
-record_test!(rejected_stage_fact_prevents_adoption, Fault::RejectFact);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_stage_fact_prevents_adoption() {
+    record_boundaries(Fault::RejectFact).await;
+}
 
 async fn record_boundaries(fault: Fault) {
     crate::test_watchdog::watchdog("automatic attempt record", async {
         for scenario in Scenario::ALL {
+            if matches!(fault, Fault::Storage | Fault::RejectFact)
+                && scenario == Scenario::ActiveSummary
+            {
+                continue;
+            }
             record_boundary(fault, scenario).await;
         }
     })
@@ -85,7 +120,7 @@ fn trigger_identity(trigger: &Value) -> Value {
     })
 }
 
-async fn record_boundary(fault: Fault, scenario: Scenario) {
+async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
     let stage = scenario.stage();
     let Fx {
         root,
@@ -357,12 +392,13 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         assert_eq!(item["state"], "unknown");
         let _ = restarted_control.shutdown().await;
         restarted.shutdown().await.unwrap();
-        return;
+        return after.record;
     }
     later_attempt(&control, &mut receive, &target, &after).await;
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
+    after.record
 }
 
 // Only triggers this fault fixture actually registers. Query before dropping so
