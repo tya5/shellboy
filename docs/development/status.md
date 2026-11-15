@@ -2,32 +2,39 @@
 
 ## CORE301 current-main GC port candidate (not main state)
 
-The isolated worktree `task/core301-single-request-port-63724` is a descendant of
-`c0c1d82767f061c60c2f4d46673a3cfa30560145`; current committed HEAD is
-`039e495797e8d557f2dd49fdde694a660a4dc247` plus uncommitted follow-up source.
-The actual selected-R extraction map was SHA-256 verified as
-`d550095b0ae53e3ff4af0cb280ae554ba7e1f38aae6e635b1358a699116d2b57`.
-The follow-up adds a real DbWorker shutdown cancel/join/retire call after accepted
-lane drain, one post-cleanup/pre-reply reconciliation hook shared by ordinary and
-background wrappers, exact selected-attachment witness checks, typed bounded GC
-stage facts and typed capture admission (`NoTarget`, `Cancelled`, `Started`); pre-cancel returns before
-reservation/planning, and uncancelled `NoTarget` retains closed-to-active fallback. Current-main HTTP source and migration
-bytes are preserved; see the exact diff check in the handoff, not this status note.
+The isolated worktree `task/core301-single-request-port-63724` is based on
+`c0c1d82767f061c60c2f4d46673a3cfa30560145`. The current source/test repair is
+committed as `fc3019daec8d042141df6f84ce9b60aeaf90670b`; it preserves the
+reason-only witness/owner-token boundary, the one selected-source facts
+authority, shared summary metrics/readback, closed-summary-before-active
+fallback, atomic adoption/FINISH and prior C6 correlated RunStop outcomes.
+C7 fixes top-level terminal attempt projection to use the same immutable typed
+compaction cause as the saved phase fact; later owner-token state remains an
+unwind/next-work responsibility, not a cause rewriter.
 
-Focused evidence on the changing source is intentionally separate: registered
-record cancellation, explicit RunStop after active spill, active range append/
-latest-tool-tail, attachment mutation/append, bounded-fact negative injections,
-capacity-one real worker shutdown with queued completion, and latest pre-cancel/no-target controls have passed in `core301-current-capture-controls13-63724.log`.
-The same batch's attachment test exposed an outdated synthetic SQL fixture; after fixing
-its schema, the exact attachment/append-tail test passed in `core301-current-attachment-control16-63724.log`. The exact
-60-second `record_after_rejected_final_write` control timed out in the current
-batch while entering its subsequent scenario; preserve that result and diagnose
-it before any full-suite rerun. The latest `cargo check --locked --tests` passed in `core301-current-capture-check12-63724.log`.
-Formatting now passes with the installed rustfmt selected through Rust 1.99.1. Full standard/native checks, independent review,
-three-OS CI and main landing are not established for this worktree. No provider,
-installed binary, user database, OOM or release claim is made.
+Native qualification is SHA-specific. The preceding complete C6 candidate
+`75145faacff384463b0ccde51913b63061c6cceb` passed guarded `cargo test --locked`
+(exit 0; 2,644 library and 1,415 integration tests passed; cleanup confirmed),
+but that result is not transferable to the C7 source change. The new C7 focused
+receipts are `core301-terminal-projection-unit-recheck.log` (three exact consumer
+controls, 1/1 each, plus fmt/check) and
+`core301-terminal-projection-existing-controls.log` (13 exact Stop/metrics/
+routing/source-facts controls, 1/1 each, `matrix_failed=0`; cleanup confirmed).
+The full normal native on the new complete SHA is still pending.
 
-Snapshot: `origin/main` at `482e7eadb39b0bed4059135842c9b148c162f70d` (2026-11-08). This page describes the checked-out main state, not release certification. The exact base commit and open PR were checked against Git history and GitHub on this date.
+Current HTTP source and migration bytes remain unchanged from the c0 base. The
+original fb/f497 reds and later receipts remain in the private evidence ledger;
+zero-test selectors are excluded. Independent bounded review closure, new-SHA
+full native, three-OS qualification, CI and main landing are not established.
+The 20:15 candidate-commit target was met at f751; the concrete terminal-cause
+P2 reopened quality closure at 20:17. Keep 21:45 native/review and 23:00
+landing as targets, report forecast risk early, and do not waive a gate for time.
+
+Next: commit the C7 design/status delta, then run guarded full `cargo test
+--locked` on that complete SHA with source frozen through terminal cleanup. After
+its result, obtain only the bounded review delta for typed terminal projection;
+no full review replay, CI or three-OS run until P2 closure.
+
 ## v0.11.0 preparation
 
 Release preparation updates the package version and synthetic upgrade checker from public schema 32 to 35. Publication, tagging, exact-candidate upgrade and installation remain separate reviewer-controlled gates. See [draft notes](release-v0.11.0-draft.md).

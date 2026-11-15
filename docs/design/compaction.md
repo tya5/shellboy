@@ -34,7 +34,13 @@ This section describes the current-main native proactive GC implementation contr
   checks. Unit mapping controls still assert each reason-only mapping exactly. Do not force
   scheduler order or add token hooks/barriers. Rejected alternatives remain: no
   `WitnessRejection`/provenance wrapper, reread of `stop_reason`, global/per-job cancellation,
-  flag, registry, actor, or reply-grace/latency change.
+  flag, registry, actor, or reply-grace/latency change. Terminal attempt status now uses
+  that same typed `Outcome`, not a second read of the owner token: `RunStopped` remains
+  `(failed, run_stopped)` if the token flips during the terminal-save await; typed
+  `Cancelled` remains `(cancelled, cancelled)`. Profile and storage causes stay failed.
+  The driver still checks its token for unwind/next-work control. A string parser or third
+  correlated pair would break this causal contract; finite projection controls cover both
+  exact accepted pairs plus the profile/storage negatives.
 - C6-2 selected spill routing: `SpillThenSummary` commits any eligible closed spill, then
   runs the shared closed-summary planner; active spill is allowed only after its uncancelled
   `NoTarget`, followed by active summary. Failure/suppression never falls through. This keeps
