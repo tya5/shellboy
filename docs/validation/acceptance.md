@@ -94,9 +94,19 @@ Execution `e80e7758-b207-4379-ad48-f1bb7a58536e`, exit 0, cleanup confirmed; exa
 log `core306-provenance-focused.log`. Guarded format exit 0 is in
 `core306-provenance-fmt.log`; schema regeneration exit 0 is in
 `core306-protocol-schema-64dd.log`.
-- Full `sh scripts/check.sh` on a clean committed source SHA, independent source
-review, same-SHA three-OS CI and authorized main integration have not run. These
-focused results do not establish qualification. No schema migration, user DB,
+- First full guarded `sh scripts/check.sh` on clean d4dd SHA terminated RED:
+execution `8196dc7d-4992-410a-8068-f1c3d3268d7f`, exit 101/cleanup confirmed,
+2,652 library passed/25 ignored; integration 1,415 passed/1 failed/19 ignored.
+Sole failed `history::history_metadata_links_real_executions_and_preserves_fork_origin`
+fixture used invalid literal attempt ID `attempt`; the new strict `InvalidState` is
+intended. Fixture-only follow-up replaces the 3 matching literals with a fixed
+canonical UUID; no strictness/assertions are weakened. The run stopped before the
+later `test-db-observation` selector. Fresh complete standard check on the fixture-fix
+SHA is pending. Independent bounded source review on d4dd is accepted, no scoped
+P1/P2; artifact `.local/leader/core306-d4dd-saved-attempt-source-review.md`, SHA-256
+`148cc0b20a0877789950d622839ba92381ae99ea91d47bb7f19bfde111063a4c`. Same-SHA
+three-OS CI and authorized main integration have not run. Focused results do not
+establish qualification. No schema migration, user DB,
 installed Core, restart, paid provider or release operation was performed. Project
 and global hybrid RAG search reported semantic not ready; keyword fallback returned
 no matching records. No indexing/embedding action was taken.
