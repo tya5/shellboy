@@ -6,10 +6,13 @@ The isolated worktree `task/core301-single-request-port-63724` is based on
 `c0c1d82767f061c60c2f4d46673a3cfa30560145`. C8 spill-custody source is
 `a5f9b0afd6c02ef0e5314a65720c110d2df29430`; the C3 paired pre-FINISH rejection /
 postcommit storage acceptance cell is `08f2602019ee313203ebba86c27319dd49af0c71`,
-with formatter follow-up `86e3631ba290dba1a0b29d1708be984f0a597b6c`. The C3 bounded
-review is accepted in `.local/leader/core301-2cc731-fault-pair-bounded-review.md`
-(SHA-256 `db20f044921f7d5a58be9cdf8581c094eddadefa82cc7094fc322919b2bfb4a4`).
-Review acceptance does not establish runtime qualification.
+with formatter follow-up `86e3631ba290dba1a0b29d1708be984f0a597b6c`. The initial C3
+bounded review in `.local/leader/core301-2cc731-fault-pair-bounded-review.md` (SHA-256
+`db20f044921f7d5a58be9cdf8581c094eddadefa82cc7094fc322919b2bfb4a4`) was later
+corrected by `.local/leader/core301-c3-provenance-correction.md` (SHA-256
+`bedbfd7aee62165ce29ce792cd8dd2d4e46e62ffbe4b700dd10692863f8a41d6`), which found
+failure-path loss of the captured trigger's run/boundary provenance. The original
+review cannot close this corrected delta; bounded review closure is pending.
 
 C3 runs the true SQL-triggered `Fault::RejectFact` inside adoption (pre-FINISH
 rollback) and matched `Fault::Storage` at its postcommit checkpoint for the same
@@ -27,23 +30,34 @@ restart controls remain.
 and does not qualify the C3 candidate. On `dbae793745428dad57eb37d7ed3942c97427dd57`,
 layout and Python checks (228 tests), formatting and strict all-target Clippy passed;
 the full all-target Rust test executable exited 101 after 2,647 passed, 1 failed and
-25 ignored. The sole failure was the new C3 cell's comparison of whole trigger JSON:
-the stable trigger fields matched, but the legitimate postcommit record also includes
-`run_id` and `a_boundary` metadata. This was an overbroad test comparison, not evidence
-of a runtime mismatch. The immutable red receipt is
-`core301-standard-check-dbae7937-63724.log` / `-result.json`; execution
-`93b82444-1ad6-457b-ab23-c3ecc0173924`, exit 101, cleanup confirmed. Because
-`scripts/check.sh` stops at the failed all-target test command, the later exact
-`test-db-observation` feature selector did not run.
+25 ignored. The sole failure was the new C3 cell's whole-trigger comparison. Source
+review then established the reason was not harmless per-attempt variation: W0 captures
+`run_id` and optional `a_boundary`, but the pre-FINISH terminal path reconstructed the
+trigger from five numeric locals and `attempt::finish_tx` replaced the provisional
+record, dropping those captured provenance fields. The independent correction is
+`.local/leader/core301-c3-provenance-correction.md` (SHA-256
+`bedbfd7aee62165ce29ce792cd8dd2d4e46e62ffbe4b700dd10692863f8a41d6`). The original
+red receipt remains `core301-standard-check-dbae7937-63724.log` / `-result.json`;
+execution `93b82444-1ad6-457b-ab23-c3ecc0173924`, exit 101, cleanup confirmed.
 
-The current repair compares only the existing `trigger_identity` five-field typed
-identity (`input_tokens`, `auto_at_tokens`, `target_percent`, `target_tokens`,
-`a_input_tokens`) on both records. It does not weaken the same-trigger requirement or
-change production code. The repair is unqualified until a fresh complete
-`sh scripts/check.sh` passes on its new clean complete SHA; source must stay frozen
-through terminal cleanup. Prior C7.1 (16/17, active-Stop aggregate red) and C8 (four
-spill-custody controls plus strict Clippy green) evidence remain correctly scoped to
-their SHAs. Original earlier red evidence remains preserved.
+The follow-up complete `sh scripts/check.sh` on `abf339fe90b28b8a75d534b51e9c2c7d8dd5b2e5`
+passed (execution `d4c44659-b586-4ba7-8310-e25092cbbf54`, exit 0, cleanup confirmed):
+layout, Python 228, fmt, strict all-target Clippy, library 2,648/0/25 ignored,
+integration 1,415/0/19 ignored, other targets 14/0/1 ignored and 9/0/2 ignored,
+and exact `test-db-observation` selector 1/1. However, abf used only cross-run numeric
+trigger projection and did not assert or preserve each attempt's own run/boundary
+provenance; it is NOT qualification for the now-confirmed P2. Its log/result/resources
+are `core301-standard-check-abf339fe-63724.*`.
+
+The repair in progress makes `begin_tx` return its exact captured trigger (including
+`run_id` and observed `a_boundary`) and uses that same value for terminal W4 persistence.
+No fallback JSON merge or current-state boundary reread is used. The paired oracle keeps
+the five shared numeric fields for cross-run equality and separately checks each
+record's `run_id` against its own model-attempt turn and its observed boundary shape;
+an attempt-level unit test checks exact captured-trigger survival through terminal
+finish. This new source/test delta is unqualified until a fresh complete
+`sh scripts/check.sh` passes on its new clean SHA. Prior C7.1 and C8 receipts remain
+scoped to their historical SHAs; all original reds remain visible.
 
 C6-3 selected-source facts authority uses the captured `GcSourceFacts` and checks
 group-completeness agreement; C6-2 sequencing retains active spill custody when later

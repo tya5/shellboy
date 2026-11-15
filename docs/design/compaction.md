@@ -1095,6 +1095,14 @@ What each loss affects:
   replacing them: `json_set(json(?new),'$.committed_stages',
   json_extract(error_json,'$.automatic_trim_attempt.committed_stages'))` and
   `token`. W4's pending target overwrites the provisional one, as today.
+- Terminal W4 uses the exact captured `trigger` returned by W0's `begin_tx`;
+  it does not reconstruct the trigger from the current threshold/usage locals.
+  The captured value includes `run_id` and, when `ABoundaryObservation::Observe`
+  applies, the original `a_boundary` token. Terminal writes preserve this causal
+  snapshot through pre-FINISH rejection as well as committed stages. Cross-attempt
+  comparisons use only the five shared numeric trigger fields; each attempt's own
+  `run_id` and optional boundary are checked against its captured provenance. Do
+  not backfill by rereading current A state or by silently merging old JSON fields.
 - Bounds: one record per triggering attempt (the existing rule; a later Run on
   the same measurement still overwrites it); at most four facts, because each
   stage runs at most once per attempt (`proactive.rs:386`). Each fact has a fixed
