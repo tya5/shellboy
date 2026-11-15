@@ -855,7 +855,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     // test itself. This seed uses production schema/path/tool rows and the same
     // real Control boundary below, without an invented driver snapshot.
     let target_for_seed = target.clone();
-    let target_for_seed = target.clone();
     let(active_run,request_turn,attempt)=control.store.database.call(move|db|{
         let tx=db.transaction()?;
         let(profile,model,effort):(String,String,Option<String>)=tx.query_row("SELECT profile_id,model_id,effort FROM thread WHERE id=?1",[&target_for_seed],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
@@ -876,7 +875,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         }
         tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?2,'live','fixture')",rusqlite::params![run,target_for_seed])?;
         tx.execute("INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES(?1,?2,?3,'running',0,'fixture')",rusqlite::params![request_turn,target_for_seed,run])?;
-        let source_turn=if active{request_turn.clone()}else{old_turn.clone().expect("closed path has old turn")};
         let mut attempt=uuid::Uuid::new_v4().to_string();
         let insert_attempt=|tx:&rusqlite::Transaction<'_>,attempt:&str,turn:&str|->Result<(),crate::storage::StorageError>{
             let revision:i64=tx.query_row("SELECT selection_revision FROM thread WHERE id=?1",[&target_for_seed],|r|r.get(0))?;
@@ -967,8 +965,27 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     let mutex = control.boundary(&thread_id).await;
     let mut boundary = crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await);
     let result=async{
-        let mut committed_spill=None;
-        let work=summary_stage(&control,&control.compactor,&thread_id,&slot,active,&mut boundary,&automatic,slot.stop.clone(),false,&mut committed_spill);
+        let mode = if active {
+            SummaryStageMode::Active {
+                spill_after_no_target: false,
+            }
+        } else {
+            SummaryStageMode::Closed
+        };
+        let work = async {
+            summary_stage(
+            SummaryStageOwner {
+                control: &control,
+                compactor: &control.compactor,
+                thread: &thread_id,
+                boundary: &mut boundary,
+                automatic: &automatic,
+                run_stop: slot.stop.clone(),
+            },
+            mode,
+            &slot,
+            ).await.map(|outcome| outcome.summary)
+        };
         tokio::pin!(work);
         let request=tokio::select!{
             result=&mut work=>panic!("uncalibrated summary ended before provider admission: active={active} fault={fault:?} no_target={} err={:?}",result.as_ref().is_ok_and(|value|value.no_target),result.as_ref().err().map(|error|(error.code,error.message.clone()))),

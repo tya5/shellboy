@@ -15,15 +15,6 @@ static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct WriterJobId(u64);
-impl WriterJobId {
-    #[cfg(test)]
-    pub(crate) fn test_fixture() -> Self {
-        Self(0xfeed)
-    }
-    pub(crate) fn is_valid(self) -> bool {
-        self.0 != 0
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WriterJobPhase {
@@ -53,8 +44,8 @@ pub(crate) fn owner_rejection_reason(
 
 #[derive(Debug)]
 pub(crate) enum WriterCompletion {
-    Ready(Dispatched),
-    Failed(ApiError),
+    Ready,
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,12 +127,6 @@ struct JoinedFacts {
     producer_joined: bool,
 }
 
-#[cfg(test)]
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ShutdownFacts {
-    pub producer_joined: bool,
-}
-
 fn start_join_reaper(job: &mut OwnedGcJob) {
     if job.retirement_task.is_some() || job.joined || job.task.is_none() {
         return;
@@ -183,9 +168,7 @@ fn record_child_exit(job: &mut OwnedGcJob, exit: ChildExit) {
         ChildExit::Finished(Some(terminal)) => {
             job.lifecycle
                 .get_or_insert(WriterLifecycle::ProducerTerminated);
-            if job.terminal.is_none() {
-                job.terminal = Some(terminal);
-            }
+            job.terminal.get_or_insert(terminal);
         }
         ChildExit::Finished(None) => {
             job.lifecycle
@@ -315,10 +298,6 @@ impl WriterGcCoordinator {
         Ok(false)
     }
 
-    pub(crate) fn active_job_id(&self) -> Option<WriterJobId> {
-        self.active.as_ref().map(|job| job.id)
-    }
-
     pub(crate) fn cancel_job(&mut self, id: WriterJobId) -> bool {
         let Some(job) = self.active.as_mut().filter(|job| job.id == id) else {
             return false;
@@ -329,13 +308,6 @@ impl WriterGcCoordinator {
         start_join_reaper(job);
         true
     }
-    pub(crate) fn phase(&self, id: WriterJobId) -> Option<WriterJobPhase> {
-        self.active
-            .as_ref()
-            .filter(|job| job.id == id)
-            .map(|job| job.phase)
-    }
-
     pub(crate) fn complete_before_db_reply(
         &mut self,
         db: &Connection,
@@ -350,7 +322,7 @@ impl WriterGcCoordinator {
         }
         match result {
             Ok(summary) => {
-                job.terminal = Some(WriterCompletion::Ready(summary.clone()));
+                job.terminal = Some(WriterCompletion::Ready);
                 if job.phase == WriterJobPhase::Computing && !job.cancel.is_cancelled() {
                     match witness_rejection(db, &job.witness) {
                         Ok(None) => {
@@ -370,8 +342,8 @@ impl WriterGcCoordinator {
                     }
                 }
             }
-            Err(error) => {
-                job.terminal = Some(WriterCompletion::Failed(error));
+            Err(_error) => {
+                job.terminal = Some(WriterCompletion::Failed);
                 job.cancel.cancel();
                 job.phase = WriterJobPhase::Closing;
             }
@@ -504,7 +476,7 @@ impl WriterGcCoordinator {
         if job.cancel.is_cancelled() {
             return Ok(Some(
                 job.rejection
-                    .unwrap_or_else(|| super::discard::RejectionReason::Cancelled),
+                    .unwrap_or(super::discard::RejectionReason::Cancelled),
             ));
         }
         if job.phase != WriterJobPhase::Computing {
@@ -513,7 +485,7 @@ impl WriterGcCoordinator {
             } else {
                 Some(
                     job.rejection
-                        .unwrap_or_else(|| super::discard::RejectionReason::SourceChanged),
+                        .unwrap_or(super::discard::RejectionReason::SourceChanged),
                 )
             });
         }
@@ -570,19 +542,19 @@ impl WriterGcCoordinator {
         }
         if job.phase == WriterJobPhase::Closing {
             start_join_reaper(job);
-            if let Some(receiver) = job.joined_receiver.as_mut() {
-                if let Ok(facts) = receiver.try_recv() {
-                    if facts.producer_panicked {
-                        job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-                    }
-                    if facts.producer_joined {
-                        job.joined = true;
-                    }
-                    if facts.producer_panicked {
-                        job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-                    }
-                    job.joined_receiver = None;
+            if let Some(receiver) = job.joined_receiver.as_mut()
+                && let Ok(facts) = receiver.try_recv()
+            {
+                if facts.producer_panicked {
+                    job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
                 }
+                if facts.producer_joined {
+                    job.joined = true;
+                }
+                if facts.producer_panicked {
+                    job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
+                }
+                job.joined_receiver = None;
             }
             return Ok(true);
         }
@@ -604,26 +576,6 @@ impl WriterGcCoordinator {
         }
     }
 
-    pub(crate) async fn drain(&mut self, id: WriterJobId) -> bool {
-        let Some(job) = self.active.as_mut().filter(|job| job.id == id) else {
-            return false;
-        };
-        job.phase = WriterJobPhase::Closing;
-        job.cancel.cancel();
-        if let Some(task) = job.task.as_mut() {
-            if task.await.is_err() {
-                job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-            }
-            job.task = None;
-        }
-        if let Some(signal) = job.completion_signal.as_mut() {
-            if let Ok(exit) = signal.try_recv() {
-                record_child_exit(job, exit);
-            }
-        }
-        job.joined = true;
-        true
-    }
     pub(crate) fn retire_joined(&mut self, id: WriterJobId) -> bool {
         if self.active.as_ref().is_some_and(|job| {
             job.id == id
@@ -641,13 +593,6 @@ impl WriterGcCoordinator {
             false
         }
     }
-    #[cfg(test)]
-    pub(crate) fn shutdown_facts(&self) -> Option<ShutdownFacts> {
-        self.active.as_ref().map(|job| ShutdownFacts {
-            producer_joined: job.joined,
-        })
-    }
-
     pub(crate) async fn shutdown(&mut self) -> bool {
         let id = self.active.as_ref().map(|job| job.id);
         if let Some(job) = self.active.as_mut() {
@@ -657,18 +602,18 @@ impl WriterGcCoordinator {
             if let Some(retirement) = job.retirement_task.as_mut() {
                 let _ = retirement.await;
             }
-            if let Some(receiver) = job.joined_receiver.as_mut() {
-                if let Ok(facts) = receiver.try_recv() {
-                    if facts.producer_panicked {
-                        job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
-                    }
-                    job.joined = facts.producer_joined;
+            if let Some(receiver) = job.joined_receiver.as_mut()
+                && let Ok(facts) = receiver.try_recv()
+            {
+                if facts.producer_panicked {
+                    job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
                 }
+                job.joined = facts.producer_joined;
             }
-            if let Some(signal) = job.completion_signal.as_mut() {
-                if let Ok(exit) = signal.try_recv() {
-                    record_child_exit(job, exit);
-                }
+            if let Some(signal) = job.completion_signal.as_mut()
+                && let Ok(exit) = signal.try_recv()
+            {
+                record_child_exit(job, exit);
             }
             job.retirement_task = None;
             if job.task.is_some() {
@@ -809,7 +754,7 @@ mod attachment_witness_tests {
     #[test]
     fn selected_attachment_mutation_rejects_but_append_only_tail_remains_eligible() {
         use super::super::discard::RejectionReason as R;
-        let (mut db, witness) = setup();
+        let (db, witness) = setup();
         assert_eq!(witness_rejection(&db, &witness).unwrap(), None);
         db.execute(
             "INSERT INTO attachment_ref VALUES('a','source','/synthetic','file','external','now')",
@@ -821,18 +766,18 @@ mod attachment_witness_tests {
             Some(R::SourceChanged)
         );
 
-        let (mut db, witness) = setup();
+        let (db, witness) = setup();
         db.execute_batch("INSERT INTO attachment_ref VALUES('a','source','/synthetic','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL);").unwrap();
         assert_eq!(
             witness_rejection(&db, &witness).unwrap(),
             Some(R::SourceChanged)
         );
 
-        let (mut db, witness) = setup();
+        let (db, witness) = setup();
         db.execute_batch("UPDATE thread SET selection_revision=selection_revision+1; INSERT INTO node VALUES('tail',1,NULL,'{}'); INSERT INTO thread_path VALUES('t',1,'tail');").unwrap();
         assert_eq!(witness_rejection(&db, &witness).unwrap(), None);
 
-        let (mut db, witness) = setup();
+        let (db, witness) = setup();
         db.execute(
             "UPDATE run SET state='stopping',stop_reason='stopping' WHERE thread_id='t'",
             [],

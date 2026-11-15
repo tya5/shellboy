@@ -33,6 +33,28 @@ pub(crate) struct CapturedGroup {
     pub(crate) tool: bool,
 }
 
+struct ThreadPlanFacts {
+    selection: i64,
+    profile_revision: i64,
+    generation: i64,
+    epoch: i64,
+    profile: String,
+    model: String,
+    effort: Option<String>,
+    current_turn: Option<String>,
+    latest_turn: Option<String>,
+    spill_committed: bool,
+}
+
+struct ActiveGroupFacts {
+    range: Range<usize>,
+    complete: bool,
+    protected: bool,
+    work: bool,
+    spill_or_tool: bool,
+    user: bool,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct GcPlannedSource {
     pub(crate) ordinal: i64,
@@ -43,7 +65,6 @@ pub(crate) struct GcPlannedSource {
     pub(crate) protected: bool,
     pub(crate) group_complete: bool,
     pub(crate) has_summary_marker: bool,
-    pub(crate) current_turn_user: bool,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct GcRangePlan {
@@ -53,14 +74,8 @@ pub(crate) struct GcRangePlan {
     pub(crate) profile_revision: i64,
     pub(crate) nonappend_generation: i64,
     pub(crate) epoch: i64,
-    pub(crate) profile: String,
-    pub(crate) model: String,
-    pub(crate) effort: Option<String>,
-    pub(crate) stage: super::attempt::GcStage,
-    pub(crate) active_tail_range: Option<Range<usize>>,
     pub(crate) active_turn: bool,
     pub(crate) spill_epoch_advanced: bool,
-    pub(crate) drop_reasoning: bool,
     pub(crate) active_user_messages: Vec<String>,
 }
 
@@ -71,7 +86,6 @@ pub(crate) struct CapturedSummaryInput {
     pub(crate) profile_revision: i64,
     pub(crate) nonappend_generation: i64,
     pub(crate) epoch: i64,
-    pub(crate) source_characters: u64,
     pub(crate) profile: String,
     pub(crate) model: String,
     pub(crate) thread_summary_max_chars: Option<u64>,
@@ -82,24 +96,9 @@ pub(crate) struct CapturedSummaryInput {
     pub(crate) request_turn_id: Option<String>,
     pub(crate) request_generation: Option<i64>,
     pub(crate) groups: Vec<CapturedGroup>,
-    pub(crate) active_tail_group: Option<usize>,
     pub(crate) active_turn: bool,
     pub(crate) spill_epoch_advanced: bool,
-    pub(crate) drop_reasoning: bool,
     pub(crate) active_user_messages: Vec<String>,
-}
-
-impl CapturedSourceStamp {
-    pub(crate) fn fingerprint(&self) -> (&str, i64, i64, Option<&str>, &str, bool) {
-        (
-            &self.id,
-            self.ordinal,
-            self.revision,
-            self.turn.as_deref(),
-            &self.hash,
-            self.protected,
-        )
-    }
 }
 
 /// Plan only the ordinary-new prefix from bounded path metadata. The caller
@@ -110,12 +109,26 @@ fn plan_gc_prefix_tx(
     thread: &str,
     stage: &super::attempt::GcStage,
 ) -> Result<Option<GcRangePlan>, StorageError> {
-    let (selection,profile_revision,generation,epoch,profile,model,effort,current_turn,latest_turn,spill_committed):
-        (i64,i64,i64,i64,String,String,Option<String>,Option<String>,Option<String>,bool)=tx.query_row(
+    let facts = tx.query_row(
         "SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
         params![thread,stage.attempt_id,stage.token],
-        |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?,row.get(7)?,row.get(8)?,row.get(9)?)),
+        |row| Ok(ThreadPlanFacts {
+            selection: row.get(0)?, profile_revision: row.get(1)?, generation: row.get(2)?, epoch: row.get(3)?,
+            profile: row.get(4)?, model: row.get(5)?, effort: row.get(6)?, current_turn: row.get(7)?, latest_turn: row.get(8)?, spill_committed: row.get(9)?,
+        }),
     )?;
+    let ThreadPlanFacts {
+        selection,
+        profile_revision,
+        generation,
+        epoch,
+        profile,
+        model,
+        effort,
+        current_turn,
+        latest_turn,
+        spill_committed,
+    } = facts;
     let spill_epoch_advanced =
         stage.reasoning_epoch.checked_add(1) == Some(epoch) && spill_committed;
     if stage.thread_id != thread
@@ -124,7 +137,16 @@ fn plan_gc_prefix_tx(
         || stage.effort != effort
         || (stage.reasoning_epoch != epoch && !spill_epoch_advanced)
     {
-        return Err(StorageError::InvalidInput(format!("GC range-plan context mismatch thread={} profile={} model={} effort={} stage_epoch={} thread_epoch={} committed_spill={}",stage.thread_id==thread,stage.profile_id==profile,stage.model_id==model,stage.effort==effort,stage.reasoning_epoch,epoch,spill_committed).into()));
+        return Err(StorageError::InvalidInput(format!(
+            "GC range-plan context mismatch thread={} profile={} model={} effort={} stage_epoch={} thread_epoch={} committed_spill={}",
+            stage.thread_id == thread,
+            stage.profile_id == profile,
+            stage.model_id == model,
+            stage.effort == effort,
+            stage.reasoning_epoch,
+            epoch,
+            spill_committed
+        )));
     }
     let current_boundary = current_turn
         .as_deref()
@@ -264,7 +286,7 @@ fn plan_gc_prefix_tx(
             protected,
             group_complete,
             has_summary_marker,
-            current_turn_user,
+            _current_turn_user,
         ) = row?;
         sources.push(GcPlannedSource {
             ordinal,
@@ -275,7 +297,6 @@ fn plan_gc_prefix_tx(
             protected,
             group_complete,
             has_summary_marker,
-            current_turn_user,
         });
     }
     if sources.len() != end {
@@ -290,14 +311,8 @@ fn plan_gc_prefix_tx(
         profile_revision,
         nonappend_generation: generation,
         epoch,
-        profile,
-        model,
-        effort,
-        stage: stage.clone(),
-        active_tail_range: None,
         active_turn: false,
         spill_epoch_advanced,
-        drop_reasoning: false,
         active_user_messages: Vec::new(),
     }))
 }
@@ -308,9 +323,24 @@ fn plan_gc_active_turn_tx(
     stage: &super::attempt::GcStage,
     expected_turn: &str,
 ) -> Result<Option<GcRangePlan>, StorageError> {
-    let (selection,profile_revision,generation,epoch,profile,model,effort,current_turn,latest_turn,spill_committed):(i64,i64,i64,i64,String,String,Option<String>,Option<String>,Option<String>,bool)=tx.query_row(
+    let facts = tx.query_row(
         "SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
-        params![thread,stage.attempt_id,stage.token],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?,r.get(9)?)))?;
+        params![thread,stage.attempt_id,stage.token],|r|Ok(ThreadPlanFacts {
+        selection:r.get(0)?, profile_revision:r.get(1)?, generation:r.get(2)?, epoch:r.get(3)?,
+        profile:r.get(4)?, model:r.get(5)?, effort:r.get(6)?, current_turn:r.get(7)?, latest_turn:r.get(8)?, spill_committed:r.get(9)?,
+    }))?;
+    let ThreadPlanFacts {
+        selection,
+        profile_revision,
+        generation,
+        epoch,
+        profile,
+        model,
+        effort,
+        current_turn,
+        latest_turn,
+        spill_committed,
+    } = facts;
     let Some(current_turn) = current_turn else {
         return Ok(None);
     };
@@ -327,7 +357,15 @@ fn plan_gc_active_turn_tx(
         || stage.effort != effort
         || (stage.reasoning_epoch != epoch && !spill_epoch_advanced)
     {
-        return Err(StorageError::InvalidInput(format!("GC active plan context mismatch: thread={} profile={} model={} effort={} epoch={} committed_spill={}",stage.thread_id==thread,stage.profile_id==profile,stage.model_id==model,stage.effort==effort,stage.reasoning_epoch==epoch,spill_committed).into()));
+        return Err(StorageError::InvalidInput(format!(
+            "GC active plan context mismatch: thread={} profile={} model={} effort={} epoch={} committed_spill={}",
+            stage.thread_id == thread,
+            stage.profile_id == profile,
+            stage.model_id == model,
+            stage.effort == effort,
+            stage.reasoning_epoch == epoch,
+            spill_committed
+        )));
     }
     let current_boundary =
         super::resolve_turn_boundary(tx, thread, &current_turn, super::TURN_BOUNDARY_IDS)?;
@@ -339,7 +377,7 @@ fn plan_gc_active_turn_tx(
     let mut statement=tx.prepare(
         "SELECT p.ordinal,n.id,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN p.ordinal ELSE max(p.ordinal) OVER (PARTITION BY json_extract(n.payload_json,'$.group_id')) END,CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,CASE WHEN n.payload_json IS NULL OR json_type(n.payload_json,'$.output') IS NOT NULL THEN 0 WHEN n.turn_id IS ?2 AND (json_extract(n.payload_json,'$.role')='user' OR json_extract(n.payload_json,'$.item.role')='user') THEN 1 ELSE 0 END,json_type(n.payload_json,'$.spill_version') IS NOT NULL,json_type(n.payload_json,'$.summary_scope') IS NOT NULL,json_type(n.payload_json,'$.context_trim') IS NOT NULL FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 ORDER BY p.ordinal")?;
     let mut rows = statement.query(params![thread, current_turn])?;
-    let mut groups: Vec<(Range<usize>, bool, bool, bool, bool, bool, bool)> = Vec::new();
+    let mut groups: Vec<ActiveGroupFacts> = Vec::new();
     let mut merger = SourceGroupRangeMerger::new();
     let mut ordinal_next = 0usize;
     let mut tool = false;
@@ -387,15 +425,14 @@ fn plan_gc_active_turn_tx(
             let work = is_tool || spill || marker || context_trim;
             let spill_or_tool = is_tool || spill;
             groups.try_reserve(1).map_err(|_| overflow())?;
-            groups.push((
-                span,
-                is_tool,
-                is_complete,
-                is_protected,
+            groups.push(ActiveGroupFacts {
+                range: span,
+                complete: is_complete,
+                protected: is_protected,
                 work,
                 spill_or_tool,
                 user,
-            ));
+            });
             if is_tool && is_complete {
                 latest_tool = Some(index)
             }
@@ -423,7 +460,7 @@ fn plan_gc_active_turn_tx(
     let Some(latest) = latest_tool else {
         return Ok(None);
     };
-    if !groups[latest].2 || groups[latest].3 {
+    if !groups[latest].complete || groups[latest].protected {
         return Ok(None);
     }
     let request = request_group.or(boundary_group).ok_or_else(|| {
@@ -433,18 +470,22 @@ fn plan_gc_active_turn_tx(
         return Ok(None);
     }
     let Some(start) = (request + 1..latest)
-        .take_while(|index| groups[*index].2 && !groups[*index].3 && !groups[*index].6)
-        .find(|index| groups[*index].4)
+        .take_while(|index| {
+            groups[*index].complete && !groups[*index].protected && !groups[*index].user
+        })
+        .find(|index| groups[*index].work)
     else {
         return Ok(None);
     };
     let selected_end = latest;
-    if !groups[start..latest].iter().any(|group| group.5) {
+    if !groups[start..latest]
+        .iter()
+        .any(|group| group.spill_or_tool)
+    {
         return Ok(None);
     }
-    let tail_range = Some(groups[latest].0.clone());
     let last = selected_end - 1;
-    let range = groups[start].0.start..groups[last].0.end;
+    let range = groups[start].range.start..groups[last].range.end;
     let mut sources = Vec::new();
     sources
         .try_reserve_exact(range.end - range.start)
@@ -490,7 +531,6 @@ fn plan_gc_active_turn_tx(
             protected,
             group_complete,
             has_summary_marker,
-            current_turn_user: current_user,
         });
     }
     if sources.len() != range.end - range.start {
@@ -505,14 +545,8 @@ fn plan_gc_active_turn_tx(
         profile_revision,
         nonappend_generation: generation,
         epoch,
-        profile,
-        model,
-        effort,
-        stage: stage.clone(),
-        active_tail_range: tail_range,
         active_turn: true,
         spill_epoch_advanced,
-        drop_reasoning: false,
         active_user_messages,
     }))
 }
@@ -520,7 +554,7 @@ fn plan_gc_active_turn_tx(
 pub(crate) enum GcCaptureOutcome {
     NoTarget,
     Cancelled,
-    Captured(CapturedSummaryInput),
+    Captured(Box<CapturedSummaryInput>),
 }
 
 /// Production GC entry: choose R and capture it under one writer transaction.
@@ -624,24 +658,14 @@ fn capture_gc_plan_and_sources(
     }
     let group_ranges =
         merge_source_group_ranges(row_plans.iter().map(|row| row.group_id.as_deref()));
-    let mut source_characters = 0u64;
     let mut groups = Vec::new();
     groups
         .try_reserve_exact(group_ranges.len())
         .map_err(|_| overflow())?;
-    let mut active_tail_group = None;
     for span in &group_ranges {
         if cancel.is_cancelled() {
             tx.commit()?;
             return Ok(GcCaptureOutcome::Cancelled);
-        }
-        if let (Some(active), Some(first)) = (
-            planned.active_tail_range.as_ref(),
-            row_plans.get(span.start),
-        ) {
-            if usize::try_from(first.ordinal).ok() == Some(active.start) {
-                active_tail_group = Some(groups.len());
-            }
         }
         let mut group = CapturedGroup {
             stamps: Vec::new(),
@@ -693,9 +717,6 @@ fn capture_gc_plan_and_sources(
         drop(payload_statement);
         let marker_adapter = super::summary_marker_item(&payload).is_some();
         let projection = super::edit::projection_characters(&payload, thread_facts.3);
-        source_characters = source_characters
-            .checked_add(projection)
-            .ok_or_else(overflow)?;
         current.projection_weight = current
             .projection_weight
             .checked_add(u128::from(projection))
@@ -760,13 +781,12 @@ fn capture_gc_plan_and_sources(
         super::attempt::begin_gc_tx(&tx, stage, reason, trigger, target_plan)?;
     }
     tx.commit()?;
-    Ok(GcCaptureOutcome::Captured(CapturedSummaryInput {
+    Ok(GcCaptureOutcome::Captured(Box::new(CapturedSummaryInput {
         thread: thread.to_owned(),
         selection_revision: thread_facts.0,
         profile_revision: thread_facts.1,
         nonappend_generation: thread_facts.2,
         epoch: thread_facts.3,
-        source_characters,
         profile: thread_facts.4,
         model: thread_facts.5,
         thread_summary_max_chars: thread_facts.7.and_then(|value| u64::try_from(value).ok()),
@@ -777,12 +797,10 @@ fn capture_gc_plan_and_sources(
         request_turn_id: request_turn.as_ref().map(|(turn, _)| turn.clone()),
         request_generation: request_turn.map(|(_, generation)| generation),
         groups,
-        active_tail_group,
         active_turn: planned.active_turn,
         spill_epoch_advanced: planned.spill_epoch_advanced,
-        drop_reasoning: planned.drop_reasoning,
         active_user_messages: planned.active_user_messages.clone(),
-    }))
+    })))
 }
 
 struct SourceGroupRangeMerger {

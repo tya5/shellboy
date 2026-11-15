@@ -405,14 +405,6 @@ fn gc_request_groups(captured: &CapturedSummaryInput) -> Vec<single_request::Req
             text: group.text.as_str(),
             projection_weight: group.projection_weight,
             source_count: group.stamps.len() as u64,
-            first_id: group
-                .stamps
-                .first()
-                .map_or_else(String::new, |stamp| stamp.id.clone()),
-            last_id: group
-                .stamps
-                .last()
-                .map_or_else(String::new, |stamp| stamp.id.clone()),
         })
         .collect()
 }
@@ -769,12 +761,6 @@ impl Compactor {
         let snapshot = self.snapshot(thread, false).await?;
         Ok(edit::history_characters(&snapshot))
     }
-    /// #182 proactive order: the ordinary prefix summary only when the prefix
-    /// holds something other than earlier summaries.
-    pub(crate) async fn has_closed_summary(&self, thread: &str) -> Result<bool, ApiError> {
-        let snapshot = self.snapshot(thread, true).await?;
-        Ok(policy::unsummarized_prefix(&snapshot).is_some())
-    }
     pub(crate) async fn summarize_prefix_guarded(
         &self,
         thread: &str,
@@ -938,9 +924,9 @@ impl Compactor {
             let mut pending=Some(dispatched.clone());
             let completion=db.complete_gc_job_cancellable(job_id,&mut pending,Some(&stop_for_job),failure_write).await;
             match completion{
-                Err(crate::storage::GcCompletionSubmitError::NotAdmitted(_))=>{
-                    let terminal=pending.take().map(|r|match r{Ok(value)=>WriterCompletion::Ready(value),Err(error)=>WriterCompletion::Failed(error)});
-                    if let Some(error)=report_error{let _=result_tx.send(Err(error));}
+                Err(crate::storage::GcCompletionSubmitError::NotAdmitted(error))=>{
+                    let terminal=pending.take().map(|r|match r{Ok(_value)=>WriterCompletion::Ready,Err(_error)=>WriterCompletion::Failed});
+                    let _ = result_tx.send(Err(report_error.unwrap_or_else(|| storage_error(error))));
                     return terminal;
                 }
                 Err(crate::storage::GcCompletionSubmitError::AdmittedReplyLost(error))=>{let _=result_tx.send(Err(storage_error(error)));return None;}
@@ -952,7 +938,7 @@ impl Compactor {
                 }
                 Ok(_)=>{let _=result_tx.send(report_error.map_or_else(||Err(invalid("GC completion was not adoptable")),Err));return None;}
             }
-            let dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return None;}};
+            let _dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return None;}};
             let guard=tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();let _=result_tx.send(Err(invalid("GC cancelled by explicit Run Stop")));return None;},guard=boundary_for_job.clone().lock_owned()=>guard};
             let apply_capture=captured.clone();let apply_config=config.clone();let apply_usage=usage.clone();
             let adopted=db.adopt_gc_candidate(job_id,guard,move|tx,result|{
@@ -1697,7 +1683,7 @@ mod tests {
         });
         assert_eq!(
             artifact.input_key,
-            summary_key(&snapshot, &[original.clone()])
+            summary_key(&snapshot, std::slice::from_ref(&original))
         );
         assert_eq!(artifact.payload["source_node_ids"], json!(["marker"]));
         assert_eq!(artifact.payload["summary_usage"]["requests"], 1);

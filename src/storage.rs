@@ -1333,7 +1333,7 @@ where
     Fut: std::future::Future<Output = Option<crate::compaction::WriterCompletion>> + Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
-    let job: Job = Box::new(move |db, _, slow, coordinator| {
+    let job: Job = Box::new(move |db, _, _slow, coordinator| {
         let stage_copy = stage.clone();
         let result = if coordinator.can_install_capture() {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(db, &stage_copy)))
@@ -1347,7 +1347,7 @@ where
             crate::compaction::GcCaptureOutcome::NoTarget => Ok(GcCaptureAdmission::NoTarget),
             crate::compaction::GcCaptureOutcome::Cancelled => Ok(GcCaptureAdmission::Cancelled),
             crate::compaction::GcCaptureOutcome::Captured(captured) => coordinator
-                .install_after_commit(db, captured, stage_copy, runtime, wake, launch)
+                .install_after_commit(db, *captured, stage_copy, runtime, wake, launch)
                 .map(GcCaptureAdmission::Started)
                 .map_err(|message| StorageError::InvalidInput(message.into())),
         });
@@ -2729,7 +2729,6 @@ mod lane_budget_tests {
             profile_revision: 0,
             nonappend_generation: 0,
             epoch: 0,
-            source_characters: 10,
             profile: "fixture".into(),
             model: "fixture".into(),
             thread_summary_max_chars: None,
@@ -2740,10 +2739,8 @@ mod lane_budget_tests {
             request_turn_id: None,
             request_generation: None,
             groups: vec![group],
-            active_tail_group: None,
             active_turn: false,
             spill_epoch_advanced: false,
-            drop_reasoning: false,
             active_user_messages: Vec::new(),
         };
         let stage = crate::compaction::GcStage {
@@ -2760,7 +2757,11 @@ mod lane_budget_tests {
         let _ = db
             .call_with_gc_capture_cancellable(
                 stage,
-                move |_, _| Ok(crate::compaction::GcCaptureOutcome::Captured(captured)),
+                move |_, _| {
+                    Ok(crate::compaction::GcCaptureOutcome::Captured(Box::new(
+                        captured,
+                    )))
+                },
                 move |_, _, cancel| async move {
                     let _ = cancel.cancelled().await;
                     let _ = tx.send(());
@@ -2870,24 +2871,24 @@ mod lane_budget_tests {
                 Ok(())
             }).await.unwrap();
             let stage=crate::compaction::GcStage{attempt_id:"a".into(),token:"tok".into(),thread_id:"t".into(),profile_id:"fixture".into(),model_id:"fixture".into(),effort:None,reasoning_epoch:0,stage:"active_summary"};
-            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),selection_revision:0,profile_revision:0,nonappend_generation:0,epoch:0,source_characters:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,request_turn_id:None,request_generation:None,groups:Vec::new(),active_tail_group:None,active_turn:false,spill_epoch_advanced:false,drop_reasoning:false,active_user_messages:Vec::new()};
+            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),selection_revision:0,profile_revision:0,nonappend_generation:0,epoch:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,request_turn_id:None,request_generation:None,groups:Vec::new(),active_turn:false,spill_epoch_advanced:false,active_user_messages:Vec::new()};
             let (producer_ready_tx,producer_ready_rx)=oneshot::channel();
             let (complete_tx,complete_rx)=oneshot::channel();
             let (admitted_tx,admitted_rx)=oneshot::channel();
             let (reply_tx,reply_rx)=oneshot::channel();
             let (release_tx,release_rx)=oneshot::channel();
             let db_for_producer=db.clone();
-            let _job=db.call_with_gc_capture_cancellable(stage,move|_,_|Ok(crate::compaction::GcCaptureOutcome::Captured(captured)),move|id,_,cancel|async move{
+            let _job=db.call_with_gc_capture_cancellable(stage,move|_,_|Ok(crate::compaction::GcCaptureOutcome::Captured(Box::new(captured))),move|id,_,cancel|async move{
                 let _=producer_ready_tx.send(());
                 let _=complete_rx.await;
                 let (command,reply)=make_gc_completion_job(id,Err(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"synthetic terminal failure")),None);
-                if db_for_producer.admit(Lane::Foreground,command).await.is_err(){let _=reply_tx.send(false);return Some(crate::compaction::WriterCompletion::Failed(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"completion not admitted")));}
+                if db_for_producer.admit(Lane::Foreground,command).await.is_err(){let _=reply_tx.send(false);return Some(crate::compaction::WriterCompletion::Failed);}
                 let _=admitted_tx.send(());
                 let observed=reply.receive().await.is_ok();
                 let _=reply_tx.send(observed);
                 let _=cancel.cancelled().await;
                 let _=release_rx.await;
-                Some(crate::compaction::WriterCompletion::Failed(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"producer drained")))
+                Some(crate::compaction::WriterCompletion::Failed)
             },None).await.unwrap();
             assert!(matches!(_job,GcCaptureAdmission::Started(_)));
             producer_ready_rx.await.unwrap();

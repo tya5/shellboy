@@ -191,23 +191,44 @@ impl Automatic {
     }
 }
 
-// Shared real stage boundary, including fault-only postcommit observation.
-async fn summary_stage(
-    control: &Arc<Control>,
-    compactor: &crate::compaction::Compactor,
-    thread: &str,
-    _slot: &DriverSlot,
-    active: bool,
-    boundary: &mut crate::compaction::boundary::Boundary<'_>,
-    automatic: &Automatic,
+// The owner scope carries the existing Run, boundary, and attempt lifetimes together.
+struct SummaryStageOwner<'owner, 'boundary> {
+    control: &'owner Arc<Control>,
+    compactor: &'owner crate::compaction::Compactor,
+    thread: &'owner str,
+    boundary: &'owner mut crate::compaction::boundary::Boundary<'boundary>,
+    automatic: &'owner Automatic,
     run_stop: tokio_util::sync::CancellationToken,
-    spill_active_after_closed_no_target: bool,
-    committed_spill: &mut Option<crate::compaction::CompactResult>,
-) -> Result<crate::compaction::CompactResult, ApiError> {
+}
+
+enum SummaryStageMode {
+    Closed,
+    Active { spill_after_no_target: bool },
+}
+
+#[derive(Debug)]
+struct SummaryStageOutcome {
+    summary: crate::compaction::CompactResult,
+    committed_active_spill: Option<crate::compaction::CompactResult>,
+}
+
+// Preserve the existing closed-summary-first route; active spill is a consequence
+// of a true closed NoTarget, and its committed fact returns with the stage result.
+async fn summary_stage(
+    owner: SummaryStageOwner<'_, '_>,
+    mode: SummaryStageMode,
+    _slot: &DriverSlot,
+) -> Result<SummaryStageOutcome, ApiError> {
+    let SummaryStageOwner {
+        control,
+        compactor,
+        thread,
+        boundary,
+        automatic,
+        run_stop,
+    } = owner;
     let thread_boundary = control.boundary(thread).await;
     let admission_wait = tokio_util::sync::CancellationToken::new();
-    // Preserve the established order even after an active spill: summarize an
-    // eligible ordinary prefix first; only fall back to this Turn when absent.
     let closed_stage = "closed_summary";
     let closed = boundary
         .pause(
@@ -226,68 +247,66 @@ async fn summary_stage(
         )
         .await
         .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
-    let (_stage, result) = if active && closed.no_target {
-        if spill_active_after_closed_no_target {
-            let active_spill = "active_spill";
-            let spilled = automatic
-                .observed(
-                    control,
-                    active_spill,
-                    compactor.spill_staged_cancellable(
-                        thread,
-                        true,
-                        u64::MAX,
-                        run_stop.clone(),
-                        Some(automatic.stage(active_spill)),
+    let mut committed_active_spill = None;
+    let (_stage, summary) = match mode {
+        SummaryStageMode::Active {
+            spill_after_no_target,
+        } if closed.no_target => {
+            if spill_after_no_target {
+                let active_spill = "active_spill";
+                let spilled = automatic
+                    .observed(
+                        control,
+                        active_spill,
+                        compactor.spill_staged_cancellable(
+                            thread,
+                            true,
+                            u64::MAX,
+                            run_stop.clone(),
+                            Some(automatic.stage(active_spill)),
+                        ),
+                    )
+                    .await?;
+                #[cfg(test)]
+                if !spilled.no_target {
+                    fault_tests::checkpoint(control, _slot, active_spill).await?;
+                }
+                if !spilled.no_target {
+                    committed_active_spill = Some(spilled);
+                }
+            }
+            let active_stage = "active_summary";
+            let result = boundary
+                .pause(
+                    &admission_wait,
+                    automatic.observed(
+                        control,
+                        active_stage,
+                        compactor.run_gc_summary(
+                            automatic.stage(active_stage),
+                            true,
+                            automatic.turn.clone(),
+                            thread_boundary,
+                            run_stop,
+                        ),
                     ),
                 )
-                .await?;
-            #[cfg(test)]
-            if !spilled.no_target {
-                fault_tests::checkpoint(control, _slot, active_spill).await?;
-            }
-            if !spilled.no_target {
-                *committed_spill = Some(spilled);
-            }
+                .await
+                .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
+            (active_stage, result)
         }
-        let active_stage = "active_summary";
-        let result = boundary
-            .pause(
-                &admission_wait,
-                automatic.observed(
-                    control,
-                    active_stage,
-                    compactor.run_gc_summary(
-                        automatic.stage(active_stage),
-                        true,
-                        automatic.turn.clone(),
-                        thread_boundary,
-                        run_stop,
-                    ),
-                ),
-            )
-            .await
-            .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
-        (active_stage, result)
-    } else {
-        (closed_stage, closed)
+        _ => (closed_stage, closed),
     };
     #[cfg(test)]
-    if !result.no_target {
+    if !summary.no_target {
         fault_tests::checkpoint(control, _slot, _stage).await?;
     }
-    Ok(result)
+    Ok(SummaryStageOutcome {
+        summary,
+        committed_active_spill,
+    })
 }
 
-pub(super) async fn maybe_compact(
-    control: &Arc<Control>,
-    snapshot: &mut Snapshot,
-    slot: &DriverSlot,
-    boundary: &mut crate::compaction::boundary::Boundary<'_>,
-) -> Result<bool, ApiError> {
-    let run_stop = slot.stop.clone();
-    maybe_compact_with_run_stop(control, snapshot, slot, boundary, run_stop).await
-}
 pub(super) async fn maybe_compact_with_run_stop(
     control: &Arc<Control>,
     snapshot: &mut Snapshot,
@@ -490,19 +509,30 @@ pub(super) async fn maybe_compact_with_run_stop(
                 committed_spill = Some(spilled);
             }
         }
-        summary_stage(
-            control,
-            &compactor,
-            &snapshot.thread,
+        let mode = if active {
+            SummaryStageMode::Active {
+                spill_after_no_target: route == SpillRoute::SpillThenSummary,
+            }
+        } else {
+            SummaryStageMode::Closed
+        };
+        let outcome = summary_stage(
+            SummaryStageOwner {
+                control,
+                compactor: &compactor,
+                thread: &snapshot.thread,
+                boundary,
+                automatic: &automatic,
+                run_stop: run_stop.clone(),
+            },
+            mode,
             slot,
-            active,
-            boundary,
-            &automatic,
-            run_stop.clone(),
-            route == SpillRoute::SpillThenSummary,
-            &mut committed_spill,
         )
-        .await
+        .await?;
+        if outcome.committed_active_spill.is_some() {
+            committed_spill = outcome.committed_active_spill;
+        }
+        Ok(outcome.summary)
     }
     .await;
     // A retiring owner must not remove a newer owner's witness.

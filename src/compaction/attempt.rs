@@ -172,8 +172,6 @@ pub(crate) fn finish_gc_tx(
     Ok(())
 }
 
-/// Replaces W2/W4 bodies while keeping the stage facts of the same token.
-
 /// Whether beginning an attempt observes the first-known-A lifecycle boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ABoundaryObservation {

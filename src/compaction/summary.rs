@@ -168,6 +168,174 @@ impl SummaryAdoption {
     }
 }
 
+/// Native GC adoption over only the selected captured R. The caller runs this
+/// inside the coordinator's strict original-token FINISH transaction.
+pub(super) fn adopt_gc_result_tx(
+    tx: &rusqlite::Transaction<'_>,
+    config: &Config,
+    captured: &super::gc_capture::CapturedSummaryInput,
+    generated: &single_request::Dispatched,
+    usage: &SummaryUsage,
+) -> Result<String, StorageError> {
+    let selected = generated.selected.clone();
+    if selected.is_empty()
+        || selected.end > captured.groups.len()
+        || generated.response.text.trim().is_empty()
+    {
+        return Err(StorageError::InvalidInput(
+            "GC summary has empty or invalid selected R".into(),
+        ));
+    }
+    let stamps = captured.groups[selected.clone()]
+        .iter()
+        .flat_map(|group| group.stamps.iter())
+        .collect::<Vec<_>>();
+    let originals = stamps
+        .iter()
+        .map(|stamp| stamp.id.clone())
+        .collect::<Vec<_>>();
+    let source_characters = captured.groups[selected.clone()]
+        .iter()
+        .try_fold(0u64, |sum, group| {
+            sum.checked_add(u64::try_from(group.projection_weight).ok()?)
+        })
+        .ok_or_else(|| StorageError::InvalidInput("GC source projection overflow".into()))?;
+    let text = if captured.active_turn {
+        let originals = originals.clone();
+        super::single_request::active_turn_summary_text(
+            &originals,
+            captured.active_user_messages.len(),
+            false,
+            &generated.response.text,
+            None,
+        )
+    } else {
+        generated.response.text.clone()
+    };
+    let identities = stamps
+        .iter()
+        .map(|stamp| super::SummarySourceIdentity {
+            id: &stamp.id,
+            revision: stamp.revision,
+            hash: &stamp.hash,
+            attachments: &stamp.attachments,
+            marker_adapter: stamp.marker_adapter,
+        })
+        .collect::<Vec<_>>();
+    let scope = captured.active_turn.then_some("active_turn_middle");
+    let artifact = super::summary_artifact(super::SummaryArtifactInput {
+        profile: &captured.profile,
+        model: &captured.model,
+        effort: captured.effort.as_deref(),
+        epoch: captured.epoch,
+        sources: &identities,
+        source_ids: &originals,
+        text: &text,
+        usage,
+        output_limit_exceeded: generated.size.exceeded_output_limit,
+        scope,
+        kept_reasoning_ids: &[],
+        reasoning_epoch: None,
+    });
+    let projected = artifact.projection_characters;
+    let payload = artifact.payload;
+    if projected >= source_characters {
+        return Err(StorageError::InvalidInput(
+            "GC summary does not shrink selected source projection".into(),
+        ));
+    }
+    let thread = &captured.thread;
+    let (selection,profile_revision,generation,epoch,profile,model,effort):(i64,i64,i64,i64,String,String,Option<String>)=tx.query_row("SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?;
+    if selection < captured.selection_revision
+        || profile_revision != captured.profile_revision
+        || generation != captured.nonappend_generation
+        || epoch != captured.epoch
+        || profile != captured.profile
+        || model != captured.model
+        || effort != captured.effort
+    {
+        return Err(StorageError::InvalidInput(
+            "GC captured source context changed before FINISH".into(),
+        ));
+    }
+    let path = tx
+        .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+        .query_map([thread], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let start = usize::try_from(
+        stamps
+            .first()
+            .ok_or_else(|| StorageError::InvalidInput("GC selected R is empty".into()))?
+            .ordinal,
+    )
+    .map_err(|_| StorageError::InvalidInput("negative GC source ordinal".into()))?;
+    for (offset, stamp) in stamps.iter().enumerate() {
+        let index = start
+            .checked_add(offset)
+            .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
+        if usize::try_from(stamp.ordinal).ok() != Some(index)
+            || path.get(index).map(String::as_str) != Some(stamp.id.as_str())
+        {
+            return Err(StorageError::InvalidInput(
+                "GC selected R path changed".into(),
+            ));
+        }
+    }
+    let end_ordinal = stamps
+        .last()
+        .and_then(|stamp| stamp.ordinal.checked_add(1))
+        .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
+    let current_facts =
+        super::gc_capture::selected_source_facts(tx, thread, stamps[0].ordinal..end_ordinal)?;
+    let selected_groups = &captured.groups[selected.clone()];
+    for group in selected_groups {
+        assert!(
+            group
+                .stamps
+                .iter()
+                .all(|stamp| stamp.source.group_complete == group.complete),
+            "captured eligible-group completeness must match each selected source fact"
+        );
+    }
+    let expected_facts = selected_groups
+        .iter()
+        .flat_map(|group| group.stamps.iter().map(|stamp| stamp.source.clone()))
+        .collect::<Vec<_>>();
+    super::gc_capture::classify_selected_source_facts(
+        &expected_facts,
+        &current_facts,
+        super::gc_capture::SourceFactPolicy::StrictFinalAdoption,
+    )
+    .map_err(|reason| {
+        StorageError::InvalidInput(format!(
+            "GC selected R facts changed before FINISH: {reason:?}"
+        ))
+    })?;
+    let input_key = artifact.input_key;
+    let selected_sources = stamps
+        .iter()
+        .map(|stamp| super::ReplacementSource {
+            id: &stamp.id,
+            revision: stamp.revision,
+            hash: &stamp.hash,
+        })
+        .collect::<Vec<_>>();
+    let node = super::store_replacement_material_tx(
+        tx,
+        config,
+        super::ReplacementMaterial {
+            thread,
+            input_key: &input_key,
+            format: FORMAT,
+            sources: &selected_sources,
+            payload: &payload,
+        },
+    )?;
+    let new_path = super::replace_selected_path(&path, start, stamps.len(), &node, &[])?;
+    history::select_path(tx, thread, selection as u64, &new_path, &timestamp())?;
+    Ok(node)
+}
+
 #[cfg(test)]
 mod append_adoption_tests {
     use super::*;
@@ -353,172 +521,4 @@ mod append_adoption_tests {
     async fn cancelled_append_rejects_summary_adoption() {
         adoption_case("cancel").await;
     }
-}
-
-/// Native GC adoption over only the selected captured R. The caller runs this
-/// inside the coordinator's strict original-token FINISH transaction.
-pub(super) fn adopt_gc_result_tx(
-    tx: &rusqlite::Transaction<'_>,
-    config: &Config,
-    captured: &super::gc_capture::CapturedSummaryInput,
-    generated: &single_request::Dispatched,
-    usage: &SummaryUsage,
-) -> Result<String, StorageError> {
-    let selected = generated.selected.clone();
-    if selected.is_empty()
-        || selected.end > captured.groups.len()
-        || generated.response.text.trim().is_empty()
-    {
-        return Err(StorageError::InvalidInput(
-            "GC summary has empty or invalid selected R".into(),
-        ));
-    }
-    let stamps = captured.groups[selected.clone()]
-        .iter()
-        .flat_map(|group| group.stamps.iter())
-        .collect::<Vec<_>>();
-    let originals = stamps
-        .iter()
-        .map(|stamp| stamp.id.clone())
-        .collect::<Vec<_>>();
-    let source_characters = captured.groups[selected.clone()]
-        .iter()
-        .try_fold(0u64, |sum, group| {
-            sum.checked_add(u64::try_from(group.projection_weight).ok()?)
-        })
-        .ok_or_else(|| StorageError::InvalidInput("GC source projection overflow".into()))?;
-    let text = if captured.active_turn {
-        let originals = originals.clone();
-        super::single_request::active_turn_summary_text(
-            &originals,
-            captured.active_user_messages.len(),
-            false,
-            &generated.response.text,
-            None,
-        )
-    } else {
-        generated.response.text.clone()
-    };
-    let identities = stamps
-        .iter()
-        .map(|stamp| super::SummarySourceIdentity {
-            id: &stamp.id,
-            revision: stamp.revision,
-            hash: &stamp.hash,
-            attachments: &stamp.attachments,
-            marker_adapter: stamp.marker_adapter,
-        })
-        .collect::<Vec<_>>();
-    let scope = captured.active_turn.then_some("active_turn_middle");
-    let artifact = super::summary_artifact(super::SummaryArtifactInput {
-        profile: &captured.profile,
-        model: &captured.model,
-        effort: captured.effort.as_deref(),
-        epoch: captured.epoch,
-        sources: &identities,
-        source_ids: &originals,
-        text: &text,
-        usage,
-        output_limit_exceeded: generated.size.exceeded_output_limit,
-        scope,
-        kept_reasoning_ids: &[],
-        reasoning_epoch: None,
-    });
-    let projected = artifact.projection_characters;
-    let payload = artifact.payload;
-    if projected >= source_characters {
-        return Err(StorageError::InvalidInput(
-            "GC summary does not shrink selected source projection".into(),
-        ));
-    }
-    let thread = &captured.thread;
-    let (selection,profile_revision,generation,epoch,profile,model,effort):(i64,i64,i64,i64,String,String,Option<String>)=tx.query_row("SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?;
-    if selection < captured.selection_revision
-        || profile_revision != captured.profile_revision
-        || generation != captured.nonappend_generation
-        || epoch != captured.epoch
-        || profile != captured.profile
-        || model != captured.model
-        || effort != captured.effort
-    {
-        return Err(StorageError::InvalidInput(
-            "GC captured source context changed before FINISH".into(),
-        ));
-    }
-    let path = tx
-        .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
-        .query_map([thread], |r| r.get::<_, String>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let start = usize::try_from(
-        stamps
-            .first()
-            .ok_or_else(|| StorageError::InvalidInput("GC selected R is empty".into()))?
-            .ordinal,
-    )
-    .map_err(|_| StorageError::InvalidInput("negative GC source ordinal".into()))?;
-    for (offset, stamp) in stamps.iter().enumerate() {
-        let index = start
-            .checked_add(offset)
-            .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
-        if usize::try_from(stamp.ordinal).ok() != Some(index)
-            || path.get(index).map(String::as_str) != Some(stamp.id.as_str())
-        {
-            return Err(StorageError::InvalidInput(
-                "GC selected R path changed".into(),
-            ));
-        }
-    }
-    let end_ordinal = stamps
-        .last()
-        .and_then(|stamp| stamp.ordinal.checked_add(1))
-        .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
-    let current_facts =
-        super::gc_capture::selected_source_facts(tx, thread, stamps[0].ordinal..end_ordinal)?;
-    let selected_groups = &captured.groups[selected.clone()];
-    for group in selected_groups {
-        assert!(
-            group
-                .stamps
-                .iter()
-                .all(|stamp| stamp.source.group_complete == group.complete),
-            "captured eligible-group completeness must match each selected source fact"
-        );
-    }
-    let expected_facts = selected_groups
-        .iter()
-        .flat_map(|group| group.stamps.iter().map(|stamp| stamp.source.clone()))
-        .collect::<Vec<_>>();
-    super::gc_capture::classify_selected_source_facts(
-        &expected_facts,
-        &current_facts,
-        super::gc_capture::SourceFactPolicy::StrictFinalAdoption,
-    )
-    .map_err(|reason| {
-        StorageError::InvalidInput(format!(
-            "GC selected R facts changed before FINISH: {reason:?}"
-        ))
-    })?;
-    let input_key = artifact.input_key;
-    let selected_sources = stamps
-        .iter()
-        .map(|stamp| super::ReplacementSource {
-            id: &stamp.id,
-            revision: stamp.revision,
-            hash: &stamp.hash,
-        })
-        .collect::<Vec<_>>();
-    let node = super::store_replacement_material_tx(
-        tx,
-        config,
-        super::ReplacementMaterial {
-            thread,
-            input_key: &input_key,
-            format: FORMAT,
-            sources: &selected_sources,
-            payload: &payload,
-        },
-    )?;
-    let new_path = super::replace_selected_path(&path, start, stamps.len(), &node, &[])?;
-    history::select_path(tx, thread, selection as u64, &new_path, &timestamp())?;
-    Ok(node)
 }

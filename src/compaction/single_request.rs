@@ -22,8 +22,6 @@ pub(super) struct RequestGroupText<'a> {
     pub(super) text: &'a str,
     pub(super) projection_weight: u128,
     pub(super) source_count: u64,
-    pub(super) first_id: String,
-    pub(super) last_id: String,
 }
 pub(super) struct SummaryMaterial<'a> {
     pub(super) thread: &'a str,
@@ -48,14 +46,6 @@ fn snapshot_request_groups<'a>(
                 .map(|source| edit::projection_characters(&source.payload, snapshot.epoch) as u128)
                 .sum(),
             source_count: group.sources.len() as u64,
-            first_id: group
-                .sources
-                .first()
-                .map_or_else(String::new, |source| source.id.clone()),
-            last_id: group
-                .sources
-                .last()
-                .map_or_else(String::new, |source| source.id.clone()),
         })
         .collect()
 }
@@ -95,12 +85,12 @@ pub(super) fn request(
     limit: OutputLimit,
 ) -> Value {
     model::response_request(
-        &input.model,
+        input.model,
         vec![
             json!({"role":"developer","content":[{"type":"input_text","text":format!("{SUMMARY_PROMPT}{KEEP_INSTRUCTIONS} Maximum output length: {} characters.",limit.0)}]}),
             json!({"role":"user","content":[{"type":"input_text","text":input.selected_text(selected)}]}),
         ],
-        input.effort.as_deref(),
+        input.effort,
         false,
     )
 }
@@ -624,7 +614,7 @@ impl Compactor {
             }
             let observation = ledger.begin(&self.database).await?;
             let result =
-                Self::summary_response(&client, &input.thread, payload, cancel.clone(), admission)
+                Self::summary_response(&client, input.thread, payload, cancel.clone(), admission)
                     .await;
             let response = match result {
                 Ok(response) => {
@@ -1094,14 +1084,6 @@ mod tests {
                     })
                     .sum(),
                 source_count: group.sources.len() as u64,
-                first_id: group
-                    .sources
-                    .first()
-                    .map_or_else(String::new, |source| source.id.clone()),
-                last_id: group
-                    .sources
-                    .last()
-                    .map_or_else(String::new, |source| source.id.clone()),
             })
             .collect()
     }

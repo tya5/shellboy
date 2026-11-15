@@ -118,9 +118,6 @@ impl Scenario {
     fn summary(self) -> bool {
         matches!(self, Self::ClosedSummary | Self::ActiveSummary)
     }
-    fn spill(self) -> bool {
-        matches!(self, Self::ClosedSpill | Self::ActiveSpill)
-    }
     fn target_percent(self) -> u64 {
         match self {
             Self::ClosedSpill => 50,
