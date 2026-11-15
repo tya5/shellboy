@@ -529,6 +529,7 @@ fn plan_gc_active_turn_tx(
 
 pub(crate) enum GcCaptureOutcome {
     NoTarget,
+    Cancelled,
     Captured(CapturedSummaryInput),
 }
 
@@ -540,13 +541,14 @@ pub(crate) fn capture_ordinary_gc_prefix_with_receipt_tx(
     reason: &str,
     trigger: &Value,
     target_plan: &Value,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<GcCaptureOutcome, StorageError> {
     if stage.thread_id != thread {
         return Err(StorageError::InvalidInput(
             "GC receipt belongs to another Thread".into(),
         ));
     }
-    capture_gc_plan_and_sources(db, thread, stage, reason, trigger, target_plan)
+    capture_gc_plan_and_sources(db, thread, stage, reason, trigger, target_plan, cancel)
 }
 
 fn capture_gc_plan_and_sources(
@@ -556,6 +558,7 @@ fn capture_gc_plan_and_sources(
     reason: &str,
     trigger: &Value,
     target_plan: &Value,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<GcCaptureOutcome, StorageError> {
     let tx = db.transaction()?;
     let planned = if trigger["scope"] == "active_turn" {
@@ -570,6 +573,12 @@ fn capture_gc_plan_and_sources(
         tx.commit()?;
         return Ok(GcCaptureOutcome::NoTarget);
     };
+    // Once R is known, explicit Stop can return a target fact without reading
+    // source payloads or creating the provisional receipt/producer.
+    if cancel.is_cancelled() {
+        tx.commit()?;
+        return Ok(GcCaptureOutcome::Cancelled);
+    }
     let range = planned.range.clone();
     let start = i64::try_from(range.start).map_err(|_| overflow())?;
     let end = i64::try_from(range.end).map_err(|_| overflow())?;
@@ -674,6 +683,10 @@ fn capture_gc_plan_and_sources(
         .map_err(|_| overflow())?;
     let mut active_tail_group = None;
     for span in &group_ranges {
+        if cancel.is_cancelled() {
+            tx.commit()?;
+            return Ok(GcCaptureOutcome::Cancelled);
+        }
         if let (Some(active), Some(first)) = (
             planned.active_tail_range.as_ref(),
             row_plans.get(span.start),
@@ -704,6 +717,10 @@ fn capture_gc_plan_and_sources(
     }
     let mut group_index = 0usize;
     for (index, row) in row_plans.into_iter().enumerate() {
+        if cancel.is_cancelled() {
+            tx.commit()?;
+            return Ok(GcCaptureOutcome::Cancelled);
+        }
         while group_index + 1 < group_ranges.len() && index >= group_ranges[group_index].end {
             group_index += 1;
         }
@@ -783,6 +800,10 @@ fn capture_gc_plan_and_sources(
         tx.query_row("SELECT t.id,t.run_id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2",params![stage.attempt_id,thread],|row|Ok((Some(row.get::<_,String>(0)?),Some(row.get::<_,String>(1)?),Some(row.get::<_,i64>(2)?)))).optional()?.ok_or_else(||StorageError::InvalidInput("GC parent attempt provenance disappeared".into()))?
     };
     {
+        if cancel.is_cancelled() {
+            tx.commit()?;
+            return Ok(GcCaptureOutcome::Cancelled);
+        }
         if stage.thread_id != thread
             || stage.profile_id != thread_facts.4
             || stage.model_id != thread_facts.5
@@ -887,11 +908,105 @@ fn overflow() -> StorageError {
     )
     .into()
 }
-fn load_attachments(
-    tx: &rusqlite::Transaction<'_>,
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct GcSourceFacts {
+    pub(super) ordinal: i64,
+    pub(super) id: String,
+    pub(super) revision: i64,
+    pub(super) turn: Option<String>,
+    pub(super) group_id: Option<String>,
+    pub(super) protected: bool,
+    pub(super) group_complete: bool,
+    pub(super) attachments: Vec<Value>,
+}
+
+/// Batch-load the exact selected source facts used by both early writer
+/// reconciliation and strict adoption. Attachments are returned in the same
+/// ordered projection used by summary rendering; no Thread snapshot is made.
+pub(super) fn selected_source_facts(
+    db: &Connection,
+    thread: &str,
+    range: Range<i64>,
+) -> Result<Vec<GcSourceFacts>, rusqlite::Error> {
+    let mut statement=db.prepare("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,COALESCE((SELECT json_group_array(json_object('id',a.id,'path',a.absolute_path,'kind',a.input_kind,'state',COALESCE(a.state,'not_selected'),'reason',a.reason)) FROM (SELECT ar.id,ar.absolute_path,ar.input_kind,ar.created_at,se.state,se.reason FROM attachment_ref ar LEFT JOIN attachment_selection se ON se.attachment_id=ar.id AND se.thread_id=?1 WHERE ar.source_node_id=n.id ORDER BY ar.created_at,ar.id) a),'[]') FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 ORDER BY p.ordinal")?;
+    let rows = statement.query_map(params![thread, range.start, range.end], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, bool>(5)?,
+            row.get::<_, bool>(6)?,
+            row.get::<_, String>(7)?,
+        ))
+    })?;
+    rows.map(|row| {
+        let (ordinal, id, revision, turn, group_id, protected, group_complete, attachments) = row?;
+        let attachments = serde_json::from_str(&attachments).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                7,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })?;
+        Ok(GcSourceFacts {
+            ordinal,
+            id,
+            revision,
+            turn,
+            group_id,
+            protected,
+            group_complete,
+            attachments,
+        })
+    })
+    .collect()
+}
+
+/// One equality authority for both eager job cancellation and strict FINISH.
+/// Early reconciliation may skip separate transactional context/receipt checks;
+/// it never invents a different selected-source equivalence rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SourceFactPolicy {
+    EarlyReconcile,
+    StrictFinalAdoption,
+}
+/// One equality authority for early producer invalidation and strict FINISH.
+/// Early validation uses the common captured facts; FINISH adds transactional
+/// safe-to-adopt requirements through the policy argument.
+pub(super) fn classify_selected_source_facts(
+    expected: &[GcSourceFacts],
+    actual: &[GcSourceFacts],
+    policy: SourceFactPolicy,
+) -> Result<(), super::discard::RejectionReason> {
+    use super::discard::RejectionReason::SourceChanged;
+    if expected.len() != actual.len() {
+        return Err(SourceChanged);
+    }
+    for (expected, actual) in expected.iter().zip(actual) {
+        if expected.ordinal != actual.ordinal
+            || expected.id != actual.id
+            || expected.revision != actual.revision
+            || expected.turn != actual.turn
+            || expected.group_id != actual.group_id
+            || expected.protected != actual.protected
+            || expected.group_complete != actual.group_complete
+            || expected.attachments != actual.attachments
+            || (policy == SourceFactPolicy::StrictFinalAdoption
+                && (!actual.group_complete || actual.protected))
+        {
+            return Err(SourceChanged);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn load_attachments(
+    tx: &rusqlite::Connection,
     thread: &str,
     source: &str,
-) -> Result<Vec<Value>, StorageError> {
+) -> Result<Vec<Value>, rusqlite::Error> {
     let mut attachments = Vec::new();
     let mut statement = tx.prepare(
         "SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id",

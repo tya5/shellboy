@@ -145,20 +145,21 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         after_release(&control, &mut receive, fault, scenario, &reached).await;
     }
     let shutdown = control.shutdown().await;
+    let final_write_is_expected = fault != Fault::RejectFinal || !scenario.summary();
     if matches!(
         fault,
         Fault::Persistent
-            | Fault::RejectFinal
             | Fault::Remeasurement
             | Fault::RejectFact
             | Fault::Storage
             | Fault::RetiredWritesAbsent
-    ) {
+    ) || fault == Fault::RejectFinal && final_write_is_expected
+    {
         assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
     } else {
         shutdown.unwrap();
     }
-    if fault != Fault::RejectFact {
+    if fault != Fault::RejectFact && final_write_is_expected {
         assert!(
             reached.load(Ordering::SeqCst),
             "intended injector reached before shutdown"
@@ -182,14 +183,67 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         terminal.attempt, checkpoint.attempt,
         "same attempt across phases"
     );
+    if fault == Fault::RejectFinal && scenario == Scenario::ActiveSpill {
+        let target_id = target.clone();
+        let (expected_path, expected_revision, expected_epoch) = control
+            .store
+            .database
+            .call(|db| {
+                Ok(
+                    db.query_row("SELECT path,revision,epoch FROM fault_boundary", [], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                        ))
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        let expected_path: Vec<String> = serde_json::from_str(&expected_path).unwrap();
+        let (actual_path,revision,epoch,summary_replacements,spill_replacements)=control.store.database.call(move|db|{
+            let path=db.prepare("SELECT p.node_id FROM thread_path p WHERE p.thread_id=?1 ORDER BY p.ordinal")?.query_map([&target_id],|r|r.get::<_,String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            let revision_epoch=db.query_row("SELECT selection_revision,reasoning_epoch FROM thread WHERE id=?1",[&target_id],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?)))?;
+            let summaries=db.query_row("SELECT count(*) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND n.kind='summary'",[&target_id],|r|r.get::<_,i64>(0))?;
+            let spills=db.query_row("SELECT count(*) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND n.kind='spill'",[&target_id],|r|r.get::<_,i64>(0))?;
+            Ok((path,revision_epoch.0,revision_epoch.1,summaries,spills))
+        }).await.unwrap();
+        assert!(
+            actual_path.starts_with(&expected_path),
+            "strict FINISH rollback preserves the captured selected path prefix; append-only tail may extend it"
+        );
+        assert!(
+            revision >= expected_revision,
+            "legal append can advance selection revision"
+        );
+        assert_eq!(
+            epoch, expected_epoch,
+            "strict summary FINISH rollback preserves reasoning epoch"
+        );
+        assert_eq!(
+            summary_replacements, 0,
+            "failed FINISH leaves no adopted summary replacement"
+        );
+        assert_eq!(
+            spill_replacements, 2,
+            "the earlier committed spills remain adopted"
+        );
+    }
     assert_eq!(
         trigger_identity(&terminal.record["trigger"]),
         trigger_identity(&checkpoint.record["trigger"]),
         "immutable original trigger tuple across phases"
     );
-    if scenario.continues_to_active_summary(fault) {
-        // The checkpoint facts are retained exactly; the entered active summary
-        // adds only its own fact.
+    if scenario.continues_to_active_summary(fault) && fault == Fault::RejectFinal {
+        // Strict FINISH and summary adoption share one transaction. RejectFinal
+        // rolls that transaction back, so an entered stage is not a committed fact.
+        assert_eq!(terminal.record["outcome"], "unknown", "{}", terminal.record);
+        assert_eq!(
+            terminal.record["committed_stages"], checkpoint.record["committed_stages"],
+            "failed strict FINISH cannot publish an active-summary stage fact"
+        );
+    } else if scenario.continues_to_active_summary(fault) {
         let mut retained = terminal.record["committed_stages"].clone();
         assert!(
             retained
@@ -505,7 +559,10 @@ async fn assert_record(
             }
             // After release the driver enters the active summary of the same
             // attempt (§3 summary branch); it commits its own stage fact.
-            if !live && scenario.continues_to_active_summary(fault) {
+            if !live
+                && scenario.continues_to_active_summary(fault)
+                && !(fault == Fault::RejectFinal && scenario == Scenario::ActiveSpill)
+            {
                 set.push("active_summary");
             }
             set
@@ -545,21 +602,12 @@ async fn assert_record(
         "summary facts equal adopted summary replacements: {record}"
     );
     for (name, fact) in &facts {
-        let object = fact.as_object().unwrap();
-        assert_eq!(fact["stage"], name.as_str());
-        for (key, value) in object {
-            let allowed = match key.as_str() {
-                "stage" | "summary_node_id" => value.is_string() || value.is_null(),
-                "summary_usage" => value.is_object() || value.is_null(),
-                _ => value.is_u64() || value.is_i64() || value.is_null(),
-            };
-            assert!(
-                allowed,
-                "fact {name} field {key} is not fixed-size content-free data: {fact}"
-            );
-        }
-        assert!(fact.to_string().len() < 1024, "fact stays small: {fact}");
+        assert!(
+            bounded_stage_fact(fact, name),
+            "fixed bounded content-free schema: {fact}"
+        );
     }
+
     // The captured boundary is re-taken by each later stage of the same
     // attempt, so it describes the last committed stage.
     let last = keys.last().copied().unwrap_or(stage);
@@ -630,6 +678,136 @@ async fn assert_record(
         "no retired automatic_target marks are written: {fault:?} {record}"
     );
     Saved { attempt, record }
+}
+
+fn bounded_stage_fact(fact: &Value, name: &str) -> bool {
+    let Some(object) = fact.as_object() else {
+        return false;
+    };
+    let keys = object
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let gc_fact = fact.get("drop_all_reasoning").is_some();
+    let expected = if gc_fact {
+        [
+            "stage",
+            "selection_revision",
+            "reasoning_epoch",
+            "summary_node_id",
+            "source_nodes",
+            "spilled_groups",
+            "drop_all_reasoning",
+            "captured_reasoning_epoch",
+            "source_characters",
+            "summary_characters",
+            "summary_limit",
+            "model_requests",
+            "summary_usage",
+        ]
+        .into_iter()
+        .collect()
+    } else {
+        [
+            "stage",
+            "selection_revision",
+            "reasoning_epoch",
+            "summary_node_id",
+            "source_nodes",
+            "spilled_groups",
+            "removed_characters",
+            "source_characters",
+            "summary_characters",
+            "summary_limit",
+            "model_requests",
+            "summary_usage",
+        ]
+        .into_iter()
+        .collect()
+    };
+    if keys != expected || fact["stage"] != name {
+        return false;
+    }
+    if object.iter().any(|(key, value)| match key.as_str() {
+        "stage" => !value.as_str().is_some_and(|s| s.len() <= 32),
+        "summary_node_id" => {
+            !value.is_null()
+                && !value
+                    .as_str()
+                    .is_some_and(|id| id.len() <= 128 && uuid::Uuid::parse_str(id).is_ok())
+        }
+        "drop_all_reasoning" => !value.is_boolean(),
+        "summary_usage" => !value.is_null() && !bounded_summary_usage(value),
+        "source_nodes" | "spilled_groups" => value.as_u64().is_none(),
+        "selection_revision" | "reasoning_epoch" | "captured_reasoning_epoch" => {
+            value.as_i64().is_none()
+        }
+        _ => !value.is_null() && value.as_u64().is_none() && value.as_i64().is_none(),
+    }) {
+        return false;
+    }
+    fact.to_string().len() < 1024
+}
+fn bounded_summary_usage(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    let keys = object
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    if keys
+        != [
+            "requests",
+            "input_tokens",
+            "cached_tokens",
+            "cache_creation_tokens",
+            "output_tokens",
+        ]
+        .into_iter()
+        .collect()
+        || !value["requests"].is_u64()
+    {
+        return false;
+    }
+    [
+        "input_tokens",
+        "cached_tokens",
+        "cache_creation_tokens",
+        "output_tokens",
+    ]
+    .into_iter()
+    .all(|name| {
+        let n = &value[name];
+        let Some(fields) = n.as_object() else {
+            return false;
+        };
+        fields
+            .keys()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>()
+            == ["known_sum", "unknown_count", "overflow"]
+                .into_iter()
+                .collect()
+            && (n["known_sum"].is_null() || n["known_sum"].is_u64())
+            && n["unknown_count"].is_u64()
+            && n["overflow"].is_boolean()
+    })
+}
+
+#[test]
+fn bounded_stage_schema_rejects_numeric_strings_content_and_untyped_usage() {
+    let valid = json!({"stage":"active_summary","selection_revision":2,"reasoning_epoch":4,"summary_node_id":"550e8400-e29b-41d4-a716-446655440000","source_nodes":2,"spilled_groups":0,"drop_all_reasoning":true,"captured_reasoning_epoch":3,"source_characters":120,"summary_characters":24,"summary_limit":4000,"model_requests":1,"summary_usage":{"requests":1,"input_tokens":{"known_sum":4,"unknown_count":0,"overflow":false},"cached_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"cache_creation_tokens":{"known_sum":null,"unknown_count":1,"overflow":false},"output_tokens":{"known_sum":2,"unknown_count":0,"overflow":false}}});
+    assert!(bounded_stage_fact(&valid, "active_summary"));
+    let mut bad = valid.clone();
+    bad["source_nodes"] = json!("2");
+    assert!(!bounded_stage_fact(&bad, "active_summary"));
+    let mut bad = valid.clone();
+    bad["summary_node_id"] = json!("secret provider text");
+    assert!(!bounded_stage_fact(&bad, "active_summary"));
+    let mut bad = valid;
+    bad["summary_usage"]["input_tokens"]["known_sum"] = json!("secret");
+    assert!(!bounded_stage_fact(&bad, "active_summary"));
 }
 
 // The two uncalibrated call sites have no target plan, so the driver fixture

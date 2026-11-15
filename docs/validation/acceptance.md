@@ -1,5 +1,35 @@
 # Validation record
 
+## CORE301 c0-rooted GC port follow-up (candidate, uncommitted)
+
+Environment: macOS arm64, synthetic DBs and loopback mock provider; no paid API
+or user database. Worktree branch `task/core301-single-request-port-63724`, committed
+parent `039e495797e8d557f2dd49fdde694a660a4dc247`, based on c0
+`c0c1d82767f061c60c2f4d46673a3cfa30560145`.
+
+Focused exact-source results:
+
+- On the latest source before the documentation-only status update, `cargo fmt --all --check`, `cargo check --locked --tests`, and exact `control::driver::proactive::fault_tests::record_tests::record_after_cancellation` passed in `core301-final-fmt-check-record30-63724.log` (execution `ad1f38f3-83af-43e8-9815-38e48c0d96ab`; command is in the shell receipt).
+- `control::driver::proactive::fault_tests::record_tests::record_after_cancellation` passed 1/1 in `core301-runstop-order-controls24-63724.log`.
+- `runtime_features::proactive_active_spill_then_cancelled_summary_preserves_adoption` passed 1/1 after explicit RunStopped precedence repair in `core301-runstop-witness-token26-63724.log` (execution `241b0533-5246-4187-ac15-5cd3fffbd674`; exact command in receipt).
+- `runtime_features::proactive_resumes_when_an_older_complete_tool_group_becomes_reducible` passed 1/1; this exercises selected-R/latest-tool tail and append during provider wait in `core301-active-append-control27-63724.log` (execution `90377c6c-801c-4230-9a99-ddd7060d9943`).
+- `compaction::gc_coordinator::attachment_witness_tests::selected_attachment_mutation_rejects_but_append_only_tail_remains_eligible` passed 1/1; `control::driver::proactive::fault_tests::record_tests::bounded_stage_schema_rejects_numeric_strings_content_and_untyped_usage` passed 1/1 in `core301-record-schema-controls18-63724.log`.
+- Real capacity-one writer custody tests passed 1/1 each: `storage::lane_budget_tests::shutdown_joins_writer_owned_gc_after_draining_queued_completion_reply` and the then-current cancellation control in `core301-final-lifecycle-controls29-63724.log` (execution `3ff31770-4132-4d02-ba26-88592ee2af97`); that cancellation test name/semantics are superseded by the latest pre-cancel-before-planning contract below. The first installs a coordinator-owned producer, queues completion behind a held writer, observes its DbReply, and proves shutdown waits for producer join; it is not all GC shutdown/fault qualification.
+- `runtime_features::proactive_active_candidate_rejects_source_protection_tool_and_unwitnessed_epoch_mutations` passed 1/1 in `core301-witness-rollback-controls28-63724.log`.
+
+Latest c0-rooted source evidence (worktree still changing; base `039e495797e8d557f2dd49fdde694a660a4dc247`):
+
+- `cargo check --locked --tests` passed in `core301-shared-evaluator-artifact-check20-63724.log`; formatting used installed rustfmt via Rust 1.99.1.
+- In `core301-cac-artifact-controls21-63724.log`, exact summary-key stability, selected-attachment mutation, pre-cancel-before-planning, ordinary/background pre-reply mutation and RejectFinal SQL rollback tests each passed 1/1. Exact active RunStop and `runtime_features::proactive_resumes_when_an_older_complete_tool_group_becomes_reducible` passed 1/1 each; the latter retains latest complete tool group outside R, preserves a valid append during provider wait exactly once, adopts summary, and completes following work.
+- The batch's three manual selectors used a wrong module path and ran zero tests; they are not evidence. Correctly qualified `compaction::summary::append_adoption_tests::{append_tail_survives_summary_adoption,batch_append_tail_survives_summary_adoption,source_hash_edit_rejects}` each passed 1/1 in `core301-manual-artifact-controls22-63724.log`.
+- After adding direct recipe coverage, `compaction::tests::shared_summary_artifact_keeps_key_payload_and_projection_in_one_recipe` passed 1/1 in `core301-summary-artifact-recipe-test24-63724.log`. Its first run failed on an invalid synthetic marker fixture and is preserved in `...test23...`.
+- Exact `runtime_features::proactive_active_spill_then_cancelled_summary_preserves_adoption` passed 1/1 in batch21. There was no registered test matching the attempted natural-name selector; its zero-test result is not evidence. The positive growing-active-range test above reaches normal Turn completion after adoption.
+
+These affected controls do not qualify the whole dirty source tree, known full-native failures on SHA `039e495...`, normal standard checks, independent whole-unit review, three-OS behavior or landing.
+
+Rollback evidence update: after the strict-FINISH ordering review, exact `control::driver::proactive::fault_tests::record_tests::record_after_rejected_final_write` passed 1/1 in `core301-rollback-finish-oracle17-63724.log` (execution `e42f6664-bcef-47a4-a752-e2dcdcc464c5`; unchanged watchdog). For `ActiveSpill`, rejected strict FINISH rolls back the active summary and its stage fact together; the test verifies unknown outcome, unchanged committed-stage set, no summary replacement, two earlier spill replacements retained, path prefix, reasoning epoch and allowed append revision. This closes that focused fixture, not every rollback/fault mode. Earlier attempts/logs remain preserved as failed evidence. A full native run on exact SHA `039e495...` had 2,626 passed, 9 failed and 25 ignored; those results do not qualify the changing follow-up SHA. No full standard check, CI, independent source review, three-OS qualification or main landing is claimed. Prepared HTTP source remains unchanged; provider readiness and physical-memory/OOM guarantees remain untested/unclaimed.
+
+
 ## v0.11.0 synthetic schema upgrade
 
 On macOS arm64 with SQLite 3.51.0, a two-Thread, one-node in-memory synthetic fixture applied migrations 33-35 in 3.017 ms (one run). Ledger, original records and new indexes were checked. This is not a public-binary upgrade, production-scale timing or Windows hardware validation; those remain separate gates.

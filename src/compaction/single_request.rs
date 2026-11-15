@@ -453,7 +453,7 @@ impl Compactor {
             ),
             None => dispatched.response.text.clone(),
         };
-        let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":summary_text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":ledger.usage(),"summary_output_limit_exceeded":dispatched.size.exceeded_output_limit});
+        let drop_all_reasoning = drop_all_reasoning || (active.is_some() && !reaches_latest);
         let mut kept_reasoning = Vec::new();
         if let Some(plan) = &active
             && reaches_latest
@@ -461,15 +461,49 @@ impl Compactor {
             kept_reasoning = snapshot.groups[plan.latest]
                 .sources
                 .iter()
-                .filter(|s| s.payload["type"] == "tool_call")
-                .map(|s| s.id.clone())
+                .filter(|source| source.payload["type"] == "tool_call")
+                .map(|source| source.id.clone())
                 .collect();
-            payload["summary_scope"] = json!("active_turn_middle");
-            payload["kept_reasoning_node_ids"] = json!(kept_reasoning);
-        } else if active.is_some() {
-            payload["summary_scope"] = json!("active_turn_prefix");
         }
-        let projected = edit::projection_characters(&payload, snapshot.epoch);
+        let scope = active.as_ref().map(|_| {
+            if reaches_latest {
+                "active_turn_middle"
+            } else {
+                "active_turn_prefix"
+            }
+        });
+        let identities = sources
+            .iter()
+            .map(|source| SummarySourceIdentity {
+                id: &source.id,
+                revision: source.revision,
+                hash: &source.hash,
+                attachments: &source.attachments,
+                marker_adapter: summary_marker_item(&source.payload).is_some(),
+            })
+            .collect::<Vec<_>>();
+        let artifact = summary_artifact(SummaryArtifactInput {
+            profile: &snapshot.profile,
+            model: &snapshot.model,
+            effort: snapshot.effort.as_deref(),
+            epoch: snapshot.epoch,
+            sources: &identities,
+            source_ids: &originals,
+            text: &summary_text,
+            usage: ledger.usage(),
+            output_limit_exceeded: dispatched.size.exceeded_output_limit,
+            scope,
+            kept_reasoning_ids: &kept_reasoning,
+            reasoning_epoch: (active.is_some() || drop_all_reasoning).then_some(
+                if drop_all_reasoning {
+                    snapshot.epoch + 1
+                } else {
+                    snapshot.epoch
+                },
+            ),
+        });
+        let projected = artifact.projection_characters;
+        let payload = artifact.payload;
         if projected >= source_chars {
             let thread = snapshot.thread.clone();
             let proof = snapshot.clone();
@@ -502,16 +536,6 @@ impl Compactor {
                 "Summary does not shrink its original source projection; original path retained",
             ));
         }
-        let drop_all_reasoning = drop_all_reasoning || (active.is_some() && !reaches_latest);
-        if active.is_some() || drop_all_reasoning {
-            let epoch = if drop_all_reasoning {
-                snapshot.epoch + 1
-            } else {
-                snapshot.epoch
-            };
-            payload["reasoning_epoch"] = json!(epoch);
-            payload["item"]["reasoning_epoch"] = json!(epoch);
-        }
         let adoption = SummaryAdoption {
             automatic,
             removed_characters: (source_chars - projected) as u64,
@@ -519,6 +543,7 @@ impl Compactor {
             snapshot,
             sources,
             payload,
+            input_key: artifact.input_key,
             start: selected.start,
             count: selected.end,
             result: CompactResult {

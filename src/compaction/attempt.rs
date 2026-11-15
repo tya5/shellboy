@@ -85,16 +85,48 @@ pub(crate) fn provisional_gc_matches(
     )?)
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct GcStageFact {
+    pub(crate) selection_revision: i64,
+    pub(crate) reasoning_epoch: i64,
+    pub(crate) summary_node_id: String,
+    pub(crate) source_nodes: u64,
+    pub(crate) spilled_groups: u64,
+    pub(crate) drop_all_reasoning: bool,
+    pub(crate) captured_reasoning_epoch: i64,
+    pub(crate) source_characters: Option<u64>,
+    pub(crate) summary_characters: Option<u64>,
+    pub(crate) summary_limit: Option<u64>,
+    pub(crate) model_requests: Option<u64>,
+    pub(crate) summary_usage: Option<super::SummaryUsage>,
+}
+impl GcStageFact {
+    fn value(&self, stage: &GcStage) -> Value {
+        json!({"stage":stage.stage,"selection_revision":self.selection_revision,"reasoning_epoch":self.reasoning_epoch,
+            "summary_node_id":self.summary_node_id,"source_nodes":self.source_nodes,"spilled_groups":self.spilled_groups,
+            "drop_all_reasoning":self.drop_all_reasoning,"captured_reasoning_epoch":self.captured_reasoning_epoch,
+            "source_characters":self.source_characters,"summary_characters":self.summary_characters,
+            "summary_limit":self.summary_limit,"model_requests":self.model_requests,"summary_usage":self.summary_usage})
+    }
+}
+
 pub(crate) fn record_gc_stage_tx(
     tx: &rusqlite::Transaction<'_>,
     stage: &GcStage,
-    fact: &str,
+    fact: &GcStageFact,
 ) -> Result<(), StorageError> {
     validate_gc_stage(stage)?;
+    if fact.summary_node_id.is_empty() || fact.summary_node_id.len() > 128 || fact.source_nodes == 0
+    {
+        return Err(StorageError::InvalidInput(
+            "invalid bounded GC stage fact".into(),
+        ));
+    }
+    let fact = fact.value(stage).to_string();
     let path = format!("$.automatic_trim_attempt.committed_stages.{}", stage.stage);
     let changed = if matches!(stage.stage, "closed_summary" | "active_summary") {
         tx.execute(
-            "UPDATE model_attempt SET error_json=json_set(error_json,?6,json(?7),'$.automatic_trim_attempt.summary',json(json_extract(?7,'$.summary'))) WHERE id=?1 AND state='completed' AND profile_id=?2 AND model_id=?3 AND reasoning_epoch=?4 AND effort IS ?8 AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?5 AND json_extract(error_json,'$.automatic_trim_attempt.provisional')=1 AND json_type(error_json,?6) IS NULL AND json_type(?7,'$.summary')='object'",
+            "UPDATE model_attempt SET error_json=json_set(error_json,?6,json(?7),'$.automatic_trim_attempt.summary',json_object('summary_node_id',json_extract(?7,'$.summary_node_id'),'source_nodes',json_extract(?7,'$.source_nodes'))) WHERE id=?1 AND state='completed' AND profile_id=?2 AND model_id=?3 AND reasoning_epoch=?4 AND effort IS ?8 AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?5 AND json_extract(error_json,'$.automatic_trim_attempt.provisional')=1 AND json_type(error_json,?6) IS NULL",
             params![stage.attempt_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,path,fact,stage.effort],
         )?
     } else {

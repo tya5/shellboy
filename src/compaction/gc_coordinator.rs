@@ -59,13 +59,8 @@ enum ChildExit {
     Panicked,
 }
 
-#[derive(Clone, Debug)]
-struct SourceWitness {
-    ordinal: i64,
-    id: String,
-    turn: Option<String>,
-    revision: i64,
-}
+type SourceWitness = super::gc_capture::GcSourceFacts;
+
 #[derive(Clone, Debug)]
 struct CaptureWitness {
     thread: String,
@@ -98,12 +93,17 @@ impl From<&CapturedSummaryInput> for CaptureWitness {
             sources: input
                 .groups
                 .iter()
-                .flat_map(|group| group.stamps.iter())
-                .map(|stamp| SourceWitness {
-                    ordinal: stamp.ordinal,
-                    id: stamp.id.clone(),
-                    turn: stamp.turn.clone(),
-                    revision: stamp.revision,
+                .flat_map(|group| {
+                    group.stamps.iter().map(move |stamp| SourceWitness {
+                        ordinal: stamp.ordinal,
+                        id: stamp.id.clone(),
+                        turn: stamp.turn.clone(),
+                        revision: stamp.revision,
+                        group_id: stamp.group_id.clone(),
+                        protected: stamp.protected,
+                        group_complete: group.complete,
+                        attachments: stamp.attachments.clone(),
+                    })
                 })
                 .collect(),
         }
@@ -398,7 +398,8 @@ impl WriterGcCoordinator {
         F: FnOnce(
             &rusqlite::Transaction<'_>,
             &Dispatched,
-        ) -> Result<(T, String), crate::storage::StorageError>,
+        )
+            -> Result<(T, crate::compaction::GcStageFact), crate::storage::StorageError>,
     {
         let Some(job) = self.active.as_mut().filter(|job| job.id == id) else {
             return Err(crate::storage::StorageError::InvalidInput(
@@ -450,22 +451,10 @@ impl WriterGcCoordinator {
             match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let tx = db.transaction()?;
                 let (value, fact) = apply(&tx, candidate)?;
-                let fact_value: serde_json::Value =
-                    serde_json::from_str(&fact).map_err(|error| {
-                        crate::storage::StorageError::InvalidInput(format!(
-                            "invalid GC stage fact: {error}"
-                        ))
-                    })?;
                 super::attempt::record_gc_stage_tx(&tx, stage, &fact)?;
                 super::attempt::finish_gc_tx(&tx, stage)?;
-                if fact_value["drop_all_reasoning"] == true {
-                    let captured_epoch = fact_value["captured_reasoning_epoch"]
-                        .as_i64()
-                        .ok_or_else(|| {
-                            crate::storage::StorageError::InvalidInput(
-                                "active GC FINISH lacks captured epoch witness".into(),
-                            )
-                        })?;
+                if fact.drop_all_reasoning {
+                    let captured_epoch = fact.captured_reasoning_epoch;
                     let current: i64 = tx.query_row(
                         "SELECT reasoning_epoch FROM thread WHERE id=?1",
                         [&stage.thread_id],
@@ -658,7 +647,8 @@ impl WriterGcCoordinator {
         })
     }
 
-    pub(crate) async fn shutdown(&mut self) {
+    pub(crate) async fn shutdown(&mut self) -> bool {
+        let id = self.active.as_ref().map(|job| job.id);
         if let Some(job) = self.active.as_mut() {
             job.phase = WriterJobPhase::Closing;
             job.cancel.cancel();
@@ -688,6 +678,10 @@ impl WriterGcCoordinator {
                 job.joined = true;
             }
         }
+        match id {
+            None => true,
+            Some(id) => self.retire_joined(id),
+        }
     }
 }
 
@@ -713,6 +707,14 @@ fn witness_rejection(
     if facts.2 != witness.nonappend_generation {
         return Ok(Some(R::NonappendGenerationChanged));
     }
+    let stopping: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",
+        [&witness.thread],
+        |r| r.get(0),
+    )?;
+    if stopping {
+        return Ok(Some(R::RunStopped));
+    }
     for (turn, expected) in [
         (witness.origin_turn.as_deref(), witness.origin_generation),
         (
@@ -733,19 +735,99 @@ fn witness_rejection(
             }
         }
     }
-    let stopping: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",
-        [&witness.thread],
-        |r| r.get(0),
-    )?;
-    if stopping {
-        return Ok(Some(R::RunStopped));
+    let Some(first) = witness.sources.first() else {
+        return Ok(None);
+    };
+    let last = witness.sources.last().expect("first source checked");
+    let Some(end) = last.ordinal.checked_add(1) else {
+        return Ok(Some(R::SourceChanged));
+    };
+    let current =
+        super::gc_capture::selected_source_facts(db, &witness.thread, first.ordinal..end)?;
+    Ok(super::gc_capture::classify_selected_source_facts(
+        &witness.sources,
+        &current,
+        super::gc_capture::SourceFactPolicy::EarlyReconcile,
+    )
+    .err())
+}
+
+#[cfg(test)]
+mod attachment_witness_tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn setup() -> (Connection, CaptureWitness) {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE thread(id TEXT,profile_revision INTEGER,reasoning_epoch INTEGER,selection_nonappend_generation INTEGER,profile_id TEXT,model_id TEXT,effort TEXT,deleted_at TEXT,archived_at TEXT,selection_revision INTEGER);
+          CREATE TABLE run(thread_id TEXT,state TEXT);
+          CREATE TABLE turn(id TEXT,thread_id TEXT,generation INTEGER);
+          CREATE TABLE node(id TEXT,payload_revision INTEGER,turn_id TEXT,payload_json TEXT);
+          CREATE TABLE thread_path(thread_id TEXT,ordinal INTEGER,node_id TEXT);
+          CREATE TABLE attachment_ref(id TEXT,source_node_id TEXT,absolute_path TEXT,input_kind TEXT,ownership TEXT,created_at TEXT);
+          CREATE TABLE attachment_selection(thread_id TEXT,attachment_id TEXT,state TEXT,reason TEXT);
+          CREATE TABLE receipt(target_thread_id TEXT,message_node_id TEXT,state TEXT);
+          CREATE TABLE tool_group(id TEXT,state TEXT);
+          CREATE TABLE tool_call(group_id TEXT,call_id TEXT,state TEXT);
+          CREATE TABLE tool_result(group_id TEXT,call_id TEXT);
+          INSERT INTO thread VALUES('t',3,7,2,'p','m',NULL,NULL,NULL,8);
+          INSERT INTO run VALUES('t','completed');
+          INSERT INTO node VALUES('source',4,NULL,'{}');
+          INSERT INTO thread_path VALUES('t',0,'source');").unwrap();
+        let attachments = super::super::gc_capture::selected_source_facts(&db, "t", 0..1).unwrap()
+            [0]
+        .attachments
+        .clone();
+        let witness = CaptureWitness {
+            thread: "t".into(),
+            profile_revision: 3,
+            epoch: 7,
+            nonappend_generation: 2,
+            profile: "p".into(),
+            model: "m".into(),
+            effort: None,
+            origin_turn: None,
+            origin_generation: None,
+            request_turn_id: None,
+            request_generation: None,
+            sources: vec![SourceWitness {
+                ordinal: 0,
+                id: "source".into(),
+                turn: None,
+                revision: 4,
+                group_id: None,
+                protected: false,
+                group_complete: true,
+                attachments,
+            }],
+        };
+        (db, witness)
     }
-    for source in &witness.sources {
-        let current:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal=?2 AND p.node_id=?3 AND n.payload_revision=?4 AND n.turn_id IS ?5)",params![witness.thread,source.ordinal,source.id,source.revision,source.turn],|r|r.get(0))?;
-        if !current {
-            return Ok(Some(R::SourceChanged));
-        }
+
+    #[test]
+    fn selected_attachment_mutation_rejects_but_append_only_tail_remains_eligible() {
+        use super::super::discard::RejectionReason as R;
+        let (mut db, witness) = setup();
+        assert_eq!(witness_rejection(&db, &witness).unwrap(), None);
+        db.execute(
+            "INSERT INTO attachment_ref VALUES('a','source','/synthetic','file','external','now')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            witness_rejection(&db, &witness).unwrap(),
+            Some(R::SourceChanged)
+        );
+
+        let (mut db, witness) = setup();
+        db.execute_batch("INSERT INTO attachment_ref VALUES('a','source','/synthetic','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL);").unwrap();
+        assert_eq!(
+            witness_rejection(&db, &witness).unwrap(),
+            Some(R::SourceChanged)
+        );
+
+        let (mut db, witness) = setup();
+        db.execute_batch("UPDATE thread SET selection_revision=selection_revision+1; INSERT INTO node VALUES('tail',1,NULL,'{}'); INSERT INTO thread_path VALUES('t',1,'tail');").unwrap();
+        assert_eq!(witness_rejection(&db, &witness).unwrap(), None);
     }
-    Ok(None)
 }

@@ -501,6 +501,13 @@ impl<T> DbReply<T> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GcCaptureAdmission {
+    NoTarget,
+    Cancelled,
+    Started(crate::compaction::WriterJobId),
+}
+
 #[derive(Debug)]
 pub(crate) enum GcCompletionSubmitError {
     NotAdmitted(StorageError),
@@ -520,7 +527,7 @@ impl DbWorker {
         operation: F,
         launch: L,
         cancel: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<Option<crate::compaction::WriterJobId>, StorageError>
+    ) -> Result<GcCaptureAdmission, StorageError>
     where
         F: FnOnce(
                 &mut Connection,
@@ -550,14 +557,22 @@ impl DbWorker {
             .as_ref()
             .map(|lanes| lanes.foreground.clone())
             .ok_or(StorageError::Closed)?;
-        let permit = match cancel.as_ref() {
-            Some(token) => {
-                tokio::select! {biased;_=token.cancelled()=>return Err(StorageError::InvalidInput("GC capture cancelled before command admission".into())),permit=sender.reserve_owned()=>permit.map_err(|_|StorageError::Closed)?}
+        if cancel
+            .as_ref()
+            .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
+        {
+            return Ok(GcCaptureAdmission::Cancelled);
+        }
+        let permit = if let Some(token) = cancel.as_ref() {
+            tokio::select! {biased;
+                _=token.cancelled()=>return Ok(GcCaptureAdmission::Cancelled),
+                permit=sender.reserve_owned()=>permit.map_err(|_|StorageError::Closed)?,
             }
-            None => sender
+        } else {
+            sender
                 .reserve_owned()
                 .await
-                .map_err(|_| StorageError::Closed)?,
+                .map_err(|_| StorageError::Closed)?
         };
         {
             let admission = self
@@ -565,12 +580,14 @@ impl DbWorker {
                 .sender
                 .lock()
                 .expect("DB admission mutex poisoned");
-            if admission.is_none()
-                || cancel
-                    .as_ref()
-                    .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
-            {
+            if admission.is_none() {
                 return Err(StorageError::Closed);
+            }
+            if cancel
+                .as_ref()
+                .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
+            {
+                return Ok(GcCaptureAdmission::Cancelled);
             }
             self.shared
                 .foreground_waiting
@@ -692,7 +709,7 @@ impl DbWorker {
         F: FnOnce(
                 &rusqlite::Transaction<'_>,
                 &crate::compaction::Dispatched,
-            ) -> Result<(T, String), StorageError>
+            ) -> Result<(T, crate::compaction::GcStageFact), StorageError>
             + Send
             + 'static,
     {
@@ -1298,7 +1315,7 @@ fn make_gc_capture_job<F, L, Fut>(
     launch: L,
     runtime: tokio::runtime::Handle,
     wake: GcRetirementWake,
-) -> (Command, DbReply<Option<crate::compaction::WriterJobId>>)
+) -> (Command, DbReply<GcCaptureAdmission>)
 where
     F: FnOnce(
             &mut Connection,
@@ -1327,13 +1344,14 @@ where
         let mut result = result;
         finish_transaction(db, &mut result);
         let result = result.and_then(|capture| match capture {
-            crate::compaction::GcCaptureOutcome::NoTarget => Ok(None),
+            crate::compaction::GcCaptureOutcome::NoTarget => Ok(GcCaptureAdmission::NoTarget),
+            crate::compaction::GcCaptureOutcome::Cancelled => Ok(GcCaptureAdmission::Cancelled),
             crate::compaction::GcCaptureOutcome::Captured(captured) => coordinator
                 .install_after_commit(db, captured, stage_copy, runtime, wake, launch)
-                .map(Some)
+                .map(GcCaptureAdmission::Started)
                 .map_err(|message| StorageError::InvalidInput(message.into())),
         });
-        let _ = coordinator.reconcile_before_db_reply(db);
+        reconcile_gc_before_reply(db, coordinator);
         let _ = sender.send(result);
         JobOutcome::default()
     });
@@ -1380,7 +1398,7 @@ fn make_gc_completion_job(
             .complete_before_db_reply(db, id, result)
             .map_err(StorageError::from);
         let result = write.unwrap_or(Ok(())).and(completion);
-        let _ = coordinator.reconcile_before_db_reply(db);
+        reconcile_gc_before_reply(db, coordinator);
         let _ = sender.send(result);
         JobOutcome::default()
     });
@@ -1405,7 +1423,7 @@ where
     F: FnOnce(
             &rusqlite::Transaction<'_>,
             &crate::compaction::Dispatched,
-        ) -> Result<(T, String), StorageError>
+        ) -> Result<(T, crate::compaction::GcStageFact), StorageError>
         + Send
         + 'static,
 {
@@ -1416,7 +1434,7 @@ where
         }))
         .unwrap_or(Err(StorageError::JobPanicked));
         finish_transaction(db, &mut result);
-        let _ = coordinator.reconcile_before_db_reply(db);
+        reconcile_gc_before_reply(db, coordinator);
         drop(guard);
         let _ = sender.send(result);
         JobOutcome::default()
@@ -1433,6 +1451,13 @@ where
     )
 }
 
+fn reconcile_gc_before_reply(
+    connection: &Connection,
+    coordinator: &mut crate::compaction::WriterGcCoordinator,
+) {
+    let _ = coordinator.reconcile_before_db_reply(connection);
+}
+
 fn make_job<T, F>(operation: F) -> (Command, DbReply<T>)
 where
     T: Send + 'static,
@@ -1440,7 +1465,7 @@ where
 {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(
-        move |connection: &mut Connection, _, slow_backtrace, _writer_gc| {
+        move |connection: &mut Connection, _, slow_backtrace, writer_gc| {
             let installed = connection
                 .progress_handler(
                     PROGRESS_GRANULARITY as std::ffi::c_int,
@@ -1460,6 +1485,7 @@ where
                 let _ = connection.progress_handler(0, None::<fn() -> bool>);
             }
             finish_transaction(connection, &mut result);
+            reconcile_gc_before_reply(connection, writer_gc);
             let _ = sender.send(result);
             JobOutcome::default()
         },
@@ -1493,7 +1519,7 @@ where
         move |connection: &mut Connection,
               waiting: &Arc<AtomicUsize>,
               slow_backtrace,
-              _writer_gc| {
+              writer_gc| {
             let budget = Arc::new(StepBudget::default());
             let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
             let waiting = waiting.clone();
@@ -1533,6 +1559,7 @@ where
             let _ = connection.progress_handler(0, None::<fn() -> bool>);
             let _ = connection.commit_hook(None::<fn() -> bool>);
             finish_transaction(connection, &mut result);
+            reconcile_gc_before_reply(connection, writer_gc);
             let deferred = budget.hit.load(Ordering::Acquire);
             let steps = budget.ticks.load(Ordering::Acquire) * PROGRESS_GRANULARITY;
             let reply = if deferred {
@@ -1890,6 +1917,14 @@ fn run_worker(
             checkpoint.attempted(now, changes, complete);
             state.checkpoint_attempts.fetch_add(1, Ordering::SeqCst);
         }
+    }
+    // All accepted commands have completed. Admission is closed, so any producer
+    // not yet admitted to a writer command observes Closed and exits; join it here
+    // before SQLite closes. Commands admitted before shutdown were drained above.
+    if !lanes.runtime.block_on(state.gc_coordinator.shutdown()) {
+        return Err(StorageError::Worker(
+            "GC producer shutdown did not acknowledge retirement".into(),
+        ));
     }
     // A concurrent reader may keep an older snapshot, preventing truncation.
     // That status does not invalidate committed WAL frames or the writer close.
@@ -2650,6 +2685,227 @@ mod slow_job_tests {
 mod lane_budget_tests {
     use super::*;
     use std::sync::mpsc as sync_mpsc;
+
+    async fn active_gc_source_fixture() -> (tempfile::TempDir, DbWorker, oneshot::Receiver<()>) {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open_with_capacity(root.path().join("db"), 1)
+            .await
+            .unwrap();
+        db.call(|db|{
+            db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now')",[])?;
+            db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
+            db.execute("INSERT INTO node(id,turn_id,kind,created_at,payload_revision,payload_json,payload_bytes,body_hash)VALUES('source','u','message','now',1,'{}',2,'hash')",[])?;
+            db.execute("INSERT INTO thread_path(thread_id,ordinal,node_id)VALUES('t',0,'source')",[])?;
+            db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json)VALUES('a','u',0,0,'fixture','fixture',0,'completed','{}','now',?1)",[r#"{"automatic_trim_attempt":{"token":"tok","provisional":true}}"#])?;
+            Ok(())
+        }).await.unwrap();
+        let attachments = Vec::new();
+        let stamp = crate::compaction::CapturedSourceStamp {
+            ordinal: 0,
+            id: "source".into(),
+            turn: Some("u".into()),
+            revision: 1,
+            hash: "hash".into(),
+            marker_adapter: false,
+            group_id: None,
+            protected: false,
+            attachments: attachments.clone(),
+        };
+        let group = crate::compaction::CapturedGroup {
+            stamps: vec![stamp],
+            text: "Node source revision 1:\n{}\nAttachment references: []".into(),
+            projection_weight: 10,
+            has_unsummarized: true,
+            complete: true,
+            tool: false,
+        };
+        let captured = crate::compaction::CapturedSummaryInput {
+            thread: "t".into(),
+            selection_revision: 0,
+            profile_revision: 0,
+            nonappend_generation: 0,
+            epoch: 0,
+            source_characters: 10,
+            profile: "fixture".into(),
+            model: "fixture".into(),
+            thread_summary_max_chars: None,
+            effort: None,
+            origin_turn: Some("u".into()),
+            origin_run: Some("r".into()),
+            origin_generation: Some(0),
+            request_turn_id: None,
+            request_generation: None,
+            groups: vec![group],
+            active_tail_group: None,
+            active_turn: false,
+            spill_epoch_advanced: false,
+            drop_reasoning: false,
+            active_user_messages: Vec::new(),
+        };
+        let stage = crate::compaction::GcStage {
+            attempt_id: "a".into(),
+            token: "tok".into(),
+            thread_id: "t".into(),
+            profile_id: "fixture".into(),
+            model_id: "fixture".into(),
+            effort: None,
+            reasoning_epoch: 0,
+            stage: "closed_summary",
+        };
+        let (tx, rx) = oneshot::channel();
+        let _ = db
+            .call_with_gc_capture_cancellable(
+                stage,
+                move |_, _| Ok(crate::compaction::GcCaptureOutcome::Captured(captured)),
+                move |_, _, cancel| async move {
+                    let _ = cancel.cancelled().await;
+                    let _ = tx.send(());
+                    None
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        (root, db, rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cancelled_capture_is_not_misreported_as_no_target_or_admitted() {
+        let root = tempfile::tempdir().unwrap();
+        let db = DbWorker::open_with_capacity(root.path().join("db"), 1)
+            .await
+            .unwrap();
+        let stage = crate::compaction::GcStage {
+            attempt_id: "unused".into(),
+            token: "unused".into(),
+            thread_id: "t".into(),
+            profile_id: "p".into(),
+            model_id: "m".into(),
+            effort: None,
+            reasoning_epoch: 0,
+            stage: "closed_summary",
+        };
+        let no_target = db
+            .call_with_gc_capture_cancellable(
+                stage.clone(),
+                |_, _| Ok(crate::compaction::GcCaptureOutcome::NoTarget),
+                |_, _, _| async { None },
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(no_target, GcCaptureAdmission::NoTarget);
+        let stop = tokio_util::sync::CancellationToken::new();
+        stop.cancel();
+        let called = Arc::new(AtomicBool::new(false));
+        let observed = called.clone();
+        let outcome = db
+            .call_with_gc_capture_cancellable(
+                stage,
+                move |_, _| {
+                    observed.store(true, Ordering::SeqCst);
+                    Ok(crate::compaction::GcCaptureOutcome::NoTarget)
+                },
+                |_, _, _| async { None },
+                Some(stop),
+            )
+            .await
+            .unwrap();
+        assert_eq!(outcome, GcCaptureAdmission::Cancelled);
+        assert!(
+            !called.load(Ordering::SeqCst),
+            "cancelled token returns before writer reservation/planning"
+        );
+        db.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ordinary_and_background_source_mutations_reconcile_before_success_reply() {
+        for background in [false, true] {
+            let (_root, db, cancelled) = active_gc_source_fixture().await;
+            if background {
+                assert!(matches!(
+                    db.call_background_kind("gc_witness_fixture", |db| {
+                        db.execute(
+                            "UPDATE node SET payload_revision=payload_revision+1 WHERE id='source'",
+                            [],
+                        )
+                        .map_err(StorageError::from)?;
+                        Ok(1)
+                    })
+                    .await
+                    .unwrap(),
+                    Background::Done(1)
+                ));
+            } else {
+                assert_eq!(
+                    db.call(|db| Ok(db.execute(
+                        "UPDATE node SET payload_revision=payload_revision+1 WHERE id='source'",
+                        []
+                    )?))
+                    .await
+                    .unwrap(),
+                    1
+                );
+            }
+            cancelled.await.unwrap();
+            db.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn shutdown_joins_writer_owned_gc_after_draining_queued_completion_reply() {
+        crate::test_watchdog::watchdog("GC writer shutdown custody", async {
+            let root=tempfile::tempdir().unwrap();
+            let db=DbWorker::open_with_capacity(root.path().join("db"),1).await.unwrap();
+            db.call(|db|{
+                db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('t','/','/AGENTS.md','fixture','fixture','now')",[])?;
+                db.execute_batch("INSERT INTO run(id,thread_id,state,created_at)VALUES('r','t','completed','now');
+                    INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('u','t','r','completed','now');")?;
+                db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at,error_json) VALUES('a','u',0,0,'fixture','fixture',0,'completed','{}','now',?1)", [r#"{"automatic_trim_attempt":{"token":"tok","provisional":true}}"#])?;
+                Ok(())
+            }).await.unwrap();
+            let stage=crate::compaction::GcStage{attempt_id:"a".into(),token:"tok".into(),thread_id:"t".into(),profile_id:"fixture".into(),model_id:"fixture".into(),effort:None,reasoning_epoch:0,stage:"active_summary"};
+            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),selection_revision:0,profile_revision:0,nonappend_generation:0,epoch:0,source_characters:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,request_turn_id:None,request_generation:None,groups:Vec::new(),active_tail_group:None,active_turn:false,spill_epoch_advanced:false,drop_reasoning:false,active_user_messages:Vec::new()};
+            let (producer_ready_tx,producer_ready_rx)=oneshot::channel();
+            let (complete_tx,complete_rx)=oneshot::channel();
+            let (admitted_tx,admitted_rx)=oneshot::channel();
+            let (reply_tx,reply_rx)=oneshot::channel();
+            let (release_tx,release_rx)=oneshot::channel();
+            let db_for_producer=db.clone();
+            let _job=db.call_with_gc_capture_cancellable(stage,move|_,_|Ok(crate::compaction::GcCaptureOutcome::Captured(captured)),move|id,_,cancel|async move{
+                let _=producer_ready_tx.send(());
+                let _=complete_rx.await;
+                let (command,reply)=make_gc_completion_job(id,Err(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"synthetic terminal failure")),None);
+                if db_for_producer.admit(Lane::Foreground,command).await.is_err(){let _=reply_tx.send(false);return Some(crate::compaction::WriterCompletion::Failed(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"completion not admitted")));}
+                let _=admitted_tx.send(());
+                let observed=reply.receive().await.is_ok();
+                let _=reply_tx.send(observed);
+                let _=cancel.cancelled().await;
+                let _=release_rx.await;
+                Some(crate::compaction::WriterCompletion::Failed(crate::protocol::ApiError::new(crate::protocol::ErrorCode::IoFailed,"producer drained")))
+            },None).await.unwrap();
+            assert!(matches!(_job,GcCaptureAdmission::Started(_)));
+            producer_ready_rx.await.unwrap();
+
+            let (blocker_started_tx,blocker_started_rx)=oneshot::channel();
+            let (blocker_release_tx,blocker_release_rx)=sync_mpsc::channel();
+            let blocker=db.try_call(move|_|{let _=blocker_started_tx.send(());blocker_release_rx.recv().unwrap();Ok(())}).unwrap();
+            blocker_started_rx.await.unwrap();
+            // Hold a real foreground blocker, then queue completion in the single
+            // slot. Shutdown must drain that reply before it can join the producer.
+            let _=complete_tx.send(());
+            admitted_rx.await.unwrap();
+            let shutdown_db=db.clone();
+            let shutdown=tokio::spawn(async move{shutdown_db.shutdown().await});
+            blocker_release_tx.send(()).unwrap();
+            blocker.receive().await.unwrap();
+            assert!(reply_rx.await.unwrap(),"admitted completion reply is observed by its producer");
+            assert!(!shutdown.is_finished(),"shutdown waits for producer join acknowledgement");
+            let _=release_tx.send(());
+            shutdown.await.unwrap().unwrap();
+        }).await.unwrap();
+    }
 
     /// Far beyond the budget: unbounded without interruption (watchdog-protected).
     const ENDLESS: &str =

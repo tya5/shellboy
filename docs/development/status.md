@@ -1,5 +1,32 @@
 # Development status
 
+## CORE301 current-main GC port candidate (not main state)
+
+The isolated worktree `task/core301-single-request-port-63724` is a descendant of
+`c0c1d82767f061c60c2f4d46673a3cfa30560145`; current committed HEAD is
+`039e495797e8d557f2dd49fdde694a660a4dc247` plus uncommitted follow-up source.
+The actual selected-R extraction map was SHA-256 verified as
+`d550095b0ae53e3ff4af0cb280ae554ba7e1f38aae6e635b1358a699116d2b57`.
+The follow-up adds a real DbWorker shutdown cancel/join/retire call after accepted
+lane drain, one post-cleanup/pre-reply reconciliation hook shared by ordinary and
+background wrappers, exact selected-attachment witness checks, typed bounded GC
+stage facts and typed capture admission (`NoTarget`, `Cancelled`, `Started`); pre-cancel returns before
+reservation/planning, and uncancelled `NoTarget` retains closed-to-active fallback. Current-main HTTP source and migration
+bytes are preserved; see the exact diff check in the handoff, not this status note.
+
+Focused evidence on the changing source is intentionally separate: registered
+record cancellation, explicit RunStop after active spill, active range append/
+latest-tool-tail, attachment mutation/append, bounded-fact negative injections,
+capacity-one real worker shutdown with queued completion, and latest pre-cancel/no-target controls have passed in `core301-current-capture-controls13-63724.log`.
+The same batch's attachment test exposed an outdated synthetic SQL fixture; after fixing
+its schema, the exact attachment/append-tail test passed in `core301-current-attachment-control16-63724.log`. The exact
+60-second `record_after_rejected_final_write` control timed out in the current
+batch while entering its subsequent scenario; preserve that result and diagnose
+it before any full-suite rerun. The latest `cargo check --locked --tests` passed in `core301-current-capture-check12-63724.log`.
+Formatting now passes with the installed rustfmt selected through Rust 1.99.1. Full standard/native checks, independent review,
+three-OS CI and main landing are not established for this worktree. No provider,
+installed binary, user database, OOM or release claim is made.
+
 Snapshot: `origin/main` at `482e7eadb39b0bed4059135842c9b148c162f70d` (2026-11-08). This page describes the checked-out main state, not release certification. The exact base commit and open PR were checked against Git history and GitHub on this date.
 ## v0.11.0 preparation
 

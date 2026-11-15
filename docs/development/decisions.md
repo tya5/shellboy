@@ -4505,3 +4505,21 @@ no in-repo production consumer depended on the prior ThreadDetails shape. Review
 this source API boundary independently. The live-config test checks precedence
 and client-pool identity; it is authored but unexecuted pending safe hosted
 qualification.
+
+
+## CORE301 cancellation versus no-target classification (2026-11-15)
+
+Decision: keep one writer-owned metadata planner and a typed capture admission result.
+An uncancelled planner-confirmed `NoTarget` permits the established closed-to-active
+fallback. If already cancelled, return `Cancelled` before writer-lane reservation or
+planning; do not interpret Stop as evidence of no target or run an active fallback.
+Cancellation arriving after admission is checked after planning and before selected
+payload reads and provisional receipt creation. After receipt commit, the writer-owned
+coordinator retains completion custody, cancellation, join and retirement.
+
+Rejected: treating generic storage failure as no-target, waiting for queue capacity after
+Stop, or continuing selected-payload capture after Stop. Natural Turn completion remains
+provenance rather than producer cancellation. Explicit Run Stop retains cancellation
+semantics. Counterexamples and stage ownership are recorded in the current Core301 section
+of `docs/design/compaction.md`. This decision does not qualify the full integration,
+rollback/fault matrix, independent review or cross-platform behavior.

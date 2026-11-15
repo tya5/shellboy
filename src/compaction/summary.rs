@@ -8,6 +8,7 @@ pub(super) struct SummaryAdoption {
     pub(super) snapshot: Snapshot,
     pub(super) sources: Vec<Source>,
     pub(super) payload: Value,
+    pub(super) input_key: String,
     pub(super) start: usize,
     pub(super) count: usize,
     pub(super) result: CompactResult,
@@ -221,6 +222,7 @@ mod append_adoption_tests {
                 if mode == "cancel" {
                     cancel.cancel();
                 }
+                let input_key = super::summary_key(&snapshot, &snapshot.groups[0].sources);
                 let adoption = SummaryAdoption {
                     automatic: None,
                     removed_characters: 0,
@@ -228,6 +230,7 @@ mod append_adoption_tests {
                     sources: snapshot.groups[0].sources.clone(),
                     snapshot,
                     payload: json!({"text":"summary"}),
+                    input_key,
                     start: 0,
                     count: 1,
                     result: CompactResult::default(),
@@ -384,11 +387,33 @@ pub(super) fn adopt_gc_result_tx(
     } else {
         generated.response.text.clone()
     };
-    let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":usage});
-    if captured.active_turn {
-        payload["summary_scope"] = json!("active_turn_middle");
-    }
-    let projected = edit::projection_characters(&payload, captured.epoch);
+    let identities = stamps
+        .iter()
+        .map(|stamp| super::SummarySourceIdentity {
+            id: &stamp.id,
+            revision: stamp.revision,
+            hash: &stamp.hash,
+            attachments: &stamp.attachments,
+            marker_adapter: stamp.marker_adapter,
+        })
+        .collect::<Vec<_>>();
+    let scope = captured.active_turn.then_some("active_turn_middle");
+    let artifact = super::summary_artifact(super::SummaryArtifactInput {
+        profile: &captured.profile,
+        model: &captured.model,
+        effort: captured.effort.as_deref(),
+        epoch: captured.epoch,
+        sources: &identities,
+        source_ids: &originals,
+        text: &text,
+        usage,
+        output_limit_exceeded: generated.size.exceeded_output_limit,
+        scope,
+        kept_reasoning_ids: &[],
+        reasoning_epoch: None,
+    });
+    let projected = artifact.projection_characters;
+    let payload = artifact.payload;
     if projected >= source_characters {
         return Err(StorageError::InvalidInput(
             "GC summary does not shrink selected source projection".into(),
@@ -430,39 +455,42 @@ pub(super) fn adopt_gc_result_tx(
                 "GC selected R path changed".into(),
             ));
         }
-        let (revision,turn,protected):(i64,Option<String>,bool)=tx.query_row("SELECT n.payload_revision,n.turn_id,EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?2 AND q.message_node_id=n.id AND q.state IN ('accepted','held')) FROM node n WHERE n.id=?1",params![stamp.id,thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-        if revision != stamp.revision || turn != stamp.turn || protected != stamp.protected {
-            return Err(StorageError::InvalidInput(
-                "GC source revision, turn, or protection changed".into(),
-            ));
-        }
-        if let Some(group) = &stamp.group_id {
-            let complete:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",[group],|r|r.get(0))?;
-            if !complete {
-                return Err(StorageError::InvalidInput(
-                    "GC tool group changed before FINISH".into(),
-                ));
-            }
-        }
     }
-    let adapter = if stamps.iter().any(|stamp| stamp.marker_adapter) {
-        MARKER_ADAPTER
-    } else {
-        ADAPTER
-    };
-    let input_key = key(&(
-        FORMAT,
-        PROMPT,
-        adapter,
-        &captured.profile,
-        &captured.model,
-        &captured.effort,
-        captured.epoch,
-        stamps
-            .iter()
-            .map(|stamp| (&stamp.id, stamp.revision, &stamp.hash, &stamp.attachments))
-            .collect::<Vec<_>>(),
-    ));
+    let end_ordinal = stamps
+        .last()
+        .and_then(|stamp| stamp.ordinal.checked_add(1))
+        .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
+    let current_facts =
+        super::gc_capture::selected_source_facts(tx, thread, stamps[0].ordinal..end_ordinal)?;
+    let expected_facts = captured.groups[selected.clone()]
+        .iter()
+        .flat_map(|group| {
+            group
+                .stamps
+                .iter()
+                .map(move |stamp| super::gc_capture::GcSourceFacts {
+                    ordinal: stamp.ordinal,
+                    id: stamp.id.clone(),
+                    revision: stamp.revision,
+                    turn: stamp.turn.clone(),
+                    group_id: stamp.group_id.clone(),
+                    protected: stamp.protected,
+                    group_complete: group.complete,
+                    attachments: stamp.attachments.clone(),
+                })
+        })
+        .collect::<Vec<_>>();
+    super::gc_capture::classify_selected_source_facts(
+        &expected_facts,
+        &current_facts,
+        super::gc_capture::SourceFactPolicy::StrictFinalAdoption,
+    )
+    .map_err(|reason| {
+        StorageError::InvalidInput(format!(
+            "GC selected R facts changed before FINISH: {reason:?}"
+        ))
+    })?;
+    let input_key = artifact.input_key;
     let selected_sources = stamps
         .iter()
         .map(|stamp| super::ReplacementSource {

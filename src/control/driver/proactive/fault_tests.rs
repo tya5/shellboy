@@ -22,7 +22,8 @@ enum Fault {
     /// #303: observe the current failed-attempt path and prove legacy W2/W3 (the activity witness is restored for the TUI indicator, #165)
     /// writes are absent rather than injecting faults into removed write sites.
     RetiredWritesAbsent,
-    /// #226: the real final write (W4) is rejected; the attempt runs to its end.
+    /// #226: reject a terminal attempt write where one remains; for a native
+    /// summary, strict FINISH is already inside the adoption transaction.
     RejectFinal,
     /// #226: the stage fact itself is rejected before the stage adopts.
     RejectFact,
@@ -64,6 +65,9 @@ fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
+            // Strict summary FINISH is inside adoption, before this test's
+            // post-stage W4 injector is installed; those summary cases adopted.
+            Fault::RejectFinal if scenario.summary() => "adopted",
             // A cancellation at the active-spill boundary is observed by the
             // following active summary stage of the same attempt (§3): the
             // committed spill stays and the attempt ends `cancelled` (§6.4,
@@ -630,7 +634,9 @@ async fn after_release(
         .await
         .unwrap();
     }
-    if fault == Fault::RejectFinal {
+    // Strict summary FINISH already completed inside adoption before this
+    // postcommit hook is installed; no second W4 final write follows it.
+    if fault == Fault::RejectFinal && !scenario.summary() {
         crate::test_watchdog::watchdog("rejected final write reached", async {
             while !reached.load(Ordering::SeqCst) {
                 tokio::task::yield_now().await;

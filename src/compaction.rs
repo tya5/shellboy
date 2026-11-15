@@ -22,13 +22,15 @@ pub(crate) mod context_usage;
 pub mod discard;
 mod retry;
 pub(crate) use attempt::{
-    ABoundaryObservation, AutomaticStage, GcStage, begin_tx as attempt_begin_tx,
+    ABoundaryObservation, AutomaticStage, GcStage, GcStageFact, begin_tx as attempt_begin_tx,
     finish_tx as attempt_finish_tx,
 };
 mod edit;
 mod failure_memory;
 mod gc_capture;
 mod gc_coordinator;
+#[cfg(test)]
+pub(crate) use gc_capture::{CapturedGroup, CapturedSourceStamp};
 pub(crate) use gc_capture::{CapturedSummaryInput, GcCaptureOutcome};
 pub(crate) use gc_coordinator::{
     CompletionDisposition, WriterCompletion, WriterGcCoordinator, WriterJobId,
@@ -72,6 +74,62 @@ const FORMAT: &str = "shellboy-summary-v1";
 const PROMPT: &str = "shellboy-summary-prompt-v3";
 const ADAPTER: &str = "responses-assistant-text-v2";
 const MARKER_ADAPTER: &str = "responses-marker-item-v3";
+
+pub(super) struct SummarySourceIdentity<'a> {
+    pub(super) id: &'a str,
+    pub(super) revision: i64,
+    pub(super) hash: &'a str,
+    pub(super) attachments: &'a [Value],
+    pub(super) marker_adapter: bool,
+}
+pub(super) struct SummaryArtifactInput<'a> {
+    pub(super) profile: &'a str,
+    pub(super) model: &'a str,
+    pub(super) effort: Option<&'a str>,
+    pub(super) epoch: i64,
+    pub(super) sources: &'a [SummarySourceIdentity<'a>],
+    pub(super) source_ids: &'a [String],
+    pub(super) text: &'a str,
+    pub(super) usage: &'a SummaryUsage,
+    pub(super) output_limit_exceeded: bool,
+    pub(super) scope: Option<&'a str>,
+    pub(super) kept_reasoning_ids: &'a [String],
+    pub(super) reasoning_epoch: Option<i64>,
+}
+pub(super) struct SummaryArtifact {
+    pub(super) input_key: String,
+    pub(super) payload: Value,
+    pub(super) projection_characters: u64,
+}
+
+/// Shared pure recipe for summary provenance, persisted payload and replay
+/// projection. Manual and GC callers retain their own eligibility and CAS rules.
+pub(super) fn summary_artifact(input: SummaryArtifactInput<'_>) -> SummaryArtifact {
+    let input_key = summary_input_key(
+        input.profile,
+        input.model,
+        input.effort,
+        input.epoch,
+        input.sources,
+    );
+    let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":input.text}]},"source_node_ids":input.source_ids,"summary_format":FORMAT,"summary_usage":input.usage,"summary_output_limit_exceeded":input.output_limit_exceeded});
+    if let Some(scope) = input.scope {
+        payload["summary_scope"] = json!(scope);
+    }
+    if !input.kept_reasoning_ids.is_empty() {
+        payload["kept_reasoning_node_ids"] = json!(input.kept_reasoning_ids);
+    }
+    if let Some(epoch) = input.reasoning_epoch {
+        payload["reasoning_epoch"] = json!(epoch);
+        payload["item"]["reasoning_epoch"] = json!(epoch);
+    }
+    let projection_characters = edit::projection_characters(&payload, input.epoch);
+    SummaryArtifact {
+        input_key,
+        payload,
+        projection_characters,
+    }
+}
 /// #182 user decision B (simplified), for every summary: the meaning of user
 /// messages that must stay in effect is kept through a dedicated section,
 /// written by the model from the source in its original order; Shellboy does
@@ -830,14 +888,15 @@ impl Compactor {
         let capture_trigger = trigger.clone();
         let capture_target = target_plan.clone();
         let capture_reason = reason.clone();
+        let capture_stop = run_stop.clone();
         let db = self.database.clone();
         let compactor = self.clone();
         let (result_tx, result_rx) =
             tokio::sync::oneshot::channel::<Result<CompactResult, ApiError>>();
         let boundary_for_job = thread_boundary.clone();
         let stop_for_job = run_stop.clone();
-        let Some(job)=self.database.call_with_gc_capture_cancellable(stage.clone(),move|connection,stage|{
-            gc_capture::capture_ordinary_gc_prefix_with_receipt_tx(connection,&thread,stage,&capture_reason,&capture_trigger,&capture_target)
+        let admission=self.database.call_with_gc_capture_cancellable(stage.clone(),move|connection,stage|{
+            gc_capture::capture_ordinary_gc_prefix_with_receipt_tx(connection,&thread,stage,&capture_reason,&capture_trigger,&capture_target,&capture_stop)
         },move|job_id,captured,cancel|async move{
             let captured=Arc::new(captured);
             let material_groups=gc_request_groups(&captured);
@@ -878,7 +937,11 @@ impl Compactor {
                 }
                 Err(crate::storage::GcCompletionSubmitError::AdmittedReplyLost(error))=>{let _=result_tx.send(Err(storage_error(error)));return None;}
                 Ok(CompletionDisposition::Accepted)=>{}
-                Ok(CompletionDisposition::Rejected(reason))=>{let _=result_tx.send(Err(discard::rejected(reason,"GC source witness changed before adoption; original path retained")));return None;}
+                Ok(CompletionDisposition::Rejected(reason))=>{
+                    if reason==discard::RejectionReason::RunStopped{stop_for_job.cancel();}
+                    let error=if stop_for_job.is_cancelled(){discard::rejected(discard::RejectionReason::Cancelled,"GC summary cancelled by explicit Run Stop; original path retained")}else{discard::rejected(reason,"GC source witness changed before adoption; original path retained")};
+                    let _=result_tx.send(Err(error));return None;
+                }
                 Ok(_)=>{let _=result_tx.send(report_error.map_or_else(||Err(invalid("GC completion was not adoptable")),Err));return None;}
             }
             let dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return None;}};
@@ -891,12 +954,28 @@ impl Compactor {
                 let drop=apply_capture.active_turn;
                 let result_value=CompactResult{source_characters:Some(source_chars),summary_characters:Some(result.response.text.chars().count() as u64),summary_limit:Some(output_limit.0),model_requests:Some(apply_usage.requests as usize),source_nodes:source_ids.len(),summary_node_id:Some(node.clone()),original_node_ids:source_ids,summary_usage:Some(apply_usage.clone()),..Default::default()};
                 let (selection_revision,reasoning_epoch):(i64,i64)=tx.query_row("SELECT selection_revision,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[&apply_capture.thread],|row|Ok((row.get(0)?,row.get(1)?)))?;
-                let fact=json!({"stage":automatic.stage,"selection_revision":selection_revision,"reasoning_epoch":reasoning_epoch,"summary_node_id":node,"source_nodes":result_value.source_nodes,"drop_all_reasoning":drop,"captured_reasoning_epoch":apply_capture.epoch,"summary":result_value}).to_string();
+                let fact=GcStageFact{selection_revision,reasoning_epoch,summary_node_id:node,source_nodes:result_value.source_nodes as u64,spilled_groups:result_value.spilled_groups as u64,drop_all_reasoning:drop,captured_reasoning_epoch:apply_capture.epoch,source_characters:result_value.source_characters,summary_characters:result_value.summary_characters,summary_limit:result_value.summary_limit,model_requests:result_value.model_requests.map(|n|n as u64),summary_usage:result_value.summary_usage.clone()};
                 Ok((result_value,fact))
             }).await;
             match adopted{Ok(value)=>{let _=result_tx.send(Ok(value));}Err(error)=>{let _=result_tx.send(Err(storage_error(error)));}}
             None
-        },Some(run_stop.clone())).await.map_err(storage_error)? else {return Ok(CompactResult{no_target:true,..Default::default()});};
+        },Some(run_stop.clone())).await.map_err(storage_error)?;
+        let job = match admission {
+            crate::storage::GcCaptureAdmission::NoTarget => {
+                return Ok(CompactResult {
+                    no_target: true,
+                    ..Default::default()
+                });
+            }
+            crate::storage::GcCaptureAdmission::Cancelled => {
+                return Err(discard::failed(
+                    discard::FailureReason::Cancelled,
+                    discard::FailureOrigin::Cancellation,
+                    "GC summary cancelled before producer admission; original path retained",
+                ));
+            }
+            crate::storage::GcCaptureAdmission::Started(job) => job,
+        };
         let mut result_rx = result_rx;
         tokio::select! {biased;
             _=run_stop.cancelled()=>{let _=self.database.cancel_gc_job(job).await;result_rx.await.map_err(|_|invalid("GC summary producer ended without terminal result"))?},
@@ -1340,28 +1419,52 @@ pub(super) fn replace_selected_path(
     Ok(next)
 }
 
-fn summary_key(s: &Snapshot, sources: &[Source]) -> String {
+fn summary_input_key(
+    profile: &str,
+    model: &str,
+    effort: Option<&str>,
+    epoch: i64,
+    sources: &[SummarySourceIdentity<'_>],
+) -> String {
+    let adapter = if sources.iter().any(|source| source.marker_adapter) {
+        MARKER_ADAPTER
+    } else {
+        ADAPTER
+    };
     key(&(
         FORMAT,
         PROMPT,
-        if sources
-            .iter()
-            .any(|source| summary_marker_item(&source.payload).is_some())
-        {
-            MARKER_ADAPTER
-        } else {
-            ADAPTER
-        },
-        &s.profile,
-        &s.model,
-        &s.effort,
-        s.epoch,
+        adapter,
+        profile,
+        model,
+        &effort,
+        epoch,
         sources
             .iter()
-            .map(|n| (&n.id, n.revision, &n.hash, &n.attachments))
+            .map(|source| (source.id, source.revision, source.hash, source.attachments))
             .collect::<Vec<_>>(),
     ))
 }
+fn summary_key(snapshot: &Snapshot, sources: &[Source]) -> String {
+    let identity = sources
+        .iter()
+        .map(|source| SummarySourceIdentity {
+            id: &source.id,
+            revision: source.revision,
+            hash: &source.hash,
+            attachments: &source.attachments,
+            marker_adapter: summary_marker_item(&source.payload).is_some(),
+        })
+        .collect::<Vec<_>>();
+    summary_input_key(
+        &snapshot.profile,
+        &snapshot.model,
+        snapshot.effort.as_deref(),
+        snapshot.epoch,
+        &identity,
+    )
+}
+
 fn source_groups(sources: Vec<Source>, completed: &HashSet<String>) -> Vec<Group> {
     // A non-API audit node may be saved while a shell is running. Keep the
     // complete span from a group's first call through its final result whole,
@@ -1545,6 +1648,82 @@ mod tests {
             summary_key(&snapshot, &only_a)
         );
     }
+    #[test]
+    fn shared_summary_artifact_keeps_key_payload_and_projection_in_one_recipe() {
+        let original = source(
+            "marker",
+            None,
+            json!({"context_trim":{},"item":{"role":"developer","content":"old"}}),
+        );
+        let snapshot = fixture_snapshot(vec![Group {
+            sources: vec![original.clone()],
+            complete: true,
+            tool: false,
+        }]);
+        let source_ids = vec![original.id.clone()];
+        let sources = vec![SummarySourceIdentity {
+            id: &original.id,
+            revision: original.revision,
+            hash: &original.hash,
+            attachments: &original.attachments,
+            marker_adapter: true,
+        }];
+        let usage = SummaryUsage {
+            requests: 1,
+            ..SummaryUsage::default()
+        };
+        let kept_reasoning_ids = vec!["kept-call".to_owned()];
+        let artifact = summary_artifact(SummaryArtifactInput {
+            profile: &snapshot.profile,
+            model: &snapshot.model,
+            effort: snapshot.effort.as_deref(),
+            epoch: snapshot.epoch,
+            sources: &sources,
+            source_ids: &source_ids,
+            text: "summary text",
+            usage: &usage,
+            output_limit_exceeded: true,
+            scope: Some("active_turn_middle"),
+            kept_reasoning_ids: &kept_reasoning_ids,
+            reasoning_epoch: Some(snapshot.epoch),
+        });
+        assert_eq!(
+            artifact.input_key,
+            summary_key(&snapshot, &[original.clone()])
+        );
+        assert_eq!(artifact.payload["source_node_ids"], json!(["marker"]));
+        assert_eq!(artifact.payload["summary_usage"]["requests"], 1);
+        assert_eq!(artifact.payload["summary_output_limit_exceeded"], true);
+        assert_eq!(artifact.payload["summary_scope"], "active_turn_middle");
+        assert_eq!(
+            artifact.payload["kept_reasoning_node_ids"],
+            json!(["kept-call"])
+        );
+        assert_eq!(artifact.payload["reasoning_epoch"], snapshot.epoch);
+        assert_eq!(
+            artifact.projection_characters,
+            edit::projection_characters(&artifact.payload, snapshot.epoch)
+        );
+        let changed_attachments = vec![json!({"id":"new"})];
+        let changed = vec![SummarySourceIdentity {
+            id: &original.id,
+            revision: original.revision,
+            hash: &original.hash,
+            attachments: &changed_attachments,
+            marker_adapter: true,
+        }];
+        assert_ne!(
+            artifact.input_key,
+            summary_input_key(
+                &snapshot.profile,
+                &snapshot.model,
+                snapshot.effort.as_deref(),
+                snapshot.epoch,
+                &changed
+            )
+        );
+    }
+
     #[test]
     fn source_groups_preserve_interleaved_audit_without_assigning_group_ids() {
         let completed = HashSet::from(["g".to_owned()]);
