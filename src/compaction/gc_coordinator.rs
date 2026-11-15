@@ -36,8 +36,26 @@ pub(crate) enum WriterJobPhase {
 pub(crate) enum CompletionDisposition {
     Accepted,
     Closed,
-    Rejected(super::discard::RejectionReason),
+    Rejected(WitnessRejection),
     Stale,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RejectionProvenance {
+    SourceWitness,
+    ExplicitRunStop,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WitnessRejection {
+    pub(crate) reason: super::discard::RejectionReason,
+    pub(crate) provenance: RejectionProvenance,
+}
+impl WitnessRejection {
+    fn observed(reason: super::discard::RejectionReason) -> Self {
+        Self {
+            reason,
+            provenance: RejectionProvenance::SourceWitness,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -71,6 +89,7 @@ struct CaptureWitness {
     model: String,
     effort: Option<String>,
     origin_turn: Option<String>,
+    origin_run: Option<String>,
     origin_generation: Option<i64>,
     request_turn_id: Option<String>,
     request_generation: Option<i64>,
@@ -87,6 +106,7 @@ impl From<&CapturedSummaryInput> for CaptureWitness {
             model: input.model.clone(),
             effort: input.effort.clone(),
             origin_turn: input.origin_turn.clone(),
+            origin_run: input.origin_run.clone(),
             origin_generation: input.origin_generation,
             request_turn_id: input.request_turn_id.clone(),
             request_generation: input.request_generation,
@@ -102,6 +122,7 @@ impl From<&CapturedSummaryInput> for CaptureWitness {
                         group_id: stamp.group_id.clone(),
                         protected: stamp.protected,
                         group_complete: group.complete,
+                        has_summary_marker: stamp.has_summary_marker,
                         attachments: stamp.attachments.clone(),
                     })
                 })
@@ -127,7 +148,7 @@ struct OwnedGcJob {
     lifecycle: Option<WriterLifecycle>,
     adoption_candidate: Option<Dispatched>,
     stage: super::attempt::GcStage,
-    rejection: Option<super::discard::RejectionReason>,
+    rejection: Option<WitnessRejection>,
 }
 
 #[derive(Debug)]
@@ -357,8 +378,8 @@ impl WriterGcCoordinator {
                             job.adoption_candidate = Some(summary);
                             job.phase = WriterJobPhase::Ready;
                         }
-                        Ok(Some(reason)) => {
-                            job.rejection = Some(reason);
+                        Ok(Some(rejection)) => {
+                            job.rejection = Some(rejection);
                             job.cancel.cancel();
                             job.phase = WriterJobPhase::Closing;
                         }
@@ -378,8 +399,8 @@ impl WriterGcCoordinator {
         }
         Ok(if job.phase == WriterJobPhase::Ready {
             CompletionDisposition::Accepted
-        } else if let Some(reason) = job.rejection {
-            CompletionDisposition::Rejected(reason)
+        } else if let Some(rejection) = job.rejection {
+            CompletionDisposition::Rejected(rejection)
         } else {
             CompletionDisposition::Closed
         })
@@ -426,13 +447,14 @@ impl WriterGcCoordinator {
         }
         match witness_rejection(db, &job.witness) {
             Ok(None) => {}
-            Ok(Some(reason)) => {
-                job.rejection = Some(reason);
+            Ok(Some(rejection)) => {
+                job.rejection = Some(rejection);
                 job.adoption_candidate = None;
                 job.phase = WriterJobPhase::Closing;
                 job.cancel.cancel();
                 return Err(crate::storage::StorageError::InvalidInput(format!(
-                    "GC source witness rejected before strict adoption: {reason:?}"
+                    "GC source witness rejected before strict adoption: {:?}",
+                    rejection.reason
                 )));
             }
             Err(error) => {
@@ -496,33 +518,33 @@ impl WriterGcCoordinator {
         &mut self,
         db: &Connection,
         id: WriterJobId,
-    ) -> Result<Option<super::discard::RejectionReason>, rusqlite::Error> {
+    ) -> Result<Option<WitnessRejection>, rusqlite::Error> {
         let Some(job) = self.active.as_mut().filter(|job| job.id == id) else {
-            return Ok(Some(super::discard::RejectionReason::SourceChanged));
+            return Ok(Some(WitnessRejection::observed(
+                super::discard::RejectionReason::SourceChanged,
+            )));
         };
         if job.cancel.is_cancelled() {
-            return Ok(Some(
-                job.rejection
-                    .unwrap_or(super::discard::RejectionReason::Cancelled),
-            ));
+            return Ok(Some(job.rejection.unwrap_or_else(|| {
+                WitnessRejection::observed(super::discard::RejectionReason::Cancelled)
+            })));
         }
         if job.phase != WriterJobPhase::Computing {
             return Ok(if job.phase == WriterJobPhase::Ready {
                 None
             } else {
-                Some(
-                    job.rejection
-                        .unwrap_or(super::discard::RejectionReason::SourceChanged),
-                )
+                Some(job.rejection.unwrap_or_else(|| {
+                    WitnessRejection::observed(super::discard::RejectionReason::SourceChanged)
+                }))
             });
         }
         match witness_rejection(db, &job.witness) {
             Ok(None) => Ok(None),
-            Ok(Some(reason)) => {
-                job.rejection = Some(reason);
+            Ok(Some(rejection)) => {
+                job.rejection = Some(rejection);
                 job.cancel.cancel();
                 job.phase = WriterJobPhase::Closing;
-                Ok(Some(reason))
+                Ok(Some(rejection))
             }
             Err(error) => {
                 job.cancel.cancel();
@@ -587,8 +609,8 @@ impl WriterGcCoordinator {
         }
         match witness_rejection(db, &job.witness) {
             Ok(None) => Ok(false),
-            Ok(Some(reason)) => {
-                job.rejection = Some(reason);
+            Ok(Some(rejection)) => {
+                job.rejection = Some(rejection);
                 job.phase = WriterJobPhase::Closing;
                 job.cancel.cancel();
                 job.adoption_candidate = None;
@@ -688,32 +710,46 @@ impl WriterGcCoordinator {
 fn witness_rejection(
     db: &Connection,
     witness: &CaptureWitness,
-) -> Result<Option<super::discard::RejectionReason>, rusqlite::Error> {
+) -> Result<Option<WitnessRejection>, rusqlite::Error> {
     use super::discard::RejectionReason as R;
     let facts:Option<(i64,i64,i64,String,String,Option<String>)>=db.query_row("SELECT profile_revision,reasoning_epoch,selection_nonappend_generation,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL AND archived_at IS NULL",[&witness.thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?))).optional()?;
     let Some(facts) = facts else {
-        return Ok(Some(R::ThreadUnavailable));
+        return Ok(Some(WitnessRejection::observed(R::ThreadUnavailable)));
     };
     if facts.0 != witness.profile_revision
         || facts.3 != witness.profile
         || facts.4 != witness.model
         || facts.5 != witness.effort
     {
-        return Ok(Some(R::ProfileChanged));
+        return Ok(Some(WitnessRejection::observed(R::ProfileChanged)));
     }
     if facts.1 != witness.epoch {
-        return Ok(Some(R::EpochChanged));
+        return Ok(Some(WitnessRejection::observed(R::EpochChanged)));
     }
     if facts.2 != witness.nonappend_generation {
-        return Ok(Some(R::NonappendGenerationChanged));
+        return Ok(Some(WitnessRejection::observed(
+            R::NonappendGenerationChanged,
+        )));
     }
-    let stopping: bool = db.query_row(
-        "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='stopping')",
-        [&witness.thread],
-        |r| r.get(0),
-    )?;
-    if stopping {
-        return Ok(Some(R::RunStopped));
+    let stop_reason: Option<Option<String>> = if let Some(run) = witness.origin_run.as_deref() {
+        db.query_row(
+            "SELECT stop_reason FROM run WHERE id=?1 AND thread_id=?2 AND state='stopping'",
+            params![run, witness.thread],
+            |r| r.get(0),
+        )
+        .optional()?
+    } else {
+        None
+    };
+    if let Some(stop_reason) = stop_reason {
+        return Ok(Some(WitnessRejection {
+            reason: R::RunStopped,
+            provenance: if stop_reason.as_deref() == Some("explicit_stop") {
+                RejectionProvenance::ExplicitRunStop
+            } else {
+                RejectionProvenance::SourceWitness
+            },
+        }));
     }
     for (turn, expected) in [
         (witness.origin_turn.as_deref(), witness.origin_generation),
@@ -731,7 +767,7 @@ fn witness_rejection(
                 )
                 .optional()?;
             if current != expected {
-                return Ok(Some(R::TurnChanged));
+                return Ok(Some(WitnessRejection::observed(R::TurnChanged)));
             }
         }
     }
@@ -740,7 +776,7 @@ fn witness_rejection(
     };
     let last = witness.sources.last().expect("first source checked");
     let Some(end) = last.ordinal.checked_add(1) else {
-        return Ok(Some(R::SourceChanged));
+        return Ok(Some(WitnessRejection::observed(R::SourceChanged)));
     };
     let current =
         super::gc_capture::selected_source_facts(db, &witness.thread, first.ordinal..end)?;
@@ -749,7 +785,8 @@ fn witness_rejection(
         &current,
         super::gc_capture::SourceFactPolicy::EarlyReconcile,
     )
-    .err())
+    .err()
+    .map(WitnessRejection::observed))
 }
 
 #[cfg(test)]
@@ -760,7 +797,7 @@ mod attachment_witness_tests {
     fn setup() -> (Connection, CaptureWitness) {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE thread(id TEXT,profile_revision INTEGER,reasoning_epoch INTEGER,selection_nonappend_generation INTEGER,profile_id TEXT,model_id TEXT,effort TEXT,deleted_at TEXT,archived_at TEXT,selection_revision INTEGER);
-          CREATE TABLE run(thread_id TEXT,state TEXT);
+          CREATE TABLE run(id TEXT,thread_id TEXT,state TEXT,stop_reason TEXT);
           CREATE TABLE turn(id TEXT,thread_id TEXT,generation INTEGER);
           CREATE TABLE node(id TEXT,payload_revision INTEGER,turn_id TEXT,payload_json TEXT);
           CREATE TABLE thread_path(thread_id TEXT,ordinal INTEGER,node_id TEXT);
@@ -771,7 +808,7 @@ mod attachment_witness_tests {
           CREATE TABLE tool_call(group_id TEXT,call_id TEXT,state TEXT);
           CREATE TABLE tool_result(group_id TEXT,call_id TEXT);
           INSERT INTO thread VALUES('t',3,7,2,'p','m',NULL,NULL,NULL,8);
-          INSERT INTO run VALUES('t','completed');
+          INSERT INTO run VALUES('r','t','completed',NULL);
           INSERT INTO node VALUES('source',4,NULL,'{}');
           INSERT INTO thread_path VALUES('t',0,'source');").unwrap();
         let attachments = super::super::gc_capture::selected_source_facts(&db, "t", 0..1).unwrap()
@@ -787,6 +824,7 @@ mod attachment_witness_tests {
             model: "m".into(),
             effort: None,
             origin_turn: None,
+            origin_run: Some("r".into()),
             origin_generation: None,
             request_turn_id: None,
             request_generation: None,
@@ -798,6 +836,7 @@ mod attachment_witness_tests {
                 group_id: None,
                 protected: false,
                 group_complete: true,
+                has_summary_marker: false,
                 attachments,
             }],
         };
@@ -816,18 +855,41 @@ mod attachment_witness_tests {
         .unwrap();
         assert_eq!(
             witness_rejection(&db, &witness).unwrap(),
-            Some(R::SourceChanged)
+            Some(WitnessRejection::observed(R::SourceChanged))
         );
 
         let (mut db, witness) = setup();
         db.execute_batch("INSERT INTO attachment_ref VALUES('a','source','/synthetic','file','external','now'); INSERT INTO attachment_selection VALUES('t','a','active',NULL);").unwrap();
         assert_eq!(
             witness_rejection(&db, &witness).unwrap(),
-            Some(R::SourceChanged)
+            Some(WitnessRejection::observed(R::SourceChanged))
         );
 
         let (mut db, witness) = setup();
         db.execute_batch("UPDATE thread SET selection_revision=selection_revision+1; INSERT INTO node VALUES('tail',1,NULL,'{}'); INSERT INTO thread_path VALUES('t',1,'tail');").unwrap();
         assert_eq!(witness_rejection(&db, &witness).unwrap(), None);
+
+        let (mut db, witness) = setup();
+        db.execute(
+            "UPDATE run SET state='stopping',stop_reason='stopping' WHERE thread_id='t'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            witness_rejection(&db, &witness).unwrap(),
+            Some(WitnessRejection::observed(R::RunStopped))
+        );
+        db.execute(
+            "UPDATE run SET stop_reason='explicit_stop' WHERE thread_id='t'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            witness_rejection(&db, &witness).unwrap(),
+            Some(WitnessRejection {
+                reason: R::RunStopped,
+                provenance: RejectionProvenance::ExplicitRunStop
+            })
+        );
     }
 }

@@ -621,7 +621,7 @@ impl DbWorker {
     pub(crate) async fn validate_gc_job(
         &self,
         id: crate::compaction::WriterJobId,
-    ) -> Result<Option<crate::compaction::discard::RejectionReason>, StorageError> {
+    ) -> Result<Option<crate::compaction::WitnessRejection>, StorageError> {
         let (tx, rx) = oneshot::channel();
         let job: Job = Box::new(move |db, _, _, coordinator| {
             let result = coordinator.validate_job(db, id).map_err(StorageError::from);
@@ -2707,6 +2707,7 @@ mod lane_budget_tests {
             revision: 1,
             hash: "hash".into(),
             marker_adapter: false,
+            has_summary_marker: false,
             group_id: None,
             protected: false,
             attachments: attachments.clone(),

@@ -162,7 +162,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
     if fault != Fault::RejectFact && final_write_is_expected {
         assert!(
             reached.load(Ordering::SeqCst),
-            "intended injector reached before shutdown"
+            "declared postcommit hook reached its configured checkpoint"
         );
     }
     assert!(
@@ -265,11 +265,12 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         );
     }
     if fault == Fault::Cancellation && scenario == Scenario::ActiveSpill {
-        // The cancelled boundary is observed by the real next stage: the active
-        // summary is entered and discarded as cancelled, with no provider POST.
+        // Stop is already set at the active-spill checkpoint. The required
+        // pre-cancel fast path enters the closed-summary caller, returns before
+        // planning, and does not manufacture an active fallback stage.
         let record = &terminal.record;
         assert_eq!(
-            record["compaction_outcome"]["phase"], "active_summary",
+            record["compaction_outcome"]["phase"], "closed_summary",
             "{record}"
         );
         assert_eq!(
@@ -847,49 +848,64 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     let owner = proactive_owner(root.path(), &url, limits).await;
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;
-    if !active {
-        for text in ["hi", "yo"] {
-            send(&control, &target, text).await;
-            incoming(&control, &mut receive)
-                .await
-                .reply
-                .send((200, answer("ok")))
-                .unwrap();
-            settled(&control, &target).await;
+    // Use persisted, completed tool/source history with no live Driver task.
+    // The old fixture held an in-flight Driver response while calling the
+    // internal summary stage with a different local boundary Mutex; native GC
+    // correctly waited for Control's real per-Thread boundary, deadlocking the
+    // test itself. This seed uses production schema/path/tool rows and the same
+    // real Control boundary below, without an invented driver snapshot.
+    let target_for_seed = target.clone();
+    let target_for_seed = target.clone();
+    let(active_run,request_turn,attempt)=control.store.database.call(move|db|{
+        let tx=db.transaction()?;
+        let(profile,model,effort):(String,String,Option<String>)=tx.query_row("SELECT profile_id,model_id,effort FROM thread WHERE id=?1",[&target_for_seed],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        let run=uuid::Uuid::new_v4().to_string();
+        let request_turn=uuid::Uuid::new_v4().to_string();
+        let old_run=(!active).then(||uuid::Uuid::new_v4().to_string());
+        let old_turn=(!active).then(||uuid::Uuid::new_v4().to_string());
+        if let (Some(old_run),Some(old_turn))=(&old_run,&old_turn){
+            tx.execute("INSERT INTO run(id,thread_id,state,created_at,ended_at)VALUES(?1,?2,'completed','fixture','fixture')",rusqlite::params![old_run,target_for_seed])?;
+            tx.execute("INSERT INTO turn(id,thread_id,run_id,state,generation,created_at,ended_at)VALUES(?1,?2,?3,'completed',0,'fixture','fixture')",rusqlite::params![old_turn,target_for_seed,old_run])?;
+            for(kind,role,text)in[("user","user","prior request"),("assistant_response","assistant","prior answer")]{let node=uuid::Uuid::new_v4().to_string();crate::history::append_node(&tx,&target_for_seed,&node,Some(old_turn),kind,&json!({"role":role,"content":[{"type":"input_text","text":text}]}),"fixture")?;}
         }
-    }
-    send(&control, &target, &"protected current ".repeat(15_000)).await;
-    let command = if cfg!(windows) {
-        "'0' * 50000"
-    } else {
-        "printf '%050000d' 0"
-    };
-    for index in 0..2 {
-        incoming(&control, &mut receive).await.reply.send((200, json!({"id":format!("site-{index}"),"status":"completed","usage":{"input_tokens":100,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("site-{index}"),"name":"shell","arguments":json!({"command":command}).to_string()}]}))).unwrap();
-    }
-    let held = incoming(&control, &mut receive).await;
-    let held = if active {
-        held
-    } else {
-        held.reply
-            .send((200, answer_with_usage("done", 100)))
-            .unwrap();
-        settled(&control, &target).await;
-        send(&control, &target, "next turn").await;
-        incoming(&control, &mut receive).await
-    };
-    // Calibration needs the request size; none is the uncalibrated case.
-    let (thread_id, run, turn, attempt) = control.store.database.call({
-        let target = target.clone();
-        move |db| Ok(db.query_row(
-            "SELECT t.thread_id,t.run_id,t.id,(SELECT a.id FROM model_attempt a WHERE a.state='completed' ORDER BY a.rowid DESC LIMIT 1) FROM turn t WHERE t.thread_id=?1 ORDER BY t.rowid DESC LIMIT 1",
-            [target], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, String>(3)?)))?)
+        tx.execute("INSERT INTO run(id,thread_id,state,created_at)VALUES(?1,?2,'live','fixture')",rusqlite::params![run,target_for_seed])?;
+        tx.execute("INSERT INTO turn(id,thread_id,run_id,state,generation,created_at)VALUES(?1,?2,?3,'running',0,'fixture')",rusqlite::params![request_turn,target_for_seed,run])?;
+        let source_turn=if active{request_turn.clone()}else{old_turn.clone().expect("closed path has old turn")};
+        let mut attempt=uuid::Uuid::new_v4().to_string();
+        let insert_attempt=|tx:&rusqlite::Transaction<'_>,attempt:&str,turn:&str|->Result<(),crate::storage::StorageError>{
+            let revision:i64=tx.query_row("SELECT selection_revision FROM thread WHERE id=?1",[&target_for_seed],|r|r.get(0))?;
+            tx.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,effort,reasoning_epoch,state,input_manifest_json,started_at)VALUES(?1,?2,0,?3,?4,?5,?6,0,'completed','{}','fixture')",rusqlite::params![attempt,turn,revision,profile,model,effort])?;Ok(())
+        };
+        if active{
+            let user=uuid::Uuid::new_v4().to_string();
+            crate::history::append_node(&tx,&target_for_seed,&user,Some(&request_turn),"user",&json!({"role":"user","content":[{"type":"input_text","text":"current request"}]}),"fixture")?;
+            insert_attempt(&tx,&attempt,&request_turn)?;
+            for index in 1..=2{
+                let group=format!("g{index}");let call=format!("c{index}");let call_node=uuid::Uuid::new_v4().to_string();let result_node=uuid::Uuid::new_v4().to_string();
+                let group_attempt=if index==1{attempt.clone()}else{let next=uuid::Uuid::new_v4().to_string();insert_attempt(&tx,&next,&request_turn)?;attempt=next.clone();next};
+                tx.execute("INSERT INTO tool_group(id,attempt_id,turn_id,state,created_at)VALUES(?1,?2,?3,'completed','fixture')",rusqlite::params![group,group_attempt,request_turn])?;
+                let item=json!({"type":"function_call","call_id":call,"name":"shell","arguments":"{}"});
+                let call_payload=json!({"role":"assistant","group_id":group,"output":[item.clone()]});
+                crate::history::append_node(&tx,&target_for_seed,&call_node,Some(&request_turn),"assistant_response",&call_payload,"fixture")?;
+                tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_id,item_type,status,payload_json,node_id)VALUES(?1,0,?2,'function_call','completed',?3,?4)",rusqlite::params![group_attempt,call,item.to_string(),call_node])?;
+                tx.execute("INSERT INTO tool_call(group_id,call_id,ordinal,tool_name,arguments_json,state)VALUES(?1,?2,0,'shell','{}','completed')",rusqlite::params![group,call])?;
+                let result_payload=json!({"role":"tool","group_id":group,"call_id":call,"content":"ok"});
+                crate::history::append_node(&tx,&target_for_seed,&result_node,Some(&request_turn),"tool_result",&result_payload,"fixture")?;
+                tx.execute("INSERT INTO tool_result(group_id,call_id,node_id,status)VALUES(?1,?2,?3,'completed')",rusqlite::params![group,call,result_node])?;
+            }
+        }else{
+            insert_attempt(&tx,&attempt,&source_turn)?;
+            let node=uuid::Uuid::new_v4().to_string();
+            crate::history::append_node(&tx,&target_for_seed,&node,Some(&request_turn),"user",&json!({"role":"user","content":[{"type":"input_text","text":"current request"}]}),"fixture")?;
+        }
+        tx.commit()?;Ok((run,request_turn,attempt))
     }).await.unwrap();
+    let thread_id = target.clone();
     let automatic = Automatic {
         attempt: attempt.clone(),
         token: "site-token".into(),
         thread: thread_id.clone(),
-        turn,
+        turn: request_turn,
     };
     let begin = (attempt.clone(), automatic.token.clone());
     control
@@ -905,6 +921,10 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
                 crate::compaction::ABoundaryObservation::Observe,
                 &json!({}),
                 &Value::Null,
+            )?;
+            tx.execute(
+                crate::compaction::discard::STAGE_SQL,
+                rusqlite::params![&begin.0, &begin.1, "active_summary"],
             )?;
             tx.commit()?;
             Ok(())
@@ -932,37 +952,32 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     });
     let slot = DriverSlot {
         id: "site".into(),
-        run_id: run,
+        run_id: active_run,
         stop: tokio_util::sync::CancellationToken::new(),
         nudge: Arc::new(tokio::sync::Notify::new()),
         foreground: Arc::new(crate::control::foreground::ForegroundSlot::default()),
         turn: Arc::new(tokio::sync::Mutex::new(None)),
     };
-    let mutex = tokio::sync::Mutex::new(());
+    let mutex = control.boundary(&thread_id).await;
     let mut boundary = crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await);
-    let work = summary_stage(
-        &control,
-        &control.compactor,
-        &thread_id,
-        &slot,
-        active,
-        &mut boundary,
-        &automatic,
-        slot.stop.clone(),
-    );
-    let answer_summary = async {
-        let request = incoming(&control, &mut receive).await;
-        assert_eq!(request.body["tools"], json!([]));
-        request
-            .reply
-            .send((200, answer("Short site summary.")))
-            .unwrap();
-    };
-    let (result, ()) = tokio::join!(work, answer_summary);
+    let result=async{
+        let work=summary_stage(&control,&control.compactor,&thread_id,&slot,active,&mut boundary,&automatic,slot.stop.clone());
+        tokio::pin!(work);
+        eprintln!("uncalibrated phase=await-summary-http active={active} fault={fault:?}");
+        let request=tokio::select!{
+            result=&mut work=>panic!("uncalibrated summary ended before provider admission: active={active} fault={fault:?} no_target={} err={:?}",result.as_ref().is_ok_and(|value|value.no_target),result.as_ref().err().map(|error|(error.code,error.message.clone()))),
+            request=incoming(&control,&mut receive)=>request,
+        };
+        eprintln!("uncalibrated phase=summary-http-reached active={active} fault={fault:?}");
+        assert_eq!(request.body["tools"],json!([]));
+        request.reply.send((200,answer("Short site summary."))).unwrap();
+        work.await
+    }.await;
+    let error = result.unwrap_err();
     assert_eq!(
-        result.unwrap_err().code,
+        error.code,
         ErrorCode::SaveFailed,
-        "the checkpoint fault follows the commit"
+        "the checkpoint fault follows the commit: {error:?}"
     );
     assert!(reached.load(Ordering::SeqCst));
     drop(boundary);
@@ -1005,7 +1020,6 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         .await
         .unwrap();
     assert_eq!(pending, 0);
-    drop(held);
     let _ = control.shutdown().await;
     owner.shutdown().await.unwrap();
     server.abort();

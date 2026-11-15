@@ -16,6 +16,7 @@ pub(crate) struct CapturedSourceStamp {
     pub(crate) revision: i64,
     pub(crate) hash: String,
     pub(crate) marker_adapter: bool,
+    pub(crate) has_summary_marker: bool,
     pub(crate) group_id: Option<String>,
     pub(crate) protected: bool,
     pub(crate) attachments: Vec<Value>,
@@ -97,6 +98,7 @@ struct RowPlan {
     complete: bool,
     protected: bool,
     summary: bool,
+    attachments: Vec<Value>,
 }
 
 impl CapturedSourceStamp {
@@ -598,56 +600,27 @@ fn capture_gc_plan_and_sources(
         )));
     }
 
-    let mut row_plans = Vec::new();
-    row_plans
-        .try_reserve_exact(range_len)
-        .map_err(|_| overflow())?;
-    let mut statement = tx.prepare(
-        "SELECT p.ordinal,n.id,n.turn_id,n.payload_revision,
-            json_extract(n.payload_json,'$.group_id'),
-            EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),
-            json_type(n.payload_json,'$.summary_format') IS NOT NULL
-         FROM thread_path p JOIN node n ON n.id=p.node_id
-         WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 ORDER BY p.ordinal",
-    )?;
-    let meta_rows = statement.query_map(params![thread, start, end], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, i64>(3)?,
-            row.get::<_, Option<String>>(4)?,
-            row.get::<_, bool>(5)?,
-            row.get::<_, bool>(6)?,
-        ))
-    })?;
-    for row in meta_rows {
-        let (ordinal, id, turn, revision, group_id, protected, summary) = row?;
-        let group_complete = if let Some(group) = &group_id {
-            tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",
-                [group], |r| r.get::<_,bool>(0),
-            )?
-        } else {
-            true
-        };
-        row_plans.push(RowPlan {
-            ordinal,
-            id,
-            turn,
-            revision,
-            group_id,
-            complete: group_complete,
-            protected,
-            summary,
-        });
-    }
-    drop(statement);
-    if row_plans.len() != range_len {
+    let captured_facts = selected_source_facts(&tx, thread, start..end)?;
+    if captured_facts.len() != range_len {
         return Err(StorageError::from(invalid(
             "Selected GC summary interval changed during capture",
         )));
     }
+    let mut row_plans = Vec::new();
+    row_plans
+        .try_reserve_exact(range_len)
+        .map_err(|_| overflow())?;
+    row_plans.extend(captured_facts.into_iter().map(|fact| RowPlan {
+        ordinal: fact.ordinal,
+        id: fact.id,
+        turn: fact.turn,
+        revision: fact.revision,
+        group_id: fact.group_id,
+        complete: fact.group_complete,
+        protected: fact.protected,
+        summary: fact.has_summary_marker,
+        attachments: fact.attachments,
+    }));
     let plan = &planned;
     if plan.selection_revision != thread_facts.0
         || plan.profile_revision != thread_facts.1
@@ -662,6 +635,7 @@ fn capture_gc_plan_and_sources(
                 || source.group_id != row.group_id
                 || source.protected != row.protected
                 || source.group_complete != row.complete
+                || source.has_summary_marker != row.summary
         })
     {
         return Err(StorageError::InvalidInput(
@@ -754,7 +728,7 @@ fn capture_gc_plan_and_sources(
             .ok_or_else(overflow)?;
         current.has_unsummarized |= !row.summary;
         let hash = key(&(row.revision, &payload));
-        let attachments = load_attachments(&tx, thread, &row.id)?;
+        let attachments = row.attachments;
         if !current.stamps.is_empty() {
             current.text.push_str("\n\n");
         }
@@ -775,6 +749,7 @@ fn capture_gc_plan_and_sources(
             revision: row.revision,
             hash,
             marker_adapter,
+            has_summary_marker: row.summary,
             group_id: row.group_id.clone(),
             protected: row.protected,
             attachments,
@@ -917,6 +892,7 @@ pub(super) struct GcSourceFacts {
     pub(super) group_id: Option<String>,
     pub(super) protected: bool,
     pub(super) group_complete: bool,
+    pub(super) has_summary_marker: bool,
     pub(super) attachments: Vec<Value>,
 }
 
@@ -928,7 +904,7 @@ pub(super) fn selected_source_facts(
     thread: &str,
     range: Range<i64>,
 ) -> Result<Vec<GcSourceFacts>, rusqlite::Error> {
-    let mut statement=db.prepare("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,COALESCE((SELECT json_group_array(json_object('id',a.id,'path',a.absolute_path,'kind',a.input_kind,'state',COALESCE(a.state,'not_selected'),'reason',a.reason)) FROM (SELECT ar.id,ar.absolute_path,ar.input_kind,ar.created_at,se.state,se.reason FROM attachment_ref ar LEFT JOIN attachment_selection se ON se.attachment_id=ar.id AND se.thread_id=?1 WHERE ar.source_node_id=n.id ORDER BY ar.created_at,ar.id) a),'[]') FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 ORDER BY p.ordinal")?;
+    let mut statement=db.prepare("SELECT p.ordinal,n.id,n.payload_revision,n.turn_id,json_extract(n.payload_json,'$.group_id'),EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?1 AND q.message_node_id=n.id AND q.state IN ('accepted','held')),CASE WHEN json_extract(n.payload_json,'$.group_id') IS NULL THEN 1 ELSE EXISTS(SELECT 1 FROM tool_group g WHERE g.id=json_extract(n.payload_json,'$.group_id') AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id)))) END,json_type(n.payload_json,'$.summary_format') IS NOT NULL,COALESCE((SELECT json_group_array(json_object('id',a.id,'path',a.absolute_path,'kind',a.input_kind,'state',COALESCE(a.state,'not_selected'),'reason',a.reason)) FROM (SELECT ar.id,ar.absolute_path,ar.input_kind,ar.created_at,se.state,se.reason FROM attachment_ref ar LEFT JOIN attachment_selection se ON se.attachment_id=ar.id AND se.thread_id=?1 WHERE ar.source_node_id=n.id ORDER BY ar.created_at,ar.id) a),'[]') FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND p.ordinal>=?2 AND p.ordinal<?3 ORDER BY p.ordinal")?;
     let rows = statement.query_map(params![thread, range.start, range.end], |row| {
         Ok((
             row.get::<_, i64>(0)?,
@@ -938,14 +914,25 @@ pub(super) fn selected_source_facts(
             row.get::<_, Option<String>>(4)?,
             row.get::<_, bool>(5)?,
             row.get::<_, bool>(6)?,
-            row.get::<_, String>(7)?,
+            row.get::<_, bool>(7)?,
+            row.get::<_, String>(8)?,
         ))
     })?;
     rows.map(|row| {
-        let (ordinal, id, revision, turn, group_id, protected, group_complete, attachments) = row?;
+        let (
+            ordinal,
+            id,
+            revision,
+            turn,
+            group_id,
+            protected,
+            group_complete,
+            has_summary_marker,
+            attachments,
+        ) = row?;
         let attachments = serde_json::from_str(&attachments).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
-                7,
+                8,
                 rusqlite::types::Type::Text,
                 Box::new(error),
             )
@@ -958,6 +945,7 @@ pub(super) fn selected_source_facts(
             group_id,
             protected,
             group_complete,
+            has_summary_marker,
             attachments,
         })
     })
@@ -992,6 +980,7 @@ pub(super) fn classify_selected_source_facts(
             || expected.group_id != actual.group_id
             || expected.protected != actual.protected
             || expected.group_complete != actual.group_complete
+            || expected.has_summary_marker != actual.has_summary_marker
             || expected.attachments != actual.attachments
             || (policy == SourceFactPolicy::StrictFinalAdoption
                 && (!actual.group_complete || actual.protected))
@@ -1000,25 +989,4 @@ pub(super) fn classify_selected_source_facts(
         }
     }
     Ok(())
-}
-
-pub(super) fn load_attachments(
-    tx: &rusqlite::Connection,
-    thread: &str,
-    source: &str,
-) -> Result<Vec<Value>, rusqlite::Error> {
-    let mut attachments = Vec::new();
-    let mut statement = tx.prepare(
-        "SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id",
-    )?;
-    let mut rows = statement.query(params![source, thread])?;
-    while let Some(row) = rows.next()? {
-        let id: String = row.get(0)?;
-        let path: String = row.get(1)?;
-        let kind: String = row.get(2)?;
-        let state: String = row.get(3)?;
-        let reason: Option<String> = row.get(4)?;
-        attachments.push(json!({"id":id,"path":path,"kind":kind,"state":state,"reason":reason}));
-    }
-    Ok(attachments)
 }

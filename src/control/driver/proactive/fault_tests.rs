@@ -65,21 +65,32 @@ fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
-            // Strict summary FINISH is inside adoption, before this test's
-            // post-stage W4 injector is installed; those summary cases adopted.
-            Fault::RejectFinal if scenario.summary() => "adopted",
-            // A cancellation at the active-spill boundary is observed by the
-            // following active summary stage of the same attempt (§3): the
-            // committed spill stays and the attempt ends `cancelled` (§6.4,
-            // typed discard #301A). At every other selected stage the
-            // cancelled boundary is the attempt's last stage, so it adopts.
-            Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
-            Fault::Cancellation => "adopted",
-            Fault::Persistent | Fault::RejectFinal => "unknown",
-            Fault::Storage
+            // Native summary strict FINISH is part of the same transaction as
+            // stage/path adoption. Post-stage faults cannot rewrite that final
+            // fact to unknown/failed; RejectFact remains a precommit rollback.
+            Fault::Persistent
+            | Fault::RejectFinal
+            | Fault::Storage
             | Fault::RetiredWritesAbsent
             | Fault::Remeasurement
-            | Fault::RejectFact => "failed",
+                if scenario.summary() =>
+            {
+                "adopted"
+            }
+            // Remeasurement runs after a successful following summary FINISH
+            // when this fault is armed at a spill checkpoint.
+            Fault::Remeasurement if scenario == Scenario::ActiveSpill => "adopted",
+            Fault::RejectFact => "failed",
+            // Cancellation after active spill is observed by the closed-summary
+            // entry. Pre-cancel returns before planning, so there is no active
+            // fallback stage; the committed spill remains and outcome is cancelled.
+            Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
+            // Other summary boundaries already completed atomic FINISH before
+            // the post-stage cancellation hook runs.
+            Fault::Cancellation if scenario.summary() => "adopted",
+            Fault::Cancellation => "adopted",
+            Fault::Persistent | Fault::RejectFinal => "unknown",
+            Fault::Storage | Fault::RetiredWritesAbsent | Fault::Remeasurement => "failed",
         },
     }
 }
@@ -107,6 +118,9 @@ impl Scenario {
     }
     fn summary(self) -> bool {
         matches!(self, Self::ClosedSummary | Self::ActiveSummary)
+    }
+    fn spill(self) -> bool {
+        matches!(self, Self::ClosedSpill | Self::ActiveSpill)
     }
     fn target_percent(self) -> u64 {
         match self {
@@ -706,7 +720,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
     if fault != Fault::RejectFact {
         assert!(
             reached.load(Ordering::SeqCst),
-            "fault hook actually reached its intended write/operation"
+            "fault hook reached its configured checkpoint"
         );
     }
     assert_boundary(&control, &target, scenario, fault, "shutdown").await;

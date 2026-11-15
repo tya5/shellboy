@@ -72,13 +72,25 @@ impl SummaryAdoption {
             }
         }
         validate(tx, &self.snapshot)?;
-        let node = store_replacement(
+        let selected_sources = self
+            .sources
+            .iter()
+            .map(|source| ReplacementSource {
+                id: &source.id,
+                revision: source.revision,
+                hash: &source.hash,
+            })
+            .collect::<Vec<_>>();
+        let node = store_replacement_material_tx(
             tx,
             config,
-            &self.snapshot,
-            &self.sources,
-            &self.payload,
-            FORMAT,
+            ReplacementMaterial {
+                thread: &self.snapshot.thread,
+                input_key: &self.input_key,
+                format: FORMAT,
+                sources: &selected_sources,
+                payload: &self.payload,
+            },
         )?;
         let snapshot_path = self
             .snapshot
@@ -476,6 +488,7 @@ pub(super) fn adopt_gc_result_tx(
                     group_id: stamp.group_id.clone(),
                     protected: stamp.protected,
                     group_complete: group.complete,
+                    has_summary_marker: stamp.has_summary_marker,
                     attachments: stamp.attachments.clone(),
                 })
         })

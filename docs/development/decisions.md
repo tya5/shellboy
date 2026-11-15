@@ -4523,3 +4523,13 @@ provenance rather than producer cancellation. Explicit Run Stop retains cancella
 semantics. Counterexamples and stage ownership are recorded in the current Core301 section
 of `docs/design/compaction.md`. This decision does not qualify the full integration,
 rollback/fault matrix, independent review or cross-platform behavior.
+
+
+## CORE301 RunStopped witness versus explicit Stop token (2026-11-15)
+
+A `RunStopped` fact from writer witness validation remains a typed rejection and must be durably reported. It does not synthesize cancellation of the owning driver's Run token. An actual explicit Run Stop already cancels that token through its owner and retains cancellation semantics. This keeps persisted state evidence distinct from the caller's cancellation cause and allows Status/log publication to finish. Oracle: `completed_trigger_real_run_turn_rejections_are_visible_in_status_and_log`, alongside the active RunStop/cancellation control.
+
+
+## CORE301 fb full-native failure disposition (2026-11-15)
+
+The first complete native run on exact candidate `fb056edbc41aecb13cc3b1f43d7d6fbdfe4d521a` exited 101: 2,632 passed, 9 failed, 25 ignored in 482.87 seconds; owned-group cleanup was confirmed. Keep it distinct from `039e495...`'s earlier full RED. `docs/validation/acceptance.md` preserves the nine original failures and exact follow-up control receipts. The stop-witness status timeout and pre-cancel/cross-stage phase oracle have scoped corrections with exact tests; atomic summary FINISH now has actual checkpoint-order rationale and the affected persistent/storage/retired/remeasurement matrix controls pass. The two uncalibrated watchdog fixtures were invalid: they held an in-flight driver response while directly entering internal summary with a different local boundary, blocking the real per-Thread boundary. Rebuilt real-source fixture reaches HTTP but currently returns `InvalidState` at strict adoption before its injector; retain this as unresolved, and do not loosen CAS or claim fixture-only without causal evidence. No whole-current native, normal completion, or three-OS qualification is claimed.
