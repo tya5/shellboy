@@ -3,71 +3,64 @@
 ## CORE301 current-main GC port candidate (not main state)
 
 The isolated worktree `task/core301-single-request-port-63724` is based on
-`c0c1d82767f061c60c2f4d46673a3cfa30560145`. C7 terminal-cause projection source commit
-is `fc3019daec8d042141df6f84ce9b60aeaf90670b`. C7.1 typed capture/stage refactor is
-`7790e363d1662138928284c1edf99f108f11c83e`. C8 committed-spill custody repair is
-`a5f9b0afd6c02ef0e5314a65720c110d2df29430`. C3 paired fault acceptance cell is
-`08f2602019ee313203ebba86c27319dd49af0c71`. The final C3 design/status SHA will be
-committed after this update; no older standard-check result transfers to it.
+`c0c1d82767f061c60c2f4d46673a3cfa30560145`. C8 spill-custody source is
+`a5f9b0afd6c02ef0e5314a65720c110d2df29430`; the C3 paired pre-FINISH rejection /
+postcommit storage acceptance cell is `08f2602019ee313203ebba86c27319dd49af0c71`,
+with formatter follow-up `86e3631ba290dba1a0b29d1708be984f0a597b6c`. The C3 bounded
+review is accepted in `.local/leader/core301-2cc731-fault-pair-bounded-review.md`
+(SHA-256 `db20f044921f7d5a58be9cdf8581c094eddadefa82cc7094fc322919b2bfb4a4`).
+Review acceptance does not establish runtime qualification.
 
-**Prelanding scope closure.** C6-2 one-owner Closed/Active stage sequencing is in C7.1
-and C8: the typed result returns the `Result` and committed spill together, only active
-mode after authoritative closed-summary `NoTarget` can spill, and later summary error /
-checkpoint cancellation cannot erase the committed spill from terminal aggregation. C6-3
-single source-fact authority is in C6 source commit `a0ad66e1aa75f77d16f4c3891db592e500d7241d`
-and preserved by C7.1: `CapturedSourceStamp.source` holds `GcSourceFacts`; writer witness
-uses `stamp.source.clone()`, and group-completeness agreement is checked in the selected-R
-classifier (`gc_coordinator.rs:98`, `gc_capture.rs:645`). C3 is now implemented in
-`record_tests.rs`: one `ActiveSummary` acceptance cell runs true `Fault::RejectFact`
-(the SQL trigger aborts the committed-stage update inside adoption, rolling back replacement,
-path, epoch and stage) and a matched `Fault::Storage` cell whose injection is armed only
-at the postcommit checkpoint. The cell asserts same immutable trigger, rejection has no
-active-summary fact, committed adoption has it, and both traverse the shared path/epoch,
-replacement/source and restart oracle. The matrix omits ActiveSummary from the separate
-Storage/RejectFact loops, so this pair does not duplicate those cells. Persistent write,
-remeasurement, cancellation, retired-write, spill/summary routing and RejectFinal controls
-remain registered. The actual migration is an aborting SQL trigger, not reason-string or
-simulated outcome control.
+C3 runs the true SQL-triggered `Fault::RejectFact` inside adoption (pre-FINISH
+rollback) and matched `Fault::Storage` at its postcommit checkpoint for the same
+`ActiveSummary` scenario. Both go through the shared path/epoch/source/restart oracle;
+the test compares the exact five-field immutable trigger identity, not unrelated
+per-attempt `run_id` / boundary metadata. It requires failed/no active-summary stage
+fact versus adopted/committed stage fact. The duplicate ActiveSummary cases were
+removed only from the two separate fault loops; other scenarios and unique cancellation,
+storage, remeasurement, persistent-write, retired-write, `RejectFinal`, routing and
+restart controls remain.
 
-**Exact-SHA qualification.** C8 `scripts/check.sh` passed on SHA
-`618a2af8dcfbd846d453bf105839f458421e1328`, guarded execution
-`03601035-cd39-40d9-9529-835a4e8a2ffe`, exit 0 and cleanup confirmed after 916.007s.
-It ran layout checks, Python suite (228 pass), fmt check, strict all-target Clippy,
-full all-target tests (2,647 library / 0 failed / 25 ignored; 1,415 integration / 0 failed /
-19 ignored; 14 passed / 1 ignored and 9 passed / 2 ignored additional targets), and exact
-`test-db-observation` selector 1/1. This qualifies 618a only. C3 source/test commit
-`08f2602019ee313203ebba86c27319dd49af0c71` adds the paired ActiveSummary acceptance cell;
-`86e3631ba290dba1a0b29d1708be984f0a597b6c` is the formatter-only follow-up after the
-first new-SHA standard run correctly stopped at `cargo fmt --check`.
-It executes true `Fault::RejectFact` and postcommit `Fault::Storage` for the same scenario,
-then asserts same trigger and contrasting failed/no-stage versus adopted/stage-fact records.
-Both flow through `record_boundary`'s shared path/epoch/source/restart oracle. The paired
-case replaces the duplicate ActiveSummary entries in the standalone Storage/RejectFact
-loops; their other three scenarios and all cancellation, persistent-write, remeasurement,
-retired-write and RejectFinal controls remain. This exact C3 cell has not yet run. First final-SHA standard-check attempt on
-`e474235e3f612fcfbc004329e2670daacc7eb3d5` ended exit 1 at fmt check, before Clippy or
-tests; immutable log/result `core301-standard-check-e474235e-63724.*`. After applying
-`cargo fmt`, the final source/test SHA is `86e3631ba290dba1a0b29d1708be984f0a597b6c`; it
-still requires the full standard sequence from its start.
+**Qualification receipts.** C8 full `sh scripts/check.sh` passed on
+`618a2af8dcfbd846d453bf105839f458421e1328` (execution
+`03601035-cd39-40d9-9529-835a4e8a2ffe`, exit 0, cleanup confirmed); it predates C3
+and does not qualify the C3 candidate. On `dbae793745428dad57eb37d7ed3942c97427dd57`,
+layout and Python checks (228 tests), formatting and strict all-target Clippy passed;
+the full all-target Rust test executable exited 101 after 2,647 passed, 1 failed and
+25 ignored. The sole failure was the new C3 cell's comparison of whole trigger JSON:
+the stable trigger fields matched, but the legitimate postcommit record also includes
+`run_id` and `a_boundary` metadata. This was an overbroad test comparison, not evidence
+of a runtime mismatch. The immutable red receipt is
+`core301-standard-check-dbae7937-63724.log` / `-result.json`; execution
+`93b82444-1ad6-457b-ab23-c3ecc0173924`, exit 101, cleanup confirmed. Because
+`scripts/check.sh` stops at the failed all-target test command, the later exact
+`test-db-observation` feature selector did not run.
 
-The previous C7.1 matrix was 16/17 on SHA 7790; its single active-stop spill aggregate red
-is preserved in `core301-clippyfix-focused.log` and fixed in a5f9. Four exact C8 spill
-custody controls passed 1/1 at execution `85188a4a-2266-4327-afa4-79964bc59f6a`; C8 strict
-Clippy passed at `7bc4ee19-d6a9-4fcb-8f36-0a25219f19bb`. These do not transfer to 08f.
+The current repair compares only the existing `trigger_identity` five-field typed
+identity (`input_tokens`, `auto_at_tokens`, `target_percent`, `target_tokens`,
+`a_input_tokens`) on both records. It does not weaken the same-trigger requirement or
+change production code. The repair is unqualified until a fresh complete
+`sh scripts/check.sh` passes on its new clean complete SHA; source must stay frozen
+through terminal cleanup. Prior C7.1 (16/17, active-Stop aggregate red) and C8 (four
+spill-custody controls plus strict Clippy green) evidence remain correctly scoped to
+their SHAs. Original earlier red evidence remains preserved.
 
-HTTP source and migrations remain unchanged from c0. Original fb/f497/994 reds and corrected
-receipts remain preserved; zero-test selectors are excluded. The final C3 standard check, full native, bounded source review, CI/three-OS qualification
-and landing are not established yet.
+C6-3 selected-source facts authority uses the captured `GcSourceFacts` and checks
+group-completeness agreement; C6-2 sequencing retains active spill custody when later
+summary work fails and permits active spill only after closed-summary `NoTarget`.
+HTTP source and migrations remain unchanged from c0. #306 saved-attempt provenance is
+design-only in `.local/private-reports/studio-current-20261113/
+core306-saved-attempt-provenance-design-20261115.md`; no #306 implementation is in
+this worktree.
 
-The prior 21:45 native/review and 23:00 main goals were superseded and missed. Revised
-checkpoints are 22:00 complete-unit freeze, 23:15 one-OS standard/review, and 00:30 CI/main;
-they do not waive validation. The 08f C3 cell commit is complete; current docs/status update is the only pending checkout
-change. Commit docs, then run full `sh scripts/check.sh` first on the new clean complete SHA
-with source frozen to terminal cleanup. Afterward run the exact paired C3 cell and affected
-C8 controls, obtain bounded review, and run fresh full normal native on that same SHA before
-any CI/three-OS job.
+The former 21:45 native/review and 23:00 main goals were missed; revised 22:00 freeze,
+23:15 one-OS standard/review, and 00:30 CI/main checkpoints were also at risk and do
+not waive any gate. A new complete SHA, full standard pass, same-SHA bounded review,
+three-OS CI and landing remain pending. Do not infer final readiness from partial
+checks or prior candidate receipts.
 
 ## v0.11.0 preparation
+
 
 Release preparation updates the package version and synthetic upgrade checker from public schema 32 to 35. Publication, tagging, exact-candidate upgrade and installation remain separate reviewer-controlled gates. See [draft notes](release-v0.11.0-draft.md).
 
