@@ -24,24 +24,27 @@ async fn record_after_storage_fault() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pre_finish_rejection_and_postcommit_storage_share_the_active_summary_cell() {
-    let (rejected, committed) = crate::test_watchdog::watchdog(
-        "pre-FINISH rollback versus postcommit adoption",
-        async {
+    let (rejected, committed) =
+        crate::test_watchdog::watchdog("pre-FINISH rollback versus postcommit adoption", async {
             let rejected = record_boundary(Fault::RejectFact, Scenario::ActiveSummary).await;
             let committed = record_boundary(Fault::Storage, Scenario::ActiveSummary).await;
             (rejected, committed)
-        },
-    )
-    .await
-    .unwrap();
+        })
+        .await
+        .unwrap();
 
-    assert_eq!(rejected["outcome"], "failed", "pre-FINISH rollback: {rejected}");
+    assert_eq!(
+        rejected["outcome"], "failed",
+        "pre-FINISH rollback: {rejected}"
+    );
     assert!(rejected["committed_stages"]["active_summary"].is_null());
-    assert_eq!(committed["outcome"], "adopted", "postcommit FINISH remains durable: {committed}");
+    assert_eq!(
+        committed["outcome"], "adopted",
+        "postcommit FINISH remains durable: {committed}"
+    );
     assert!(committed["committed_stages"]["active_summary"].is_object());
     assert_eq!(
-        rejected["trigger"],
-        committed["trigger"],
+        rejected["trigger"], committed["trigger"],
         "same scenario uses the exact immutable trigger tuple"
     );
 }
