@@ -36,13 +36,19 @@ It ran layout checks, Python suite (228 pass), fmt check, strict all-target Clip
 full all-target tests (2,647 library / 0 failed / 25 ignored; 1,415 integration / 0 failed /
 19 ignored; 14 passed / 1 ignored and 9 passed / 2 ignored additional targets), and exact
 `test-db-observation` selector 1/1. This qualifies 618a only. C3 source/test commit
-`08f2602019ee313203ebba86c27319dd49af0c71` adds the paired ActiveSummary acceptance cell.
+`08f2602019ee313203ebba86c27319dd49af0c71` adds the paired ActiveSummary acceptance cell;
+`86e3631ba290dba1a0b29d1708be984f0a597b6c` is the formatter-only follow-up after the
+first new-SHA standard run correctly stopped at `cargo fmt --check`.
 It executes true `Fault::RejectFact` and postcommit `Fault::Storage` for the same scenario,
 then asserts same trigger and contrasting failed/no-stage versus adopted/stage-fact records.
 Both flow through `record_boundary`'s shared path/epoch/source/restart oracle. The paired
 case replaces the duplicate ActiveSummary entries in the standalone Storage/RejectFact
 loops; their other three scenarios and all cancellation, persistent-write, remeasurement,
-retired-write and RejectFinal controls remain. This exact C3 cell has not yet run.
+retired-write and RejectFinal controls remain. This exact C3 cell has not yet run. First final-SHA standard-check attempt on
+`e474235e3f612fcfbc004329e2670daacc7eb3d5` ended exit 1 at fmt check, before Clippy or
+tests; immutable log/result `core301-standard-check-e474235e-63724.*`. After applying
+`cargo fmt`, the final source/test SHA is `86e3631ba290dba1a0b29d1708be984f0a597b6c`; it
+still requires the full standard sequence from its start.
 
 The previous C7.1 matrix was 16/17 on SHA 7790; its single active-stop spill aggregate red
 is preserved in `core301-clippyfix-focused.log` and fixed in a5f9. Four exact C8 spill
