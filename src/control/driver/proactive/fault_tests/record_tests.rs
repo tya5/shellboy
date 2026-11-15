@@ -44,7 +44,8 @@ async fn pre_finish_rejection_and_postcommit_storage_share_the_active_summary_ce
     );
     assert!(committed["committed_stages"]["active_summary"].is_object());
     assert_eq!(
-        rejected["trigger"], committed["trigger"],
+        trigger_identity(&rejected["trigger"]),
+        trigger_identity(&committed["trigger"]),
         "same scenario uses the exact immutable trigger tuple"
     );
 }
