@@ -520,12 +520,12 @@ impl DbWorker {
         operation: F,
         launch: L,
         cancel: Option<tokio_util::sync::CancellationToken>,
-    ) -> Result<crate::compaction::WriterJobId, StorageError>
+    ) -> Result<Option<crate::compaction::WriterJobId>, StorageError>
     where
         F: FnOnce(
                 &mut Connection,
                 &crate::compaction::GcStage,
-            ) -> Result<crate::compaction::CapturedSummaryInput, StorageError>
+            ) -> Result<crate::compaction::GcCaptureOutcome, StorageError>
             + Send
             + 'static,
         L: FnOnce(
@@ -604,7 +604,7 @@ impl DbWorker {
     pub(crate) async fn validate_gc_job(
         &self,
         id: crate::compaction::WriterJobId,
-    ) -> Result<bool, StorageError> {
+    ) -> Result<Option<crate::compaction::discard::RejectionReason>, StorageError> {
         let (tx, rx) = oneshot::channel();
         let job: Job = Box::new(move |db, _, _, coordinator| {
             let result = coordinator.validate_job(db, id).map_err(StorageError::from);
@@ -1298,12 +1298,12 @@ fn make_gc_capture_job<F, L, Fut>(
     launch: L,
     runtime: tokio::runtime::Handle,
     wake: GcRetirementWake,
-) -> (Command, DbReply<crate::compaction::WriterJobId>)
+) -> (Command, DbReply<Option<crate::compaction::WriterJobId>>)
 where
     F: FnOnce(
             &mut Connection,
             &crate::compaction::GcStage,
-        ) -> Result<crate::compaction::CapturedSummaryInput, StorageError>
+        ) -> Result<crate::compaction::GcCaptureOutcome, StorageError>
         + Send
         + 'static,
     L: FnOnce(
@@ -1326,10 +1326,12 @@ where
         };
         let mut result = result;
         finish_transaction(db, &mut result);
-        let result = result.and_then(|captured| {
-            coordinator
+        let result = result.and_then(|capture| match capture {
+            crate::compaction::GcCaptureOutcome::NoTarget => Ok(None),
+            crate::compaction::GcCaptureOutcome::Captured(captured) => coordinator
                 .install_after_commit(db, captured, stage_copy, runtime, wake, launch)
-                .map_err(|message| StorageError::InvalidInput(message.into()))
+                .map(Some)
+                .map_err(|message| StorageError::InvalidInput(message.into())),
         });
         let _ = coordinator.reconcile_before_db_reply(db);
         let _ = sender.send(result);
@@ -1355,7 +1357,7 @@ fn make_gc_completion_job(
     let job: Job = Box::new(move |db, _, _, coordinator| {
         let write = if result.is_err() {
             failure.map(|failure| match coordinator.validate_job(db, id) {
-                Ok(true) => match db.transaction() {
+                Ok(None) => match db.transaction() {
                     Ok(tx) => match crate::compaction::remember_gc_failure_tx(&tx, &failure) {
                         Ok(wrote) => {
                             if wrote {
@@ -1368,7 +1370,7 @@ fn make_gc_completion_job(
                     },
                     Err(error) => Err(StorageError::from(error)),
                 },
-                Ok(false) => Ok(()),
+                Ok(Some(_)) => Ok(()),
                 Err(error) => Err(StorageError::from(error)),
             })
         } else {

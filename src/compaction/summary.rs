@@ -79,17 +79,31 @@ impl SummaryAdoption {
             &self.payload,
             FORMAT,
         )?;
-        let mut path = self.snapshot.groups[..self.start]
+        let snapshot_path = self
+            .snapshot
+            .groups
             .iter()
             .flat_map(|group| group.sources.iter().map(|source| source.id.clone()))
             .collect::<Vec<_>>();
-        path.push(node.clone());
-        path.extend(
-            self.snapshot.groups[self.count..]
-                .iter()
-                .flat_map(|g| g.sources.iter().map(|s| s.id.clone())),
-        );
-        path.extend(appended);
+        let start_node = self.snapshot.groups[..self.start]
+            .iter()
+            .try_fold(0usize, |sum, group| sum.checked_add(group.sources.len()))
+            .ok_or_else(|| {
+                StorageError::InvalidInput("manual selected path offset overflow".into())
+            })?;
+        let source_count = self.snapshot.groups[self.start..self.count]
+            .iter()
+            .try_fold(0usize, |sum, group| sum.checked_add(group.sources.len()))
+            .ok_or_else(|| {
+                StorageError::InvalidInput("manual selected path length overflow".into())
+            })?;
+        let path = super::replace_selected_path(
+            &snapshot_path,
+            start_node,
+            source_count,
+            &node,
+            &appended,
+        )?;
         if cancel.is_cancelled() {
             return Err(StorageError::from(rejected(
                 RejectionReason::Cancelled,
@@ -359,11 +373,13 @@ pub(super) fn adopt_gc_result_tx(
         })
         .ok_or_else(|| StorageError::InvalidInput("GC source projection overflow".into()))?;
     let text = if captured.active_turn {
-        format!(
-            "Shellboy context notice: the active-Turn tool work in this range was summarized; its side effects remain. Inspect current state before repeating tools. Source nodes: {} through {}.\\n\\n{}",
-            originals.first().map_or("", String::as_str),
-            originals.last().map_or("", String::as_str),
-            generated.response.text
+        let originals = originals.clone();
+        super::single_request::active_turn_summary_text(
+            &originals,
+            captured.active_user_messages.len(),
+            false,
+            &generated.response.text,
+            None,
         )
     } else {
         generated.response.text.clone()
@@ -429,10 +445,6 @@ pub(super) fn adopt_gc_result_tx(
             }
         }
     }
-    let node = uid();
-    let replacement = uid();
-    let body = payload.to_string();
-    let now = timestamp();
     let adapter = if stamps.iter().any(|stamp| stamp.marker_adapter) {
         MARKER_ADAPTER
     } else {
@@ -451,27 +463,26 @@ pub(super) fn adopt_gc_result_tx(
             .map(|stamp| (&stamp.id, stamp.revision, &stamp.hash, &stamp.attachments))
             .collect::<Vec<_>>(),
     ));
-    tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,'summary',?2,?3,?4,?5)",params![node,now,body,body.len() as i64,key(&payload)])?;
-    tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?2,?3,?4,?5,'completed',?6)",params![replacement,node,input_key,FORMAT,PROMPT,now])?;
-    for (ordinal, stamp) in stamps.iter().enumerate() {
-        tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash)VALUES(?1,?2,?3,?4,?5)",params![replacement,ordinal as i64,stamp.id,stamp.revision,stamp.hash])?;
-    }
-    tx.execute(
-        "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES(?1,?2)",
-        params![thread, replacement],
-    )?;
-    crate::attachments::exclude_replaced_sources_tx(
+    let selected_sources = stamps
+        .iter()
+        .map(|stamp| super::ReplacementSource {
+            id: &stamp.id,
+            revision: stamp.revision,
+            hash: &stamp.hash,
+        })
+        .collect::<Vec<_>>();
+    let node = super::store_replacement_material_tx(
         tx,
-        thread,
-        &stamps
-            .iter()
-            .map(|stamp| stamp.id.clone())
-            .collect::<Vec<_>>(),
+        config,
+        super::ReplacementMaterial {
+            thread,
+            input_key: &input_key,
+            format: FORMAT,
+            sources: &selected_sources,
+            payload: &payload,
+        },
     )?;
-    crate::index::authorize_new_nodes_for_config_tx(tx, config, std::slice::from_ref(&node))?;
-    let mut new_path = path[..start].to_vec();
-    new_path.push(node.clone());
-    new_path.extend_from_slice(&path[start + stamps.len()..]);
+    let new_path = super::replace_selected_path(&path, start, stamps.len(), &node, &[])?;
     history::select_path(tx, thread, selection as u64, &new_path, &timestamp())?;
     Ok(node)
 }

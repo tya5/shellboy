@@ -26,26 +26,13 @@ pub(crate) struct GcStage {
     pub(crate) effort: Option<String>,
     pub(crate) reasoning_epoch: i64,
     pub(crate) stage: &'static str,
-    pub(crate) target_cas: Option<GcTargetCas>,
-}
-#[derive(Clone, Debug)]
-pub(crate) struct GcTargetCas {
-    pub(crate) key: String,
-    pub(crate) expected: GcTargetExpected,
-    pub(crate) new_value: String,
-}
-#[derive(Clone, Debug)]
-pub(crate) enum GcTargetExpected {
-    Absent,
-    Exact(String),
 }
 
 /// Replaces W2/W4 bodies while keeping the stage facts of the same token.
-pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.compaction_outcome',json_extract(error_json,'$.automatic_trim_attempt.compaction_outcome'),'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND COALESCE(json_extract(error_json,'$.automatic_trim_attempt.token'),?3)=?3";
+pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.compaction_outcome',json_extract(error_json,'$.automatic_trim_attempt.compaction_outcome'),'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND state IN ('preparing','inflight','failed','completed') AND json_extract(error_json,'$.automatic_trim_attempt.token')=?3";
 
 /// Strict GC begin: consume only the exact completed parent receipt and
-/// preserve any existing error JSON siblings. Target facts are checked but not
-/// modified until a successful adoption transaction.
+/// preserve any existing error JSON siblings.
 fn validate_gc_stage(stage: &GcStage) -> Result<(), StorageError> {
     if matches!(
         stage.stage,
@@ -67,13 +54,9 @@ pub(crate) fn begin_gc_tx(
     target_plan: &Value,
 ) -> Result<(), StorageError> {
     validate_gc_stage(stage)?;
-    if let Some(target) = &stage.target_cas {
-        target_matches(tx, &target.key, &target.expected)?;
-    }
-    // The main proactive driver already created this exact provisional receipt;
-    // GC capture consumes it rather than replacing the attempt authority.
-    let already_begun:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2 AND a.state='completed' AND a.profile_id=?3 AND a.model_id=?4 AND a.reasoning_epoch=?5 AND a.effort IS ?7 AND json_valid(a.error_json) AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?6 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1)",params![stage.attempt_id,stage.thread_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,stage.effort],|row|row.get(0))?;
-    if already_begun {
+    // Reuse the exact original-receipt predicate; this path consumes an existing
+    // driver-created provisional record rather than beginning a second one.
+    if provisional_gc_matches(tx, stage)? {
         return Ok(());
     }
     let body = json!({"outcome":"unknown","provisional":true,"token":stage.token,"reason":reason,
@@ -102,27 +85,6 @@ pub(crate) fn provisional_gc_matches(
     )?)
 }
 
-fn target_matches(
-    tx: &rusqlite::Transaction<'_>,
-    key: &str,
-    expected: &GcTargetExpected,
-) -> Result<(), StorageError> {
-    let current:Option<(String,Option<String>)>=tx.query_row("SELECT typeof(value),CASE WHEN typeof(value)='text' THEN value END FROM app_meta WHERE key=?1",[key],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
-    let matches = match (expected, current) {
-        (GcTargetExpected::Absent, None) => true,
-        (GcTargetExpected::Exact(expected), Some((kind, Some(current)))) if kind == "text" => {
-            expected.as_bytes() == current.as_bytes()
-        }
-        _ => false,
-    };
-    if !matches {
-        return Err(StorageError::InvalidInput(
-            "GC target changed since capture".into(),
-        ));
-    }
-    Ok(())
-}
-
 pub(crate) fn record_gc_stage_tx(
     tx: &rusqlite::Transaction<'_>,
     stage: &GcStage,
@@ -149,33 +111,12 @@ pub(crate) fn record_gc_stage_tx(
     Ok(())
 }
 
-/// Finalize exactly the provisional parent record and, when calibrated, CAS the
-/// target from its captured raw state. Caller keeps this in the adoption TX.
+/// Finalize exactly the provisional parent record in the caller's adoption TX.
 pub(crate) fn finish_gc_tx(
     tx: &rusqlite::Transaction<'_>,
     stage: &GcStage,
 ) -> Result<(), StorageError> {
     validate_gc_stage(stage)?;
-    if let Some(target) = &stage.target_cas {
-        match &target.expected {
-            GcTargetExpected::Absent => {
-                let changed=tx.execute("INSERT INTO app_meta(key,value) SELECT ?1,?2 WHERE NOT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",params![target.key,target.new_value])?;
-                if changed != 1 {
-                    return Err(StorageError::InvalidInput(
-                        "GC target absent-state CAS failed".into(),
-                    ));
-                }
-            }
-            GcTargetExpected::Exact(old) => {
-                let changed=tx.execute("UPDATE app_meta SET value=?3 WHERE key=?1 AND typeof(value)='text' AND CAST(value AS BLOB)=CAST(?2 AS BLOB)",params![target.key,old,target.new_value])?;
-                if changed != 1 {
-                    return Err(StorageError::InvalidInput(
-                        "GC target exact-value CAS failed".into(),
-                    ));
-                }
-            }
-        }
-    }
     let boundary:Option<(String,Option<String>)>=tx.query_row(
         "SELECT t.thread_id,json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1",
         params![stage.attempt_id,stage.token],|row|Ok((row.get(0)?,row.get(1)?)),

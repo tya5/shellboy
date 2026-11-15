@@ -478,7 +478,24 @@ pub(super) async fn maybe_compact_with_run_stop(
             }
             Some(summary)
         }
-        (Err(_), None) => None,
+        (Err(error), None) => {
+            let mut summary = serde_json::Map::new();
+            summary.insert("summary_rejected".into(), json!(true));
+            if let Some(details) = error.details.as_ref().and_then(Value::as_object) {
+                for field in [
+                    "summary_usage",
+                    "source_characters",
+                    "summary_characters",
+                    "summary_limit",
+                    "model_requests",
+                ] {
+                    if let Some(value) = details.get(field) {
+                        summary.insert(field.into(), value.clone());
+                    }
+                }
+            }
+            (summary.len() > 1).then_some(Value::Object(summary))
+        }
     };
     let no_target = summary
         .as_ref()
@@ -490,11 +507,6 @@ pub(super) async fn maybe_compact_with_run_stop(
     if let Err(error) = &result {
         record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);
     }
-    #[cfg(test)]
-    eprintln!(
-        "gc-driver-record-summary={}",
-        record.get("summary").is_some()
-    );
     let (attempt, token) = (automatic.attempt.clone(), automatic.token.clone());
     control
         .store

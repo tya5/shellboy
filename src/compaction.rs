@@ -29,7 +29,7 @@ mod edit;
 mod failure_memory;
 mod gc_capture;
 mod gc_coordinator;
-pub(crate) use gc_capture::CapturedSummaryInput;
+pub(crate) use gc_capture::{CapturedSummaryInput, GcCaptureOutcome};
 pub(crate) use gc_coordinator::{
     CompletionDisposition, WriterCompletion, WriterGcCoordinator, WriterJobId,
 };
@@ -331,6 +331,32 @@ fn resolve_turn_boundary(
         }
     }
     Ok(boundary.map(|b| b.1))
+}
+
+struct GcFailureSetup {
+    identity: String,
+    key: String,
+    observed: failure_memory::SlotRead,
+    provider: Option<String>,
+}
+fn gc_request_groups(captured: &CapturedSummaryInput) -> Vec<single_request::RequestGroupText<'_>> {
+    captured
+        .groups
+        .iter()
+        .map(|group| single_request::RequestGroupText {
+            text: group.text.as_str(),
+            projection_weight: group.projection_weight,
+            source_count: group.stamps.len() as u64,
+            first_id: group
+                .stamps
+                .first()
+                .map_or_else(String::new, |stamp| stamp.id.clone()),
+            last_id: group
+                .stamps
+                .last()
+                .map_or_else(String::new, |stamp| stamp.id.clone()),
+        })
+        .collect()
 }
 
 impl Compactor {
@@ -715,6 +741,78 @@ impl Compactor {
             .await
             .map_err(storage_error)
     }
+    async fn resolve_gc_stage(&self, automatic: &AutomaticStage) -> Result<GcStage, ApiError> {
+        let attempt = automatic.attempt_id.clone();
+        let attempt_id = attempt.clone();
+        let token = automatic.token.clone();
+        let stage_name = automatic.stage;
+        self.database.call(move|db|{
+            let row:(String,String,String,Option<String>,i64)=db.query_row("SELECT t.thread_id,a.profile_id,a.model_id,a.effort,a.reasoning_epoch FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND a.state='completed'",[attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
+            Ok(GcStage{attempt_id,token,thread_id:row.0,profile_id:row.1,model_id:row.2,effort:row.3,reasoning_epoch:row.4,stage:stage_name})
+        }).await.map_err(storage_error)
+    }
+
+    async fn prepare_gc_failure_setup(
+        &self,
+        captured: &CapturedSummaryInput,
+        limit: single_request::OutputLimit,
+    ) -> Result<GcFailureSetup, ApiError> {
+        let first = captured
+            .groups
+            .first()
+            .and_then(|group| group.stamps.first())
+            .map(|stamp| stamp.id.as_str())
+            .ok_or_else(|| invalid("GC failure identity has no first R source"))?;
+        let last = captured
+            .groups
+            .last()
+            .and_then(|group| group.stamps.last())
+            .map(|stamp| stamp.id.as_str())
+            .ok_or_else(|| invalid("GC failure identity has no last R source"))?;
+        let identity = single_request::failure_identity_fields(
+            &captured.thread,
+            first,
+            last,
+            &captured.profile,
+            &captured.model,
+            limit,
+        )
+        .as_str()
+        .to_owned();
+        let region = if captured.active_turn {
+            single_request::Region::Active
+        } else {
+            single_request::Region::Closed
+        };
+        let key = region.key(&captured.thread);
+        let read_key = key.clone();
+        let observed = self
+            .database
+            .call(move |db| failure_memory::read(db, &read_key))
+            .await
+            .map_err(storage_error)?;
+        let provider = self.owner_instance_id.as_deref().and_then(|owner| {
+            let (Some(run), Some(turn), Some(generation)) = (
+                captured.origin_run.as_deref(),
+                captured.origin_turn.as_deref(),
+                captured
+                    .origin_generation
+                    .and_then(|value| u64::try_from(value).ok()),
+            ) else {
+                return None;
+            };
+            Some(failure_memory::provider_turn_key(
+                &identity, run, turn, generation, owner,
+            ))
+        });
+        Ok(GcFailureSetup {
+            identity,
+            key,
+            observed,
+            provider,
+        })
+    }
+
     pub(crate) async fn run_gc_summary(
         &self,
         automatic: AutomaticStage,
@@ -723,99 +821,32 @@ impl Compactor {
         thread_boundary: Arc<tokio::sync::Mutex<()>>,
         run_stop: CancellationToken,
     ) -> Result<CompactResult, ApiError> {
-        let attempt = automatic.attempt_id.clone();
-        let stage=self.database.call(move|db|{
-            let row:(String,String,String,Option<String>,i64)=db.query_row("SELECT t.thread_id,a.profile_id,a.model_id,a.effort,a.reasoning_epoch FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND a.state='completed'",[attempt],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-            Ok(GcStage{attempt_id:automatic.attempt_id.clone(),token:automatic.token.clone(),thread_id:row.0,profile_id:row.1,model_id:row.2,effort:row.3,reasoning_epoch:row.4,stage:automatic.stage,target_cas:None})
-        }).await.map_err(storage_error)?;
-        let planning_thread = stage.thread_id.clone();
-        let planning_stage = stage.clone();
-        let planning_config = self.config.current();
-        let planning_turn = turn_id.clone();
-        let eligible = self
-            .database
-            .call(move |db| {
-                let tx = db.transaction()?;
-                let plan = if active {
-                    gc_capture::plan_gc_active_turn_tx(
-                        &tx,
-                        &planning_thread,
-                        &planning_stage,
-                        &planning_turn,
-                        &planning_config,
-                        None,
-                    )?
-                } else {
-                    gc_capture::plan_gc_prefix_tx(
-                        &tx,
-                        &planning_thread,
-                        &planning_stage,
-                        &planning_config,
-                        None,
-                    )?
-                };
-                tx.commit()?;
-                Ok(plan.is_some())
-            })
-            .await
-            .map_err(storage_error)?;
-        if !eligible {
-            return Ok(CompactResult {
-                no_target: true,
-                ..Default::default()
-            });
-        }
+        let stage = self.resolve_gc_stage(&automatic).await?;
         let trigger = json!({"scope":if active{"active_turn"}else{"prefix"},"turn_id":turn_id});
         let target_plan = Value::Null;
         let reason = "proactive_threshold".to_owned();
         let config = self.config.current();
         let thread = stage.thread_id.clone();
-        let capture_stage = stage.clone();
         let capture_trigger = trigger.clone();
         let capture_target = target_plan.clone();
         let capture_reason = reason.clone();
-        let capture_config = config.clone();
         let db = self.database.clone();
         let compactor = self.clone();
-        let clients = self
-            .clients
-            .snapshot()
-            .get(&stage.profile_id)
-            .map_err(|e| ApiError::new(ErrorCode::ConfigInvalid, e.to_string()))?;
         let (result_tx, result_rx) =
             tokio::sync::oneshot::channel::<Result<CompactResult, ApiError>>();
         let boundary_for_job = thread_boundary.clone();
         let stop_for_job = run_stop.clone();
-        let stage_name = stage.stage;
-        #[cfg(test)]
-        eprintln!(
-            "gc-native stage={} active={} capture-admit",
-            stage_name, active
-        );
-        let job=self.database.call_with_gc_capture_cancellable(stage.clone(),move|connection,stage|{
-            gc_capture::capture_ordinary_gc_prefix_with_receipt_tx(connection,&thread,&capture_config,stage,&capture_reason,&capture_trigger,&capture_target,None)
+        let Some(job)=self.database.call_with_gc_capture_cancellable(stage.clone(),move|connection,stage|{
+            gc_capture::capture_ordinary_gc_prefix_with_receipt_tx(connection,&thread,stage,&capture_reason,&capture_trigger,&capture_target)
         },move|job_id,captured,cancel|async move{
             let captured=Arc::new(captured);
-            let rendered_groups=captured.groups.iter().map(|group|group.text.as_str()).collect::<Vec<_>>();
-            let material_groups=captured.groups.iter().zip(rendered_groups).map(|(group,text)|single_request::RequestGroupText{text,projection_weight:group.projection_weight,source_count:group.stamps.len() as u64,first_id:group.stamps.first().map_or_else(String::new,|s|s.id.clone()),last_id:group.stamps.last().map_or_else(String::new,|s|s.id.clone())}).collect::<Vec<_>>();
+            let material_groups=gc_request_groups(&captured);
             let material=single_request::SummaryMaterial{thread:&captured.thread,profile:&captured.profile,model:&captured.model,effort:captured.effort.as_deref(),groups:&material_groups};
             let output_limit=single_request::resolved_limit(None,captured.thread_summary_max_chars,config.connections.get(&captured.profile),&config.compaction);
-            let failure_setup:Result<(String,String,failure_memory::SlotRead,Option<String>),ApiError>=async{
-                let first=captured.groups.first().and_then(|g|g.stamps.first()).map(|s|s.id.as_str()).ok_or_else(||invalid("GC failure identity has no first R source"))?;
-                let last=captured.groups.last().and_then(|g|g.stamps.last()).map(|s|s.id.as_str()).ok_or_else(||invalid("GC failure identity has no last R source"))?;
-                let identity=crate::digest::sha256_hex(serde_json::to_vec(&json!([captured.thread,first,last,captured.profile,captured.model,output_limit.0])).map_err(|e|invalid(&e.to_string()))?);
-                let region=if captured.active_turn{single_request::Region::Active}else{single_request::Region::Closed};
-                let key=region.key(&captured.thread);let read_key=key.clone();
-                let observed=db.call(move|db|failure_memory::read(db,&read_key)).await.map_err(storage_error)?;
-                let provider=compactor.owner_instance_id.as_deref().and_then(|owner|{
-                    let (Some(run),Some(turn),Some(generation))=(captured.origin_run.as_deref(),captured.origin_turn.as_deref(),captured.origin_generation.and_then(|value|u64::try_from(value).ok())) else{return None};
-                    Some(failure_memory::provider_turn_key(&identity,run,turn,generation,owner))
-                });
-                Ok((identity,key,observed,provider))
-            }.await;
+            let failure_setup=compactor.prepare_gc_failure_setup(&captured,output_limit).await;
             let mut ledger=usage::UsageLedger::from_context(&captured.thread,&captured.profile,&captured.model,captured.origin_turn.clone(),captured.origin_run.clone());
             let validator_db=db.clone();
-            let validate=Box::new(move|id|{let db=validator_db.clone();Box::pin(async move{match db.validate_gc_job(id).await{Ok(true)=>Ok(()),Ok(false)=>Err(invalid("GC source witness changed before request")),Err(e)=>Err(storage_error(e))}}) as futures_util::future::BoxFuture<'static,Result<(),ApiError>>});
+            let validate=Box::new(move|id|{let db=validator_db.clone();Box::pin(async move{match db.validate_gc_job(id).await{Ok(None)=>Ok(()),Ok(Some(reason))=>Err(discard::rejected(reason,"GC source witness changed before request; original path retained")),Err(e)=>Err(storage_error(e))}}) as futures_util::future::BoxFuture<'static,Result<(),ApiError>>});
             let eligible_capture=captured.clone();
             let eligible=Box::new(move|range:Range<usize>|{
                 if range.is_empty()||range.end>eligible_capture.groups.len()||range.clone().any(|i|!eligible_capture.groups[i].complete||eligible_capture.groups[i].stamps.iter().any(|s|s.protected)){return false;}
@@ -823,7 +854,7 @@ impl Compactor {
             });
             let dispatched=match &failure_setup{
                 Err(error)=>Err(error.clone()),
-                Ok((identity,_,observed,provider)) if failure_memory::blocks(observed,identity,provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
+                Ok(setup) if failure_memory::blocks(&setup.observed,&setup.identity,setup.provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
                 Ok(_)=>{
                     let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc{job_id,validate},selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible};
                     let dispatched_future=compactor.dispatch_single_summary(request);tokio::pin!(dispatched_future);
@@ -831,12 +862,12 @@ impl Compactor {
                 }
             };
             let failure_write=dispatched.as_ref().err().and_then(|error|{
-                let cause=discard::cause(error);let(identity,key,observed,provider)=failure_setup.as_ref().ok()?;
-                let value=if cause.deterministic(){Some(identity.clone())}else if matches!(cause,discard::Outcome::Failed{reason:discard::FailureReason::ProviderError,origin:discard::FailureOrigin::ProviderResponse,..}){provider.clone()}else{None};
-                value.map(|value|GcFailureMemory{key:key.clone(),observed:observed.clone(),value})
+                let cause=discard::cause(error);let setup=failure_setup.as_ref().ok()?;
+                let value=if cause.deterministic(){Some(setup.identity.clone())}else if matches!(cause,discard::Outcome::Failed{reason:discard::FailureReason::ProviderError,origin:discard::FailureOrigin::ProviderResponse,..}){setup.provider.clone()}else{None};
+                value.map(|value|GcFailureMemory{key:setup.key.clone(),observed:setup.observed.clone(),value})
             });
             let usage=ledger.usage().clone();
-            let report_error=dispatched.as_ref().err().cloned();
+            let report_error=dispatched.as_ref().err().cloned().map(|error|usage::annotate(error,&usage));
             let mut pending=Some(dispatched.clone());
             let completion=db.complete_gc_job_cancellable(job_id,&mut pending,Some(&stop_for_job),failure_write).await;
             match completion{
@@ -847,9 +878,10 @@ impl Compactor {
                 }
                 Err(crate::storage::GcCompletionSubmitError::AdmittedReplyLost(error))=>{let _=result_tx.send(Err(storage_error(error)));return None;}
                 Ok(CompletionDisposition::Accepted)=>{}
+                Ok(CompletionDisposition::Rejected(reason))=>{let _=result_tx.send(Err(discard::rejected(reason,"GC source witness changed before adoption; original path retained")));return None;}
                 Ok(_)=>{let _=result_tx.send(report_error.map_or_else(||Err(invalid("GC completion was not adoptable")),Err));return None;}
             }
-            let Ok(dispatched)=dispatched else{let _=result_tx.send(Err(invalid("GC completion accepted without summary result")));return None;};
+            let dispatched=match dispatched{Ok(value)=>value,Err(error)=>{let _=result_tx.send(Err(report_error.unwrap_or(error)));return None;}};
             let guard=tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();let _=result_tx.send(Err(invalid("GC cancelled by explicit Run Stop")));return None;},guard=boundary_for_job.clone().lock_owned()=>guard};
             let apply_capture=captured.clone();let apply_config=config.clone();let apply_usage=usage.clone();
             let adopted=db.adopt_gc_candidate(job_id,guard,move|tx,result|{
@@ -858,12 +890,13 @@ impl Compactor {
                 let source_chars=apply_capture.groups[selected.clone()].iter().try_fold(0u64,|sum,g|sum.checked_add(u64::try_from(g.projection_weight).ok()?)).ok_or_else(||StorageError::InvalidInput("GC source projection overflow".into()))?;
                 let drop=apply_capture.active_turn;
                 let result_value=CompactResult{source_characters:Some(source_chars),summary_characters:Some(result.response.text.chars().count() as u64),summary_limit:Some(output_limit.0),model_requests:Some(apply_usage.requests as usize),source_nodes:source_ids.len(),summary_node_id:Some(node.clone()),original_node_ids:source_ids,summary_usage:Some(apply_usage.clone()),..Default::default()};
-                let fact=json!({"stage":automatic.stage,"summary_node_id":node,"source_nodes":result_value.source_nodes,"drop_all_reasoning":drop,"captured_reasoning_epoch":apply_capture.epoch,"summary":result_value}).to_string();
+                let (selection_revision,reasoning_epoch):(i64,i64)=tx.query_row("SELECT selection_revision,reasoning_epoch FROM thread WHERE id=?1 AND deleted_at IS NULL",[&apply_capture.thread],|row|Ok((row.get(0)?,row.get(1)?)))?;
+                let fact=json!({"stage":automatic.stage,"selection_revision":selection_revision,"reasoning_epoch":reasoning_epoch,"summary_node_id":node,"source_nodes":result_value.source_nodes,"drop_all_reasoning":drop,"captured_reasoning_epoch":apply_capture.epoch,"summary":result_value}).to_string();
                 Ok((result_value,fact))
             }).await;
             match adopted{Ok(value)=>{let _=result_tx.send(Ok(value));}Err(error)=>{let _=result_tx.send(Err(storage_error(error)));}}
             None
-        },Some(run_stop.clone())).await.map_err(storage_error)?;
+        },Some(run_stop.clone())).await.map_err(storage_error)? else {return Ok(CompactResult{no_target:true,..Default::default()});};
         let mut result_rx = result_rx;
         tokio::select! {biased;
             _=run_stop.cancelled()=>{let _=self.database.cancel_gc_job(job).await;result_rx.await.map_err(|_|invalid("GC summary producer ended without terminal result"))?},
@@ -1203,6 +1236,51 @@ fn validate(tx: &rusqlite::Transaction<'_>, s: &Snapshot) -> Result<(), StorageE
     }
     Ok(())
 }
+pub(super) struct ReplacementSource<'a> {
+    pub(super) id: &'a str,
+    pub(super) revision: i64,
+    pub(super) hash: &'a str,
+}
+pub(super) struct ReplacementMaterial<'a> {
+    pub(super) thread: &'a str,
+    pub(super) input_key: &'a str,
+    pub(super) format: &'a str,
+    pub(super) sources: &'a [ReplacementSource<'a>],
+    pub(super) payload: &'a Value,
+}
+pub(super) fn store_replacement_material_tx(
+    tx: &rusqlite::Transaction<'_>,
+    config: &Config,
+    material: ReplacementMaterial<'_>,
+) -> Result<String, StorageError> {
+    let node = uid();
+    let replacement = uid();
+    let body = material.payload.to_string();
+    let now = timestamp();
+    tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,?2,?3,?4,?5,?6)",params![node,if material.format==FORMAT{"summary"}else{"spill"},now,body,body.len()as i64,key(material.payload)])?;
+    if material.format != FORMAT {
+        crate::history::spill_tools::save(tx, &node, material.payload)?;
+    }
+    tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?2,?3,?4,?5,'completed',?6)",params![replacement,node,material.input_key,material.format,PROMPT,now])?;
+    for (ordinal, source) in material.sources.iter().enumerate() {
+        tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash)VALUES(?1,?2,?3,?4,?5)",params![replacement,ordinal as i64,source.id,source.revision,source.hash])?;
+    }
+    tx.execute(
+        "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES(?1,?2)",
+        params![material.thread, replacement],
+    )?;
+    crate::attachments::exclude_replaced_sources_tx(
+        tx,
+        material.thread,
+        &material
+            .sources
+            .iter()
+            .map(|source| source.id.to_owned())
+            .collect::<Vec<_>>(),
+    )?;
+    crate::index::authorize_new_nodes_for_config_tx(tx, config, std::slice::from_ref(&node))?;
+    Ok(node)
+}
 fn store_replacement(
     tx: &rusqlite::Transaction<'_>,
     config: &Config,
@@ -1211,35 +1289,57 @@ fn store_replacement(
     payload: &Value,
     format: &str,
 ) -> Result<String, StorageError> {
-    let node = uid();
-    let replacement = uid();
-    let body = payload.to_string();
-    let now = timestamp();
-    tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,?2,?3,?4,?5,?6)",params![node,if format==FORMAT{"summary"}else{"spill"},now,body,body.len()as i64,key(payload)])?;
-    if format != FORMAT {
-        crate::history::spill_tools::save(tx, &node, payload)?;
-    }
-    tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?2,?3,?4,?5,'completed',?6)",params![replacement,node,summary_key(s,sources),format,PROMPT,now])?;
-    for (ordinal, source) in sources.iter().enumerate() {
-        tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash)VALUES(?1,?2,?3,?4,?5)",params![replacement,ordinal as i64,source.id,source.revision,source.hash])?;
-    }
-    tx.execute(
-        "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES(?1,?2)",
-        params![s.thread, replacement],
-    )?;
-    crate::attachments::exclude_replaced_sources_tx(
+    let selected = sources
+        .iter()
+        .map(|source| ReplacementSource {
+            id: &source.id,
+            revision: source.revision,
+            hash: &source.hash,
+        })
+        .collect::<Vec<_>>();
+    let input_key = summary_key(s, sources);
+    store_replacement_material_tx(
         tx,
-        &s.thread,
-        &sources
-            .iter()
-            .map(|source| source.id.clone())
-            .collect::<Vec<_>>(),
-    )?;
-    // Summaries (and spills, when configured) join the automatic index like any
-    // other finalized node; `indexing.auto_kinds` decides, defaulting to summaries.
-    crate::index::authorize_new_nodes_for_config_tx(tx, config, std::slice::from_ref(&node))?;
-    Ok(node)
+        config,
+        ReplacementMaterial {
+            thread: &s.thread,
+            input_key: &input_key,
+            format,
+            sources: &selected,
+            payload,
+        },
+    )
 }
+
+pub(super) fn replace_selected_path(
+    path: &[String],
+    start: usize,
+    count: usize,
+    node: &str,
+    append: &[String],
+) -> Result<Vec<String>, StorageError> {
+    let end = start
+        .checked_add(count)
+        .ok_or_else(|| StorageError::InvalidInput("replacement path range overflow".into()))?;
+    if end > path.len() {
+        return Err(StorageError::InvalidInput(
+            "replacement path range is outside current path".into(),
+        ));
+    }
+    let capacity = path
+        .len()
+        .checked_sub(count)
+        .and_then(|n| n.checked_add(1))
+        .and_then(|n| n.checked_add(append.len()))
+        .ok_or_else(|| StorageError::InvalidInput("replacement path length overflow".into()))?;
+    let mut next = Vec::with_capacity(capacity);
+    next.extend_from_slice(&path[..start]);
+    next.push(node.to_owned());
+    next.extend_from_slice(&path[end..]);
+    next.extend_from_slice(append);
+    Ok(next)
+}
+
 fn summary_key(s: &Snapshot, sources: &[Source]) -> String {
     key(&(
         FORMAT,

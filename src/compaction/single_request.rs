@@ -146,7 +146,9 @@ pub(super) fn half_input_prefix(
         .collect::<Vec<_>>();
     half_prefix_weights(&weights, selected)
 }
-pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option<Range<usize>> {
+
+#[cfg(test)]
+fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option<Range<usize>> {
     let weights = snapshot
         .groups
         .iter()
@@ -166,32 +168,6 @@ pub(super) enum Next {
     Done,
     RetryPrefix(Range<usize>),
     Failed,
-}
-
-#[cfg(test)]
-pub(super) fn after_result(
-    snapshot: &Snapshot,
-    selected: Range<usize>,
-    result: Result<(), &model::ModelError>,
-    eligible: impl FnOnce(Range<usize>) -> bool,
-) -> Next {
-    let shrink = result.is_err_and(model::ModelError::is_context_limit);
-    after_classified_result(snapshot, selected, result, shrink, eligible)
-}
-fn after_classified_result(
-    snapshot: &Snapshot,
-    selected: Range<usize>,
-    result: Result<(), &model::ModelError>,
-    shrink: bool,
-    eligible: impl FnOnce(Range<usize>) -> bool,
-) -> Next {
-    match result {
-        Ok(()) => Next::Done,
-        Err(_) if shrink => half_prefix(snapshot, selected)
-            .filter(|prefix| eligible(prefix.clone()))
-            .map_or(Next::Failed, Next::RetryPrefix),
-        Err(_) => Next::Failed,
-    }
 }
 
 fn after_input_classified_result(
@@ -461,16 +437,19 @@ impl Compactor {
                 .rposition(|g| g.complete && g.tool)
                 .is_some_and(|latest| selected.end == latest + 1);
         let summary_text = match &active {
-            Some(plan) if reaches_latest => format!(
-                "{}\n\n{}\n\n{}",
-                active_turn_notice(&originals, plan.messages.len(), true),
-                dispatched.response.text,
-                latest_round_text(&snapshot.groups[plan.latest])
+            Some(plan) if reaches_latest => active_turn_summary_text(
+                &originals,
+                plan.messages.len(),
+                true,
+                &dispatched.response.text,
+                Some(&latest_round_text(&snapshot.groups[plan.latest])),
             ),
-            Some(plan) => format!(
-                "{}\n\n{}",
-                active_turn_notice(&originals, plan.messages.len(), false),
-                dispatched.response.text
+            Some(plan) => active_turn_summary_text(
+                &originals,
+                plan.messages.len(),
+                false,
+                &dispatched.response.text,
+                None,
             ),
             None => dispatched.response.text.clone(),
         };
@@ -688,15 +667,8 @@ impl Compactor {
                             cause,
                         ));
                     }
-                    match after_input_classified_result(
-                        input,
-                        selected.clone(),
-                        Err(&failure.error),
-                        shrink,
-                        &eligible,
-                    ) {
-                        Next::RetryPrefix(prefix) => {
-                            trial.selected = prefix.clone();
+                    match trial.finish_input(input, Err(&failure.error), shrink, &eligible) {
+                        Next::RetryPrefix(_) => {
                             retries = 0;
                             continue;
                         }
@@ -773,6 +745,7 @@ impl Compactor {
             let size = AdoptionSize {
                 exceeded_output_limit: response.text.chars().count() as u64 > limit.0,
             };
+            let _ = trial.finish_input(input, Ok(()), false, |_| true);
             return Ok(Dispatched {
                 selected,
                 response,
@@ -800,6 +773,11 @@ impl Region {
 /// Capture ONCE before halving: original endpoints and request settings.
 #[derive(Clone)]
 pub(super) struct FailureIdentity(String);
+impl FailureIdentity {
+    pub(super) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 pub(super) fn provider_identity(
     identity: &FailureIdentity,
     snapshot: &Snapshot,
@@ -830,17 +808,28 @@ pub(super) fn failure_identity(
         .rev()
         .flat_map(|g| g.sources.iter().rev())
         .next()?;
-    Some(FailureIdentity(crate::digest::sha256_hex(
-        serde_json::to_vec(&json!([
-            thread,
-            first.id,
-            last.id,
-            snapshot.profile,
-            snapshot.model,
-            limit.0
-        ]))
-        .expect("identity serializes"),
-    )))
+    Some(failure_identity_fields(
+        thread,
+        &first.id,
+        &last.id,
+        &snapshot.profile,
+        &snapshot.model,
+        limit,
+    ))
+}
+
+pub(super) fn failure_identity_fields(
+    thread: &str,
+    first: &str,
+    last: &str,
+    profile: &str,
+    model: &str,
+    limit: OutputLimit,
+) -> FailureIdentity {
+    FailureIdentity(crate::digest::sha256_hex(
+        serde_json::to_vec(&json!([thread, first, last, profile, model, limit.0]))
+            .expect("identity serializes"),
+    ))
 }
 
 /// Retry cursor retains the original identity while only its trial range changes.
@@ -870,18 +859,9 @@ impl Trial {
     pub(super) fn selected(&self) -> Option<Range<usize>> {
         (!self.terminal).then(|| self.selected.clone())
     }
-    pub(super) fn finish_request(
+    pub(super) fn finish_input(
         &mut self,
-        snapshot: &Snapshot,
-        result: Result<(), &model::ModelError>,
-        eligible: impl FnOnce(Range<usize>) -> bool,
-    ) -> Next {
-        let shrink = result.is_err_and(model::ModelError::is_context_limit);
-        self.finish_classified(snapshot, result, shrink, eligible)
-    }
-    fn finish_classified(
-        &mut self,
-        snapshot: &Snapshot,
+        input: &SummaryMaterial<'_>,
         result: Result<(), &model::ModelError>,
         shrink: bool,
         eligible: impl FnOnce(Range<usize>) -> bool,
@@ -890,7 +870,7 @@ impl Trial {
             return Next::Done;
         }
         let next =
-            after_classified_result(snapshot, self.selected.clone(), result, shrink, eligible);
+            after_input_classified_result(input, self.selected.clone(), result, shrink, eligible);
         match &next {
             Next::RetryPrefix(prefix) => self.selected = prefix.clone(),
             Next::Done | Next::Failed => self.terminal = true,
@@ -957,6 +937,20 @@ pub(super) fn same_failed_range(
 
 /// Fixed model-facing notice for an active-Turn summary (#181): covered tools
 /// already ran, so the model must not repeat them blindly.
+pub(super) fn active_turn_summary_text(
+    originals: &[String],
+    retained: usize,
+    latest_included: bool,
+    summary: &str,
+    latest_round: Option<&str>,
+) -> String {
+    let notice = active_turn_notice(originals, retained, latest_included);
+    match latest_round {
+        Some(latest) => format!("{notice}\n\n{summary}\n\n{latest}"),
+        None => format!("{notice}\n\n{summary}"),
+    }
+}
+
 fn active_turn_notice(originals: &[String], retained: usize, latest_included: bool) -> String {
     let first = originals.first().map_or("", String::as_str);
     let order = if retained > 0 {
@@ -1061,6 +1055,51 @@ mod tests {
                 .collect(),
         )
     }
+    fn test_material_groups(snapshot: &Snapshot) -> Vec<RequestGroupText<'static>> {
+        snapshot
+            .groups
+            .iter()
+            .map(|group| RequestGroupText {
+                text: "",
+                projection_weight: group
+                    .sources
+                    .iter()
+                    .map(|source| {
+                        edit::projection_characters(&source.payload, snapshot.epoch) as u128
+                    })
+                    .sum(),
+                source_count: group.sources.len() as u64,
+                first_id: group
+                    .sources
+                    .first()
+                    .map_or_else(String::new, |source| source.id.clone()),
+                last_id: group
+                    .sources
+                    .last()
+                    .map_or_else(String::new, |source| source.id.clone()),
+            })
+            .collect()
+    }
+    fn transition(
+        snapshot: &Snapshot,
+        selected: Range<usize>,
+        result: Result<(), &model::ModelError>,
+        shrink: bool,
+        eligible: impl FnOnce(Range<usize>) -> bool,
+    ) -> Next {
+        let groups = test_material_groups(snapshot);
+        let input = SummaryMaterial {
+            thread: &snapshot.thread,
+            profile: &snapshot.profile,
+            model: &snapshot.model,
+            effort: snapshot.effort.as_deref(),
+            groups: &groups,
+        };
+        Trial::new(selected)
+            .unwrap()
+            .finish_input(&input, result, shrink, eligible)
+    }
+
     #[tokio::test]
     async fn same_captured_e_reopens_for_new_real_run_and_turn_scope() {
         let (_root, db) = super::super::tests::database().await;
@@ -1297,7 +1336,7 @@ mod tests {
         let half = half_prefix(&snapshot, 0..4).unwrap();
         assert_eq!(half, 0..2);
         assert_eq!(
-            after_result(&snapshot, half, Ok(()), |_| panic!(
+            transition(&snapshot, half, Ok(()), false, |_| panic!(
                 "success must not inspect another range"
             )),
             Next::Done
@@ -1310,6 +1349,18 @@ mod tests {
         }
         assert_eq!(selected.len(), 1);
     }
+    #[test]
+    fn active_summary_body_uses_real_separators_and_retains_notice_facts() {
+        let originals = vec!["source-a".to_owned(), "source-b".to_owned()];
+        let text =
+            active_turn_summary_text(&originals, 2, true, "summary text", Some("latest round"));
+        assert!(text.contains("replacing 2 source nodes (source-a through source-b)"));
+        assert!(text.contains("2 user message(s) delivered during the summarized work"));
+        assert!(text.contains("The latest tool round is included as text at the end."));
+        assert!(text.contains("\n\nsummary text\n\nlatest round"));
+        assert!(!text.contains(r"\n"));
+    }
+
     #[test]
     fn overflow_stops_before_unsafe_or_latest_and_never_splits_a_group() {
         let mut snapshot = fixture(&[10, 10, 10, 10]);
@@ -1345,21 +1396,22 @@ mod tests {
         context.provider_code = Some("context_length_exceeded".into());
         assert!(context.is_context_limit());
         assert_eq!(
-            after_result(&snapshot, 0..4, Err(&context), |prefix| prefix == (0..2)),
+            transition(&snapshot, 0..4, Err(&context), true, |prefix| prefix
+                == (0..2)),
             Next::RetryPrefix(0..2)
         );
         assert_eq!(
-            after_result(&snapshot, 0..4, Err(&context), |_| false),
+            transition(&snapshot, 0..4, Err(&context), true, |_| false),
             Next::Failed
         );
         assert_eq!(
-            after_result(&snapshot, 0..1, Err(&context), |_| true),
+            transition(&snapshot, 0..1, Err(&context), true, |_| true),
             Next::Failed
         );
         for kind in ["network", "http", "provider"] {
             let error = model::ModelError::new(kind, "synthetic non-context failure");
             assert_eq!(
-                after_result(&snapshot, 0..4, Err(&error), |_| panic!(
+                transition(&snapshot, 0..4, Err(&error), false, |_| panic!(
                     "transient failure must not select a shorter prefix"
                 )),
                 Next::Failed
@@ -1440,7 +1492,7 @@ mod tests {
         let mut overflow = model::ModelError::new("provider", "fixture");
         overflow.provider_code = Some("context_length_exceeded".into());
         assert_eq!(
-            after_result(&snapshot, 0..1, Err(&overflow), |_| true),
+            transition(&snapshot, 0..1, Err(&overflow), true, |_| true),
             Next::Failed
         );
     }
@@ -1494,7 +1546,10 @@ mod tests {
             )
             .unwrap()
         );
-        assert_eq!(after_result(&snapshot, 0..1, Ok(()), |_| false), Next::Done);
+        assert_eq!(
+            transition(&snapshot, 0..1, Ok(()), false, |_| false),
+            Next::Done
+        );
         assert!(
             same_failed_range(&db, "t", Region::Closed, &original).unwrap(),
             "success does not invent a failure or overwrite prior evidence"
@@ -1554,23 +1609,33 @@ mod tests {
     fn trial_keeps_original_identity_across_half_then_success_or_failure() {
         let snapshot = fixture(&[40, 40, 40, 40]);
         let identity = failure_identity("t", &snapshot, 0..4, OutputLimit(20000)).unwrap();
+        let groups = test_material_groups(&snapshot);
+        let material = SummaryMaterial {
+            thread: &snapshot.thread,
+            profile: &snapshot.profile,
+            model: &snapshot.model,
+            effort: snapshot.effort.as_deref(),
+            groups: &groups,
+        };
         let mut trial = Trial::with_identity(0..4, identity).unwrap();
         let original = trial.identity.0.clone();
         let mut error = model::ModelError::new("provider", "synthetic context refusal");
         error.provider_code = Some("context_length_exceeded".into());
         assert_eq!(
-            trial.finish_request(&snapshot, Err(&error), |_| true),
+            trial.finish_input(&material, Err(&error), true, |_| true),
             Next::RetryPrefix(0..2)
         );
         assert_eq!(trial.identity.0, original);
         assert_eq!(trial.selected(), Some(0..2));
         assert_eq!(
-            trial.finish_request(&snapshot, Ok(()), |_| panic!("success is terminal")),
+            trial.finish_input(&material, Ok(()), false, |_| panic!("success is terminal")),
             Next::Done
         );
         assert_eq!(trial.selected(), None);
         assert_eq!(
-            trial.finish_request(&snapshot, Err(&error), |_| panic!("no remainder retry")),
+            trial.finish_input(&material, Err(&error), true, |_| panic!(
+                "no remainder retry"
+            )),
             Next::Done
         );
         let mut failed = Trial::with_identity(
@@ -1579,7 +1644,7 @@ mod tests {
         )
         .unwrap();
         while matches!(
-            failed.finish_request(&snapshot, Err(&error), |_| true),
+            failed.finish_input(&material, Err(&error), true, |_| true),
             Next::RetryPrefix(_)
         ) {}
         assert_eq!(failed.selected(), None);

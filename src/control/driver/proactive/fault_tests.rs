@@ -56,9 +56,11 @@ enum ObservationPhase {
 
 fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -> &'static str {
     match phase {
-        // The checkpoint barrier is held after the committed stage and before
-        // any terminal outcome writer. Every post-commit fault is therefore
-        // observed as the same provisional attempt state here.
+        // Spill stages retain the shared driver's provisional record until its
+        // terminal writer. Native GC summary stages include strict FINISH in the
+        // same adoption transaction, so their committed checkpoint is already
+        // terminally adopted before any later shutdown fault is injected.
+        ObservationPhase::AtCommittedCheckpoint if scenario.summary() => "adopted",
         ObservationPhase::AtCommittedCheckpoint => "unknown",
         ObservationPhase::AfterRejectedStageTransaction => "failed",
         ObservationPhase::AfterShutdownAndRestart => match fault {
@@ -521,10 +523,9 @@ async fn prepare_with_options(
         assert_trigger_evidence(&saved["trigger"], scenario);
     }
     if !spill_off {
-        // This read occurs at the committed stage checkpoint, before owner shutdown
-        // can write terminal state. Every injected postcommit interruption is still
-        // provisional at this exact lifecycle boundary. A rejected stage fact is
-        // read after the driver's own terminal write for the failed stage.
+        // This read occurs at the committed stage checkpoint. Legacy spill
+        // stages remain provisional; native GC summary stages finish atomically
+        // with adoption. A rejected stage fact is read after its terminal write.
         let phase = if fault == Fault::RejectFact {
             ObservationPhase::AfterRejectedStageTransaction
         } else {

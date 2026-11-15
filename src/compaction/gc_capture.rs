@@ -1,8 +1,6 @@
 //! Bounded selected-range source capture for the GC-only summary path.
-use super::{Compactor, RenderSourceView, invalid, key, render_into};
+use super::{RenderSourceView, invalid, key, render_into};
 use crate::{
-    app::storage_error,
-    config::Config,
     protocol::{ApiError, ErrorCode},
     storage::StorageError,
 };
@@ -79,6 +77,8 @@ pub(crate) struct CapturedSummaryInput {
     pub(crate) origin_turn: Option<String>,
     pub(crate) origin_run: Option<String>,
     pub(crate) origin_generation: Option<i64>,
+    pub(crate) request_turn_id: Option<String>,
+    pub(crate) request_generation: Option<i64>,
     pub(crate) groups: Vec<CapturedGroup>,
     pub(crate) active_tail_group: Option<usize>,
     pub(crate) active_turn: bool,
@@ -115,20 +115,10 @@ impl CapturedSourceStamp {
 /// Plan only the ordinary-new prefix from bounded path metadata. The caller
 /// consumes this plan in the same capture transaction; no node payload Values
 /// or Run/Turn lifetime fences enter the plan.
-pub(crate) fn plan_ordinary_gc_prefix_tx(
+fn plan_gc_prefix_tx(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     stage: &super::attempt::GcStage,
-) -> Result<Option<GcRangePlan>, StorageError> {
-    plan_gc_prefix_tx(tx, thread, stage, &Config::default(), None)
-}
-
-pub(crate) fn plan_gc_prefix_tx(
-    tx: &rusqlite::Transaction<'_>,
-    thread: &str,
-    stage: &super::attempt::GcStage,
-    _config: &Config,
-    _target: Option<u64>,
 ) -> Result<Option<GcRangePlan>, StorageError> {
     let (selection,profile_revision,generation,epoch,profile,model,effort,current_turn,latest_turn,spill_committed):
         (i64,i64,i64,i64,String,String,Option<String>,Option<String>,Option<String>,bool)=tx.query_row(
@@ -322,13 +312,11 @@ pub(crate) fn plan_gc_prefix_tx(
     }))
 }
 
-pub(crate) fn plan_gc_active_turn_tx(
+fn plan_gc_active_turn_tx(
     tx: &rusqlite::Transaction<'_>,
     thread: &str,
     stage: &super::attempt::GcStage,
     expected_turn: &str,
-    _config: &Config,
-    _target: Option<u64>,
 ) -> Result<Option<GcRangePlan>, StorageError> {
     let (selection,profile_revision,generation,epoch,profile,model,effort,current_turn,latest_turn,spill_committed):(i64,i64,i64,i64,String,String,Option<String>,Option<String>,Option<String>,bool)=tx.query_row(
         "SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
@@ -539,144 +527,50 @@ pub(crate) fn plan_gc_active_turn_tx(
     }))
 }
 
-impl Compactor {
-    /// Capture only a previously selected contiguous path interval. No outside
-    /// payload is read; the caller hashes each consumed payload before rendering.
-    pub(crate) async fn capture_selected_range(
-        &self,
-        thread: &str,
-        range: Range<usize>,
-    ) -> Result<CapturedSummaryInput, ApiError> {
-        let thread = thread.to_owned();
-        let config = self.config.current();
-        self.database
-            .call(move |db| capture_selected_range_tx(db, &thread, range, &config))
-            .await
-            .map_err(storage_error)
-    }
+pub(crate) enum GcCaptureOutcome {
+    NoTarget,
+    Captured(CapturedSummaryInput),
 }
 
-pub(crate) fn capture_selected_range_tx(
-    db: &mut Connection,
-    thread: &str,
-    range: Range<usize>,
-    config: &Config,
-) -> Result<CapturedSummaryInput, StorageError> {
-    capture_selected_range_inner(db, thread, Some(range), config, None, None, None)
-}
-
-/// GC admission captures the selected range and consumes its exact original
-/// receipt in the same SQLite transaction, before the worker launches compute.
-pub(crate) fn capture_selected_range_with_receipt_tx(
-    db: &mut Connection,
-    thread: &str,
-    range: Range<usize>,
-    config: &Config,
-    stage: &super::attempt::GcStage,
-    reason: &str,
-    trigger: &Value,
-    target_plan: &Value,
-) -> Result<CapturedSummaryInput, StorageError> {
-    if stage.thread_id != thread {
-        return Err(StorageError::InvalidInput(
-            "GC receipt belongs to another Thread".into(),
-        ));
-    }
-    capture_selected_range_inner(
-        db,
-        thread,
-        Some(range),
-        config,
-        None,
-        None,
-        Some((stage, reason, trigger, target_plan, true)),
-    )
-}
-
-/// Production proactive entry: choose ordinary-new R using metadata and capture
-/// that exact range under the same SQL transaction and original GC stage.
+/// Production GC entry: choose R and capture it under one writer transaction.
 pub(crate) fn capture_ordinary_gc_prefix_with_receipt_tx(
     db: &mut Connection,
     thread: &str,
-    config: &Config,
     stage: &super::attempt::GcStage,
     reason: &str,
     trigger: &Value,
     target_plan: &Value,
-    target: Option<u64>,
-) -> Result<CapturedSummaryInput, StorageError> {
+) -> Result<GcCaptureOutcome, StorageError> {
     if stage.thread_id != thread {
         return Err(StorageError::InvalidInput(
             "GC receipt belongs to another Thread".into(),
         ));
     }
-    capture_selected_range_inner(
-        db,
-        thread,
-        None,
-        config,
-        Some(stage),
-        target,
-        Some((stage, reason, trigger, target_plan, false)),
-    )
+    capture_gc_plan_and_sources(db, thread, stage, reason, trigger, target_plan)
 }
 
-fn capture_selected_range_inner(
+fn capture_gc_plan_and_sources(
     db: &mut Connection,
     thread: &str,
-    requested_range: Option<Range<usize>>,
-    config: &Config,
-    plan_stage: Option<&super::attempt::GcStage>,
-    plan_target: Option<u64>,
-    gc_begin: Option<(&super::attempt::GcStage, &str, &Value, &Value, bool)>,
-) -> Result<CapturedSummaryInput, StorageError> {
-    if requested_range
-        .as_ref()
-        .is_some_and(|range| range.start >= range.end)
-    {
-        return Err(ApiError::new(
-            ErrorCode::InvalidArgument,
-            "GC summary range must be nonempty",
-        )
-        .into());
-    }
+    stage: &super::attempt::GcStage,
+    reason: &str,
+    trigger: &Value,
+    target_plan: &Value,
+) -> Result<GcCaptureOutcome, StorageError> {
     let tx = db.transaction()?;
-    let planned = match plan_stage {
-        Some(stage)
-            if gc_begin
-                .as_ref()
-                .is_some_and(|(_, _, trigger, _, _)| trigger["scope"] == "active_turn") =>
-        {
-            let expected_turn = gc_begin
-                .as_ref()
-                .and_then(|(_, _, trigger, _, _)| trigger["turn_id"].as_str())
-                .ok_or_else(|| {
-                    StorageError::InvalidInput(
-                        "active GC trigger lacks original Turn provenance".into(),
-                    )
-                })?;
-            Some(
-                plan_gc_active_turn_tx(&tx, thread, stage, expected_turn, config, plan_target)?
-                    .ok_or_else(|| {
-                        StorageError::InvalidInput("no active-Turn GC group is eligible".into())
-                    })?,
-            )
-        }
-        Some(stage) => Some(
-            plan_gc_prefix_tx(&tx, thread, stage, config, plan_target)?.ok_or_else(|| {
-                StorageError::InvalidInput("no ordinary-new GC prefix is eligible".into())
-            })?,
-        ),
-        None => None,
+    let planned = if trigger["scope"] == "active_turn" {
+        let expected_turn = trigger["turn_id"].as_str().ok_or_else(|| {
+            StorageError::InvalidInput("active GC trigger lacks original Turn provenance".into())
+        })?;
+        plan_gc_active_turn_tx(&tx, thread, stage, expected_turn)?
+    } else {
+        plan_gc_prefix_tx(&tx, thread, stage)?
     };
-    if requested_range.is_some() && planned.is_some() {
-        return Err(StorageError::InvalidInput(
-            "GC capture cannot combine a caller range with a metadata plan".into(),
-        ));
-    }
-    let range = requested_range
-        .or_else(|| planned.as_ref().map(|plan| plan.range.clone()))
-        .ok_or_else(|| StorageError::InvalidInput("GC capture has no range plan".into()))?;
+    let Some(planned) = planned else {
+        tx.commit()?;
+        return Ok(GcCaptureOutcome::NoTarget);
+    };
+    let range = planned.range.clone();
     let start = i64::try_from(range.start).map_err(|_| overflow())?;
     let end = i64::try_from(range.end).map_err(|_| overflow())?;
     let range_len = range.end.checked_sub(range.start).ok_or_else(overflow)?;
@@ -745,26 +639,25 @@ fn capture_selected_range_inner(
             "Selected GC summary interval changed during capture",
         )));
     }
-    if let Some(plan) = &planned {
-        if plan.selection_revision != thread_facts.0
-            || plan.profile_revision != thread_facts.1
-            || plan.nonappend_generation != thread_facts.2
-            || plan.epoch != thread_facts.3
-            || plan.sources.len() != row_plans.len()
-            || plan.sources.iter().zip(&row_plans).any(|(source, row)| {
-                source.ordinal != row.ordinal
-                    || source.id != row.id
-                    || source.revision != row.revision
-                    || source.turn != row.turn
-                    || source.group_id != row.group_id
-                    || source.protected != row.protected
-                    || source.group_complete != row.complete
-            })
-        {
-            return Err(StorageError::InvalidInput(
-                "metadata GC range plan changed before payload capture".into(),
-            ));
-        }
+    let plan = &planned;
+    if plan.selection_revision != thread_facts.0
+        || plan.profile_revision != thread_facts.1
+        || plan.nonappend_generation != thread_facts.2
+        || plan.epoch != thread_facts.3
+        || plan.sources.len() != row_plans.len()
+        || plan.sources.iter().zip(&row_plans).any(|(source, row)| {
+            source.ordinal != row.ordinal
+                || source.id != row.id
+                || source.revision != row.revision
+                || source.turn != row.turn
+                || source.group_id != row.group_id
+                || source.protected != row.protected
+                || source.group_complete != row.complete
+        })
+    {
+        return Err(StorageError::InvalidInput(
+            "metadata GC range plan changed before payload capture".into(),
+        ));
     }
 
     if native_tool_span_splits(&tx, thread, start, end)? {
@@ -782,7 +675,7 @@ fn capture_selected_range_inner(
     let mut active_tail_group = None;
     for span in &group_ranges {
         if let (Some(active), Some(first)) = (
-            planned.as_ref().and_then(|p| p.active_tail_range.as_ref()),
+            planned.active_tail_range.as_ref(),
             row_plans.get(span.start),
         ) {
             if usize::try_from(first.ordinal).ok() == Some(active.start) {
@@ -870,36 +763,42 @@ fn capture_selected_range_inner(
             attachments,
         });
     }
-    let origin = if let Some((stage, _, _, _, _)) = gc_begin.as_ref() {
-        tx.query_row("SELECT t.id,t.run_id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2",params![stage.attempt_id,thread],|row|Ok((Some(row.get::<_,String>(0)?),Some(row.get::<_,String>(1)?),Some(row.get::<_,i64>(2)?)))).optional()?.ok_or_else(||StorageError::InvalidInput("GC parent attempt provenance disappeared".into()))?
-    } else {
-        (None, None, None)
+    let request_turn = {
+        let turn = trigger["turn_id"].as_str().ok_or_else(|| {
+            StorageError::InvalidInput("GC trigger lacks request Turn provenance".into())
+        })?;
+        let generation: Option<i64> = tx
+            .query_row(
+                "SELECT generation FROM turn WHERE id=?1 AND thread_id=?2",
+                params![turn, thread],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let generation = generation.ok_or_else(|| {
+            StorageError::InvalidInput("GC request Turn provenance disappeared".into())
+        })?;
+        Some((turn.to_owned(), generation))
     };
-    if let Some((stage, reason, trigger, target_plan, strict_begin)) = gc_begin {
+    let origin = {
+        tx.query_row("SELECT t.id,t.run_id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2",params![stage.attempt_id,thread],|row|Ok((Some(row.get::<_,String>(0)?),Some(row.get::<_,String>(1)?),Some(row.get::<_,i64>(2)?)))).optional()?.ok_or_else(||StorageError::InvalidInput("GC parent attempt provenance disappeared".into()))?
+    };
+    {
         if stage.thread_id != thread
             || stage.profile_id != thread_facts.4
             || stage.model_id != thread_facts.5
             || stage.effort != thread_facts.6
             || (stage.reasoning_epoch != thread_facts.3
-                && !planned.as_ref().is_some_and(|plan| {
-                    plan.spill_epoch_advanced
-                        && stage.reasoning_epoch.checked_add(1) == Some(thread_facts.3)
-                }))
+                && !(planned.spill_epoch_advanced
+                    && stage.reasoning_epoch.checked_add(1) == Some(thread_facts.3)))
         {
             return Err(StorageError::InvalidInput(
                 "GC parent receipt context differs from the captured Thread".into(),
             ));
         }
-        if strict_begin {
-            super::attempt::begin_gc_tx(&tx, stage, reason, trigger, target_plan)?;
-        } else if !super::attempt::provisional_gc_matches(&tx, stage)? {
-            return Err(StorageError::InvalidInput(
-                "original GC provisional record changed before R capture".into(),
-            ));
-        }
+        super::attempt::begin_gc_tx(&tx, stage, reason, trigger, target_plan)?;
     }
     tx.commit()?;
-    Ok(CapturedSummaryInput {
+    Ok(GcCaptureOutcome::Captured(CapturedSummaryInput {
         thread: thread.to_owned(),
         selection_revision: thread_facts.0,
         profile_revision: thread_facts.1,
@@ -913,17 +812,15 @@ fn capture_selected_range_inner(
         origin_turn: origin.0,
         origin_run: origin.1,
         origin_generation: origin.2,
+        request_turn_id: request_turn.as_ref().map(|(turn, _)| turn.clone()),
+        request_generation: request_turn.map(|(_, generation)| generation),
         groups,
         active_tail_group,
-        active_turn: planned.as_ref().is_some_and(|plan| plan.active_turn),
-        spill_epoch_advanced: planned
-            .as_ref()
-            .is_some_and(|plan| plan.spill_epoch_advanced),
-        drop_reasoning: planned.as_ref().is_some_and(|plan| plan.drop_reasoning),
-        active_user_messages: planned
-            .as_ref()
-            .map_or_else(Vec::new, |plan| plan.active_user_messages.clone()),
-    })
+        active_turn: planned.active_turn,
+        spill_epoch_advanced: planned.spill_epoch_advanced,
+        drop_reasoning: planned.drop_reasoning,
+        active_user_messages: planned.active_user_messages.clone(),
+    }))
 }
 
 struct SourceGroupRangeMerger {

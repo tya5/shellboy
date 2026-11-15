@@ -1,24 +1,19 @@
 # 圧縮と採用
 
-## Authoritative Redesign: Core303 / Core301 (Design Only)
+## Core301 Current Runtime Contract and C1-C6 Decisions
 
-The complete numbered specification0-13 at the end of this document supersedes
-conflicting historical proactive/summary policy. Source of truth: USER-confirmed
-SHA256 `b822f2b54f8cb5940bc8e0e65dc7287818b1b55457c629fd655eb12b3c2e1a61`
-from `.local/claude/auto-compaction-redesign.md`, read in full against fresh main
-`4e6241a9a3235bb6ceffb03574ae983c5919765b`. The specification text is copied
-verbatim below, including USER/Claude-recommendation/to-confirm distinctions.
-This is DESIGN, not an assertion of implemented behavior. Old Core303 branch
-`427c0aba61ef1c5fd516624a0f66e9339221c0df` is preserved historically and is NOT
-part of this branch. Its migration43, target estimator and implementation are
-not adopted. No new table, column, migration number or code is introduced here.
+This section describes the current-main native proactive GC implementation contract. The numbered Core303 redesign and old proactive/map-reduce paragraphs retained later in this file are historical proposal material, not a second authority for current GC. Manual `/compact` and preview keep their existing strict full-snapshot revision/source/cache/provenance and append-tail rules; GC does not inherit a manual Run/Turn presence fence. Run/Turn are provenance, not producer lifetime/cancellation; explicit Run Stop and captured generation/source invalidations remain distinct.
 
-Rule/branch/test mapping, superseded-section scope, single required #A source check,
-public-surface inventory and unresolved decisions:
-`docs/development/compaction-redesign-review.md`.
-No quality/reachability gate is introduced: original reachability explains why
-summary loss is acceptable; it is not a prerequisite to adoption. No evaluation
-of whether the instruction-preservation heading "works" is required.
+- C1, shared selected-source adoption: `SummaryAdoption::adopt_tx` and native GC build typed selected source material but use one `store_replacement_material_tx` for replacement node, ordered source references, Thread association, attachment exclusion and index authorization. Both use `replace_selected_path` then the existing `history::select_path` within their owning transaction. Manual snapshot adoption retains its own append witness and source validation; GC strict writer ownership, exact attempt token/source/protection/tool checks and FINISH remain mandatory in the same adoption transaction. Both use `active_turn_summary_text` for the shared notice/body; separators are real newline characters and the active notice preserves retained-message and latest-round statements. Do not synthesize a manual Snapshot from GC or duplicate the physical replacement protocol. Oracles: exact shared notice unit test, manual HTTP-wait adoption and active reducible-group append/latest-tail control.
+- C2, one trial transition: `SummaryMaterial` is the shared selected-R representation and `Trial::finish_input` owns selected range and terminal/retry transitions. The production dispatch and focused tests call that same transition; only the checked projection-weight half-prefix calculation is shared, not a parallel Snapshot transition. Manual conversion occurs once at the manual owner boundary; GC borrows its already captured group text. Provider/context/output refusal classification, range eligibility, terminal output validation, and one-group stopping remain separate facts; output length is not a context-refusal signal. Oracles: exact half-prefix, refusal, Trial-original-identity and request wire tests.
+- C3, failure identity: manual snapshot and GC selected-R inputs call `failure_identity_fields` with the same ordered `(thread, first source ID, last source ID, profile, model, output limit)` identity. Identity is intentionally unchanged across a halved trial. Region slot, CAS, provider-turn key, owner identity and actual provider failure memory remain; text equality is not a replacement key.
+- C4, one authoritative plan/capture boundary: `capture_ordinary_gc_prefix_with_receipt_tx` performs metadata plan and selected-source capture in one writer transaction, returning typed `NoTarget` or `Captured`. No preflight plan is carried across an await or used as adoption authority. `NoTarget` commits no source capture, provisional GC stage, or producer install; the caller records the existing no-target attempt result. Closed prefix and current-Turn plan policies share context/witness primitives but retain distinct eligible ranges and tail handling.
+- C5, only live authorities: remove unused GC target-CAS types/branches (production passed `None` and no product caller exists), unused caller-selected capture variants, and temporary `eprintln!` hooks. `begin_gc_tx` and `provisional_gc_matches` share one exact provisional receipt predicate. Do not remove or weaken original attempt state/token FINISH, source/profile/epoch/nonappend/tool/protection checks, failure-memory compare-and-set, writer join/retirement, or Run Stop custody.
+- C6, ownership-shaped orchestration: `resolve_gc_stage`, `prepare_gc_failure_setup`, the one material conversion, dispatcher, writer-owned completion/adoption and retirement each follow the existing owner boundary; no framework, queue, registry, or endpoint-specific worker is added. A serialized failed writer reply remains unknown, never fabricated terminal state.
+
+Rejected alternatives and counterexamples: no active-summary fallback that reuses a stale plan; no output-size-based halving; no relaxed token/state CAS; no cancellation on natural Turn finish; no full Thread payload snapshot or reread; no arbitrary row/heap cap; no second writer or generic reentry framework. The original Turn and current request Turn/generation are captured separately: a closed-prefix summary can still be invalidated by a changed request generation, but ordinary Turn completion is not itself rejection. The single `witness_rejection` decision returns typed facts and is evaluated once at each writer boundary; completion uses that same fact for acceptance and persisted rejection.
+
+The earlier design-only review map and numbered redesign are retained as historical source material below; where they differ from these C1-C6 decisions they are not current runtime rules. This document does not claim full native qualification, provider readiness, OOM prevention, CI, cross-platform support or main landing.
 
 
 `src/compaction.rs` は通常のRust moduleとして配置する。公開入口は `Compactor::spill` と `summarize`。Controlの `/compact` は受付receiptを保存してからThreadごとの安全境界へ並べ、operation getのdownstreamで後続結果を取得する。Driverの通信・全tool結果確定と同じ境界を用いる。圧縮だけでTurnを作成・再開しない。
@@ -39,15 +34,18 @@ independent of SQLite recursive delete triggers; ON CONFLICT UPDATE is also cove
 Counter overflow or invalid numeric type aborts the transaction. Conservative
 invalidation is allowed (including same-cursor appends); this is not an event count.
 
-Adoption requires unchanged generation and the captured full ordered path as a prefix
-of current selection, plus existing profile/epoch/Run/Turn/hash/cancellation guards.
+This is the manual snapshot adoption contract: manual adoption requires unchanged
+generation and the captured full ordered path as a prefix of current selection, plus its
+existing profile/epoch/source/hash/cancellation guards. Proactive GC has the separate
+metadata-plan and request/attempt provenance rules in the operative section above; natural
+Run/Turn completion is not a GC cancellation cause.
 Replacement and current appended tail commit together against current revision in the
 same transaction. Other compaction edits and virtual expanded preview snapshots keep
 strict revision checks. No public API, payload, queue or journal is added. The counter
 lives with its thread, migration is transactional, and path/counter changes roll back
 together. Focused SQL/transaction and adoption tests qualify these invariants.
 
-## Owner-scope fences during queued message acceptance (#52)
+## Manual snapshot owner-scope fences during queued message acceptance (#52)
 
 The compaction snapshot freezes both the presence and identity of its current
 live Run and active Turn. Adoption rejects a newly live/stopping Run when the
@@ -56,10 +54,9 @@ Run liveness and Turn generation/state fences still apply when captured.
 Selected-path revision advances only on real history adoption, never merely on
 message acceptance. An ordinary queued message in the same active Turn remains
 off-path and cannot be erased by compaction of the unchanged selected sources;
-it does not invalidate a valid snapshot solely by being accepted. This applies
-to automatic as well as explicit compaction. No new counter, schema field or
-worker is needed. Broad Thread metadata changes do not acquire a new compaction
-fence, avoiding unnecessary discard of completed summary API work.
+it does not invalidate a valid snapshot solely by being accepted. These Run/Turn presence fences apply to manual snapshot compaction. Proactive GC uses
+its independent captured request/attempt Turn provenance; natural completion is not its
+cancellation cause. No new counter or schema field is needed.
 
 完結tool groupはassistantの全callと全resultを一つの境界として扱う。spillは全callと各結果のplaceholderを一つのnodeへ保存する。placeholderはcall ID、コマンド引数、終了状態、execution IDと原文node IDを含む。通常は最新完結groupを保護し、明確なcontext超過の二段階目だけ保護を解除する。推論の扱いは [#182](#signed-reasoning-and-history-edits-182) の位置規則に従う（編集位置より前は保持、後ろは送らない）。
 
@@ -258,7 +255,7 @@ warnings and immutable provenance unchanged. Agent guidance also explains
 cross-conversation semantic retrieval and verification of historical evidence;
 usage observation is a manual read of existing records, not new telemetry.
 
-## Bounded explicit summaries (#73 / D-015)
+## Historical bounded-summary proposal (#73 / D-015)
 
 Explicit range summaries use map/reduce, not concatenated part summaries. Keep
 map inputs chronological and group-atomic; pack complete chronological map
@@ -407,7 +404,7 @@ other segments use existing cache validity. Provider/model failures after sendin
 and races after the snapshot remain unpredicted. Final output is prepared after
 the read snapshot closes, with current capture revisions and explicit limits.
 
-## Proactive threshold compaction (#125 / D-019)
+## Historical proactive threshold design (#125 / D-019)
 
 Positioning: in normal operation the conversation stays at a low token count.
 A momentarily huge input is never blocked or pre-checked; it is sent. Only after
@@ -589,7 +586,7 @@ is reused; no extra source lookup or raw error parsing is introduced (#132).
 A second Run triggered by the
 same measurement overwrites the earlier record on that attempt.
 
-## Active-Turn middle summary (#181, reshaped by #182)
+## Historical active-Turn summary proposal (#181/#182)
 
 Background and the GPT-route evidence: [midturn-compaction](midturn-compaction.md).
 The #182 shape below supersedes its sections 1-4 and 7.
@@ -754,7 +751,7 @@ still pages the resulting groups. Malformed/oversized records are excluded and
 reported, never converted to zero. Combined token sums preserve known/unknown/
 overflow semantics; fields not reported for one request type remain unknown.
 
-## Proactive selection and spill evidence (#215)
+## Historical proactive selection and spill evidence (#215)
 
 Automatic compaction attempts eligible reducing spills before requesting a
 summary. An open tool loop retains its existing safety fence; a driver gate
@@ -784,7 +781,7 @@ prefix even when a smaller whole-group window could meet the target. This
 projection is a planning estimate, not a semantic-retention or token guarantee;
 actual provider usage still verifies the target on a subsequent request.
 
-## Calibrated proactive target (#209)
+## Historical calibrated proactive target proposal (#209)
 
 The target is 80% of `auto_at_tokens`. In the #208 observations at the
 200,000-token threshold, W7 had five post-compaction inputs in the 120,000 to
@@ -835,7 +832,7 @@ retain their separate escalation policy. Local replay-character changes guide
 whether to widen in the same attempt; only the next provider report verifies
 the outcome. No independent token or output-size guarantee is implied.
 
-## Owner amendment: four-stage automatic escalation (#215)
+## Historical owner amendment: four-stage escalation (#215)
 
 In one automatic attempt, run closed-Turn spill, closed-Turn summary, active-
 Turn spill, then active-Turn summary. Recompute remaining calibrated need from
@@ -1267,7 +1264,7 @@ summary node, its parts cache and summary text are not removed by the prune
 itself; cache entries whose sources the GC tombstones are collected by the
 existing summary-cache sweep. Compaction never reuses a pruned replacement.
 
-## Spill shortfall near the proactive threshold (#271)
+## Historical spill-shortfall and coverage proposal (#271)
 
 A successful spill advances the reasoning epoch. If a below-threshold verification
 shows that a spill-only stage did not reach the 80% target, defer further spill
