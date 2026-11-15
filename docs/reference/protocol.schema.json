@@ -3669,6 +3669,12 @@
     },
     "NodeProvenance": {
       "properties": {
+        "attempt_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "created_at": {
           "type": "string"
         },

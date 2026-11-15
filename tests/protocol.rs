@@ -43,6 +43,39 @@ fn context_edit_requires_unambiguous_ranges_and_bounded_ids() {
 }
 
 #[test]
+fn node_provenance_attempt_id_is_optional_and_legacy_absence_roundtrips() {
+    let attempt_id = uuid::Uuid::new_v4().to_string();
+    let base = json!({
+        "notification": null,
+        "message": null,
+        "sender": null,
+        "kind": "assistant_response",
+        "created_at": "2026-11-15T00:00:00Z",
+        "source_revision": 0,
+        "turn_id": null,
+        "run_id": null,
+        "origin_thread_id": null,
+    });
+    let legacy: NodeProvenance = serde_json::from_value(base.clone()).unwrap();
+    assert_eq!(legacy.attempt_id, None);
+    assert!(
+        serde_json::to_value(&legacy)
+            .unwrap()
+            .get("attempt_id")
+            .is_none()
+    );
+
+    let mut with_attempt = base;
+    with_attempt["attempt_id"] = json!(attempt_id);
+    let decoded: NodeProvenance = serde_json::from_value(with_attempt).unwrap();
+    assert_eq!(decoded.attempt_id.as_deref(), Some(attempt_id.as_str()));
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap()["attempt_id"],
+        attempt_id
+    );
+}
+
+#[test]
 fn all_public_commands_have_typed_roundtrip_fixtures() {
     let fixtures = [
         ("status", json!({})),

@@ -3965,6 +3965,7 @@ fn shellboy_provenance_fixture() -> shellboy::protocol::NodeProvenance {
         notification: None,
         message: None,
         sender: None,
+        attempt_id: None,
         kind: "assistant_response".into(),
         created_at: "2026-10-25T00:00:00Z".into(),
         source_revision: 0,
