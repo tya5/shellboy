@@ -3611,13 +3611,19 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 }
                 tokio::task::yield_now().await;
             };
-            // RunStop commits the stopping witness before its post-commit owner
-            // callback cancels the token, so this DB-witness-first order keeps
-            // the actual RunStopped reason. Earlier spills remain adopted.
-            assert_eq!(record["outcome"], "failed", "{record:#?}");
+            // DB stopping and owner-token cancellation are separate from the
+            // durable GC receipt; accept only the two correlated outcomes below.
+            // Earlier independently committed spills remain adopted.
+            match (
+                record["outcome"].as_str(),
+                record["compaction_outcome"]["outcome"]["reason"].as_str(),
+            ) {
+                (Some("cancelled"), Some("cancelled"))
+                | (Some("failed"), Some("run_stopped")) => {}
+                other => panic!("unexpected correlated RunStop outcome: {other:?}; {record:#?}"),
+            }
             assert_eq!(record["trigger"]["a_input_tokens"], first_known_a);
             assert_eq!(record["trigger"]["target_tokens"], 40);
-            assert_eq!(record["compaction_outcome"]["outcome"]["reason"], "run_stopped", "{record:#?}");
             assert_eq!(record["compaction_outcome"]["phase"], summary_stage, "{record:#?}");
             assert_eq!(record["committed_stages"][stage]["spilled_groups"], adopted_ids.len(), "{record:#?}");
             assert!(record["committed_stages"][summary_stage].is_null(), "{record:#?}");
@@ -4516,7 +4522,17 @@ async fn compact_list_records_the_summary_parameters_in_effect() {
     let events = proactive_events(&control, &thread).await;
     assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(events[0]["trigger"]["auto_at_tokens"], 100);
-    assert_eq!(events[0]["metrics"]["summary_limit"], 6000);
+    let metrics = &events[0]["metrics"];
+    assert!(metrics["source_characters"].as_u64().is_some(), "{metrics}");
+    assert!(
+        metrics["summary_characters"].as_u64().is_some(),
+        "{metrics}"
+    );
+    assert_eq!(metrics["summary_limit"], 6000);
+    assert_eq!(metrics["model_requests"], 1);
+    assert_eq!(metrics["summary_usage"]["requests"], 1);
+    assert_eq!(metrics["spilled_groups"], 0);
+    assert!(metrics["summary_node_id"].is_string(), "{metrics}");
     assert!(events[0]["metrics"].get("segment_chars").is_none());
     assert!(events[0]["metrics"].get("reduce_rounds").is_none());
     control.shutdown().await.unwrap();
