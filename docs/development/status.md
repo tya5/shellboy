@@ -7,9 +7,8 @@ The isolated worktree `task/core301-single-request-port-63724` is based on
 is `fc3019daec8d042141df6f84ce9b60aeaf90670b`. C7.1 typed capture/stage refactor is
 `7790e363d1662138928284c1edf99f108f11c83e`. C8 committed-spill custody repair is
 `a5f9b0afd6c02ef0e5314a65720c110d2df29430`. C3 paired fault acceptance cell is
-`08f2602019ee313203ebba86c27319dd49af0c71`. The docs/status commit for the C8 candidate
-is `618a2af8dcfbd846d453bf105839f458421e1328`; this C3 documentation update makes a new
-complete candidate SHA after itself.
+`08f2602019ee313203ebba86c27319dd49af0c71`. The final C3 design/status SHA will be
+committed after this update; no older standard-check result transfers to it.
 
 **Prelanding scope closure.** C6-2 one-owner Closed/Active stage sequencing is in C7.1
 and C8: the typed result returns the `Result` and committed spill together, only active
@@ -33,30 +32,34 @@ simulated outcome control.
 **Exact-SHA qualification.** C8 `scripts/check.sh` passed on SHA
 `618a2af8dcfbd846d453bf105839f458421e1328`, guarded execution
 `03601035-cd39-40d9-9529-835a4e8a2ffe`, exit 0 and cleanup confirmed after 916.007s.
-It ran layout checks, Python suite, fmt check, strict all-target Clippy, full all-target
-tests (2,647 library / 0 failed / 25 ignored; 1,415 integration / 0 failed / 19 ignored;
-14 passed / 1 ignored and 9 passed / 2 ignored additional targets), and the exact
-`test-db-observation` integration selector 1/1. This complete check qualifies only 618a.
-The new C3 test commit `08f2602019ee313203ebba86c27319dd49af0c71` and subsequent docs edits
-are not qualified by 618a. The previous C7.1 matrix was 16/17 on SHA 7790; its single red
-was the actual dropped-spill aggregate regression and remains preserved in
-`core301-clippyfix-focused.log`. Four exact C8 spill-custody controls passed 1/1 on working
-C8 at execution `85188a4a-2266-4327-afa4-79964bc59f6a` (active/closed Stop, postcommit
-Storage, RejectFinal rollback); strict C8 Clippy passed at `7bc4ee19-d6a9-4fcb-8f36-0a25219f19bb`.
-The exact C3 cell on 08f has not run yet.
+It ran layout checks, Python suite (228 pass), fmt check, strict all-target Clippy,
+full all-target tests (2,647 library / 0 failed / 25 ignored; 1,415 integration / 0 failed /
+19 ignored; 14 passed / 1 ignored and 9 passed / 2 ignored additional targets), and exact
+`test-db-observation` selector 1/1. This qualifies 618a only. C3 source/test commit
+`08f2602019ee313203ebba86c27319dd49af0c71` adds the paired ActiveSummary acceptance cell.
+It executes true `Fault::RejectFact` and postcommit `Fault::Storage` for the same scenario,
+then asserts same trigger and contrasting failed/no-stage versus adopted/stage-fact records.
+Both flow through `record_boundary`'s shared path/epoch/source/restart oracle. The paired
+case replaces the duplicate ActiveSummary entries in the standalone Storage/RejectFact
+loops; their other three scenarios and all cancellation, persistent-write, remeasurement,
+retired-write and RejectFinal controls remain. This exact C3 cell has not yet run.
+
+The previous C7.1 matrix was 16/17 on SHA 7790; its single active-stop spill aggregate red
+is preserved in `core301-clippyfix-focused.log` and fixed in a5f9. Four exact C8 spill
+custody controls passed 1/1 at execution `85188a4a-2266-4327-afa4-79964bc59f6a`; C8 strict
+Clippy passed at `7bc4ee19-d6a9-4fcb-8f36-0a25219f19bb`. These do not transfer to 08f.
 
 HTTP source and migrations remain unchanged from c0. Original fb/f497/994 reds and corrected
-receipts remain preserved; zero-test selectors are excluded. No new complete-SHA standard
-check, full native, final C3 bounded review, CI/three-OS qualification or landing is
-established yet.
+receipts remain preserved; zero-test selectors are excluded. The final C3 standard check, full native, bounded source review, CI/three-OS qualification
+and landing are not established yet.
 
 The prior 21:45 native/review and 23:00 main goals were superseded and missed. Revised
 checkpoints are 22:00 complete-unit freeze, 23:15 one-OS standard/review, and 00:30 CI/main;
-they do not waive validation. Final source change and C3 cell are now committed at 08f;
-current docs update is the only pending checkout change. Next commit docs, run the full
-`sh scripts/check.sh` first on the new clean final SHA with source frozen to terminal
-cleanup, then run only the affected exact C3/C8 matrix, obtain bounded review, and run a
-fresh full normal native on the same SHA before any CI/three-OS job.
+they do not waive validation. The 08f C3 cell commit is complete; current docs/status update is the only pending checkout
+change. Commit docs, then run full `sh scripts/check.sh` first on the new clean complete SHA
+with source frozen to terminal cleanup. Afterward run the exact paired C3 cell and affected
+C8 controls, obtain bounded review, and run fresh full normal native on that same SHA before
+any CI/three-OS job.
 
 ## v0.11.0 preparation
 
