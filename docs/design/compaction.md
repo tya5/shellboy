@@ -76,6 +76,16 @@ This section describes the current-main native proactive GC implementation contr
   C8 control: preserve `summary_rejected`, prior path/spill, epoch, and no-summary/no-POST
   facts when strict summary is rejected after spill commit. Failure/suppression does not fall through. Existing fault
   checkpoints remain after the actual committed stages.
+- C3 source/oracle unit (commit `08f2602019ee313203ebba86c27319dd49af0c71`) now has
+  one paired `ActiveSummary` cell comparing a real `Fault::RejectFact` SQL abort inside
+  atomic adoption (pre-FINISH rollback) with independent `Fault::Storage` failure at the
+  postcommit checkpoint (FINISH already durable). Both use the same `record_boundary` /
+  `assert_boundary` path, epoch, source/provenance, trigger and restart checks; paired
+  terminal assertions distinguish absent stage/failed from committed stage/adopted. The
+  pair replaces those two duplicated ActiveSummary entries in the individual scenario
+  loops; their ClosedSpill, ClosedSummary and ActiveSpill controls remain, as do
+  cancellation, remeasurement, persistent-write, retired-write, and RejectFinal effects.
+  No timer/hook/mutation of production ordering is added.
 - RejectFinal fault semantics: strict summary FINISH and replacement/path adoption are one
   transaction. `fault_tests::checkpoint` is invoked only after the stage method returns:
   for native summary that return follows writer-owned replacement/path/stage/FINISH COMMIT.

@@ -3,56 +3,60 @@
 ## CORE301 current-main GC port candidate (not main state)
 
 The isolated worktree `task/core301-single-request-port-63724` is based on
-`c0c1d82767f061c60c2f4d46673a3cfa30560145`. C7 terminal projection is source commit
-`fc3019daec8d042141df6f84ce9b60aeaf90670b`; the C7 docs/status SHA was
-`43d3e5724b494947bfca86223d9981fa09e9280f`. C7.1 strict-Clippy cleanup/source ownership
-refactor is committed separately as `7790e363d1662138928284c1edf99f108f11c83e`;
-this C7.1 documentation update will have its own final SHA.
+`c0c1d82767f061c60c2f4d46673a3cfa30560145`. C7 terminal-cause projection source commit
+is `fc3019daec8d042141df6f84ce9b60aeaf90670b`. C7.1 typed capture/stage refactor is
+`7790e363d1662138928284c1edf99f108f11c83e`. C8 committed-spill custody repair is
+`a5f9b0afd6c02ef0e5314a65720c110d2df29430`. C3 paired fault acceptance cell is
+`08f2602019ee313203ebba86c27319dd49af0c71`. The docs/status commit for the C8 candidate
+is `618a2af8dcfbd846d453bf105839f458421e1328`; this C3 documentation update makes a new
+complete candidate SHA after itself.
 
-C7 native at 43d3 passed guarded full `cargo test --locked` (exit 0; 2,647 library and
-1,415 integration tests passed; cleanup confirmed) and bounded source review accepted the
-third-pair fix. Those native/review results do not transfer to C7.1/C8. Strict Clippy on
-C7.1 initially exposed 34 diagnostics. Source-classified fixes now use named facts, remove
-only unused duplicate data/probes, keep the public spill helper, preserve the writer ack /
-result channel, and make stage side-effects an owned result. C7.1 source/test commit is
-`7790e363d1662138928284c1edf99f108f11c83e`.
+**Prelanding scope closure.** C6-2 one-owner Closed/Active stage sequencing is in C7.1
+and C8: the typed result returns the `Result` and committed spill together, only active
+mode after authoritative closed-summary `NoTarget` can spill, and later summary error /
+checkpoint cancellation cannot erase the committed spill from terminal aggregation. C6-3
+single source-fact authority is in C6 source commit `a0ad66e1aa75f77d16f4c3891db592e500d7241d`
+and preserved by C7.1: `CapturedSourceStamp.source` holds `GcSourceFacts`; writer witness
+uses `stamp.source.clone()`, and group-completeness agreement is checked in the selected-R
+classifier (`gc_coordinator.rs:98`, `gc_capture.rs:645`). C3 is now implemented in
+`record_tests.rs`: one `ActiveSummary` acceptance cell runs true `Fault::RejectFact`
+(the SQL trigger aborts the committed-stage update inside adoption, rolling back replacement,
+path, epoch and stage) and a matched `Fault::Storage` cell whose injection is armed only
+at the postcommit checkpoint. The cell asserts same immutable trigger, rejection has no
+active-summary fact, committed adoption has it, and both traverse the shared path/epoch,
+replacement/source and restart oracle. The matrix omits ActiveSummary from the separate
+Storage/RejectFact loops, so this pair does not duplicate those cells. Persistent write,
+remeasurement, cancellation, retired-write, spill/summary routing and RejectFinal controls
+remain registered. The actual migration is an aborting SQL trigger, not reason-string or
+simulated outcome control.
 
-C7.1's 17-selector matrix exposed one real active-Stop regression: an active spill committed,
-then a RunStopped summary rejection returned early and lost the committed spill from the
-attempt summary, omitting `summary_rejected`. Original reason/path/stage facts remained
-correct. C8 now returns `SummaryStageOutcome { summary: Result<...>, committed_active_spill }`
-on every normal/error/checkpoint branch and merges the committed spill before projecting
-the terminal summary. This fix is committed as `a5f9b0afd6c02ef0e5314a65720c110d2df29430`.
+**Exact-SHA qualification.** C8 `scripts/check.sh` passed on SHA
+`618a2af8dcfbd846d453bf105839f458421e1328`, guarded execution
+`03601035-cd39-40d9-9529-835a4e8a2ffe`, exit 0 and cleanup confirmed after 916.007s.
+It ran layout checks, Python suite, fmt check, strict all-target Clippy, full all-target
+tests (2,647 library / 0 failed / 25 ignored; 1,415 integration / 0 failed / 19 ignored;
+14 passed / 1 ignored and 9 passed / 2 ignored additional targets), and the exact
+`test-db-observation` integration selector 1/1. This complete check qualifies only 618a.
+The new C3 test commit `08f2602019ee313203ebba86c27319dd49af0c71` and subsequent docs edits
+are not qualified by 618a. The previous C7.1 matrix was 16/17 on SHA 7790; its single red
+was the actual dropped-spill aggregate regression and remains preserved in
+`core301-clippyfix-focused.log`. Four exact C8 spill-custody controls passed 1/1 on working
+C8 at execution `85188a4a-2266-4327-afa4-79964bc59f6a` (active/closed Stop, postcommit
+Storage, RejectFinal rollback); strict C8 Clippy passed at `7bc4ee19-d6a9-4fcb-8f36-0a25219f19bb`.
+The exact C3 cell on 08f has not run yet.
 
-Guarded fmt/check plus exact active/closed RunStop, postcommit Storage and RejectFinal rollback
-controls pass 1/1 on C8: execution `85188a4a-2266-4327-afa4-79964bc59f6a`, log
-`core301-c8-spill-return-recheck2.log`, exit 0/cleanup confirmed. The active-stop
-`summary_rejected` assertion now passes. Guarded `cargo clippy --locked --all-targets -- -D warnings`
-passes on C8: execution `7bc4ee19-d6a9-4fcb-8f36-0a25219f19bb`, log
-`core301-c8-clippy-final.log`, exit 0/cleanup confirmed. C8's complete exact matrix and full
-standard script remain pending.
+HTTP source and migrations remain unchanged from c0. Original fb/f497/994 reds and corrected
+receipts remain preserved; zero-test selectors are excluded. No new complete-SHA standard
+check, full native, final C3 bounded review, CI/three-OS qualification or landing is
+established yet.
 
-The first full `sh scripts/check.sh` on 43d3 failed strict Clippy (exit 101) before the
-all-target test or `test-db-observation` selector; its immutable log is
-`core301-standard-check-43d3e572-63724.log`. Structural fixes now address those 34
-warnings without blanket allowances; the 43d3 full native is green but cannot qualify the
-new C8 SHA. The full standard check has not yet completed on C8.
-
-HTTP source and migrations remain unchanged from c0. Original fb/f497/994 reds and
-corrected earlier receipts remain preserved; zero-test selectors are excluded.
-Independent review of the C8 stage ownership/fact changes, C8 `scripts/check.sh`, a
-new C8 full native, CI/three-OS qualification and main landing are not established.
-
-The 21:45 native/review target is no longer feasible for the reopened C7.1 SHA. Recovery
-commit checkpoint 21:30 and full standard-check checkpoint 22:15 remain execution
-checkpoints, not guaranteed completions. A new full native after check, bounded review,
-and three-OS workflow do not fit before 23:00 without skipping evidence; 23:00 landing is
-at severe risk and is not claimed or silently shifted.
-
-Next: finish the admitted C8 fix controls, commit the spill-custody fix and design/status
-separately, then run the entire `sh scripts/check.sh` on that exact clean SHA and
-freeze source until terminal cleanup. If green, run new full normal native and bounded
-review delta before any CI/three-OS request.
+The prior 21:45 native/review and 23:00 main goals were superseded and missed. Revised
+checkpoints are 22:00 complete-unit freeze, 23:15 one-OS standard/review, and 00:30 CI/main;
+they do not waive validation. Final source change and C3 cell are now committed at 08f;
+current docs update is the only pending checkout change. Next commit docs, run the full
+`sh scripts/check.sh` first on the new clean final SHA with source frozen to terminal
+cleanup, then run only the affected exact C3/C8 matrix, obtain bounded review, and run a
+fresh full normal native on the same SHA before any CI/three-OS job.
 
 ## v0.11.0 preparation
 
