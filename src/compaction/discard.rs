@@ -325,6 +325,23 @@ pub(crate) fn cause(error: &crate::protocol::ApiError) -> Outcome {
         })
 }
 
+/// Project the top-level automatic-attempt status from its captured typed cause.
+/// Driver cancellation still controls unwind; a later token state cannot rewrite
+/// a RunStopped/profile/storage cause after its compaction outcome was recorded.
+pub(crate) fn terminal_attempt_status(cause: Outcome) -> &'static str {
+    match cause {
+        Outcome::Rejected {
+            reason: RejectionReason::Cancelled,
+        }
+        | Outcome::Failed {
+            reason: FailureReason::Cancelled,
+            origin: FailureOrigin::Cancellation,
+            ..
+        } => "cancelled",
+        _ => "failed",
+    }
+}
+
 /// Exact two-object shape, bounded before serde allocation. Unknown facts are
 /// unavailable, never permission to fabricate a cause from historical details.
 pub(crate) fn decode(text: &str) -> Option<CompactionOutcomeFact> {
@@ -348,6 +365,7 @@ pub(crate) const SAVE_SQL: &str = "UPDATE model_attempt SET error_json=json_set(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn completed_discard_requires_original_token_and_stage_and_preserves_success() {
         use rusqlite::params;

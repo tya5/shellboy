@@ -28,6 +28,70 @@ mod spill_route_tests {
 
 pub(super) const REASON: &str = "proactive_threshold";
 
+fn terminal_attempt_outcome(
+    result: &Result<crate::compaction::CompactResult, ApiError>,
+    no_target: bool,
+) -> &'static str {
+    match result {
+        Ok(_) if no_target => "no_target",
+        Ok(_) => "adopted",
+        Err(error) => crate::compaction::discard::terminal_attempt_status(
+            crate::compaction::discard::cause(error),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod terminal_projection_tests {
+    use super::terminal_attempt_outcome;
+    use crate::compaction::discard::{
+        self, CompactionOutcomeFact, CompactionPhase, Outcome, RejectionReason,
+    };
+    use crate::protocol::{ApiError, ErrorCode};
+
+    fn rejected(reason: RejectionReason, message: &str) -> ApiError {
+        let mut error = ApiError::new(ErrorCode::InvalidState, message);
+        error.compaction_cause = Some(Box::new(Outcome::Rejected { reason }));
+        error
+    }
+
+    #[test]
+    fn captured_run_stopped_stays_failed_if_owner_token_cancels_before_terminal_projection() {
+        let error = rejected(RejectionReason::RunStopped, "DB witness first");
+        let captured = discard::cause(&error);
+        let fact = CompactionOutcomeFact {
+            phase: CompactionPhase::ClosedSummary,
+            elapsed_ms: 1,
+            outcome: captured,
+        };
+        let owner_stop = tokio_util::sync::CancellationToken::new();
+        owner_stop.cancel();
+
+        assert!(owner_stop.is_cancelled());
+        assert_eq!(terminal_attempt_outcome(&Err(error), false), "failed");
+        assert_eq!(
+            fact.outcome,
+            Outcome::Rejected {
+                reason: RejectionReason::RunStopped
+            }
+        );
+    }
+
+    #[test]
+    fn captured_cancelled_cause_projects_cancelled() {
+        let error = rejected(RejectionReason::Cancelled, "owner token first");
+        assert_eq!(terminal_attempt_outcome(&Err(error), false), "cancelled");
+    }
+
+    #[test]
+    fn profile_and_storage_causes_project_failed() {
+        let profile = rejected(RejectionReason::ProfileChanged, "profile changed");
+        assert_eq!(terminal_attempt_outcome(&Err(profile), false), "failed");
+        let storage = ApiError::new(ErrorCode::SaveFailed, "storage failed");
+        assert_eq!(terminal_attempt_outcome(&Err(storage), false), "failed");
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SpillRoute {
     SpillOnly,
@@ -520,7 +584,7 @@ pub(super) async fn maybe_compact_with_run_stop(
     let no_target = summary
         .as_ref()
         .is_some_and(|summary| summary["no_target"] == true);
-    let mut record = json!({"outcome":match &result {Ok(_) if no_target=>"no_target",Ok(_)=>"adopted",Err(e) if slot.stop.is_cancelled() && !e.is_storage_failure()=>"cancelled",Err(_)=>"failed"},"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
+    let mut record = json!({"outcome":terminal_attempt_outcome(&result,no_target),"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
     if let Some(summary) = summary {
         record["summary"] = summary;
     }
