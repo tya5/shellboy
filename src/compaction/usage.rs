@@ -111,15 +111,30 @@ pub(super) struct UsageLedger {
 }
 impl UsageLedger {
     pub(super) fn new(snapshot: &Snapshot) -> Self {
+        Self::from_context(
+            &snapshot.thread,
+            &snapshot.profile,
+            &snapshot.model,
+            snapshot.current_turn.clone(),
+            snapshot.run_fence.clone(),
+        )
+    }
+    pub(super) fn from_context(
+        thread: &str,
+        profile: &str,
+        model: &str,
+        turn_id: Option<String>,
+        run_id: Option<String>,
+    ) -> Self {
         let now = timestamp();
         Self {
             record: UsageRecord {
                 id: uid(),
-                thread_id: snapshot.thread.clone(),
-                turn_id: snapshot.current_turn.clone(),
-                run_id: snapshot.run_fence.clone(),
-                profile_id: snapshot.profile.clone(),
-                model_id: snapshot.model.clone(),
+                thread_id: thread.to_owned(),
+                turn_id,
+                run_id,
+                profile_id: profile.to_owned(),
+                model_id: model.to_owned(),
                 started_at: now.clone(),
                 updated_at: now,
                 rate_observations: Vec::new(),

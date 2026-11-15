@@ -132,46 +132,60 @@ async fn summary_stage(
     control: &Arc<Control>,
     compactor: &crate::compaction::Compactor,
     thread: &str,
-    slot: &DriverSlot,
+    _slot: &DriverSlot,
     active: bool,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
     automatic: &Automatic,
+    run_stop: tokio_util::sync::CancellationToken,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
-    let stage = if active {
-        "active_summary"
-    } else {
-        "closed_summary"
-    };
-    let result = if active {
-        automatic
-            .observed(
+    let thread_boundary = control.boundary(thread).await;
+    let admission_wait = tokio_util::sync::CancellationToken::new();
+    // Preserve the established order even after an active spill: summarize an
+    // eligible ordinary prefix first; only fall back to this Turn when absent.
+    let closed_stage = "closed_summary";
+    let closed = boundary
+        .pause(
+            &admission_wait,
+            automatic.observed(
                 control,
-                stage,
-                compactor.summarize_active_guarded(
-                    thread,
-                    slot.stop.clone(),
-                    Some(boundary),
-                    Some(automatic.stage(stage)),
+                closed_stage,
+                compactor.run_gc_summary(
+                    automatic.stage(closed_stage),
+                    false,
+                    automatic.turn.clone(),
+                    thread_boundary.clone(),
+                    run_stop.clone(),
+                ),
+            ),
+        )
+        .await
+        .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
+    let (_stage, result) = if active && closed.no_target {
+        let active_stage = "active_summary";
+        let result = boundary
+            .pause(
+                &admission_wait,
+                automatic.observed(
+                    control,
+                    active_stage,
+                    compactor.run_gc_summary(
+                        automatic.stage(active_stage),
+                        true,
+                        automatic.turn.clone(),
+                        thread_boundary,
+                        run_stop,
+                    ),
                 ),
             )
-            .await?
+            .await
+            .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
+        (active_stage, result)
     } else {
-        automatic
-            .observed(
-                control,
-                stage,
-                compactor.summarize_prefix_guarded(
-                    thread,
-                    slot.stop.clone(),
-                    Some(boundary),
-                    Some(automatic.stage(stage)),
-                ),
-            )
-            .await?
+        (closed_stage, closed)
     };
     #[cfg(test)]
     if !result.no_target {
-        fault_tests::checkpoint(control, slot, stage).await?;
+        fault_tests::checkpoint(control, _slot, _stage).await?;
     }
     Ok(result)
 }
@@ -181,6 +195,16 @@ pub(super) async fn maybe_compact(
     snapshot: &mut Snapshot,
     slot: &DriverSlot,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
+) -> Result<bool, ApiError> {
+    let run_stop = slot.stop.clone();
+    maybe_compact_with_run_stop(control, snapshot, slot, boundary, run_stop).await
+}
+pub(super) async fn maybe_compact_with_run_stop(
+    control: &Arc<Control>,
+    snapshot: &mut Snapshot,
+    slot: &DriverSlot,
+    boundary: &mut crate::compaction::boundary::Boundary<'_>,
+    run_stop: tokio_util::sync::CancellationToken,
 ) -> Result<bool, ApiError> {
     // One decision per fresh provider report; no character forecast or marks.
     let thread = snapshot.thread.clone();
@@ -347,32 +371,41 @@ pub(super) async fn maybe_compact(
         }
         // With spill disabled, keep the same summary/adoption path but skip
         // both automatic spill stages and the #A range-selection read.
-        let active = !compactor.has_closed_summary(&snapshot.thread).await?;
+        let active = slot
+            .turn
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|turn| turn.turn == snapshot.turn);
         if route == SpillRoute::SpillThenSummary {
-            let spill_phase = if active {
-                "active_spill"
-            } else {
-                "closed_spill"
-            };
-            let spilled = automatic
-                .observed(
-                    control,
-                    spill_phase,
-                    compactor.spill_staged_cancellable(
-                        &snapshot.thread,
-                        active,
-                        u64::MAX,
-                        slot.stop.clone(),
-                        Some(automatic.stage(spill_phase)),
-                    ),
-                )
-                .await?;
-            #[cfg(test)]
-            if !spilled.no_target {
-                fault_tests::checkpoint(control, slot, spill_phase).await?;
-            }
-            if !spilled.no_target {
-                committed_spill = Some(spilled);
+            // Older completed Turns remain the first GC target even when a new
+            // active Turn exists; spill the active region only if that prefix has no target.
+            for spill_phase in ["closed_spill", "active_spill"]
+                .into_iter()
+                .take(if active { 2 } else { 1 })
+            {
+                let spill_active = spill_phase == "active_spill";
+                let spilled = automatic
+                    .observed(
+                        control,
+                        spill_phase,
+                        compactor.spill_staged_cancellable(
+                            &snapshot.thread,
+                            spill_active,
+                            u64::MAX,
+                            slot.stop.clone(),
+                            Some(automatic.stage(spill_phase)),
+                        ),
+                    )
+                    .await?;
+                #[cfg(test)]
+                if !spilled.no_target {
+                    fault_tests::checkpoint(control, slot, spill_phase).await?;
+                }
+                if !spilled.no_target {
+                    committed_spill = Some(spilled);
+                    break;
+                }
             }
         }
         summary_stage(
@@ -383,6 +416,7 @@ pub(super) async fn maybe_compact(
             active,
             boundary,
             &automatic,
+            run_stop.clone(),
         )
         .await
     }
@@ -456,6 +490,11 @@ pub(super) async fn maybe_compact(
     if let Err(error) = &result {
         record["error"] = serde_json::to_value(error).unwrap_or(Value::Null);
     }
+    #[cfg(test)]
+    eprintln!(
+        "gc-driver-record-summary={}",
+        record.get("summary").is_some()
+    );
     let (attempt, token) = (automatic.attempt.clone(), automatic.token.clone());
     control
         .store

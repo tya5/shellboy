@@ -51,34 +51,44 @@ impl Compactor {
     /// revalidates the snapshot, as an admission wait does.
     pub(super) async fn summary_backoff(
         &self,
-        snapshot: &Snapshot,
+        owner: &mut super::single_request::DispatchOwner<'_, '_>,
         delay: Duration,
         cancel: &CancellationToken,
-        boundary: Option<&mut boundary::Boundary<'_>>,
     ) -> Result<(), ApiError> {
         if delay.is_zero() {
             return Ok(());
         }
-        let wait = async {
-            tokio::select! { biased; _ = cancel.cancelled() => {}, _ = tokio::time::sleep(delay) => {} }
-        };
-        if let Some(boundary) = boundary {
-            boundary
-                .pause(cancel, wait)
-                .await
-                .map_err(|_| cancelled())?;
-            let witness = snapshot.clone();
-            self.database
-                .call(move |db| {
-                    let tx = db.transaction()?;
-                    validate(&tx, &witness)?;
-                    tx.commit()?;
-                    Ok(())
-                })
-                .await
-                .map_err(storage_error)?;
-        } else {
-            wait.await;
+        match owner {
+            super::single_request::DispatchOwner::Manual { snapshot, boundary } => {
+                let wait = async {
+                    tokio::select! {biased;_=cancel.cancelled()=>{},_=tokio::time::sleep(delay)=>{}}
+                };
+                if let Some(boundary) = boundary.as_deref_mut() {
+                    boundary
+                        .pause(cancel, wait)
+                        .await
+                        .map_err(|_| cancelled())?;
+                    let witness = (*snapshot).clone();
+                    self.database
+                        .call(move |db| {
+                            let tx = db.transaction()?;
+                            validate(&tx, &witness)?;
+                            tx.commit()?;
+                            Ok(())
+                        })
+                        .await
+                        .map_err(storage_error)?;
+                } else {
+                    wait.await;
+                }
+            }
+            super::single_request::DispatchOwner::Gc { job_id, validate } => {
+                tokio::select! {biased;_=cancel.cancelled()=>{},_=tokio::time::sleep(delay)=>{}};
+                if cancel.is_cancelled() {
+                    return Err(cancelled());
+                }
+                validate(*job_id).await?;
+            }
         }
         if cancel.is_cancelled() {
             return Err(cancelled());

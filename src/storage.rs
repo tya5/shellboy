@@ -263,6 +263,7 @@ type Job = Box<
             &mut Connection,
             &Arc<AtomicUsize>,
             statement_observation::SlowBacktrace,
+            &mut crate::compaction::WriterGcCoordinator,
         ) -> JobOutcome
         + Send
         + 'static,
@@ -429,6 +430,54 @@ struct Shared {
     shutdown_done: Notify,
 }
 
+/// Weak storage capability used by the producer reaper to publish joined retirement.
+#[derive(Clone)]
+pub(crate) struct GcRetirementWake {
+    shared: std::sync::Weak<Shared>,
+}
+impl GcRetirementWake {
+    pub(crate) async fn notify(
+        &self,
+        id: crate::compaction::WriterJobId,
+    ) -> Result<(), StorageError> {
+        let shared = self.shared.upgrade().ok_or(StorageError::Closed)?;
+        let sender = shared
+            .sender
+            .lock()
+            .expect("DB admission mutex poisoned")
+            .as_ref()
+            .map(|lanes| lanes.foreground.clone())
+            .ok_or(StorageError::Closed)?;
+        let permit = sender
+            .reserve_owned()
+            .await
+            .map_err(|_| StorageError::Closed)?;
+        if shared
+            .sender
+            .lock()
+            .expect("DB admission mutex poisoned")
+            .is_none()
+        {
+            return Err(StorageError::Closed);
+        }
+        permit.send(make_gc_retirement_job(id));
+        Ok(())
+    }
+}
+fn make_gc_retirement_job(id: crate::compaction::WriterJobId) -> Command {
+    let job: Job = Box::new(move |connection, _, _, writer_gc| {
+        let _ = writer_gc.reconcile_joined_retirement(connection, id);
+        JobOutcome::default()
+    });
+    Command::Run {
+        job,
+        queued_at: Instant::now(),
+        kind: "gc::joined_retirement",
+        lane: Lane::Foreground,
+        requester: None,
+    }
+}
+
 /// Cloneable admission handle; all clones share one connection and shutdown gate.
 #[derive(Clone)]
 pub struct DbWorker {
@@ -452,7 +501,206 @@ impl<T> DbReply<T> {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum GcCompletionSubmitError {
+    NotAdmitted(StorageError),
+    AdmittedReplyLost(StorageError),
+}
+
 impl DbWorker {
+    pub(crate) fn gc_retirement_wake(&self) -> GcRetirementWake {
+        GcRetirementWake {
+            shared: Arc::downgrade(&self.shared),
+        }
+    }
+
+    pub(crate) async fn call_with_gc_capture_cancellable<F, L, Fut>(
+        &self,
+        stage: crate::compaction::GcStage,
+        operation: F,
+        launch: L,
+        cancel: Option<tokio_util::sync::CancellationToken>,
+    ) -> Result<crate::compaction::WriterJobId, StorageError>
+    where
+        F: FnOnce(
+                &mut Connection,
+                &crate::compaction::GcStage,
+            ) -> Result<crate::compaction::CapturedSummaryInput, StorageError>
+            + Send
+            + 'static,
+        L: FnOnce(
+                crate::compaction::WriterJobId,
+                crate::compaction::CapturedSummaryInput,
+                tokio_util::sync::CancellationToken,
+            ) -> Fut
+            + Send
+            + 'static,
+        Fut: std::future::Future<Output = Option<crate::compaction::WriterCompletion>>
+            + Send
+            + 'static,
+    {
+        let runtime = tokio::runtime::Handle::current();
+        let wake = self.gc_retirement_wake();
+        let (command, reply) = make_gc_capture_job(stage, operation, launch, runtime, wake);
+        let sender = self
+            .shared
+            .sender
+            .lock()
+            .expect("DB admission mutex poisoned")
+            .as_ref()
+            .map(|lanes| lanes.foreground.clone())
+            .ok_or(StorageError::Closed)?;
+        let permit = match cancel.as_ref() {
+            Some(token) => {
+                tokio::select! {biased;_=token.cancelled()=>return Err(StorageError::InvalidInput("GC capture cancelled before command admission".into())),permit=sender.reserve_owned()=>permit.map_err(|_|StorageError::Closed)?}
+            }
+            None => sender
+                .reserve_owned()
+                .await
+                .map_err(|_| StorageError::Closed)?,
+        };
+        {
+            let admission = self
+                .shared
+                .sender
+                .lock()
+                .expect("DB admission mutex poisoned");
+            if admission.is_none()
+                || cancel
+                    .as_ref()
+                    .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
+            {
+                return Err(StorageError::Closed);
+            }
+            self.shared
+                .foreground_waiting
+                .fetch_add(1, Ordering::AcqRel);
+            permit.send(command);
+        }
+        reply.receive().await
+    }
+    pub(crate) async fn cancel_gc_job(
+        &self,
+        id: crate::compaction::WriterJobId,
+    ) -> Result<bool, StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let job: Job = Box::new(move |_, _, _, coordinator| {
+            let _ = tx.send(Ok(coordinator.cancel_job(id)));
+            JobOutcome::default()
+        });
+        self.admit(
+            Lane::Foreground,
+            Command::Run {
+                job,
+                queued_at: Instant::now(),
+                kind: "gc::explicit_stop",
+                lane: Lane::Foreground,
+                requester: None,
+            },
+        )
+        .await?;
+        rx.await.map_err(|_| StorageError::Closed)?
+    }
+    pub(crate) async fn validate_gc_job(
+        &self,
+        id: crate::compaction::WriterJobId,
+    ) -> Result<bool, StorageError> {
+        let (tx, rx) = oneshot::channel();
+        let job: Job = Box::new(move |db, _, _, coordinator| {
+            let result = coordinator.validate_job(db, id).map_err(StorageError::from);
+            let _ = tx.send(result);
+            JobOutcome::default()
+        });
+        self.admit(
+            Lane::Foreground,
+            Command::Run {
+                job,
+                queued_at: Instant::now(),
+                kind: "gc::witness_validate",
+                lane: Lane::Foreground,
+                requester: None,
+            },
+        )
+        .await?;
+        rx.await.map_err(|_| StorageError::Closed)?
+    }
+    pub(crate) async fn complete_gc_job_cancellable(
+        &self,
+        id: crate::compaction::WriterJobId,
+        pending: &mut Option<Result<crate::compaction::Dispatched, crate::protocol::ApiError>>,
+        cancel: Option<&tokio_util::sync::CancellationToken>,
+        failure: Option<crate::compaction::GcFailureMemory>,
+    ) -> Result<crate::compaction::CompletionDisposition, GcCompletionSubmitError> {
+        if pending.is_none() {
+            return Err(GcCompletionSubmitError::NotAdmitted(
+                StorageError::InvalidInput("GC result already transferred".into()),
+            ));
+        }
+        let sender = self
+            .shared
+            .sender
+            .lock()
+            .expect("DB admission mutex poisoned")
+            .as_ref()
+            .map(|lanes| lanes.foreground.clone())
+            .ok_or_else(|| GcCompletionSubmitError::NotAdmitted(StorageError::Closed))?;
+        let permit = match cancel {
+            Some(token) => {
+                tokio::select! {biased;_=token.cancelled()=>return Err(GcCompletionSubmitError::NotAdmitted(StorageError::InvalidInput("GC completion cancelled before admission".into()))),permit=sender.reserve_owned()=>permit.map_err(|_|GcCompletionSubmitError::NotAdmitted(StorageError::Closed))?}
+            }
+            None => sender
+                .reserve_owned()
+                .await
+                .map_err(|_| GcCompletionSubmitError::NotAdmitted(StorageError::Closed))?,
+        };
+        let reply;
+        {
+            let admission = self
+                .shared
+                .sender
+                .lock()
+                .expect("DB admission mutex poisoned");
+            if admission.is_none() {
+                return Err(GcCompletionSubmitError::NotAdmitted(StorageError::Closed));
+            }
+            if cancel.is_some_and(tokio_util::sync::CancellationToken::is_cancelled) {
+                return Err(GcCompletionSubmitError::NotAdmitted(
+                    StorageError::InvalidInput("GC completion cancelled before admission".into()),
+                ));
+            }
+            let result = pending.take().expect("checked");
+            let (command, response) = make_gc_completion_job(id, result, failure);
+            self.shared
+                .foreground_waiting
+                .fetch_add(1, Ordering::AcqRel);
+            permit.send(command);
+            reply = response;
+        }
+        reply
+            .receive()
+            .await
+            .map_err(GcCompletionSubmitError::AdmittedReplyLost)
+    }
+    pub(crate) async fn adopt_gc_candidate<T, F>(
+        &self,
+        id: crate::compaction::WriterJobId,
+        guard: tokio::sync::OwnedMutexGuard<()>,
+        apply: F,
+    ) -> Result<T, StorageError>
+    where
+        T: Send + 'static,
+        F: FnOnce(
+                &rusqlite::Transaction<'_>,
+                &crate::compaction::Dispatched,
+            ) -> Result<(T, String), StorageError>
+            + Send
+            + 'static,
+    {
+        let (command, reply) = make_gc_adoption_job(id, guard, apply);
+        self.admit(Lane::Foreground, command).await?;
+        reply.receive().await
+    }
+
     /// Open only after acquiring the data-directory owner lock.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         Self::open_with_capacity(path, DEFAULT_QUEUE_CAPACITY).await
@@ -531,6 +779,7 @@ impl DbWorker {
             slow_limit: slow_limit.clone(),
             next_job_id: next_job_id.clone(),
             checkpoint_attempts: checkpoint_attempts.clone(),
+            gc_coordinator: crate::compaction::WriterGcCoordinator::default(),
             #[cfg(test)]
             background_steps: background_steps.clone(),
         };
@@ -1043,35 +1292,176 @@ fn finish_transaction<T>(connection: &Connection, result: &mut Result<T, Storage
     }
 }
 
+fn make_gc_capture_job<F, L, Fut>(
+    stage: crate::compaction::GcStage,
+    operation: F,
+    launch: L,
+    runtime: tokio::runtime::Handle,
+    wake: GcRetirementWake,
+) -> (Command, DbReply<crate::compaction::WriterJobId>)
+where
+    F: FnOnce(
+            &mut Connection,
+            &crate::compaction::GcStage,
+        ) -> Result<crate::compaction::CapturedSummaryInput, StorageError>
+        + Send
+        + 'static,
+    L: FnOnce(
+            crate::compaction::WriterJobId,
+            crate::compaction::CapturedSummaryInput,
+            tokio_util::sync::CancellationToken,
+        ) -> Fut
+        + Send
+        + 'static,
+    Fut: std::future::Future<Output = Option<crate::compaction::WriterCompletion>> + Send + 'static,
+{
+    let (sender, receiver) = oneshot::channel();
+    let job: Job = Box::new(move |db, _, slow, coordinator| {
+        let stage_copy = stage.clone();
+        let result = if coordinator.can_install_capture() {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(db, &stage_copy)))
+                .unwrap_or(Err(StorageError::JobPanicked))
+        } else {
+            Err(StorageError::QueueFull)
+        };
+        let mut result = result;
+        finish_transaction(db, &mut result);
+        let result = result.and_then(|captured| {
+            coordinator
+                .install_after_commit(db, captured, stage_copy, runtime, wake, launch)
+                .map_err(|message| StorageError::InvalidInput(message.into()))
+        });
+        let _ = coordinator.reconcile_before_db_reply(db);
+        let _ = sender.send(result);
+        JobOutcome::default()
+    });
+    (
+        Command::Run {
+            job,
+            queued_at: Instant::now(),
+            kind: "gc::capture_commit",
+            lane: Lane::Foreground,
+            requester: None,
+        },
+        DbReply { receiver },
+    )
+}
+fn make_gc_completion_job(
+    id: crate::compaction::WriterJobId,
+    result: Result<crate::compaction::Dispatched, crate::protocol::ApiError>,
+    failure: Option<crate::compaction::GcFailureMemory>,
+) -> (Command, DbReply<crate::compaction::CompletionDisposition>) {
+    let (sender, receiver) = oneshot::channel();
+    let job: Job = Box::new(move |db, _, _, coordinator| {
+        let write = if result.is_err() {
+            failure.map(|failure| match coordinator.validate_job(db, id) {
+                Ok(true) => match db.transaction() {
+                    Ok(tx) => match crate::compaction::remember_gc_failure_tx(&tx, &failure) {
+                        Ok(wrote) => {
+                            if wrote {
+                                tx.commit().map(|_| ()).map_err(StorageError::from)
+                            } else {
+                                Ok(())
+                            }
+                        }
+                        Err(error) => Err(error),
+                    },
+                    Err(error) => Err(StorageError::from(error)),
+                },
+                Ok(false) => Ok(()),
+                Err(error) => Err(StorageError::from(error)),
+            })
+        } else {
+            None
+        };
+        let completion = coordinator
+            .complete_before_db_reply(db, id, result)
+            .map_err(StorageError::from);
+        let result = write.unwrap_or(Ok(())).and(completion);
+        let _ = coordinator.reconcile_before_db_reply(db);
+        let _ = sender.send(result);
+        JobOutcome::default()
+    });
+    (
+        Command::Run {
+            job,
+            queued_at: Instant::now(),
+            kind: "gc::compute_completion",
+            lane: Lane::Foreground,
+            requester: None,
+        },
+        DbReply { receiver },
+    )
+}
+fn make_gc_adoption_job<T, F>(
+    id: crate::compaction::WriterJobId,
+    guard: tokio::sync::OwnedMutexGuard<()>,
+    apply: F,
+) -> (Command, DbReply<T>)
+where
+    T: Send + 'static,
+    F: FnOnce(
+            &rusqlite::Transaction<'_>,
+            &crate::compaction::Dispatched,
+        ) -> Result<(T, String), StorageError>
+        + Send
+        + 'static,
+{
+    let (sender, receiver) = oneshot::channel();
+    let job: Job = Box::new(move |db, _, _, coordinator| {
+        let mut result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            coordinator.adopt_ready_candidate(db, id, apply)
+        }))
+        .unwrap_or(Err(StorageError::JobPanicked));
+        finish_transaction(db, &mut result);
+        let _ = coordinator.reconcile_before_db_reply(db);
+        drop(guard);
+        let _ = sender.send(result);
+        JobOutcome::default()
+    });
+    (
+        Command::Run {
+            job,
+            queued_at: Instant::now(),
+            kind: "gc::strict_adoption",
+            lane: Lane::Foreground,
+            requester: None,
+        },
+        DbReply { receiver },
+    )
+}
+
 fn make_job<T, F>(operation: F) -> (Command, DbReply<T>)
 where
     T: Send + 'static,
     F: FnOnce(&mut Connection) -> Result<T, StorageError> + Send + 'static,
 {
     let (sender, receiver) = oneshot::channel();
-    let job: Job = Box::new(move |connection: &mut Connection, _, slow_backtrace| {
-        let installed = connection
-            .progress_handler(
-                PROGRESS_GRANULARITY as std::ffi::c_int,
-                Some(move || {
-                    slow_backtrace.observe(Instant::now());
-                    false
-                }),
-            )
-            .is_ok();
-        let mut result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            operation(connection)
-        })) {
-            Ok(result) => result,
-            Err(_) => Err(StorageError::JobPanicked),
-        };
-        if installed {
-            let _ = connection.progress_handler(0, None::<fn() -> bool>);
-        }
-        finish_transaction(connection, &mut result);
-        let _ = sender.send(result);
-        JobOutcome::default()
-    });
+    let job: Job = Box::new(
+        move |connection: &mut Connection, _, slow_backtrace, _writer_gc| {
+            let installed = connection
+                .progress_handler(
+                    PROGRESS_GRANULARITY as std::ffi::c_int,
+                    Some(move || {
+                        slow_backtrace.observe(Instant::now());
+                        false
+                    }),
+                )
+                .is_ok();
+            let mut result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                operation(connection)
+            })) {
+                Ok(result) => result,
+                Err(_) => Err(StorageError::JobPanicked),
+            };
+            if installed {
+                let _ = connection.progress_handler(0, None::<fn() -> bool>);
+            }
+            finish_transaction(connection, &mut result);
+            let _ = sender.send(result);
+            JobOutcome::default()
+        },
+    );
     (
         Command::Run {
             job,
@@ -1098,7 +1488,10 @@ where
 {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(
-        move |connection: &mut Connection, waiting: &Arc<AtomicUsize>, slow_backtrace| {
+        move |connection: &mut Connection,
+              waiting: &Arc<AtomicUsize>,
+              slow_backtrace,
+              _writer_gc| {
             let budget = Arc::new(StepBudget::default());
             let (handler_budget, hook_budget) = (budget.clone(), budget.clone());
             let waiting = waiting.clone();
@@ -1238,6 +1631,7 @@ struct WorkerState {
     slow_limit: Arc<Mutex<SlowJobLimit>>,
     next_job_id: Arc<AtomicU64>,
     checkpoint_attempts: Arc<AtomicUsize>,
+    gc_coordinator: crate::compaction::WriterGcCoordinator,
     #[cfg(test)]
     background_steps: StepLog,
 }
@@ -1322,7 +1716,7 @@ fn run_worker(
     foreground: mpsc::Receiver<Command>,
     background: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<(), StorageError>>,
-    state: WorkerState,
+    mut state: WorkerState,
     startup: (
         Option<tokio::sync::watch::Sender<crate::app::StartupProgress>>,
         Option<crate::diagnostics::Diagnostics>,
@@ -1407,6 +1801,7 @@ fn run_worker(
                     observation.connection(),
                     &state.foreground_waiting,
                     slow_backtrace.clone(),
+                    &mut state.gc_coordinator,
                 );
                 let counters = observation
                     .available()

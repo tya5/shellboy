@@ -770,6 +770,7 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
         active,
         &mut boundary,
         &automatic,
+        slot.stop.clone(),
     );
     let answer_summary = async {
         let request = incoming(&control, &mut receive).await;

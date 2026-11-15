@@ -77,6 +77,11 @@ fn receipt_source_query(w: &Window, display: bool) -> String {
         w.sql(&at)
     )
 }
+pub(super) fn automatic_metrics_root(alias: &str) -> String {
+    format!(
+        "CASE WHEN json_valid({alias}.error_json) AND json_type({alias}.error_json,'$.automatic_trim_attempt')='object' THEN COALESCE(json_extract({alias}.error_json,'$.automatic_trim_attempt.summary'),json_extract({alias}.error_json,'$.automatic_trim_attempt.result'),json_extract({alias}.error_json,'$.automatic_trim_attempt.error.details'),'{{}}') ELSE COALESCE(json_extract({alias}.error_json,'$.automatic_trim'),'{{}}') END"
+    )
+}
 pub(super) fn automatic_query(w: &Window) -> String {
     automatic_source_query(w, false)
 }
@@ -91,12 +96,12 @@ fn automatic_source_query(w: &Window, display: bool) -> String {
     } else {
         "(SELECT count(*) FROM model_attempt earlier INDEXED BY attempts_by_turn WHERE earlier.turn_id=a.turn_id AND earlier.rowid<=a.rowid AND earlier.state IN ('failed','incomplete'))"
     };
-    let root = "COALESCE(json_extract(a.error_json,'$.automatic_trim'),json_extract(a.error_json,'$.automatic_trim_attempt.result'),json_extract(a.error_json,'$.automatic_trim_attempt.summary'),json_extract(a.error_json,'$.automatic_trim_attempt.error.details'),'{}')";
-    let node = output_node(root);
+    let root = automatic_metrics_root("a");
+    let node = output_node(&root);
     let at = "COALESCE(n.created_at,a.ended_at,a.started_at)";
     format!(
         "SELECT a.id,{at},{},json_extract(a.error_json,'$.error.kind'),json_extract(a.error_json,'$.automatic_retry.number'),a.turn_id,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),'recorded'),{failures},CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.reason')='text' THEN json_extract(a.error_json,'$.automatic_trim_attempt.reason') END,CASE WHEN json_type(a.error_json,'$.automatic_trim_attempt.trigger')='object' THEN json_extract(a.error_json,'$.automatic_trim_attempt.trigger') END,{} FROM {source} ON a.turn_id=u.id LEFT JOIN node n ON n.id={node} WHERE u.thread_id=?1 AND {AUTO} AND {} ORDER BY usage_saved_start({at}) DESC,a.id DESC LIMIT ?2",
-        enriched(root),
+        enriched(&root),
         crate::compaction::discard::status_sql("a"),
         w.sql(at)
     )

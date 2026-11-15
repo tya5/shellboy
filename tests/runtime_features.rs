@@ -3671,6 +3671,15 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
             let events = proactive_events(&control, &target).await;
             assert_eq!(events.len(), 2, "{events:#?}");
             let retry = events.iter().find(|event| event["state"] == "adopted").expect("adopted retry");
+            let inspect_id=retry["attempt_id"].as_str().unwrap().to_owned();
+            let db=control.store.database.clone();
+            let facts=db.call(move|db|{
+                let facts=db.query_row("SELECT json_valid(a.error_json),json_group_array(j.key),json_type(a.error_json,'$.automatic_trim'),json_type(a.error_json,'$.automatic_trim_attempt'),json_type(a.error_json,'$.automatic_trim_attempt.summary'),json_type(a.error_json,'$.automatic_trim_attempt.result'),json_extract(a.error_json,'$.automatic_trim_attempt.summary.summary_node_id'),json_extract(a.error_json,'$.automatic_trim_attempt.result.summary_node_id') FROM model_attempt a,json_each(CASE WHEN json_valid(a.error_json) THEN json_extract(a.error_json,'$.automatic_trim_attempt') ELSE '{}' END) j WHERE a.id=?1 GROUP BY a.id",[inspect_id],|r|Ok((r.get::<_,bool>(0)?,r.get::<_,String>(1)?,r.get::<_,Option<String>>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,Option<String>>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,Option<String>>(7)?)))?;
+                Ok(facts)
+            }).await.unwrap();
+            assert!(facts.0, "current attempt JSON must be valid");
+            assert!(facts.1.contains("summary"), "committed GC FINISH stores its summary facts: {facts:?}");
+            assert_eq!(facts.6.as_deref(),retry["metrics"]["summary_node_id"].as_str(),"readback exposes the committed summary node from the current attempt record");
             assert!(retry["metrics"]["summary_node_id"].is_string(), "{retry:#?}");
             let retry_record = attempt_record(&control, retry["attempt_id"].as_str().unwrap().to_owned()).await;
             assert_eq!(retry_record["trigger"]["a_input_tokens"], 200, "{retry_record:#?}");
@@ -3809,10 +3818,9 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
             return;
         }
         let material = second.body["input"].to_string();
-        // §4.1: nothing unsafe precedes the latest complete tool group, so the
-        // range includes it; the summarizer sees the whole range.
-        assert!(material.contains("STEP0") && material.contains("STEP2"), "③ is summary input");
-        assert!(material.contains("STEP3"), "④ (latest complete group) is in the selected range");
+        // Keep the latest complete tool group as a separate tail, not summary input.
+        assert!(material.contains("STEP0") && material.contains("STEP2"), "ordinary active prefix is summary input");
+        assert!(!material.contains("STEP3"), "latest complete group is outside the selected range");
         assert!(!material.contains("EEEE"), "encrypted reasoning is never summary material");
         second.reply.send((200, answer("## Goal\nRun steps\n## Current state\nSTEP0-2 ran"))).unwrap();
         let after = incoming(&control, &mut receive).await;
@@ -3822,11 +3830,12 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         let before = after_prefix.body["input"].as_array().unwrap();
         let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
         assert_eq!(input[..=request], before[..=before_request], "①② unchanged");
-        let tail = &input[request + 1..];
-        assert!(tail.iter().all(|item| item.get("type").is_none_or(|t| t == "message")), "no call, result or reasoning after the edit: {tail:?}");
-        let notice = tail.iter().find(|item| item.to_string().contains("tool work below in the active Turn was summarized")).expect("summary notice");
-        let text = notice.to_string();
-        assert!(text.contains("STEP3") && text.contains("Latest tool round"), "④ as text: {text}");
+        let tail=&input[request+1..];
+        let notice=tail.iter().find(|item|item.to_string().contains("active-Turn tool work in this range was summarized")).expect("summary notice for selected middle range");
+        assert!(!notice.to_string().contains("STEP3"),"latest group is not claimed as summarized");
+        let call=tail.iter().position(|item|item["call_id"]=="step-3").expect("latest call retained outside R");
+        assert_eq!(tail.get(call+1).and_then(|item|item["call_id"].as_str()),Some("step-3"),"its result remains adjacent and unsplit");
+        assert!(tail[call].to_string().contains("STEP3")&&tail[call+1].to_string().contains("STEP3"),"latest complete group remains intact: {tail:?}");
         after.reply.send((200, answer("finished"))).unwrap();
         settled(&control, &target).await;
         let events = proactive_events(&control, &target).await;
@@ -4930,9 +4939,20 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     );
     let input = summary.body["input"].to_string();
     assert!(
-        input.contains("call-0") && input.contains("call-1"),
-        "whole active range"
+        input.contains("call-0"),
+        "older complete tool group is summary material"
     );
+    assert!(
+        !input.contains("call-1"),
+        "latest complete group remains outside summary R"
+    );
+    let append_thread = thread.clone();
+    control.store.database.call(move|db|{
+        let tx=db.transaction()?;
+        let turn:String=tx.query_row("SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1",[&append_thread],|row|row.get(0))?;
+        shellboy::history::append_node(&tx,&append_thread,"gc-append-during-provider",Some(&turn),"user",&json!({"role":"user","content":"GC-APPENDED-TAIL"}),"gc-append")?;
+        tx.commit()?;Ok(())
+    }).await.unwrap();
     summary
         .reply
         .send((200, answer("short middle summary")))
@@ -4943,9 +4963,15 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
         json!([]),
         "ordinary work continues after compaction"
     );
+    let next_input = next.body["input"].to_string();
     assert!(
-        next.body["input"].to_string().contains("call-1"),
-        "the latest round remains in the replay as plain text"
+        next_input.contains("call-1"),
+        "the latest round remains outside R"
+    );
+    assert_eq!(
+        next_input.matches("GC-APPENDED-TAIL").count(),
+        1,
+        "valid tail append during provider wait survives adoption exactly once"
     );
     next.reply
         .send((200, answer_with_usage("done", 10)))
@@ -4967,6 +4993,92 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     control.shutdown().await.unwrap();
     owner.shutdown().await.unwrap();
     server.abort();
+}
+
+async fn active_gc_candidate_mutation_case(mutation: &'static str) {
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, server) = proxy().await;
+    let owner = proactive_owner(
+        root.path(),
+        &url,
+        "spill=false\n[compaction]\nauto_at_tokens=100\n",
+    )
+    .await;
+    let control = Control::new(&owner, root.path().into());
+    let thread = thread(&control).await;
+    send(&control, &thread, "active mutation fixture").await;
+    incoming(&control, &mut receive)
+        .await
+        .reply
+        .send((200, bx_tool("call-0", 50, "echo first")))
+        .unwrap();
+    let next = incoming(&control, &mut receive).await;
+    assert_ne!(
+        next.body["tools"],
+        json!([]),
+        "first usage is below threshold"
+    );
+    next.reply
+        .send((200, bx_tool("call-1", 200, "echo latest")))
+        .unwrap();
+    let summary = incoming(&control, &mut receive).await;
+    assert_eq!(
+        summary.body["tools"],
+        json!([]),
+        "active candidate is waiting for its real provider response"
+    );
+    let target = thread.clone();
+    control.store.database.call(move|db|{
+        let tx=db.transaction()?;
+        let (source,payload):(String,String)=tx.query_row(
+            "SELECT n.id,n.payload_json FROM thread_path p JOIN node n ON n.id=p.node_id JOIN json_each(n.payload_json,'$.output') item WHERE p.thread_id=?1 AND json_extract(item.value,'$.call_id')='call-0' LIMIT 1",
+            [&target],|row|Ok((row.get(0)?,row.get(1)?)))?;
+        match mutation{
+            "source"=>{tx.execute("UPDATE node SET payload_revision=payload_revision+1 WHERE id=?1",[source])?;}
+            "protection"=>{let receipt=uuid::Uuid::new_v4().to_string();tx.execute("INSERT INTO receipt(id,client_operation_id,sender_json,target_thread_id,message_node_id,state,created_at)VALUES(?1,?1,'{}',?2,?3,'accepted','gc-mutation')",rusqlite::params![receipt,target,source])?;}
+            "tool"=>{let payload:Value=serde_json::from_str(&payload).map_err(|e|rusqlite::Error::FromSqlConversionFailure(0,rusqlite::types::Type::Text,Box::new(e)))?;let group=payload["group_id"].as_str().ok_or_else(||rusqlite::Error::InvalidQuery)?;tx.execute("UPDATE tool_group SET state='running' WHERE id=?1",[group])?;}
+            "epoch"=>{tx.execute("UPDATE thread SET reasoning_epoch=reasoning_epoch+1 WHERE id=?1",[&target])?;}
+            _=>unreachable!(),
+        }
+        tx.commit()?;Ok(())
+    }).await.unwrap();
+    summary
+        .reply
+        .send((200, answer("a deliberately short summary")))
+        .unwrap();
+    let ordinary = incoming(&control, &mut receive).await;
+    assert_ne!(
+        ordinary.body["tools"],
+        json!([]),
+        "a stale candidate is rejected and normal work resumes"
+    );
+    let target = thread.clone();
+    let outcome=control.store.database.call(move|db|{
+        let summaries:i64=db.query_row("SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",[&target],|r|r.get(0))?;
+        let outcome:Option<String>=db.query_row("SELECT json_extract(a.error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",[&target],|r|r.get(0)).optional()?;
+        Ok((summaries,outcome))
+    }).await.unwrap();
+    assert_eq!(
+        outcome,
+        (0, Some("failed".into())),
+        "{mutation} mutation cannot adopt stale GC R"
+    );
+    ordinary
+        .reply
+        .send((200, answer_with_usage("continued", 10)))
+        .unwrap();
+    settled(&control, &thread).await;
+    control.shutdown().await.unwrap();
+    owner.shutdown().await.unwrap();
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_active_candidate_rejects_source_protection_tool_and_unwitnessed_epoch_mutations()
+{
+    for mutation in ["source", "protection", "tool", "epoch"] {
+        active_gc_candidate_mutation_case(mutation).await;
+    }
 }
 
 /// #303 §6.2 (replaces the #180 bounded no-target proof): with only a

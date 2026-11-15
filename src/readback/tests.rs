@@ -1047,3 +1047,43 @@ fn active_shell_filtered_windows_remain_bounded_and_resumable() {
     assert_eq!(next["items"][0]["execution_id"], "active-00000");
     assert!(next["next_cursor"].is_null());
 }
+
+#[test]
+fn proactive_attempt_metrics_do_not_fall_back_to_stale_automatic_trim() {
+    let db = Connection::open_in_memory().unwrap();
+    let root = super::compact::automatic_metrics_root("a");
+    let current=json!({"automatic_trim":{"summary_node_id":"stale"},"automatic_trim_attempt":{"outcome":"adopted","summary":{"summary_node_id":"current","source_nodes":8}}}).to_string();
+    let selected: String = db
+        .query_row(
+            &format!("SELECT {root} FROM (SELECT ?1 AS error_json) a"),
+            [&current],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let selected: Value = serde_json::from_str(&selected).unwrap();
+    assert_eq!(selected["summary_node_id"], "current");
+    let incomplete=json!({"automatic_trim":{"summary_node_id":"stale"},"automatic_trim_attempt":{"outcome":"unknown","provisional":true}}).to_string();
+    let selected: String = db
+        .query_row(
+            &format!("SELECT {root} FROM (SELECT ?1 AS error_json) a"),
+            [&incomplete],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let selected: Value = serde_json::from_str(&selected).unwrap();
+    assert_eq!(
+        selected,
+        json!({}),
+        "current token exists but lacks summary; do not expose stale legacy metrics"
+    );
+    let legacy = json!({"automatic_trim":{"summary_node_id":"historic"}}).to_string();
+    let selected: String = db
+        .query_row(
+            &format!("SELECT {root} FROM (SELECT ?1 AS error_json) a"),
+            [&legacy],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let selected: Value = serde_json::from_str(&selected).unwrap();
+    assert_eq!(selected["summary_node_id"], "historic");
+}

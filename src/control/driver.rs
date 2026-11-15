@@ -184,11 +184,12 @@ pub(super) async fn drive(
         let mut snapshot = snapshot;
         let mut compact_boundary =
             crate::compaction::boundary::Boundary::new(&boundary, boundary_guard);
-        let compacted = proactive::maybe_compact(
+        let compacted = proactive::maybe_compact_with_run_stop(
             &control,
             &mut snapshot,
             &request_slot,
             &mut compact_boundary,
+            slot.stop.clone(),
         )
         .await;
         if let Err(error) = &compacted

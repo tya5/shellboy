@@ -14,8 +14,192 @@ pub(crate) struct AutomaticStage {
     pub(crate) stage: &'static str,
 }
 
+/// GC-only stage token; unlike ordinary automatic stages it always carries
+/// the original parent receipt and its qualified target compare-and-swap.
+#[derive(Clone, Debug)]
+pub(crate) struct GcStage {
+    pub(crate) attempt_id: String,
+    pub(crate) token: String,
+    pub(crate) thread_id: String,
+    pub(crate) profile_id: String,
+    pub(crate) model_id: String,
+    pub(crate) effort: Option<String>,
+    pub(crate) reasoning_epoch: i64,
+    pub(crate) stage: &'static str,
+    pub(crate) target_cas: Option<GcTargetCas>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct GcTargetCas {
+    pub(crate) key: String,
+    pub(crate) expected: GcTargetExpected,
+    pub(crate) new_value: String,
+}
+#[derive(Clone, Debug)]
+pub(crate) enum GcTargetExpected {
+    Absent,
+    Exact(String),
+}
+
 /// Replaces W2/W4 bodies while keeping the stage facts of the same token.
-pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.compaction_outcome',json_extract(error_json,'$.automatic_trim_attempt.compaction_outcome'),'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND state IN ('preparing','inflight','failed','completed') AND json_extract(error_json,'$.automatic_trim_attempt.token')=?3";
+pub(crate) const FINISH_SQL: &str = "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json_set(json(?1),'$.token',?3,'$.compaction_outcome',json_extract(error_json,'$.automatic_trim_attempt.compaction_outcome'),'$.committed_stages',json(COALESCE(CASE WHEN json_extract(error_json,'$.automatic_trim_attempt.token')=?3 THEN json_extract(error_json,'$.automatic_trim_attempt.committed_stages') END,'{}')))) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json)) AND COALESCE(json_extract(error_json,'$.automatic_trim_attempt.token'),?3)=?3";
+
+/// Strict GC begin: consume only the exact completed parent receipt and
+/// preserve any existing error JSON siblings. Target facts are checked but not
+/// modified until a successful adoption transaction.
+fn validate_gc_stage(stage: &GcStage) -> Result<(), StorageError> {
+    if matches!(
+        stage.stage,
+        "closed_spill" | "closed_summary" | "active_spill" | "active_summary"
+    ) {
+        Ok(())
+    } else {
+        Err(StorageError::InvalidInput(
+            "unknown GC receipt stage".into(),
+        ))
+    }
+}
+
+pub(crate) fn begin_gc_tx(
+    tx: &rusqlite::Transaction<'_>,
+    stage: &GcStage,
+    reason: &str,
+    trigger: &Value,
+    target_plan: &Value,
+) -> Result<(), StorageError> {
+    validate_gc_stage(stage)?;
+    if let Some(target) = &stage.target_cas {
+        target_matches(tx, &target.key, &target.expected)?;
+    }
+    // The main proactive driver already created this exact provisional receipt;
+    // GC capture consumes it rather than replacing the attempt authority.
+    let already_begun:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2 AND a.state='completed' AND a.profile_id=?3 AND a.model_id=?4 AND a.reasoning_epoch=?5 AND a.effort IS ?7 AND json_valid(a.error_json) AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?6 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1)",params![stage.attempt_id,stage.thread_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,stage.effort],|row|row.get(0))?;
+    if already_begun {
+        return Ok(());
+    }
+    let body = json!({"outcome":"unknown","provisional":true,"token":stage.token,"reason":reason,
+        "trigger":trigger,"target_plan":target_plan,"committed_stages":{}})
+    .to_string();
+    let changed=tx.execute(
+        "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND state='completed' AND profile_id=?3 AND model_id=?4 AND reasoning_epoch=?5 AND effort IS ?7 AND (error_json IS NULL OR json_valid(error_json)) AND json_type(COALESCE(error_json,'{}'),'$.automatic_trim_attempt') IS NULL AND EXISTS(SELECT 1 FROM turn WHERE turn.id=model_attempt.turn_id AND turn.thread_id=?6)",
+        params![body,stage.attempt_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.thread_id,stage.effort],
+    )?;
+    if changed != 1 {
+        return Err(StorageError::InvalidInput(
+            "original completed GC receipt did not match".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn provisional_gc_matches(
+    db: &rusqlite::Connection,
+    stage: &GcStage,
+) -> Result<bool, StorageError> {
+    Ok(db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2 AND a.state='completed' AND a.profile_id=?3 AND a.model_id=?4 AND a.reasoning_epoch=?5 AND a.effort IS ?7 AND json_valid(a.error_json) AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?6 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1)",
+        params![stage.attempt_id,stage.thread_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,stage.effort],
+        |row| row.get(0),
+    )?)
+}
+
+fn target_matches(
+    tx: &rusqlite::Transaction<'_>,
+    key: &str,
+    expected: &GcTargetExpected,
+) -> Result<(), StorageError> {
+    let current:Option<(String,Option<String>)>=tx.query_row("SELECT typeof(value),CASE WHEN typeof(value)='text' THEN value END FROM app_meta WHERE key=?1",[key],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+    let matches = match (expected, current) {
+        (GcTargetExpected::Absent, None) => true,
+        (GcTargetExpected::Exact(expected), Some((kind, Some(current)))) if kind == "text" => {
+            expected.as_bytes() == current.as_bytes()
+        }
+        _ => false,
+    };
+    if !matches {
+        return Err(StorageError::InvalidInput(
+            "GC target changed since capture".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn record_gc_stage_tx(
+    tx: &rusqlite::Transaction<'_>,
+    stage: &GcStage,
+    fact: &str,
+) -> Result<(), StorageError> {
+    validate_gc_stage(stage)?;
+    let path = format!("$.automatic_trim_attempt.committed_stages.{}", stage.stage);
+    let changed = if matches!(stage.stage, "closed_summary" | "active_summary") {
+        tx.execute(
+            "UPDATE model_attempt SET error_json=json_set(error_json,?6,json(?7),'$.automatic_trim_attempt.summary',json(json_extract(?7,'$.summary'))) WHERE id=?1 AND state='completed' AND profile_id=?2 AND model_id=?3 AND reasoning_epoch=?4 AND effort IS ?8 AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?5 AND json_extract(error_json,'$.automatic_trim_attempt.provisional')=1 AND json_type(error_json,?6) IS NULL AND json_type(?7,'$.summary')='object'",
+            params![stage.attempt_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,path,fact,stage.effort],
+        )?
+    } else {
+        tx.execute(
+            "UPDATE model_attempt SET error_json=json_set(error_json,?6,json(?7)) WHERE id=?1 AND state='completed' AND profile_id=?2 AND model_id=?3 AND reasoning_epoch=?4 AND effort IS ?8 AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?5 AND json_extract(error_json,'$.automatic_trim_attempt.provisional')=1 AND json_type(error_json,?6) IS NULL",
+            params![stage.attempt_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,path,fact,stage.effort],
+        )?
+    };
+    if changed != 1 {
+        return Err(StorageError::InvalidInput(
+            "strict GC stage receipt changed".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Finalize exactly the provisional parent record and, when calibrated, CAS the
+/// target from its captured raw state. Caller keeps this in the adoption TX.
+pub(crate) fn finish_gc_tx(
+    tx: &rusqlite::Transaction<'_>,
+    stage: &GcStage,
+) -> Result<(), StorageError> {
+    validate_gc_stage(stage)?;
+    if let Some(target) = &stage.target_cas {
+        match &target.expected {
+            GcTargetExpected::Absent => {
+                let changed=tx.execute("INSERT INTO app_meta(key,value) SELECT ?1,?2 WHERE NOT EXISTS(SELECT 1 FROM app_meta WHERE key=?1)",params![target.key,target.new_value])?;
+                if changed != 1 {
+                    return Err(StorageError::InvalidInput(
+                        "GC target absent-state CAS failed".into(),
+                    ));
+                }
+            }
+            GcTargetExpected::Exact(old) => {
+                let changed=tx.execute("UPDATE app_meta SET value=?3 WHERE key=?1 AND typeof(value)='text' AND CAST(value AS BLOB)=CAST(?2 AS BLOB)",params![target.key,old,target.new_value])?;
+                if changed != 1 {
+                    return Err(StorageError::InvalidInput(
+                        "GC target exact-value CAS failed".into(),
+                    ));
+                }
+            }
+        }
+    }
+    let boundary:Option<(String,Option<String>)>=tx.query_row(
+        "SELECT t.thread_id,json_extract(a.error_json,'$.automatic_trim_attempt.trigger.a_boundary') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1",
+        params![stage.attempt_id,stage.token],|row|Ok((row.get(0)?,row.get(1)?)),
+    ).optional()?;
+    let changed=tx.execute(
+        "UPDATE model_attempt SET error_json=json_set(error_json,'$.automatic_trim_attempt.outcome','adopted','$.automatic_trim_attempt.provisional',json('false')) WHERE id=?1 AND state='completed' AND profile_id=?2 AND model_id=?3 AND reasoning_epoch=?4 AND effort IS ?6 AND json_valid(error_json) AND json_extract(error_json,'$.automatic_trim_attempt.token')=?5 AND json_extract(error_json,'$.automatic_trim_attempt.provisional')=1",
+        params![stage.attempt_id,stage.profile_id,stage.model_id,stage.reasoning_epoch,stage.token,stage.effort],
+    )?;
+    if changed == 1
+        && let Some((thread, Some(boundary))) = boundary
+    {
+        let expected = serde_json::from_str(&boundary)
+            .map_err(|error| StorageError::Schema(error.to_string()))?;
+        super::a_state::reset_tx(tx, &thread, expected, &stage.token)?;
+    }
+    if changed != 1 {
+        return Err(StorageError::InvalidInput(
+            "strict GC FINISH token CAS failed".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Replaces W2/W4 bodies while keeping the stage facts of the same token.
 
 /// Whether beginning an attempt observes the first-known-A lifecycle boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -325,3 +325,153 @@ mod append_adoption_tests {
         adoption_case("cancel").await;
     }
 }
+
+/// Native GC adoption over only the selected captured R. The caller runs this
+/// inside the coordinator's strict original-token FINISH transaction.
+pub(super) fn adopt_gc_result_tx(
+    tx: &rusqlite::Transaction<'_>,
+    config: &Config,
+    captured: &super::gc_capture::CapturedSummaryInput,
+    generated: &single_request::Dispatched,
+    usage: &SummaryUsage,
+) -> Result<String, StorageError> {
+    let selected = generated.selected.clone();
+    if selected.is_empty()
+        || selected.end > captured.groups.len()
+        || generated.response.text.trim().is_empty()
+    {
+        return Err(StorageError::InvalidInput(
+            "GC summary has empty or invalid selected R".into(),
+        ));
+    }
+    let stamps = captured.groups[selected.clone()]
+        .iter()
+        .flat_map(|group| group.stamps.iter())
+        .collect::<Vec<_>>();
+    let originals = stamps
+        .iter()
+        .map(|stamp| stamp.id.clone())
+        .collect::<Vec<_>>();
+    let source_characters = captured.groups[selected.clone()]
+        .iter()
+        .try_fold(0u64, |sum, group| {
+            sum.checked_add(u64::try_from(group.projection_weight).ok()?)
+        })
+        .ok_or_else(|| StorageError::InvalidInput("GC source projection overflow".into()))?;
+    let text = if captured.active_turn {
+        format!(
+            "Shellboy context notice: the active-Turn tool work in this range was summarized; its side effects remain. Inspect current state before repeating tools. Source nodes: {} through {}.\\n\\n{}",
+            originals.first().map_or("", String::as_str),
+            originals.last().map_or("", String::as_str),
+            generated.response.text
+        )
+    } else {
+        generated.response.text.clone()
+    };
+    let mut payload = json!({"item":{"role":"developer","content":[{"type":"input_text","text":text}]},"source_node_ids":originals,"summary_format":FORMAT,"summary_usage":usage});
+    if captured.active_turn {
+        payload["summary_scope"] = json!("active_turn_middle");
+    }
+    let projected = edit::projection_characters(&payload, captured.epoch);
+    if projected >= source_characters {
+        return Err(StorageError::InvalidInput(
+            "GC summary does not shrink selected source projection".into(),
+        ));
+    }
+    let thread = &captured.thread;
+    let (selection,profile_revision,generation,epoch,profile,model,effort):(i64,i64,i64,i64,String,String,Option<String>)=tx.query_row("SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort FROM thread WHERE id=?1 AND deleted_at IS NULL",[thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?)))?;
+    if selection < captured.selection_revision
+        || profile_revision != captured.profile_revision
+        || generation != captured.nonappend_generation
+        || epoch != captured.epoch
+        || profile != captured.profile
+        || model != captured.model
+        || effort != captured.effort
+    {
+        return Err(StorageError::InvalidInput(
+            "GC captured source context changed before FINISH".into(),
+        ));
+    }
+    let path = tx
+        .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+        .query_map([thread], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let start = usize::try_from(
+        stamps
+            .first()
+            .ok_or_else(|| StorageError::InvalidInput("GC selected R is empty".into()))?
+            .ordinal,
+    )
+    .map_err(|_| StorageError::InvalidInput("negative GC source ordinal".into()))?;
+    for (offset, stamp) in stamps.iter().enumerate() {
+        let index = start
+            .checked_add(offset)
+            .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
+        if usize::try_from(stamp.ordinal).ok() != Some(index)
+            || path.get(index).map(String::as_str) != Some(stamp.id.as_str())
+        {
+            return Err(StorageError::InvalidInput(
+                "GC selected R path changed".into(),
+            ));
+        }
+        let (revision,turn,protected):(i64,Option<String>,bool)=tx.query_row("SELECT n.payload_revision,n.turn_id,EXISTS(SELECT 1 FROM receipt q WHERE q.target_thread_id=?2 AND q.message_node_id=n.id AND q.state IN ('accepted','held')) FROM node n WHERE n.id=?1",params![stamp.id,thread],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
+        if revision != stamp.revision || turn != stamp.turn || protected != stamp.protected {
+            return Err(StorageError::InvalidInput(
+                "GC source revision, turn, or protection changed".into(),
+            ));
+        }
+        if let Some(group) = &stamp.group_id {
+            let complete:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM tool_group g WHERE g.id=?1 AND g.state='completed' AND NOT EXISTS(SELECT 1 FROM tool_call c WHERE c.group_id=g.id AND (c.state!='completed' OR NOT EXISTS(SELECT 1 FROM tool_result r WHERE r.group_id=c.group_id AND r.call_id=c.call_id))))",[group],|r|r.get(0))?;
+            if !complete {
+                return Err(StorageError::InvalidInput(
+                    "GC tool group changed before FINISH".into(),
+                ));
+            }
+        }
+    }
+    let node = uid();
+    let replacement = uid();
+    let body = payload.to_string();
+    let now = timestamp();
+    let adapter = if stamps.iter().any(|stamp| stamp.marker_adapter) {
+        MARKER_ADAPTER
+    } else {
+        ADAPTER
+    };
+    let input_key = key(&(
+        FORMAT,
+        PROMPT,
+        adapter,
+        &captured.profile,
+        &captured.model,
+        &captured.effort,
+        captured.epoch,
+        stamps
+            .iter()
+            .map(|stamp| (&stamp.id, stamp.revision, &stamp.hash, &stamp.attachments))
+            .collect::<Vec<_>>(),
+    ));
+    tx.execute("INSERT INTO node(id,kind,created_at,payload_json,payload_bytes,body_hash)VALUES(?1,'summary',?2,?3,?4,?5)",params![node,now,body,body.len() as i64,key(&payload)])?;
+    tx.execute("INSERT INTO replacement(id,output_node_id,input_key,format_version,prompt_version,state,created_at)VALUES(?1,?2,?3,?4,?5,'completed',?6)",params![replacement,node,input_key,FORMAT,PROMPT,now])?;
+    for (ordinal, stamp) in stamps.iter().enumerate() {
+        tx.execute("INSERT INTO replacement_source(replacement_id,ordinal,source_node_id,source_revision,source_hash)VALUES(?1,?2,?3,?4,?5)",params![replacement,ordinal as i64,stamp.id,stamp.revision,stamp.hash])?;
+    }
+    tx.execute(
+        "INSERT INTO thread_replacement(thread_id,replacement_id)VALUES(?1,?2)",
+        params![thread, replacement],
+    )?;
+    crate::attachments::exclude_replaced_sources_tx(
+        tx,
+        thread,
+        &stamps
+            .iter()
+            .map(|stamp| stamp.id.clone())
+            .collect::<Vec<_>>(),
+    )?;
+    crate::index::authorize_new_nodes_for_config_tx(tx, config, std::slice::from_ref(&node))?;
+    let mut new_path = path[..start].to_vec();
+    new_path.push(node.clone());
+    new_path.extend_from_slice(&path[start + stamps.len()..]);
+    history::select_path(tx, thread, selection as u64, &new_path, &timestamp())?;
+    Ok(node)
+}

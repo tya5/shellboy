@@ -2,6 +2,7 @@
 //! entry points. Request trials end here; adoption performs atomic revalidation.
 use super::*;
 use crate::model;
+use futures_util::future::BoxFuture;
 
 /// Request construction consumes an already-resolved output policy.
 pub(super) struct SummaryRequest<'a, 'boundary> {
@@ -16,9 +17,67 @@ pub(super) struct SummaryRequest<'a, 'boundary> {
     pub(super) requested_limit: Option<u64>,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct RequestGroupText<'a> {
+    pub(super) text: &'a str,
+    pub(super) projection_weight: u128,
+    pub(super) source_count: u64,
+    pub(super) first_id: String,
+    pub(super) last_id: String,
+}
+pub(super) struct SummaryMaterial<'a> {
+    pub(super) thread: &'a str,
+    pub(super) profile: &'a str,
+    pub(super) model: &'a str,
+    pub(super) effort: Option<&'a str>,
+    pub(super) groups: &'a [RequestGroupText<'a>],
+}
+fn snapshot_request_groups<'a>(
+    snapshot: &Snapshot,
+    range: Range<usize>,
+    rendered: &'a [String],
+) -> Vec<RequestGroupText<'a>> {
+    snapshot.groups[range]
+        .iter()
+        .zip(rendered)
+        .map(|(group, text)| RequestGroupText {
+            text,
+            projection_weight: group
+                .sources
+                .iter()
+                .map(|source| edit::projection_characters(&source.payload, snapshot.epoch) as u128)
+                .sum(),
+            source_count: group.sources.len() as u64,
+            first_id: group
+                .sources
+                .first()
+                .map_or_else(String::new, |source| source.id.clone()),
+            last_id: group
+                .sources
+                .last()
+                .map_or_else(String::new, |source| source.id.clone()),
+        })
+        .collect()
+}
+impl SummaryMaterial<'_> {
+    pub(super) fn selected_text(&self, range: Range<usize>) -> String {
+        self.groups[range]
+            .iter()
+            .map(|group| group.text)
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+    pub(super) fn source_count(&self, range: Range<usize>) -> u64 {
+        self.groups[range]
+            .iter()
+            .map(|group| group.source_count)
+            .sum()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct OutputLimit(pub(super) u64);
-fn resolved_limit(
+pub(super) fn resolved_limit(
     manual: Option<u64>,
     thread: Option<u64>,
     connection: Option<&crate::config::Connection>,
@@ -30,22 +89,18 @@ fn resolved_limit(
     )
 }
 
-pub(super) fn request(snapshot: &Snapshot, selected: Range<usize>, limit: OutputLimit) -> Value {
-    let text = snapshot.groups[selected]
-        .iter()
-        .flat_map(|group| group.sources.iter())
-        // `extra_sources` are validation witnesses (a hidden marker), never
-        // summary material: its notice is not original text.
-        .map(|source| render(source, snapshot.epoch))
-        .collect::<Vec<_>>()
-        .join("\n\n");
+pub(super) fn request(
+    input: &SummaryMaterial<'_>,
+    selected: Range<usize>,
+    limit: OutputLimit,
+) -> Value {
     model::response_request(
-        &snapshot.model,
+        &input.model,
         vec![
             json!({"role":"developer","content":[{"type":"input_text","text":format!("{SUMMARY_PROMPT}{KEEP_INSTRUCTIONS} Maximum output length: {} characters.",limit.0)}]}),
-            json!({"role":"user","content":[{"type":"input_text","text":text}]}),
+            json!({"role":"user","content":[{"type":"input_text","text":input.selected_text(selected)}]}),
         ],
-        snapshot.effort.as_deref(),
+        input.effort.as_deref(),
         false,
     )
 }
@@ -64,24 +119,13 @@ pub(super) fn overflow_prefix(snapshot: &Snapshot) -> Range<usize> {
 /// fixed instructions and extra_sources never participate in halving weights.
 /// Only a classified context refusal calls this. Transient retry stays with
 /// the existing HTTP request retry mechanism, never this range transformation.
-pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option<Range<usize>> {
+fn half_prefix_weights(weights: &[u128], selected: Range<usize>) -> Option<Range<usize>> {
     if selected.len() <= 1 {
         return None;
     }
-    let weights: Vec<u128> = snapshot.groups[selected.clone()]
-        .iter()
-        .map(|group| {
-            group
-                .sources
-                .iter()
-                .map(|source| edit::projection_characters(&source.payload, snapshot.epoch) as u128)
-                .sum()
-        })
-        .collect();
+    let weights = &weights[selected.clone()];
     let half = weights.iter().sum::<u128>() / 2;
-    let mut total = 0;
-    let mut count = 0;
-    // USER-confirmed: remove at least one trailing group even for zero weight.
+    let (mut total, mut count) = (0u128, 0usize);
     for weight in weights.iter().take(weights.len() - 1) {
         if total + weight > half {
             break;
@@ -90,6 +134,31 @@ pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option
         count += 1;
     }
     Some(selected.start..selected.start + count.max(1))
+}
+pub(super) fn half_input_prefix(
+    input: &SummaryMaterial<'_>,
+    selected: Range<usize>,
+) -> Option<Range<usize>> {
+    let weights = input
+        .groups
+        .iter()
+        .map(|group| group.projection_weight)
+        .collect::<Vec<_>>();
+    half_prefix_weights(&weights, selected)
+}
+pub(super) fn half_prefix(snapshot: &Snapshot, selected: Range<usize>) -> Option<Range<usize>> {
+    let weights = snapshot
+        .groups
+        .iter()
+        .map(|group| {
+            group
+                .sources
+                .iter()
+                .map(|source| edit::projection_characters(&source.payload, snapshot.epoch) as u128)
+                .sum()
+        })
+        .collect::<Vec<_>>();
+    half_prefix_weights(&weights, selected)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -109,7 +178,6 @@ pub(super) fn after_result(
     let shrink = result.is_err_and(model::ModelError::is_context_limit);
     after_classified_result(snapshot, selected, result, shrink, eligible)
 }
-
 fn after_classified_result(
     snapshot: &Snapshot,
     selected: Range<usize>,
@@ -119,8 +187,24 @@ fn after_classified_result(
 ) -> Next {
     match result {
         Ok(()) => Next::Done,
+        Err(_) if shrink => half_prefix(snapshot, selected)
+            .filter(|prefix| eligible(prefix.clone()))
+            .map_or(Next::Failed, Next::RetryPrefix),
+        Err(_) => Next::Failed,
+    }
+}
+
+fn after_input_classified_result(
+    input: &SummaryMaterial<'_>,
+    selected: Range<usize>,
+    result: Result<(), &model::ModelError>,
+    shrink: bool,
+    eligible: impl FnOnce(Range<usize>) -> bool,
+) -> Next {
+    match result {
+        Ok(()) => Next::Done,
         Err(_) if shrink => {
-            match half_prefix(snapshot, selected).filter(|prefix| eligible(prefix.clone())) {
+            match half_input_prefix(input, selected).filter(|prefix| eligible(prefix.clone())) {
                 Some(prefix) => Next::RetryPrefix(prefix),
                 None => Next::Failed,
             }
@@ -129,7 +213,7 @@ fn after_classified_result(
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AdoptionSize {
     pub(super) exceeded_output_limit: bool,
 }
@@ -160,16 +244,33 @@ pub(super) fn is_typed_refusal(output: &[Value]) -> bool {
 }
 
 /// One real HTTP request loop; the owner derives the retry range and performs adoption.
-pub(super) struct DispatchRequest<'a, 'b> {
-    snapshot: &'a Snapshot,
-    selected: Range<usize>,
-    limit: OutputLimit,
-    cancel: &'a CancellationToken,
-    ledger: &'a mut usage::UsageLedger,
-    boundary: Option<&'a mut boundary::Boundary<'b>>,
-    eligible: Box<dyn Fn(Range<usize>) -> bool + Send + 'a>,
+pub(super) enum DispatchOwner<'a, 'b> {
+    Manual {
+        snapshot: &'a Snapshot,
+        boundary: Option<&'a mut boundary::Boundary<'b>>,
+    },
+    Gc {
+        job_id: super::gc_coordinator::WriterJobId,
+        validate: Box<
+            dyn FnMut(
+                    super::gc_coordinator::WriterJobId,
+                ) -> BoxFuture<'static, Result<(), ApiError>>
+                + Send
+                + 'a,
+        >,
+    },
 }
-pub(super) struct Dispatched {
+pub(super) struct DispatchRequest<'a, 'b> {
+    pub(super) input: &'a SummaryMaterial<'a>,
+    pub(super) owner: DispatchOwner<'a, 'b>,
+    pub(super) selected: Range<usize>,
+    pub(super) limit: OutputLimit,
+    pub(super) cancel: &'a CancellationToken,
+    pub(super) ledger: &'a mut usage::UsageLedger,
+    pub(super) eligible: Box<dyn Fn(Range<usize>) -> bool + Send + 'a>,
+}
+#[derive(Clone, Debug)]
+pub(crate) struct Dispatched {
     pub(super) selected: Range<usize>,
     pub(super) response: model::ModelResponse,
     pub(super) size: AdoptionSize,
@@ -258,15 +359,39 @@ impl Compactor {
                 message,
             ));
         }
+        let rendered_groups: Vec<String> = snapshot.groups[original.clone()]
+            .iter()
+            .map(|group| {
+                group
+                    .sources
+                    .iter()
+                    .map(|source| render(source, snapshot.epoch))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            })
+            .collect();
+        let material_groups =
+            snapshot_request_groups(&snapshot, original.clone(), &rendered_groups);
+        let material = SummaryMaterial {
+            thread: &snapshot.thread,
+            profile: &snapshot.profile,
+            model: &snapshot.model,
+            effort: snapshot.effort.as_deref(),
+            groups: &material_groups,
+        };
+        let base = original.start;
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
-                snapshot: &snapshot,
-                selected: original,
+                input: &material,
+                owner: DispatchOwner::Manual {
+                    snapshot: &snapshot,
+                    boundary,
+                },
+                selected: 0..material_groups.len(),
                 limit,
                 cancel: &cancel,
                 ledger,
-                boundary,
-                eligible: Box::new(valid),
+                eligible: Box::new(move |local| valid(base + local.start..base + local.end)),
             })
             .await;
         let dispatched = match dispatched {
@@ -317,7 +442,8 @@ impl Compactor {
                 return Err(error);
             }
         };
-        let selected = dispatched.selected;
+        let selected =
+            original.start + dispatched.selected.start..original.start + dispatched.selected.end;
         let sources: Vec<Source> = snapshot.groups[selected.clone()]
             .iter()
             .flat_map(|g| g.sources.clone())
@@ -438,33 +564,29 @@ impl Compactor {
         request: DispatchRequest<'_, '_>,
     ) -> Result<Dispatched, ApiError> {
         let DispatchRequest {
-            snapshot,
+            input,
+            mut owner,
             selected,
             limit,
             cancel,
             ledger,
-            mut boundary,
             eligible,
         } = request;
-        let connection = self
-            .config
-            .connections
-            .get(&snapshot.profile)
-            .ok_or_else(|| {
-                discard::attach(
-                    ApiError::new(ErrorCode::ConfigInvalid, "Connection not found"),
-                    discard::Outcome::Failed {
-                        reason: discard::FailureReason::Unclassified,
-                        origin: discard::FailureOrigin::Preparation,
-                        http_status: None,
-                        provider_status: None,
-                        provider_status_source: None,
-                        final_group_count: None,
-                        final_source_nodes: None,
-                    },
-                )
-            })?;
-        let client = self.clients.get(&snapshot.profile).map_err(|e| {
+        let connection = self.config.connections.get(input.profile).ok_or_else(|| {
+            discard::attach(
+                ApiError::new(ErrorCode::ConfigInvalid, "Connection not found"),
+                discard::Outcome::Failed {
+                    reason: discard::FailureReason::Unclassified,
+                    origin: discard::FailureOrigin::Preparation,
+                    http_status: None,
+                    provider_status: None,
+                    provider_status_source: None,
+                    final_group_count: None,
+                    final_source_nodes: None,
+                },
+            )
+        })?;
+        let client = self.clients.get(input.profile).map_err(|e| {
             discard::attach(
                 invalid(&e.to_string()),
                 discard::Outcome::Failed {
@@ -490,20 +612,16 @@ impl Compactor {
             let selected = trial
                 .selected()
                 .ok_or_else(|| invalid("Summary trial already ended"))?;
-            let payload = super::single_request::request(snapshot, selected.clone(), limit);
-            // Preserve existing transport admission and durable usage accounting.
-            let admission = self
-                .summary_admission(&client, snapshot, cancel, boundary.as_deref_mut())
-                .await?;
+            let payload = super::single_request::request(input, selected.clone(), limit);
+            // Preserve the existing manual snapshot fence; GC supplies its own typed R witness.
+            let admission = self.summary_admission(&client, &mut owner, cancel).await?;
+            if let DispatchOwner::Gc { job_id, validate } = &mut owner {
+                validate(*job_id).await?;
+            }
             let observation = ledger.begin(&self.database).await?;
-            let result = Self::summary_response(
-                &client,
-                &snapshot.thread,
-                payload,
-                cancel.clone(),
-                admission,
-            )
-            .await;
+            let result =
+                Self::summary_response(&client, &input.thread, payload, cancel.clone(), admission)
+                    .await;
             let response = match result {
                 Ok(response) => {
                     ledger
@@ -552,8 +670,7 @@ impl Compactor {
                     if !shrink {
                         if let Some(delay) = retry::retry_delay(connection, &failure, retries) {
                             retries += 1;
-                            self.summary_backoff(snapshot, delay, cancel, boundary.as_deref_mut())
-                                .await?;
+                            self.summary_backoff(&mut owner, delay, cancel).await?;
                             continue;
                         }
                         // Keep the provider's reason: the user needs it to act
@@ -571,19 +688,22 @@ impl Compactor {
                             cause,
                         ));
                     }
-                    match trial.finish_classified(snapshot, Err(&failure.error), shrink, &eligible)
-                    {
-                        Next::RetryPrefix(_) => {
+                    match after_input_classified_result(
+                        input,
+                        selected.clone(),
+                        Err(&failure.error),
+                        shrink,
+                        &eligible,
+                    ) {
+                        Next::RetryPrefix(prefix) => {
+                            trial.selected = prefix.clone();
                             retries = 0;
                             continue;
                         }
                         Next::Done | Next::Failed => {
                             if context_refusal {
                                 let groups = trial.selected.end - trial.selected.start;
-                                let nodes = snapshot.groups[trial.selected.clone()]
-                                    .iter()
-                                    .map(|g| g.sources.len() as u64)
-                                    .sum();
+                                let nodes = input.source_count(trial.selected.clone());
                                 return Err(discard::attach(
                                     invalid(
                                         "Summary context refusal at final eligible prefix; original path retained",
@@ -601,10 +721,7 @@ impl Compactor {
                                 ));
                             }
                             if input_refusal && trial.selected.len() == 1 {
-                                let nodes = snapshot.groups[trial.selected.clone()]
-                                    .iter()
-                                    .map(|g| g.sources.len() as u64)
-                                    .sum::<u64>();
+                                let nodes = input.source_count(trial.selected.clone());
                                 return Err(discard::attach(
                                     invalid(
                                         "Summary input refused at minimum eligible group; original path retained",
@@ -656,7 +773,6 @@ impl Compactor {
             let size = AdoptionSize {
                 exceeded_output_limit: response.text.chars().count() as u64 > limit.0,
             };
-            trial.finish_request(snapshot, Ok(()), &eligible);
             return Ok(Dispatched {
                 selected,
                 response,
@@ -1132,8 +1248,28 @@ mod tests {
     #[test]
     fn one_request_contains_whole_selected_range_and_output_instruction() {
         let snapshot = fixture(&[40, 60, 80]);
+        let texts: Vec<String> = snapshot
+            .groups
+            .iter()
+            .map(|group| {
+                group
+                    .sources
+                    .iter()
+                    .map(|source| render(source, snapshot.epoch))
+                    .collect::<Vec<_>>()
+                    .join("\n\n")
+            })
+            .collect();
+        let groups = snapshot_request_groups(&snapshot, 0..snapshot.groups.len(), &texts);
+        let input = SummaryMaterial {
+            thread: &snapshot.thread,
+            profile: &snapshot.profile,
+            model: &snapshot.model,
+            effort: snapshot.effort.as_deref(),
+            groups: &groups,
+        };
         let body = request(
-            &snapshot,
+            &input,
             0..2,
             resolved_limit(None, None, None, &crate::config::Compaction::default()),
         );
