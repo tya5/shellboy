@@ -50,6 +50,57 @@ Current-source final-format/check batch `core301-c4-final-controls60-63724.log`:
 Rollback evidence update: after the strict-FINISH ordering review, exact `control::driver::proactive::fault_tests::record_tests::record_after_rejected_final_write` passed 1/1 in `core301-rollback-finish-oracle17-63724.log` (execution `e42f6664-bcef-47a4-a752-e2dcdcc464c5`; unchanged watchdog). For `ActiveSpill`, rejected strict FINISH rolls back the active summary and its stage fact together; the test verifies unknown outcome, unchanged committed-stage set, no summary replacement, two earlier spill replacements retained, path prefix, reasoning epoch and allowed append revision. This closes that focused fixture, not every rollback/fault mode. Earlier attempts/logs remain preserved as failed evidence. A full native run on exact SHA `039e495...` had 2,626 passed, 9 failed and 25 ignored; those results do not qualify the changing follow-up SHA. No full standard check, CI, independent source review, three-OS qualification or main landing is claimed. Prepared HTTP source remains unchanged; provider readiness and physical-memory/OOM guarantees remain untested/unclaimed.
 
 
+## CORE306 saved-attempt provenance producer (source unit in progress)
+
+Source branch `issue-306-saved-attempt-provenance-63724`, based on main
+`031c034edc970f37c02f031c81989b931fbf506d`. Read-only design
+`.local/private-reports/studio-current-20261113/core306-saved-attempt-provenance-design-20261115.md`
+(SHA-256 `e4e941a4d459c492706c588e27a9a426d9d57ed84d528b7f76aa5d2509649c5e`)
+anchors the source relationship and consumer contract.
+
+- Guarded `cargo check --locked --tests` passed on the current uncommitted source
+delta: execution `55c7f0c3-4a2b-4238-82e5-09cb554c6142`, exit 0, cleanup confirmed.
+- Five fully qualified exact tests passed 1/1 each under guard/rust-slot:
+`history::relations::tests::attempt_provenance_requires_one_exact_owner_and_skips_other_kinds`,
+`history::relations::tests::unique_malformed_attempt_owner_is_strict_not_absent`,
+`history::relations::tests::attempt_owner_lookup_uses_node_index_and_never_reads_output_payload`,
+`protocol::node_provenance_attempt_id_is_optional_and_legacy_absence_roundtrips`, and
+`protocol::exported_schema_matches_committed_protocol_schema`; execution
+`e80e7758-b207-4379-ad48-f1bb7a58536e`, exit 0, cleanup confirmed.
+- Guarded protocol schema generation passed: `core306-protocol-schema-64dd.log`.
+
+These are focused component results, not final qualification. The full standard
+`sh scripts/check.sh` has not run on a clean committed SHA; independent review,
+three-OS CI and main landing are not established. No schema migration or user DB,
+installed Core, restart, provider, or release operation was performed. The initial
+hybrid knowledge search reported incomplete semantic indexes; keyword fallback had
+no relevant hits, and no re-indexing was attempted.
+
+## CORE306 saved-attempt provenance producer (source candidate; final qualification pending)
+
+- Core worktree: branch `issue-306-saved-attempt-provenance-63724` at landed main
+`031c034edc970f37c02f031c81989b931fbf506d`, one writer. No main/remote push yet.
+- Read-only basis: `.local/private-reports/studio-current-20261113/
+core306-saved-attempt-provenance-design-20261115.md`, SHA-256
+`e4e941a4d459c492706c588e27a9a426d9d57ed84d528b7f76aa5d2509649c5e`. It maps
+existing output_item attempt association and the separate Studio canonical source
+identity. Consumer contract was sent without requiring ACK; no Studio source edits.
+- Guarded `cargo check --locked --tests` passed on the current uncommitted delta:
+execution `55c7f0c3-4a2b-4238-82e5-09cb554c6142`, exit 0, cleanup confirmed.
+- Five fully-qualified `-- --exact` controls each passed 1/1: unique/ambiguous/missing
+assistant output owners, malformed unique owner strict rejection, output_item node
+index plan and no payload read, legacy/optional typed DTO, and generated schema parity.
+Execution `e80e7758-b207-4379-ad48-f1bb7a58536e`, exit 0, cleanup confirmed; exact
+log `core306-provenance-focused.log`. Guarded format exit 0 is in
+`core306-provenance-fmt.log`; schema regeneration exit 0 is in
+`core306-protocol-schema-64dd.log`.
+- Full `sh scripts/check.sh` on a clean committed source SHA, independent source
+review, same-SHA three-OS CI and authorized main integration have not run. These
+focused results do not establish qualification. No schema migration, user DB,
+installed Core, restart, paid provider or release operation was performed. Project
+and global hybrid RAG search reported semantic not ready; keyword fallback returned
+no matching records. No indexing/embedding action was taken.
+
 ## v0.11.0 synthetic schema upgrade
 
 On macOS arm64 with SQLite 3.51.0, a two-Thread, one-node in-memory synthetic fixture applied migrations 33-35 in 3.017 ms (one run). Ledger, original records and new indexes were checked. This is not a public-binary upgrade, production-scale timing or Windows hardware validation; those remain separate gates.

@@ -89,6 +89,55 @@ push, CI dispatch or landing is recorded yet in this status snapshot. Time does 
 waive the remaining gates or authorize unrelated installed-binary, DB-migration or
 owner-restart actions. Do not infer final readiness from prior candidate receipts.
 
+## Core #306 saved-attempt provenance producer (in progress; separate from #301)
+
+This unit is on branch `issue-306-saved-attempt-provenance-63724`, rooted at
+landed main `031c034edc970f37c02f031c81989b931fbf506d`, in its sole dedicated
+worktree. The read-only design artifact
+`.local/private-reports/studio-current-20261113/core306-saved-attempt-provenance-design-20261115.md`
+has SHA-256 `e4e941a4d459c492706c588e27a9a426d9d57ed84d528b7f76aa5d2509649c5e`.
+Producer implementation now adds optional `NodeProvenance.attempt_id` only for an
+assistant response with exactly one distinct existing `output_item` owner through
+`output_item_node`; missing/ambiguous is absent, a sole malformed UUID is strict
+`invalid_state`. It preserves `(node_id, item_identity)` and adds no DB schema,
+index, writer, migration, cache, or UI-local state. Consumer field contract was
+handed to the existing Studio owner `f797` without an ACK gate. Global/project
+hybrid RAG searches were degraded due incomplete semantic indexes; keyword fallback
+returned no matching material. No index rebuild or embeddings were attempted; the
+source-grounded prior design remains the implementation basis.
+
+The source and exact tests are still in progress. Focused exact controls and a
+`cargo check --locked --tests` have passed; see the separate validation record for
+execution IDs and per-selector counts. The final commit, full `sh scripts/check.sh`,
+independent source review, same-SHA three-OS CI, and main landing remain pending.
+No consumer implementation, installed Core/DB operation, or release action is part
+of this unit.
+
+## Core #306 saved-attempt provenance producer (in progress; separate unit)
+
+The sole #306 worktree is `shellboy-worktrees/core306-saved-attempt-provenance-63724`,
+branch `issue-306-saved-attempt-provenance-63724`, based on landed main
+`031c034edc970f37c02f031c81989b931fbf506d`. The adopted Core contract is documented
+in `docs/design/search-and-relations.md` and `docs/design/protocol.md`: optional
+`NodeProvenance.attempt_id` is producer-sourced from a unique `output_item.node_id`
+owner through existing `output_item_node`, only for assistant responses. Missing or
+ambiguous owner stays absent; a unique malformed attempt ID is strict invalid state.
+No DB schema/index/migration or writer change is part of this unit, and canonical
+`(node_id,item_identity)` plus all UI-local/generation/capability state remain outside
+the new field. The consumer-only type/adoption handoff was sent to existing Studio
+owner `f79761f2-cf2e-4281-9489-9f7df4fe53d0` (message `9b504772-1834-4d63-8690-fdb6e0e290f8`); no consumer source was edited.
+
+Current source/test/schema delta is still uncommitted and not full-native-qualified.
+Guarded `cargo check --locked --tests` and the five exact provenance/DTO/schema
+selectors passed in their local receipts; `sh scripts/check.sh` on the final clean
+candidate, source review, three-OS CI and main landing are pending. Hybrid knowledge
+search was degraded because semantic indexes are incomplete; the project/global
+keyword fallback returned no relevant artifact, and no re-index or embedding call was
+attempted. Read-only design source is
+`.local/private-reports/studio-current-20261113/core306-saved-attempt-provenance-design-20261115.md`
+(SHA-256 `e4e941a4d459c492706c588e27a9a426d9d57ed84d528b7f76aa5d2509649c5e`).
+No installed Core/DB, restart, deployment, or release action is included.
+
 ## v0.11.0 preparation
 
 
