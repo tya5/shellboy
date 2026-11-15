@@ -11,8 +11,12 @@ bounded review in `.local/leader/core301-2cc731-fault-pair-bounded-review.md` (S
 `db20f044921f7d5a58be9cdf8581c094eddadefa82cc7094fc322919b2bfb4a4`) was later
 corrected by `.local/leader/core301-c3-provenance-correction.md` (SHA-256
 `bedbfd7aee62165ce29ce792cd8dd2d4e46e62ffbe4b700dd10692863f8a41d6`), which found
-failure-path loss of the captured trigger's run/boundary provenance. The original
-review cannot close this corrected delta; bounded review closure is pending.
+failure-path loss of the captured trigger's run/boundary provenance. The corrective
+bounded review is now closed on exact source commit `143953a95001484881703ea291c2bdd572c5e0e5`
+and complete SHA `7749ff01173da4de0145a231ecd7fd87a373c9fb`; closure artifact
+`.local/leader/core301-7749-captured-trigger-provenance-closure.md` has SHA-256
+`8b2bdd5cabea054d3853d1e2e9ab5cad444ab4c5e63ca5869bac20e07844a0e7`, with no new
+scoped P1/P2. Its finite scope limits remain explicit in that artifact.
 
 C3 runs the true SQL-triggered `Fault::RejectFact` inside adoption (pre-FINISH
 rollback) and matched `Fault::Storage` at its postcommit checkpoint for the same
@@ -49,15 +53,26 @@ trigger projection and did not assert or preserve each attempt's own run/boundar
 provenance; it is NOT qualification for the now-confirmed P2. Its log/result/resources
 are `core301-standard-check-abf339fe-63724.*`.
 
-The repair in progress makes `begin_tx` return its exact captured trigger (including
-`run_id` and observed `a_boundary`) and uses that same value for terminal W4 persistence.
-No fallback JSON merge or current-state boundary reread is used. The paired oracle keeps
-the five shared numeric fields for cross-run equality and separately checks each
-record's `run_id` against its own model-attempt turn and its observed boundary shape;
-an attempt-level unit test checks exact captured-trigger survival through terminal
-finish. This new source/test delta is unqualified until a fresh complete
-`sh scripts/check.sh` passes on its new clean SHA. Prior C7.1 and C8 receipts remain
-scoped to their historical SHAs; all original reds remain visible.
+The repair makes `begin_tx` return its exact captured trigger (including `run_id` and
+observed `a_boundary`) and uses that same value for terminal W4 persistence. No fallback
+JSON merge or current-state boundary reread is used. The paired oracle keeps the five
+shared numeric fields for cross-run equality, checks each record's `run_id` against its
+own model-attempt turn and its observed boundary shape, and asserts distinct run IDs;
+an attempt-level unit checks exact captured-trigger survival through terminal finish.
+The independent review notes that boundary type/shape at integration is not itself an
+independent original-token comparison; exact-token equality is checked at the writer
+unit and supported by one-value source dataflow. The current complete SHA
+`7749ff01173da4de0145a231ecd7fd87a373c9fb` passed guarded `sh scripts/check.sh`:
+execution `a643b931-bc15-42b2-ac31-9bbbc051e7df`, exit 0, cleanup confirmed after
+1,008.298s. It ran layout, Python 228, fmt, strict all-target Clippy, library
+2,649 passed / 0 failed / 25 ignored, integration 1,415 / 0 / 19 ignored, additional
+targets 14 / 0 / 1 ignored and 9 / 0 / 2 ignored, and the exact
+`test-db-observation` selector 1/1. Owned peak RSS 2,375.25 MiB / footprint
+4,540.30 MiB under the 8,192 MiB limit; no stop by swap. See
+`core301-standard-check-7749ff01-63724.log`, `-result.json`, and `-resources.tsv`.
+Three-OS CI and main integration remain pending. Earlier C7.1, C8, dbae red, and
+abf green/nonqual receipts remain scoped to their exact SHAs; all original reds remain
+visible.
 
 C6-3 selected-source facts authority uses the captured `GcSourceFacts` and checks
 group-completeness agreement; C6-2 sequencing retains active spill custody when later
@@ -67,11 +82,12 @@ design-only in `.local/private-reports/studio-current-20261113/
 core306-saved-attempt-provenance-design-20261115.md`; no #306 implementation is in
 this worktree.
 
-The former 21:45 native/review and 23:00 main goals were missed; revised 22:00 freeze,
-23:15 one-OS standard/review, and 00:30 CI/main checkpoints were also at risk and do
-not waive any gate. A new complete SHA, full standard pass, same-SHA bounded review,
-three-OS CI and landing remain pending. Do not infer final readiness from partial
-checks or prior candidate receipts.
+The former 21:45 native/review and 23:00 main goals and revised 22:00 freeze checkpoint
+were missed. The revised 23:15 one-OS standard/review checkpoint is met at 22:53 JST on
+`7749ff`; the 00:30 same-SHA three-OS CI/main target remains pending and at risk. No
+push, CI dispatch or landing is recorded yet in this status snapshot. Time does not
+waive the remaining gates or authorize unrelated installed-binary, DB-migration or
+owner-restart actions. Do not infer final readiness from prior candidate receipts.
 
 ## v0.11.0 preparation
 
