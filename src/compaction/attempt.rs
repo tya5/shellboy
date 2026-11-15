@@ -179,7 +179,7 @@ pub(crate) enum ABoundaryObservation {
     Unobserved,
 }
 
-/// Writes the provisional `unknown` record inside the witness transaction.
+/// Writes the provisional `unknown` record and returns its exact captured trigger.
 pub(crate) fn begin_tx(
     tx: &rusqlite::Transaction<'_>,
     attempt: &str,
@@ -188,7 +188,7 @@ pub(crate) fn begin_tx(
     a_boundary: ABoundaryObservation,
     trigger: &Value,
     target_plan: &Value,
-) -> Result<(), StorageError> {
+) -> Result<Value, StorageError> {
     let mut trigger = trigger.clone();
     if a_boundary == ABoundaryObservation::Observe {
         let scope: Option<(String, String, String)> = tx
@@ -211,7 +211,7 @@ pub(crate) fn begin_tx(
         "UPDATE model_attempt SET error_json=json_set(COALESCE(error_json,'{}'),'$.automatic_trim_attempt',json(?1)) WHERE id=?2 AND (error_json IS NULL OR json_valid(error_json))",
         params![body, attempt],
     )?;
-    Ok(())
+    Ok(trigger)
 }
 
 pub(crate) fn finish_tx(
@@ -391,6 +391,49 @@ mod tests {
         let saved: Value = serde_json::from_str(&saved).unwrap();
         assert_eq!(saved["automatic_trim_attempt"]["outcome"], "adopted");
         assert_eq!(raw_a, "{", "unobserved A bytes stay untouched");
+    }
+
+    #[test]
+    fn begin_returns_captured_trigger_and_terminal_finish_persists_it() {
+        let db = crate::control::test_support::terminal_attempt_fixture("trial", "completed");
+        let boundary = super::super::a_state::scope_tx(&db, "t", "c", "m")
+            .unwrap()
+            .token();
+        let input_trigger = json!({"run_id":"triggering-run","input_tokens":200});
+        let captured_trigger = {
+            let tx = db.unchecked_transaction().unwrap();
+            let captured = begin_tx(
+                &tx,
+                "trial",
+                "captured-token",
+                "test",
+                ABoundaryObservation::Observe,
+                &input_trigger,
+                &Value::Null,
+            )
+            .unwrap();
+            tx.commit().unwrap();
+            captured
+        };
+        assert_eq!(captured_trigger["run_id"], "triggering-run");
+        assert_eq!(
+            captured_trigger["a_boundary"],
+            serde_json::to_value(boundary).unwrap()
+        );
+
+        let body = json!({"outcome":"failed","trigger":captured_trigger.clone()}).to_string();
+        let tx = db.unchecked_transaction().unwrap();
+        assert!(finish_tx(&tx, &body, "trial", "captured-token").unwrap());
+        tx.commit().unwrap();
+        let saved: String = db
+            .query_row(
+                "SELECT error_json FROM model_attempt WHERE id='trial'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let saved: Value = serde_json::from_str(&saved).unwrap();
+        assert_eq!(saved["automatic_trim_attempt"]["trigger"], captured_trigger);
     }
 
     #[test]

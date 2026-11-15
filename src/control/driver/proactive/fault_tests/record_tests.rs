@@ -48,6 +48,10 @@ async fn pre_finish_rejection_and_postcommit_storage_share_the_active_summary_ce
         trigger_identity(&committed["trigger"]),
         "same scenario uses the exact immutable trigger tuple"
     );
+    assert_ne!(
+        rejected["trigger"]["run_id"], committed["trigger"]["run_id"],
+        "each independent cell retains its own run provenance"
+    );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn connection_target_percent_is_inherited_when_thread_is_unset() {
@@ -510,13 +514,13 @@ async fn assert_record(
     assert_immutable(control).await;
     let target = target.to_owned();
     let guard_before = guard_before.to_vec();
-    let (attempt, record, replacements, witness, pending, boundary, begin, epoch) = {
-        let (attempt, record, replacements, witness, pending, boundary, begin, epoch) = control.store.database.call({
+    let (attempt, record, replacements, witness, pending, boundary, begin, epoch, attempt_run_id) = {
+        let (attempt, record, replacements, witness, pending, boundary, begin, epoch, attempt_run_id) = control.store.database.call({
             let target = target.clone();
             move |db| {
-                let (attempt, record): (String, String) = db.query_row(
-                    "SELECT id,json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'",
-                    [], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                let (attempt, record, attempt_run_id): (String, String, String) = db.query_row(
+                    "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt'),t.run_id FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE json_type(a.error_json,'$.automatic_trim_attempt')='object'",
+                    [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
                 // Every replacement adopted for the Thread: (kind, output node).
                 let replacements: Vec<(String, String)> = db.prepare("SELECT n.kind,n.id FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 ORDER BY n.rowid")?
                     .query_map([&target], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
@@ -525,7 +529,7 @@ async fn assert_record(
                 let boundary: Option<(i64, i64)> = db.query_row("SELECT revision,epoch FROM fault_boundary", [], |r| Ok((r.get(0)?, r.get(1)?))).optional().ok().flatten();
                 let begin: Option<i64> = db.query_row("SELECT epoch FROM fault_begin", [], |r| r.get(0)).optional().ok().flatten();
                 let epoch: i64 = db.query_row("SELECT reasoning_epoch FROM thread WHERE id=?1", [&target], |r| r.get(0))?;
-                Ok((attempt, record, replacements, witness, pending, boundary, begin, epoch))
+                Ok((attempt, record, replacements, witness, pending, boundary, begin, epoch, attempt_run_id))
             }
         }).await.unwrap();
         (
@@ -537,11 +541,28 @@ async fn assert_record(
             boundary,
             begin,
             epoch,
+            attempt_run_id,
         )
     };
     let record: Value = serde_json::from_str(&record).unwrap();
     assert_eq!(record["reason"], REASON);
     assert_trigger_evidence(&record["trigger"], scenario);
+    if matches!(fault, Fault::RejectFact | Fault::Storage) && scenario == Scenario::ActiveSummary {
+        assert_eq!(
+            record["trigger"]["run_id"], attempt_run_id,
+            "each terminal record retains its own triggering run"
+        );
+        let boundary = record["trigger"]["a_boundary"]
+            .as_object()
+            .expect("observed A-boundary provenance is retained");
+        assert_eq!(
+            boundary.len(),
+            2,
+            "captured A-boundary has only its typed token fields"
+        );
+        assert!(boundary["scope"].is_u64());
+        assert!(boundary["boundary"].is_u64());
+    }
     // The guard is untouched whenever the attempt's own guard write is not
     // reached or is rejected. A healthy W3 (cancellation, rejected final
     // write) legitimately saves its normal result before the failure.

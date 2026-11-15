@@ -467,10 +467,10 @@ pub(super) async fn maybe_compact_with_run_stop(
     let can_run=control.store.database.call(move |db| {
         let tx=db.transaction()?;
         let current: Option<(String, i64)> = tx.query_row("SELECT profile_id,revision FROM thread WHERE id=?1",[&guard_thread],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-        if current != Some((sampled_profile, sampled_revision)) { return Ok(false); }
+        if current != Some((sampled_profile, sampled_revision)) { return Ok(None); }
         let consumed:bool=tx.query_row("SELECT json_type(error_json,'$.automatic_trim_attempt') IS NOT NULL FROM model_attempt WHERE id=?1",[&id],|r|r.get(0))?;
-        if consumed {return Ok(false);}
-        crate::compaction::attempt_begin_tx(
+        if consumed {return Ok(None);}
+        let captured_trigger = crate::compaction::attempt_begin_tx(
             &tx,
             &id,
             &token,
@@ -486,11 +486,11 @@ pub(super) async fn maybe_compact_with_run_stop(
         tx.execute("INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![saved_key, saved_witness])?;
         // Retire old target/guard metadata, never the historical attempt record.
         for key in [crate::compaction::CompactionKeys::new(&thread).automatic_target(),crate::compaction::CompactionKeys::new(&thread).automatic_guard(),crate::compaction::CompactionKeys::new(&thread).automatic_status()] {tx.execute("DELETE FROM app_meta WHERE key=?1",[key])?;}
-        tx.commit()?;Ok(true)
+        tx.commit()?;Ok(Some(captured_trigger))
     }).await.map_err(storage_error)?;
-    if !can_run {
+    let Some(captured_trigger) = can_run else {
         return Ok(false);
-    }
+    };
     control.diagnostics.record(
         crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
         ids.clone(),
@@ -661,7 +661,7 @@ pub(super) async fn maybe_compact_with_run_stop(
     let no_target = summary
         .as_ref()
         .is_some_and(|summary| summary["no_target"] == true);
-    let mut record = json!({"outcome":terminal_attempt_outcome(&result,no_target),"provisional":false,"reason":REASON,"trigger":{"auto_at_tokens":threshold,"target_percent":percent,"target_tokens":target,"input_tokens":input,"a_input_tokens":a},"target_plan":null});
+    let mut record = json!({"outcome":terminal_attempt_outcome(&result,no_target),"provisional":false,"reason":REASON,"trigger":captured_trigger,"target_plan":null});
     if let Some(summary) = summary {
         record["summary"] = summary;
     }
