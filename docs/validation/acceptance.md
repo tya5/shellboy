@@ -7,6 +7,19 @@ or user database. Worktree branch `task/core301-single-request-port-63724`, comm
 parent `039e495797e8d557f2dd49fdde694a660a4dc247`, based on c0
 `c0c1d82767f061c60c2f4d46673a3cfa30560145`.
 
+### Evidence correction for final 994 candidate (2026-11-15)
+
+This is the current authority for SHA `994a4767cfe514bc0fa0bffc2ed3022677711251`; the older C4 batch claims below are historical and do not override these exact receipts.
+
+- `core301-994-final-preflight71-63724.log`: guarded format/check plus 15 exact controls passed on 994. This is focused evidence only.
+- `core301-full-native-994a476-63724.log`, execution `233b6a28-b8b0-4752-957a-9eec6e9d5a20`: guarded `cargo test --locked` exited 101 after 761.619s; cleanup confirmed; library 2,641 passed / 0 failed / 25 ignored; integration 1,408 passed / 6 failed / 19 ignored; trailing 0-test selector is not evidence. The six exact failed tests and source-confirmed summary-limit projection cause, plus remaining hypotheses, are enumerated in `.local/private-reports/studio-current-20261113/core301-994-full-native-causal-report-20261115.md`. This 994 RED is separate from fb's nine failures. No full-native qualification is established.
+- `core301-c4-final-controls60-63724.log` is RED: attachment witness test failed because its fixture lacked the `run.id` column; the corrected controls61 receipt is the later pass. Do not cite controls60 as all-pass.
+- `core301-fb056-postfinish-controls39-63724.log` is mixed: the active-spill cancellation and persistent active/closed summary tests passed, but `record_after_remeasurement_fault` failed at ActiveSpill because its oracle expected `failed` after strict FINISH had already adopted. It does not prove later storage/retired/rollback tests. Those have separate controls41/42 receipts.
+- `core301-uncalibrated-active-positive-controls66-63724.log` is mixed: active site passed; late-prefix returned `NoTarget` because the fixture had no earlier completed Turn while correctly retaining the latest-Turn fence. The later paired valid fixture is controls67.
+- C5 owner-Stop policy: the source witness reports only `RejectionReason`; it never cancels the token. The existing Run owner controls cancellation. Token-first is `Cancelled`; DB-witness-first is `RunStopped` and may durably label the attempt `failed`, while Run Stop still finishes. The exact DB-first receipt `core301-c5-stop-owner-controls-63724.log` failed the previous `Cancelled` expectation and is preserved as RED; the new separate order assertions and end-to-end DB-first controls passed 1/1 each in `core301-c5-policy-source-fault-exact-63724.log`. No provenance wrapper, stop-reason reread or global cancel is accepted.
+- C5 source-facts check `core301-c5-sourcefacts-check4.log` and three exact post-shape controls passed; current routing/metrics/provider-scope edits are being rechecked against the six prior native reds under `core301-994-six-reds-exact-63724.log`. Neither transfers qualification from 994 or preflight71. No same-SHA full native, independent delta review, three-OS or landing qualification exists.
+
+
 Focused exact-source results:
 
 - On the latest source before the documentation-only status update, `cargo fmt --all --check`, `cargo check --locked --tests`, and exact `control::driver::proactive::fault_tests::record_tests::record_after_cancellation` passed in `core301-final-fmt-check-record30-63724.log` (execution `ad1f38f3-83af-43e8-9815-38e48c0d96ab`; command is in the shell receipt).

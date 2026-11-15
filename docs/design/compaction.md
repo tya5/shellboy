@@ -13,24 +13,42 @@ This section describes the current-main native proactive GC implementation contr
   Rejected alternatives/counterexamples: treating pre-cancel as `NoTarget` can spuriously enter active planning; mapping cancellation to a generic storage error loses its cause; waiting on a full queue after Stop harms prompt cancellation; continuing capture after Stop needlessly reads selected payload; a second planner/snapshot introduces divergent range authority. `NoTarget` remains reserved for an actual uncancelled planner result.
 
 - C4 causal map for original exact `fb056...` full-native failures (`core301-full-native-fb056-63724.log`, 2,632/9/25; do not transfer to another SHA):
-  - `completed_trigger_real_run_turn_rejections_are_visible_in_status_and_log`: cda hit its unchanged 60s watchdog while the direct `RunStopped` state witness caused explicit cancellation before durable publication. Cause was product mapping: witness reason/provenance were split. One `WitnessRejection` now carries both; SQL is scoped to the captured original Run, and only `stop_reason='explicit_stop'` selects the shared token. Direct persisted RunStopped status/log and real explicit RunStop controls pass (`core301-runstop-cause-controls30-63724.log`). Natural Turn completion and non-Stop Run/Turn generation invalidation remain separate. Structural source repair, not a timer change.
+  - `completed_trigger_real_run_turn_rejections_are_visible_in_status_and_log`: the original cda 60s watchdog red remains immutable. C5 review superseded the earlier provenance-based mapping: this is a reason-only witness; direct RunStopped remains a durable reason unless the owner token is already cancelled. The synthetic status/log control continues to assert the rejected witness; paired RunStop order controls separately cover token-first and DB-first outcomes. Natural Turn completion and non-Stop Run/Turn generation invalidation remain distinct. No timer change.
   - `record_after_cancellation` ActiveSpill: old oracle expected a post-Stop active summary/planning phase. Accepted pre-cancel contract returns `Cancelled` before reservation/planning; the committed spill remains and summary caller records closed-summary entry. Phase oracle now reflects that no-fallback behavior; exact test passes (`core301-fb056-postfinish-controls39-63724.log`). Fault still does not bypass admission/source checks.
   - `record_after_persistent_fault_active_summary` and `...closed_summary`: injection is installed by `fault_tests::checkpoint` only after native summary stage returns, which follows atomic replacement/path/stage/FINISH COMMIT. Actual injector still hits the postcommit storage boundary and shutdown error; outcome is already `adopted`, not recoverable `unknown`. Both pass after asserting persisted outcome and stage facts (`core301-fb056-postfinish-controls39-63724.log`).
   - `record_after_storage_fault` and `retired_automatic_writes_are_absent`: same post-FINISH boundary for summary scenarios. Trigger hit is still asserted; committed summary remains adopted. The spill-to-summary continuation remains a distinct reachable pre-FINISH injector case. Exact storage and retired-write matrix pass (`core301-postfinish-storage-controls42-63724.log`).
-  - `record_after_remeasurement_fault`: a summary checkpoint runs after FINISH; an active-spill checkpoint can continue into active summary then remeasurement. ClosedSpill/ClosedSummary are failed after remeasurement; ActiveSpill is adopted because its following active summary already FINISHed. Updated only phase/outcome oracle and retained hook/terminal proof; exact full matrix passes (`core301-remeasurement-exact41-63724.log`).
+  - `record_after_remeasurement_fault`: a summary checkpoint runs after FINISH; an active-spill checkpoint can continue into active summary then remeasurement. ClosedSummary is already adopted before the remeasurement injector runs; ActiveSpill is adopted because its following active summary FINISHed. ClosedSpill remains a failed non-summary path. The historical sentence claiming ClosedSummary failed was incorrect; retain the original red log and use exact scenario receipts (`core301-remeasurement-exact41-63724.log`) for current facts.
   - `uncalibrated_active_summary_is_recorded_and_checkpointed` and `uncalibrated_late_prefix_summary_is_recorded_and_checkpointed`: original fixtures held a pending real Driver response but invoked internal `summary_stage` with an unrelated local Mutex, so producer strict adoption blocked on the actual Control Thread boundary. This was a fixture lock-ownership defect, not a GC latency. Rebuild uses production `history::append_node`, current migrated SQLite schema, exact per-tool-round completed attempts/output items/results, original W1+STAGE token, and the actual Control boundary. Active sources are large tool outputs; late-prefix sources are large nonlatest completed-Turn messages with the latest Turn preserved, so a short mock summary satisfies real shrink policy. No capacity/fault oracle is bypassed. Both now pass 1/1 (`core301-uncalibrated-active-positive-controls66-63724.log`).
   - Commit-boundary controls are paired: `record_after_rejected_final_write` remains the rollback negative: strict FINISH rejection leaves no summary replacement/path/stage, keeps two earlier spills, path prefix/epoch and append revision. `uncalibrated_*` provide legitimate strict-adoption positives with postcommit injector outcomes. Exact RejectFinal and positive site evidence are separate receipts; neither is inferred from the other.
 
 - C5, only live authorities: remove unused GC target-CAS types/branches (production passed `None` and no product caller exists), unused caller-selected capture variants, and temporary `eprintln!` hooks. `begin_gc_tx` and `provisional_gc_matches` share one exact provisional receipt predicate. Do not remove or weaken original attempt state/token FINISH, source/profile/epoch/nonappend/tool/protection checks, failure-memory compare-and-set, writer join/retirement, or Run Stop custody.
-- C4-2 stop provenance: one `WitnessRejection` carries both the typed rejection reason and
-  provenance (`SourceWitness` versus persisted `stop_reason='explicit_stop'`). The same
-  evaluator reads `Run.state='stopping'` and stop reason once; completion, request validation,
-  pre-reply reconciliation and strict adoption reuse the same typed fact. Only the explicit
-  stop provenance wakes the owner's shared cancellation token; a state-only RunStopped
-  remains a durable rejection. There is no per-job Stop boolean or independent second/third
-  DB probe. Oracles: synthetic stopped-vs-explicit-stop witness test, registered
-  `completed_trigger_real_run_turn_rejections_are_visible_in_status_and_log`, and real
-  active RunStop/summary-cancellation test.
+- C5-1/2 adopted RunStop policy: the source witness returns only its actual
+  `RejectionReason`; it never cancels a Run token. The existing Run owner alone controls
+  cancellation. If that token is already cancelled when the reason is consumed, the result
+  is `Cancelled`; otherwise the observed witness reason remains `RunStopped`. RunStop has
+  two legitimate orderings: (a) token-first gives `Cancelled`; (b) DB-witness-first observes
+  the committed `state='stopping'` before the post-commit `Control::stop_run` callback
+  cancels the existing token, so the durable reason is `RunStopped` and the attempt outcome
+  may be `failed`. In both orders Run Stop must finish, issue no new conversation POST,
+  retain earlier committed spills, avoid summary adoption and leave failure memory unchanged.
+  This exact DB/token window is in `control.rs` RunStop effects and `live.rs::cancel_run`;
+  the two labels do not create separate cancellation authorities. Rejected alternatives:
+  no `WitnessRejection`/provenance wrapper, no reread of `stop_reason`, no global or
+  per-job token cancel, no flag/registry/actor, and no reply-grace or latency change.
+  The old cancellation-label assertion is superseded by two separate deterministic-order
+  controls; neither is a one-of assertion. Tests retain Stop completion, post count, path,
+  spill and failure-memory assertions. Risk: diagnostics differ by which authoritative
+  observation reaches the consumer first; the stopped Run itself still terminates normally.
+- C5 selected spill ordering: in `SpillThenSummary` with an active Turn, the coordinator may
+  commit an eligible closed spill, then it must run the shared closed-summary planner before
+  considering active spill. Only an uncancelled closed `NoTarget` permits active spill, then
+  active summary. A closed-summary failure or suppression is not `NoTarget` and cannot spill
+  active R. This preserves the single typed planner, closed-to-active summary fallback,
+  strict selected-R reads and earlier independently committed spills. Rejected alternative:
+  treating closed-spill `NoTarget` as evidence that closed-summary has no target caused the
+  994 exact control to spill 18 active groups after closed deterministic failure. The test
+  keeps the zero-active-spill assertion; active spill/summary fallback remains a separate
+  positive case.
 - RejectFinal fault semantics: strict summary FINISH and replacement/path adoption are one
   transaction. `fault_tests::checkpoint` is invoked only after the stage method returns:
   for native summary that return follows writer-owned replacement/path/stage/FINISH COMMIT.
