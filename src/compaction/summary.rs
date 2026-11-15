@@ -474,24 +474,19 @@ pub(super) fn adopt_gc_result_tx(
         .ok_or_else(|| StorageError::InvalidInput("GC source ordinal overflow".into()))?;
     let current_facts =
         super::gc_capture::selected_source_facts(tx, thread, stamps[0].ordinal..end_ordinal)?;
-    let expected_facts = captured.groups[selected.clone()]
-        .iter()
-        .flat_map(|group| {
+    let selected_groups = &captured.groups[selected.clone()];
+    for group in selected_groups {
+        assert!(
             group
                 .stamps
                 .iter()
-                .map(move |stamp| super::gc_capture::GcSourceFacts {
-                    ordinal: stamp.ordinal,
-                    id: stamp.id.clone(),
-                    revision: stamp.revision,
-                    turn: stamp.turn.clone(),
-                    group_id: stamp.group_id.clone(),
-                    protected: stamp.protected,
-                    group_complete: group.complete,
-                    has_summary_marker: stamp.has_summary_marker,
-                    attachments: stamp.attachments.clone(),
-                })
-        })
+                .all(|stamp| stamp.source.group_complete == group.complete),
+            "captured eligible-group completeness must match each selected source fact"
+        );
+    }
+    let expected_facts = selected_groups
+        .iter()
+        .flat_map(|group| group.stamps.iter().map(|stamp| stamp.source.clone()))
         .collect::<Vec<_>>();
     super::gc_capture::classify_selected_source_facts(
         &expected_facts,
