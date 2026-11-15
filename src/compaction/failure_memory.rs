@@ -166,6 +166,25 @@ mod tests {
     }
 
     #[test]
+    fn provider_scope_digest_is_stable_only_for_the_same_run_context() {
+        let current = provider_turn_key("identity", "run-a", "turn-a", 3, "owner");
+        let same = provider_turn_key("identity", "run-a", "turn-a", 3, "owner");
+        let other_run = provider_turn_key("identity", "run-b", "turn-a", 3, "owner");
+        assert_eq!(current, same);
+        assert_ne!(current, other_run);
+        assert!(blocks(
+            &SlotRead::Exact(current.clone()),
+            "other-identity",
+            Some(&same)
+        ));
+        assert!(!blocks(
+            &SlotRead::Exact(current),
+            "other-identity",
+            Some(&other_run)
+        ));
+    }
+
+    #[test]
     fn cas_insert_and_exact_replacement_misses_preserve_concurrent_values() {
         let mut db = db();
         let tx = db.transaction().unwrap();

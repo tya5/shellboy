@@ -10,16 +10,17 @@ use std::{collections::HashMap, ops::Range};
 
 #[derive(Clone, Debug)]
 pub(crate) struct CapturedSourceStamp {
-    pub(crate) ordinal: i64,
-    pub(crate) id: String,
-    pub(crate) turn: Option<String>,
-    pub(crate) revision: i64,
+    pub(crate) source: GcSourceFacts,
     pub(crate) hash: String,
     pub(crate) marker_adapter: bool,
-    pub(crate) has_summary_marker: bool,
-    pub(crate) group_id: Option<String>,
-    pub(crate) protected: bool,
-    pub(crate) attachments: Vec<Value>,
+}
+
+impl std::ops::Deref for CapturedSourceStamp {
+    type Target = GcSourceFacts;
+
+    fn deref(&self) -> &Self::Target {
+        &self.source
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -86,19 +87,6 @@ pub(crate) struct CapturedSummaryInput {
     pub(crate) spill_epoch_advanced: bool,
     pub(crate) drop_reasoning: bool,
     pub(crate) active_user_messages: Vec<String>,
-}
-
-#[derive(Clone)]
-struct RowPlan {
-    ordinal: i64,
-    id: String,
-    turn: Option<String>,
-    revision: i64,
-    group_id: Option<String>,
-    complete: bool,
-    protected: bool,
-    summary: bool,
-    attachments: Vec<Value>,
 }
 
 impl CapturedSourceStamp {
@@ -606,21 +594,7 @@ fn capture_gc_plan_and_sources(
             "Selected GC summary interval changed during capture",
         )));
     }
-    let mut row_plans = Vec::new();
-    row_plans
-        .try_reserve_exact(range_len)
-        .map_err(|_| overflow())?;
-    row_plans.extend(captured_facts.into_iter().map(|fact| RowPlan {
-        ordinal: fact.ordinal,
-        id: fact.id,
-        turn: fact.turn,
-        revision: fact.revision,
-        group_id: fact.group_id,
-        complete: fact.group_complete,
-        protected: fact.protected,
-        summary: fact.has_summary_marker,
-        attachments: fact.attachments,
-    }));
+    let row_plans = captured_facts;
     let plan = &planned;
     if plan.selection_revision != thread_facts.0
         || plan.profile_revision != thread_facts.1
@@ -634,8 +608,8 @@ fn capture_gc_plan_and_sources(
                 || source.turn != row.turn
                 || source.group_id != row.group_id
                 || source.protected != row.protected
-                || source.group_complete != row.complete
-                || source.has_summary_marker != row.summary
+                || source.group_complete != row.group_complete
+                || source.has_summary_marker != row.has_summary_marker
         })
     {
         return Err(StorageError::InvalidInput(
@@ -683,7 +657,7 @@ fn capture_gc_plan_and_sources(
             .map_err(|_| overflow())?;
         for row in &row_plans[span.clone()] {
             if row.group_id.is_some() {
-                group.complete &= row.complete;
+                group.complete &= row.group_complete;
                 group.tool = true;
             }
         }
@@ -726,9 +700,8 @@ fn capture_gc_plan_and_sources(
             .projection_weight
             .checked_add(u128::from(projection))
             .ok_or_else(overflow)?;
-        current.has_unsummarized |= !row.summary;
+        current.has_unsummarized |= !row.has_summary_marker;
         let hash = key(&(row.revision, &payload));
-        let attachments = row.attachments;
         if !current.stamps.is_empty() {
             current.text.push_str("\n\n");
         }
@@ -736,23 +709,16 @@ fn capture_gc_plan_and_sources(
             RenderSourceView {
                 id: &row.id,
                 revision: row.revision,
-                attachments: &attachments,
+                attachments: &row.attachments,
             },
             payload,
             thread_facts.3,
             &mut current.text,
         );
         current.stamps.push(CapturedSourceStamp {
-            ordinal: row.ordinal,
-            id: row.id.clone(),
-            turn: row.turn.clone(),
-            revision: row.revision,
+            source: row,
             hash,
             marker_adapter,
-            has_summary_marker: row.summary,
-            group_id: row.group_id.clone(),
-            protected: row.protected,
-            attachments,
         });
     }
     let request_turn = {
@@ -884,16 +850,16 @@ fn overflow() -> StorageError {
     .into()
 }
 #[derive(Clone, Debug, PartialEq)]
-pub(super) struct GcSourceFacts {
-    pub(super) ordinal: i64,
-    pub(super) id: String,
-    pub(super) revision: i64,
-    pub(super) turn: Option<String>,
-    pub(super) group_id: Option<String>,
-    pub(super) protected: bool,
-    pub(super) group_complete: bool,
-    pub(super) has_summary_marker: bool,
-    pub(super) attachments: Vec<Value>,
+pub(crate) struct GcSourceFacts {
+    pub(crate) ordinal: i64,
+    pub(crate) id: String,
+    pub(crate) revision: i64,
+    pub(crate) turn: Option<String>,
+    pub(crate) group_id: Option<String>,
+    pub(crate) protected: bool,
+    pub(crate) group_complete: bool,
+    pub(crate) has_summary_marker: bool,
+    pub(crate) attachments: Vec<Value>,
 }
 
 /// Batch-load the exact selected source facts used by both early writer

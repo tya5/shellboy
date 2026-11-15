@@ -621,7 +621,7 @@ impl DbWorker {
     pub(crate) async fn validate_gc_job(
         &self,
         id: crate::compaction::WriterJobId,
-    ) -> Result<Option<crate::compaction::WitnessRejection>, StorageError> {
+    ) -> Result<Option<crate::compaction::discard::RejectionReason>, StorageError> {
         let (tx, rx) = oneshot::channel();
         let job: Job = Box::new(move |db, _, _, coordinator| {
             let result = coordinator.validate_job(db, id).map_err(StorageError::from);
@@ -2701,16 +2701,19 @@ mod lane_budget_tests {
         }).await.unwrap();
         let attachments = Vec::new();
         let stamp = crate::compaction::CapturedSourceStamp {
-            ordinal: 0,
-            id: "source".into(),
-            turn: Some("u".into()),
-            revision: 1,
+            source: crate::compaction::GcSourceFacts {
+                ordinal: 0,
+                id: "source".into(),
+                revision: 1,
+                turn: Some("u".into()),
+                group_id: None,
+                protected: false,
+                group_complete: true,
+                has_summary_marker: false,
+                attachments: attachments.clone(),
+            },
             hash: "hash".into(),
             marker_adapter: false,
-            has_summary_marker: false,
-            group_id: None,
-            protected: false,
-            attachments: attachments.clone(),
         };
         let group = crate::compaction::CapturedGroup {
             stamps: vec![stamp],

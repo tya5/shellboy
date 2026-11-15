@@ -967,14 +967,13 @@ async fn uncalibrated_site(fault: Fault, active: bool) {
     let mutex = control.boundary(&thread_id).await;
     let mut boundary = crate::compaction::boundary::Boundary::new(&mutex, mutex.lock().await);
     let result=async{
-        let work=summary_stage(&control,&control.compactor,&thread_id,&slot,active,&mut boundary,&automatic,slot.stop.clone());
+        let mut committed_spill=None;
+        let work=summary_stage(&control,&control.compactor,&thread_id,&slot,active,&mut boundary,&automatic,slot.stop.clone(),false,&mut committed_spill);
         tokio::pin!(work);
-        eprintln!("uncalibrated phase=await-summary-http active={active} fault={fault:?}");
         let request=tokio::select!{
             result=&mut work=>panic!("uncalibrated summary ended before provider admission: active={active} fault={fault:?} no_target={} err={:?}",result.as_ref().is_ok_and(|value|value.no_target),result.as_ref().err().map(|error|(error.code,error.message.clone()))),
             request=incoming(&control,&mut receive)=>request,
         };
-        eprintln!("uncalibrated phase=summary-http-reached active={active} fault={fault:?}");
         assert_eq!(request.body["tools"],json!([]));
         request.reply.send((200,answer("Short site summary."))).unwrap();
         work.await

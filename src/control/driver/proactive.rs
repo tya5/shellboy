@@ -137,6 +137,8 @@ async fn summary_stage(
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
     automatic: &Automatic,
     run_stop: tokio_util::sync::CancellationToken,
+    spill_active_after_closed_no_target: bool,
+    committed_spill: &mut Option<crate::compaction::CompactResult>,
 ) -> Result<crate::compaction::CompactResult, ApiError> {
     let thread_boundary = control.boundary(thread).await;
     let admission_wait = tokio_util::sync::CancellationToken::new();
@@ -161,6 +163,29 @@ async fn summary_stage(
         .await
         .map_err(|_| invalid("GC boundary reacquisition cancelled"))??;
     let (_stage, result) = if active && closed.no_target {
+        if spill_active_after_closed_no_target {
+            let active_spill = "active_spill";
+            let spilled = automatic
+                .observed(
+                    control,
+                    active_spill,
+                    compactor.spill_staged_cancellable(
+                        thread,
+                        true,
+                        u64::MAX,
+                        run_stop.clone(),
+                        Some(automatic.stage(active_spill)),
+                    ),
+                )
+                .await?;
+            #[cfg(test)]
+            if !spilled.no_target {
+                fault_tests::checkpoint(control, _slot, active_spill).await?;
+            }
+            if !spilled.no_target {
+                *committed_spill = Some(spilled);
+            }
+        }
         let active_stage = "active_summary";
         let result = boundary
             .pause(
@@ -378,34 +403,27 @@ pub(super) async fn maybe_compact_with_run_stop(
             .as_ref()
             .is_some_and(|turn| turn.turn == snapshot.turn);
         if route == SpillRoute::SpillThenSummary {
-            // Older completed Turns remain the first GC target even when a new
-            // active Turn exists; spill the active region only if that prefix has no target.
-            for spill_phase in ["closed_spill", "active_spill"]
-                .into_iter()
-                .take(if active { 2 } else { 1 })
-            {
-                let spill_active = spill_phase == "active_spill";
-                let spilled = automatic
-                    .observed(
-                        control,
-                        spill_phase,
-                        compactor.spill_staged_cancellable(
-                            &snapshot.thread,
-                            spill_active,
-                            u64::MAX,
-                            slot.stop.clone(),
-                            Some(automatic.stage(spill_phase)),
-                        ),
-                    )
-                    .await?;
-                #[cfg(test)]
-                if !spilled.no_target {
-                    fault_tests::checkpoint(control, slot, spill_phase).await?;
-                }
-                if !spilled.no_target {
-                    committed_spill = Some(spilled);
-                    break;
-                }
+            // Commit an eligible closed spill first. Do not spill active work
+            // until the shared closed-summary planner confirms NoTarget.
+            let spilled = automatic
+                .observed(
+                    control,
+                    "closed_spill",
+                    compactor.spill_staged_cancellable(
+                        &snapshot.thread,
+                        false,
+                        u64::MAX,
+                        slot.stop.clone(),
+                        Some(automatic.stage("closed_spill")),
+                    ),
+                )
+                .await?;
+            #[cfg(test)]
+            if !spilled.no_target {
+                fault_tests::checkpoint(control, slot, "closed_spill").await?;
+            }
+            if !spilled.no_target {
+                committed_spill = Some(spilled);
             }
         }
         summary_stage(
@@ -417,6 +435,8 @@ pub(super) async fn maybe_compact_with_run_stop(
             boundary,
             &automatic,
             run_stop.clone(),
+            route == SpillRoute::SpillThenSummary,
+            &mut committed_spill,
         )
         .await
     }

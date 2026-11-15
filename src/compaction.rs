@@ -30,10 +30,10 @@ mod failure_memory;
 mod gc_capture;
 mod gc_coordinator;
 #[cfg(test)]
-pub(crate) use gc_capture::{CapturedGroup, CapturedSourceStamp};
+pub(crate) use gc_capture::{CapturedGroup, CapturedSourceStamp, GcSourceFacts};
 pub(crate) use gc_capture::{CapturedSummaryInput, GcCaptureOutcome};
 pub(crate) use gc_coordinator::{
-    CompletionDisposition, WitnessRejection, WriterCompletion, WriterGcCoordinator, WriterJobId,
+    CompletionDisposition, WriterCompletion, WriterGcCoordinator, WriterJobId,
 };
 mod keys;
 pub(crate) mod preview;
@@ -910,8 +910,7 @@ impl Compactor {
                 let db=validator_db.clone();let stop=validator_stop.clone();
                 Box::pin(async move{match db.validate_gc_job(id).await{
                     Ok(None)=>Ok(()),
-                    Ok(Some(rejection)) if rejection.provenance==gc_coordinator::RejectionProvenance::ExplicitRunStop=>{stop.cancel();Err(discard::rejected(discard::RejectionReason::Cancelled,"GC cancelled by explicit Run Stop; original path retained"))},
-                    Ok(Some(rejection))=>Err(discard::rejected(rejection.reason,"GC source witness changed before request; original path retained")),
+                    Ok(Some(reason))=>Err(discard::rejected(gc_coordinator::owner_rejection_reason(reason,stop.is_cancelled()),"GC source witness changed before request; original path retained")),
                     Err(e)=>Err(storage_error(e)),
                 }}) as futures_util::future::BoxFuture<'static,Result<(),ApiError>>
             });
@@ -946,13 +945,9 @@ impl Compactor {
                 }
                 Err(crate::storage::GcCompletionSubmitError::AdmittedReplyLost(error))=>{let _=result_tx.send(Err(storage_error(error)));return None;}
                 Ok(CompletionDisposition::Accepted)=>{}
-                Ok(CompletionDisposition::Rejected(rejection))=>{
-                    let error=if rejection.provenance==gc_coordinator::RejectionProvenance::ExplicitRunStop{
-                        stop_for_job.cancel();
-                        discard::rejected(discard::RejectionReason::Cancelled,"GC summary cancelled by explicit Run Stop; original path retained")
-                    }else{
-                        discard::rejected(rejection.reason,"GC source witness changed before adoption; original path retained")
-                    };
+                Ok(CompletionDisposition::Rejected(reason))=>{
+                    let reason=gc_coordinator::owner_rejection_reason(reason,stop_for_job.is_cancelled());
+                    let error=discard::rejected(reason,"GC source witness changed before adoption; original path retained");
                     let _=result_tx.send(Err(error));return None;
                 }
                 Ok(_)=>{let _=result_tx.send(report_error.map_or_else(||Err(invalid("GC completion was not adoptable")),Err));return None;}
