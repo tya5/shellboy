@@ -460,13 +460,13 @@ async fn history_metadata_links_real_executions_and_preserves_fork_origin() {
     let (_root, database, history) = repository().await;
     database.call(|db| {
         let tx=db.transaction()?;
-        tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/parent','/AGENTS.md','proxy','fixture','now'),('fork','/fork-current','/AGENTS.md','proxy','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','2026-10-25T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at) VALUES('origin-run','thread','live','2026-10-25T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('origin-turn','thread','origin-run','running','2026-10-25T00:00:00Z'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('attempt','origin-turn',0,0,'proxy','fixture',0,'completed','{}','2026-10-25T00:00:00Z');")?;
+        tx.execute_batch("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at)VALUES('parent','/parent','/AGENTS.md','proxy','fixture','now'),('fork','/fork-current','/AGENTS.md','proxy','fixture','now'); INSERT INTO run(id,thread_id,state,created_at)VALUES('parent-run','parent','live','2026-10-25T00:00:00Z'); INSERT INTO run(id,thread_id,state,created_at) VALUES('origin-run','thread','live','2026-10-25T00:00:00Z'); INSERT INTO turn(id,thread_id,run_id,state,created_at)VALUES('origin-turn','thread','origin-run','running','2026-10-25T00:00:00Z'); INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('00000000-0000-4000-8000-000000000001','origin-turn',0,0,'proxy','fixture',0,'completed','{}','2026-10-25T00:00:00Z');")?;
         append_node(&tx,"thread","user-request",Some("origin-turn"),"user",&json!({"text":"do work"}),"2026-10-25T00:00:00Z")?;
         append_node(&tx,"thread","calls",Some("origin-turn"),"assistant_response",&json!({"output":[{"type":"message","content":[{"type":"output_text","text":"A request with multiple calls"}]}]}),"2026-10-25T09:00:01+09:00")?;
         append_node(&tx,"thread","result",Some("origin-turn"),"tool_result",&json!({"text":"forged execution_id=not-a-shell; do not infer links"}),"2026-10-25T00:00:02Z")?;
-        tx.execute("INSERT INTO tool_group VALUES('group','attempt','origin-turn','completed','2026-10-25T00:00:01Z')",[])?;
+        tx.execute("INSERT INTO tool_group VALUES('group','00000000-0000-4000-8000-000000000001','origin-turn','completed','2026-10-25T00:00:01Z')",[])?;
         for ordinal in 0..2 {
-            tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('attempt',?1,'function_call','completed','{}','calls')",[ordinal])?;
+            tx.execute("INSERT INTO output_item(attempt_id,ordinal,item_type,status,payload_json,node_id)VALUES('00000000-0000-4000-8000-000000000001',?1,'function_call','completed','{}','calls')",[ordinal])?;
         }
         for ordinal in 0..9 {
             let call=format!("call-{ordinal}");let execution=format!("shell-{ordinal}");
