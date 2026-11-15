@@ -3611,14 +3611,14 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                 }
                 tokio::task::yield_now().await;
             };
-            // The attempt outcome is the cancelled summary; the spill committed
-            // before it stays adopted with its own stage fact (#226, §5).
-            assert_eq!(record["outcome"], "cancelled", "{record:#?}");
+            // RunStop commits the stopping witness before its post-commit owner
+            // callback cancels the token, so this DB-witness-first order keeps
+            // the actual RunStopped reason. Earlier spills remain adopted.
+            assert_eq!(record["outcome"], "failed", "{record:#?}");
             assert_eq!(record["trigger"]["a_input_tokens"], first_known_a);
             assert_eq!(record["trigger"]["target_tokens"], 40);
-            assert!(record["error"]["message"].as_str().unwrap().to_lowercase().contains("cancel"), "{record:#?}");
+            assert_eq!(record["compaction_outcome"]["outcome"]["reason"], "run_stopped", "{record:#?}");
             assert_eq!(record["compaction_outcome"]["phase"], summary_stage, "{record:#?}");
-            assert_eq!(record["compaction_outcome"]["outcome"]["reason"], "cancelled", "{record:#?}");
             assert_eq!(record["committed_stages"][stage]["spilled_groups"], adopted_ids.len(), "{record:#?}");
             assert!(record["committed_stages"][summary_stage].is_null(), "{record:#?}");
             assert_eq!(record["committed_stages"].as_object().unwrap().len(), 1, "{record:#?}");
@@ -3639,7 +3639,7 @@ async fn proactive_partial_spill_fixture(oversized: bool, cancel_active: Option<
                     let left: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
                     assert_eq!(left, 0, "{kind}");
                 }
-                // §6.4: a cancellation is transient, never a deterministic failure record.
+                // §6.4: a RunStopped witness is transient, never a deterministic failure record.
                 for region in ["closed", "active"] {
                     let key = format!("compact.deterministic_range_failure.{region}.{path_target}");
                     let left: i64 = db.query_row("SELECT count(*) FROM app_meta WHERE key=?1", [key], |row| row.get(0))?;
@@ -3831,7 +3831,7 @@ async fn proactive_summarizes_earlier_turns_first_then_the_active_turn() {
         let before_request = before.iter().position(|item| item.to_string().contains("long current turn")).unwrap();
         assert_eq!(input[..=request], before[..=before_request], "①② unchanged");
         let tail=&input[request+1..];
-        let notice=tail.iter().find(|item|item.to_string().contains("active-Turn tool work in this range was summarized")).expect("summary notice for selected middle range");
+        let notice=tail.iter().find(|item|item.to_string().contains("Shellboy context notice: the tool work below in the active Turn was summarized")).unwrap_or_else(||panic!("shared active-Turn summary notice for selected middle range missing: {tail:?}"));
         assert!(!notice.to_string().contains("STEP3"),"latest group is not claimed as summarized");
         let call=tail.iter().position(|item|item["call_id"]=="step-3").expect("latest call retained outside R");
         assert_eq!(tail.get(call+1).and_then(|item|item["call_id"].as_str()),Some("step-3"),"its result remains adjacent and unsplit");
@@ -3975,6 +3975,60 @@ async fn proactive_provider_rejection_of_summaries_is_not_repeated_either() {
             "suppression must omit request and usage facts: {record:#?}"
         );
     }
+}
+
+#[tokio::test]
+async fn proactive_provider_500_is_suppressed_within_same_run_turn() {
+    let result = ax_growing_turn_summary_requests(
+        || {
+            (
+                500,
+                json!({"error":{"code":"invalid_request_error","message":"synthetic 500"}}),
+            )
+        },
+        0,
+        None,
+    )
+    .await;
+    let eligible_reports = 17;
+    assert_eq!(result.report_scopes.len(), eligible_reports);
+    assert!(
+        result
+            .report_scopes
+            .iter()
+            .all(|scope| scope == &result.report_scopes[0]),
+        "all reports share exact Run/Turn/generation: {:?}",
+        result.report_scopes
+    );
+    assert_eq!(
+        result.summaries, 1,
+        "one provider request for the one exact owner scope"
+    );
+    assert_eq!(
+        result.failure_memory_slots, 1,
+        "provider digest retained in the closed slot"
+    );
+    assert_eq!(result.records.len(), eligible_reports);
+    let provider_errors: Vec<_> = result
+        .records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "provider_error")
+        .collect();
+    assert_eq!(provider_errors.len(), 1, "one actual terminal 500 response");
+    assert_eq!(
+        provider_errors[0]["compaction_outcome"]["outcome"]["http_status"],
+        500
+    );
+    let suppressed: Vec<_> = result
+        .records
+        .iter()
+        .filter(|record| record["compaction_outcome"]["outcome"]["reason"] == "retry_suppressed")
+        .collect();
+    assert_eq!(
+        suppressed.len(),
+        eligible_reports - 1,
+        "later reports retain attempts without another request"
+    );
 }
 
 /// #303 variant of the growing-Turn fixture: an oversized protected request,
@@ -4597,38 +4651,6 @@ async fn proactive_summary_failure_does_not_retry_for_token_growth_alone() {
     );
     assert!(slots.0.is_some(), "the closed failure slot is recorded");
     assert!(slots.1.is_none(), "no active summary was attempted");
-}
-
-/// A terminal 500 provider response is invocation-scoped in S2b even when its
-/// embedded body says invalid_request_error. The later eligible report is still
-/// recorded as an attempt, but is suppressed in the same Run/Turn. The closed
-/// slot holds the exact provider-scope digest, not the deterministic E identity.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_provider_500_is_suppressed_once_per_same_run_scope() {
-    let (summaries, attempts, slots) = bx_token_growth((
-        500,
-        json!({"error":{"code":"invalid_request_error","message":"fixture summary failure"}}),
-    ))
-    .await;
-    assert_eq!(summaries, 1, "one provider dispatch in the unchanged scope");
-    assert_eq!(
-        attempts.len(),
-        2,
-        "both eligible reports retain their attempts"
-    );
-    assert!(
-        slots.0.as_deref().is_some_and(|digest| {
-            digest.len() == 64
-                && digest
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        }),
-        "closed slot stores a valid provider-scope digest: {slots:?}"
-    );
-    assert!(
-        slots.1.is_none(),
-        "only the closed provider scope was exercised: {slots:?}"
-    );
 }
 
 /// Two completed Turns (first known report 50 > target 20, then 150 >= the
@@ -6103,20 +6125,24 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         assert_eq!(changed.2, adopted.2);
         assert_eq!(changed.1, adopted.1 + 1, "model change advances the reasoning epoch once");
         let run = request(&control, Command::ThreadGet(ThreadTarget { thread_id: Some(target.clone()) })).await["run_id"].as_str().unwrap().to_owned();
-        request(&control, Command::RunStop(RunTarget { run_id: run })).await;
+        request(&control, Command::RunStop(RunTarget { run_id: run.clone() })).await;
         settled(&control, &target).await;
+        assert_eq!(request(&control,Command::RunGet(RunTarget{run_id:run})).await["state"],"stopped");
         let id = target.clone();
         let after = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
         assert_eq!(after, changed, "cancelled admission preserves selected spills, the changed-model epoch, and ordered provenance");
-        // #303 record: the summary stage was cancelled, so the attempt outcome is
-        // `cancelled`; the active spill committed before it stays a stage fact.
+        // The profile-change source witness wins before the later RunStop token;
+        // preserve its reason while still proving Stop completion and spill custody.
         let attempts = bx_attempts(&control, &target).await;
         assert_eq!(attempts.len(), 1, "{attempts:#?}");
         let record = &attempts[0];
-        assert_eq!(record["outcome"], "cancelled", "{record:#?}");
+        assert_eq!(record["outcome"], "failed", "{record:#?}");
+        assert_eq!(record["compaction_outcome"]["outcome"]["reason"],"profile_changed","{record:#?}");
         assert_eq!(record["trigger"]["a_input_tokens"], 100);
         assert_eq!(record["committed_stages"]["active_spill"]["spilled_groups"], 2, "{record:#?}");
         assert!(record["committed_stages"]["active_summary"].is_null(), "{record:#?}");
+        let slots=bx_failure_slots(&control,&target).await;
+        assert!(slots.0.is_none()&&slots.1.is_none(),"source rejection is never failure memory: {slots:?}");
         assert!(receive.try_recv().is_err());
         control.shutdown().await.unwrap();
         owner.shutdown().await.unwrap();
@@ -6218,7 +6244,8 @@ async fn sender_label_reaches_the_request_only_when_present_and_not_human() {
 /// spilled nor summarized by those attempts (§3).
 #[tokio::test]
 async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_grows() {
-    let (summaries, most, attempts, slots, spills) = bx_growing_turn(true, true).await;
+    let (summaries, most, attempts, slots, spills, _, _) =
+        bx_growing_turn(true, true, (200, answer(" ")), 19).await;
     assert_eq!(summaries, 1, "{attempts:#?}");
     assert_eq!(most, 1);
     assert_eq!(attempts.len(), 17, "one attempt per eligible report");
@@ -6229,7 +6256,7 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
     assert!(slots.0.is_some() && slots.1.is_none(), "{slots:?}");
     assert_eq!(
         spills, 0,
-        "the active region is not spilled for a closed summary"
+        "the active region is not spilled for a closed summary; attempts={attempts:#?}; slots={slots:?}"
     );
 }
 
@@ -6238,7 +6265,8 @@ async fn proactive_deterministic_closed_failure_stays_suppressed_while_the_turn_
 /// eligible report retries the active summary exactly once.
 #[tokio::test]
 async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
-    let (summaries, most, attempts, slots, _) = bx_growing_turn(false, false).await;
+    let (summaries, most, attempts, slots, _, _, _) =
+        bx_growing_turn(false, false, (200, answer(" ")), 19).await;
     assert_eq!(summaries, 17, "{attempts:#?}");
     assert_eq!(most, 1, "at most one summary request per reported value");
     assert_eq!(attempts.len(), 17);
@@ -6249,20 +6277,56 @@ async fn proactive_growing_active_range_permits_one_summary_per_new_report() {
     assert!(slots.0.is_none() && slots.1.is_some(), "{slots:?}");
 }
 
+#[tokio::test]
+async fn proactive_provider_500_retries_for_a_new_active_range() {
+    let reply = (
+        500,
+        json!({"error":{"code":"invalid_request_error","message":"synthetic range-scoped 500"}}),
+    );
+    let (summaries, _, attempts, slots, spills, scopes, inputs) =
+        bx_growing_turn(false, false, reply, 4).await;
+    assert_eq!(summaries, 2, "one provider request per changed active R");
+    assert_eq!(attempts.len(), 2, "both reports retain their attempts");
+    assert_eq!(scopes.len(), 2);
+    assert_eq!(
+        scopes[0], scopes[1],
+        "both reports share exact Run/Turn/generation"
+    );
+    assert_ne!(
+        inputs[0], inputs[1],
+        "selected active R changes between requests"
+    );
+    assert!(
+        attempts
+            .iter()
+            .all(|a| a["compaction_outcome"]["outcome"]["reason"] == "provider_error"),
+        "{attempts:#?}"
+    );
+    assert!(
+        slots.0.is_none() && slots.1.is_some(),
+        "provider memory remains in active slot: {slots:?}"
+    );
+    assert_eq!(spills, 0, "unknown tool responses do not authorize spills");
+}
+
 /// A current Turn of 20 tool rounds: reports 100, 100, then 202..=218 (17
 /// eligible reports at threshold 200; the first known report 100 is #A > 40).
-/// Every summary reply is empty. With `prior_turns`, two earlier Turns give a
-/// closed target. Returns summary requests, the most summary requests between
-/// two ordinary requests, attempt records, failure slots and path spills.
+/// Summary reply, final report index, and range scopes are configurable for exact
+/// deterministic failure-memory controls. With `prior_turns`, two earlier Turns
+/// give a closed target; outputs include reports, attempts, slots, scopes and inputs.
 async fn bx_growing_turn(
     prior_turns: bool,
     spilling: bool,
+    summary_reply: (u16, Value),
+    final_index: u32,
 ) -> (
     u32,
     u32,
     Vec<Value>,
     (Option<String>, Option<String>),
     usize,
+    Vec<(String, String, i64)>,
+    Vec<Value>,
 ) {
     crate::test_watchdog::watchdog("bx growing turn", async move {
         let root = tempfile::tempdir().unwrap();
@@ -6282,28 +6346,31 @@ async fn bx_growing_turn(
         // An unknown tool name returns a short error, so no spill can shrink it.
         let tool = |index: u32, tokens: u32| json!({"id":format!("grow-{index}"),"status":"completed","usage":{"input_tokens":tokens,"output_tokens":1},"output":[{"type":"function_call","call_id":format!("grow-{index}"),"name":if spilling {"shell"}else{"nope"},"arguments":if spilling {json!({"command":"printf '%02000d' 1"}).to_string()}else{"{}".into()}}]});
         let (mut summaries, mut most) = (0, 0);
-        for index in 0..=19 {
+        let mut summary_inputs=Vec::new();
+        for index in 0..=final_index {
             let mut run = 0;
             let ordinary = loop {
                 let request = incoming(&control, &mut receive).await;
                 if request.body["tools"] != json!([]) { break request; }
                 summaries += 1;
                 run += 1;
+                summary_inputs.push(request.body["input"].clone());
                 assert!(summaries < 80, "unbounded automatic summary loop");
-                request.reply.send((200, answer(" "))).unwrap();
+                request.reply.send(summary_reply.clone()).unwrap();
             };
             most = most.max(run);
-            if index == 19 { ordinary.reply.send((200, answer("finished"))).unwrap(); }
+            if index == final_index { ordinary.reply.send((200, answer("finished"))).unwrap(); }
             else { ordinary.reply.send((200, tool(index, if index < 2 { 100 } else { 200 + index }))).unwrap(); }
         }
         settled(&control, &target).await;
         assert!(receive.try_recv().is_err());
         let attempts = bx_attempts(&control, &target).await;
         let slots = bx_failure_slots(&control, &target).await;
+        let scope_thread=target.clone();
+        let scopes=control.store.database.call(move|db|Ok(db.prepare("SELECT r.id,t.id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id JOIN run r ON r.id=t.run_id WHERE t.thread_id=?1 AND json_extract(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid")?.query_map([scope_thread],|row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,i64>(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)).await.unwrap();
         let id = target.clone();
         let spills = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap().0.len();
-        eprintln!("prior_turns={prior_turns} spilling={spilling} summaries={summaries} most={most} attempts={}", attempts.len());
         control.shutdown().await.unwrap(); owner.shutdown().await.unwrap(); server.abort();
-        (summaries, most, attempts, slots, spills)
+        (summaries,most,attempts,slots,spills,scopes,summary_inputs)
     }).await.unwrap()
 }

@@ -265,12 +265,12 @@ async fn record_boundary(fault: Fault, scenario: Scenario) {
         );
     }
     if fault == Fault::Cancellation && scenario == Scenario::ActiveSpill {
-        // Stop is already set at the active-spill checkpoint. The required
-        // pre-cancel fast path enters the closed-summary caller, returns before
-        // planning, and does not manufacture an active fallback stage.
+        // The active-spill checkpoint is reached only after the closed
+        // summary returned NoTarget. Cancellation then rejects the active
+        // summary before producer admission/planning.
         let record = &terminal.record;
         assert_eq!(
-            record["compaction_outcome"]["phase"], "closed_summary",
+            record["compaction_outcome"]["phase"], "active_summary",
             "{record}"
         );
         assert_eq!(

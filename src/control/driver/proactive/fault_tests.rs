@@ -87,7 +87,6 @@ fn expected_outcome(fault: Fault, scenario: Scenario, phase: ObservationPhase) -
             Fault::Cancellation if scenario == Scenario::ActiveSpill => "cancelled",
             // Other summary boundaries already completed atomic FINISH before
             // the post-stage cancellation hook runs.
-            Fault::Cancellation if scenario.summary() => "adopted",
             Fault::Cancellation => "adopted",
             Fault::Persistent | Fault::RejectFinal => "unknown",
             Fault::Storage | Fault::RetiredWritesAbsent | Fault::Remeasurement => "failed",
