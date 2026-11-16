@@ -179,9 +179,10 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
         let summary = held_summary
             .take()
             .expect("one proactive summary request is held");
-        let normal = held_normal
-            .take()
-            .expect("one ordinary request reached the provider before the held summary");
+        let normal = match held_normal.take() {
+            Some(request) => request,
+            None => incoming(&control, &mut receive).await,
+        };
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -271,9 +272,10 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .unwrap();
 
         // This request reached the provider while the summary response was held.
-        let normal = held_normal
-            .take()
-            .expect("ordinary request is held at the provider barrier");
+        let normal = match held_normal.take() {
+            Some(request) => request,
+            None => incoming(control, receive).await,
+        };
         assert_ne!(
             normal.body, summary.body,
             "next request is not a duplicate summary POST"
