@@ -372,7 +372,18 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             })
             .await
             .unwrap();
-        assert_eq!(during_overflow, before, "same R remains pending during overflow wait");
+        assert!(
+            during_overflow.starts_with(&before),
+            "same R remains pending while Run B's current suffix may append during overflow wait"
+        );
+        let summaries_during_overflow: i64 = control.store.database.call({
+            let thread = target.clone();
+            move |db| Ok(db.query_row(
+                "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
+                [thread], |row| row.get(0),
+            )?)
+        }).await.unwrap();
+        assert_eq!(summaries_during_overflow, 0, "the held job has not adopted before its response");
         assert!(receive.try_recv().is_err(), "Run B does not start a second summary while joining Run A's job");
 
         let before_release: Vec<String> = control
