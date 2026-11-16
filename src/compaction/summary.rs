@@ -495,7 +495,9 @@ pub(super) fn adopt_current_rs_tx(
             if let Some(item) = final_payload.get_mut("item") {
                 item["reasoning_epoch"] = json!(projected_epoch);
             }
-            if kept_reasoning_node_ids.is_empty() {
+            if matches!(reasoning_policy, FinalReasoningPolicy::DropAll)
+                || kept_reasoning_node_ids.is_empty()
+            {
                 if let Some(object) = final_payload.as_object_mut() {
                     object.remove("kept_reasoning_node_ids");
                 }
@@ -549,25 +551,6 @@ pub(super) fn adopt_current_rs_tx(
             "DELETE FROM app_meta WHERE key=?1",
             [history::reasoning_keep_key(thread)],
         )?;
-        for (request, node) in requests.iter().zip(&nodes) {
-            let mut final_payload = request.payload.clone();
-            if final_payload.get("summary_scope").is_some()
-                || final_payload.get("reasoning_epoch").is_some()
-            {
-                final_payload["reasoning_epoch"] = json!(final_epoch);
-                if let Some(item) = final_payload.get_mut("item") {
-                    item["reasoning_epoch"] = json!(final_epoch);
-                }
-                if let Some(object) = final_payload.as_object_mut() {
-                    object.remove("kept_reasoning_node_ids");
-                }
-                let body = final_payload.to_string();
-                tx.execute(
-                    "UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4 WHERE id=?1",
-                    rusqlite::params![node, body, body.len() as i64, super::key(&final_payload)],
-                )?;
-            }
-        }
     }
     if cancel.is_cancelled() {
         return Err(rejection(
@@ -924,9 +907,22 @@ mod final_r_adoption_tests {
                     })?;
                 let payload: Value = serde_json::from_str(&body)
                     .map_err(|error| StorageError::Schema(error.to_string()))?;
-                assert_eq!(payload["reasoning_epoch"].as_i64(), Some(epoch));
+                let stored_epoch = payload["reasoning_epoch"].as_i64().unwrap();
+                if let Some(previous) = payload_epoch {
+                    assert_eq!(
+                        stored_epoch, previous,
+                        "all batch spills share one projection epoch"
+                    );
+                }
+                payload_epoch = Some(stored_epoch);
                 assert!(payload.get("kept_reasoning_node_ids").is_none());
             }
+            let spill_projection_epoch = payload_epoch.expect("two spill payloads");
+            assert_eq!(
+                spill_projection_epoch + 1,
+                epoch,
+                "DROP_ALL advances from the live projection exactly once"
+            );
             assert!(history::reasoning_keep(&tx, "t", epoch)?.is_empty());
             let path = tx
                 .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?

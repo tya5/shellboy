@@ -426,8 +426,9 @@ followed by stale deleted-enum test references, not a green candidate.
 
 Current follow-up source adds a single batch final-adoption authority for multi-interval
 spill. It computes one live current-path projection, selects the full path once, then
-performs active DROP_ALL from that projection and stamps all replacement metadata with
-the same resulting epoch inside the kernel. Restore now checks retained-anchor order in
+performs active DROP_ALL from that projection: all spill payloads share the projected
+pre-drop epoch, then the kernel advances the Thread once and clears keep so old signed
+reasoning remains non-replayable. Restore now checks retained-anchor order in
 `replacement_ids` before any removal and only then removes verified positions descending;
 a reorder is a typed `SourceChanged` rejection before path mutation. Current docs describe
 the actually awaited U1 driver and explicitly mark nonblocking launch/reuse as planned U2.
@@ -442,3 +443,15 @@ RED, not evidence against the source rejection path. Its log/resource receipt is
 cleanup was confirmed and the remaining slot is free. The fixture is being changed to seed
 a valid path then directly install the adversarial `thread_path` order, avoiding edge creation.
 No corrected-SHA focused result or full standard result is yet claimed.
+
+The corrected focused group on `ac06f3d4` passed the `final_r_adoption_tests` module
+12/12, including reordered retained-anchor rejection and the two-interval current-epoch
+projection. The next `same_captured_e...` filter passed 1/1. The following existing
+`staged_active_spill_drops_all_prior_reasoning_atomically` regression failed because the
+first batch implementation stamped spill output with the final incremented epoch, making
+its signed reasoning replayable. That contradicts the accepted DROP_ALL effect. The shared
+kernel now stamps all batch payloads with the single projected pre-drop epoch, verifies
+that `select_path` recomputes the same keep/epoch, then increments the Thread epoch once,
+clears keep and leaves payloads stale for replay. This is in the unvalidated working
+correction; rerun of the complete focused group is pending. Original `ac06` focused RED
+log/resource receipt remains saved at `core-v21-u1-closeout-focused-ac06f3d4.*`.
