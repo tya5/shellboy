@@ -144,10 +144,7 @@ pub(super) async fn drive(
 ) -> Result<(), ApiError> {
     let result = drive_inner(control, thread, slot.clone()).await;
     if result.is_err() || slot.stop.is_cancelled() {
-        control
-            .live
-            .cancel_join_proactive_job(&thread, &slot)
-            .await;
+        control.live.cancel_join_proactive_job(&thread, &slot).await;
     }
     result
 }
@@ -182,7 +179,8 @@ async fn drive_inner(
         };
         if let Some(mut job) = completed_job {
             let joined = job.join().await;
-            slot.proactive_active.store(false, std::sync::atomic::Ordering::Release);
+            slot.proactive_active
+                .store(false, std::sync::atomic::Ordering::Release);
             control
                 .live
                 .prune_idle_background(&thread, &slot.proactive_active)
@@ -233,7 +231,8 @@ async fn drive_inner(
         let proactive_job_exists = slot.proactive_job.lock().await.is_some();
         if !proactive_job_exists {
             drop(boundary_guard);
-            slot.proactive_active.store(true, std::sync::atomic::Ordering::Release);
+            slot.proactive_active
+                .store(true, std::sync::atomic::Ordering::Release);
             let mut job = proactive::spawn_background(
                 control.clone(),
                 snapshot.clone(),
@@ -505,7 +504,8 @@ async fn drive_inner(
                     )
                     .await?;
                     if proactive_job.is_none() {
-                        slot.proactive_active.store(false, std::sync::atomic::Ordering::Release);
+                        slot.proactive_active
+                            .store(false, std::sync::atomic::Ordering::Release);
                     }
                 }
                 control

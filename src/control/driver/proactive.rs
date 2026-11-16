@@ -46,7 +46,11 @@ impl BackgroundJob {
         cancel: tokio_util::sync::CancellationToken,
         task: tokio::task::JoinHandle<Result<ProactiveOutcome, ApiError>>,
     ) -> Self {
-        Self { cancel, started: None, task }
+        Self {
+            cancel,
+            started: None,
+            task,
+        }
     }
 
     pub(in crate::control) fn is_finished(&self) -> bool {

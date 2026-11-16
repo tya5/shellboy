@@ -1150,7 +1150,8 @@ mod tests {
                 foreground: foreground.clone(),
                 turn: Arc::new(tokio::sync::Mutex::new(None)),
 
-                ..super::super::DriverSlot::default()},
+                ..super::super::DriverSlot::default()
+            },
         );
         (directory, owner, control, foreground, receive)
     }

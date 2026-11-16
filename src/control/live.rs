@@ -7,7 +7,10 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, atomic::{AtomicBool, Ordering}},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
@@ -34,7 +37,9 @@ impl LiveRegistry {
             if existing.driver_active.load(Ordering::Acquire) {
                 existing.nudge.notify_one();
                 if interrupt {
-                    existing.foreground.release(ForegroundRelease::AdditionalInput);
+                    existing
+                        .foreground
+                        .release(ForegroundRelease::AdditionalInput);
                 }
                 return None;
             }
@@ -102,7 +107,8 @@ impl LiveRegistry {
             let _ = job.join().await;
         }
         slot.proactive_active.store(false, Ordering::Release);
-        self.prune_idle_background(thread, &slot.proactive_active).await;
+        self.prune_idle_background(thread, &slot.proactive_active)
+            .await;
     }
 
     /// Drain jobs retained by naturally completed Runs before owner teardown.
@@ -372,9 +378,11 @@ mod tests {
                 .prune_idle_background("thread", &active_for_job)
                 .await;
             let _ = finished_tx.send(());
-            Ok(crate::control::driver::proactive::ProactiveOutcome::Finished {
-                path_changed: false,
-            })
+            Ok(
+                crate::control::driver::proactive::ProactiveOutcome::Finished {
+                    path_changed: false,
+                },
+            )
         });
         *first.proactive_job.lock().await = Some(
             crate::control::driver::proactive::BackgroundJob::test_started(
@@ -383,9 +391,7 @@ mod tests {
             ),
         );
         assert!(
-            !registry
-                .remove_driver_if_current("thread", &first.id)
-                .await,
+            !registry.remove_driver_if_current("thread", &first.id).await,
             "natural retirement preserves the Thread slot while its job is unjoined"
         );
         release_tx.send(()).unwrap();
@@ -417,24 +423,40 @@ mod tests {
             .expect("a natural Run exit permits a new driver on the same Thread");
         assert!(Arc::ptr_eq(&first.proactive_job, &second.proactive_job));
         assert!(second.proactive_active.load(Ordering::Acquire));
-        assert!(!old_run_stop.is_cancelled(), "natural retirement is not Stop");
+        assert!(
+            !old_run_stop.is_cancelled(),
+            "natural retirement is not Stop"
+        );
         assert!(!second.stop.is_cancelled());
         assert!(
-            second.proactive_job.lock().await.as_ref().unwrap().is_finished(),
+            second
+                .proactive_job
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .is_finished(),
             "Run B reattaches the completed-but-unjoined Run A job"
         );
         let job = second.proactive_job.lock().await.take().unwrap();
         assert!(matches!(
             job.join().await.unwrap(),
-            Ok(crate::control::driver::proactive::ProactiveOutcome::Finished {
-                path_changed: false
-            })
+            Ok(
+                crate::control::driver::proactive::ProactiveOutcome::Finished {
+                    path_changed: false
+                }
+            )
         ));
         second.proactive_active.store(false, Ordering::Release);
         registry
             .prune_idle_background("thread", &second.proactive_active)
             .await;
-        assert!(registry.foreground_for_run("thread", "run-b").await.is_some());
+        assert!(
+            registry
+                .foreground_for_run("thread", "run-b")
+                .await
+                .is_some()
+        );
         assert!(
             !registry.remove_driver_if_current("thread", &first.id).await,
             "late Run-A cleanup cannot remove Run-B's Thread slot"
@@ -466,12 +488,8 @@ mod tests {
             joined.store(true, Ordering::Release);
             Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
         });
-        *slot.proactive_job.lock().await = Some(
-            crate::control::driver::proactive::BackgroundJob::test_started(
-                job_cancel,
-                task,
-            ),
-        );
+        *slot.proactive_job.lock().await =
+            Some(crate::control::driver::proactive::BackgroundJob::test_started(job_cancel, task));
 
         assert!(registry.cancel_run("thread", "run").await);
         assert!(slot.stop.is_cancelled());
@@ -501,12 +519,8 @@ mod tests {
             observed.store(true, Ordering::Release);
             Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
         });
-        *slot.proactive_job.lock().await = Some(
-            crate::control::driver::proactive::BackgroundJob::test_started(
-                job_cancel,
-                task,
-            ),
-        );
+        *slot.proactive_job.lock().await =
+            Some(crate::control::driver::proactive::BackgroundJob::test_started(job_cancel, task));
         assert!(!registry.remove_driver_if_current("thread", &slot.id).await);
 
         registry.cancel_join_proactive_jobs().await;

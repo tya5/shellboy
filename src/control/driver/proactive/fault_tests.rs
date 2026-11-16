@@ -809,12 +809,17 @@ async fn prepare_with_mode(
                         .unwrap();
                     if scenario.active() && !spill_off {
                         assert_eq!(
-                            diagnostic.2["last_successful_attempt"]["next_request_pending"], true,
+                            diagnostic.2["last_successful_attempt"]["next_request_pending"],
+                            true,
                             "the active spill committed after the trigger attempt; witnesses: latest row={:?}; usage/report attempt={:?}; output nodes/path={:?}; replacements after report attempt={:?}",
-                            diagnostic.0, diagnostic.2["last_successful_attempt"], diagnostic.3, diagnostic.4,
+                            diagnostic.0,
+                            diagnostic.2["last_successful_attempt"],
+                            diagnostic.3,
+                            diagnostic.4,
                         );
                         assert!(
-                            !diagnostic.3.is_empty() && diagnostic.3.iter().all(|(_, selected)| *selected),
+                            !diagnostic.3.is_empty()
+                                && diagnostic.3.iter().all(|(_, selected)| *selected),
                             "the trigger attempt's output items remain selected on the path: {:?}",
                             diagnostic.3
                         );

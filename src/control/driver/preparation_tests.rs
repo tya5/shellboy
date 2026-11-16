@@ -389,8 +389,10 @@ async fn client_initialization_failure_recovers_once_instead_of_rekicking_prepar
         foreground: Arc::new(ForegroundSlot::default()),
         turn: Arc::new(tokio::sync::Mutex::new(None)),
 
-        ..DriverSlot {
-        id:::default(),};
+        driver_active: Arc::new(AtomicBool::new(true)),
+        proactive_active: Arc::new(AtomicBool::new(false)),
+        proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+    };
     assert_eq!(
         crate::test_watchdog::watchdog("src/control/driver/preparation_tests.rs: client_initialization_failure_recovers_once_instead_of_rekicking_preparation",
             drive(control.clone(), accepted.thread_id.clone(), slot.clone())
@@ -1042,7 +1044,10 @@ async fn already_admitted_tool_calls_cannot_create_an_execution_or_spawn_again()
             foreground: Arc::new(ForegroundSlot::default()),
             turn: Arc::new(tokio::sync::Mutex::new(None)),
 
-            ..DriverSlot {::default(),};
+            driver_active: Arc::new(AtomicBool::new(true)),
+            proactive_active: Arc::new(AtomicBool::new(false)),
+            proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+        };
         assert_eq!(
             run_shell(
                 control.clone(),
@@ -1187,8 +1192,10 @@ async fn interrupted_reserved_call_finishes_its_pair_without_native_creation() {
         foreground: Arc::new(ForegroundSlot::default()),
         turn: Arc::new(Mutex::new(None)),
 
-        ..DriverSlot {
-        id:::default(),};
+        driver_active: Arc::new(AtomicBool::new(true)),
+        proactive_active: Arc::new(AtomicBool::new(false)),
+        proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+    };
     let binding = slot.bind_turn(&control, &snapshot.turn).await.unwrap();
     let mut gate = binding.start_gate.lock().await;
     let turn = snapshot.turn.clone();
@@ -1343,7 +1350,10 @@ async fn interrupted_unfinished_group_waits_for_pairs_instead_of_rechecking() {
             foreground: Arc::new(ForegroundSlot::default()),
             turn: Arc::new(Mutex::new(None)),
 
-            ..DriverSlot {::default(),};
+            driver_active: Arc::new(AtomicBool::new(true)),
+            proactive_active: Arc::new(AtomicBool::new(false)),
+            proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+        };
         let stop = slot.stop.clone();
         let running = tokio::spawn(drive(control.clone(), snapshot.thread.clone(), slot));
         stop.cancel();
@@ -1778,8 +1788,10 @@ async fn unknown_arguments_are_ignored_with_a_warning_and_other_calls_continue()
         foreground: Arc::new(ForegroundSlot::default()),
         turn: Arc::new(Mutex::new(None)),
 
-        ..DriverSlot {
-        id:::default(),};
+        driver_active: Arc::new(AtomicBool::new(true)),
+        proactive_active: Arc::new(AtomicBool::new(false)),
+        proactive_job: Arc::new(tokio::sync::Mutex::new(None)),
+    };
     let turn = snapshot.turn.clone();
     control.store.database.call(move |db| {
         db.execute("INSERT INTO model_attempt(id,turn_id,generation,selection_revision,profile_id,model_id,reasoning_epoch,state,input_manifest_json,started_at)VALUES('policy-attempt',?1,0,0,'fixture','fixture',0,'completed','{}','now')", [&turn])?;
