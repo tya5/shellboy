@@ -1778,6 +1778,13 @@ async fn capture_terminal_identity(
     }
 }
 
+struct TerminalRecord {
+    provisional: Option<i64>,
+    token: Option<String>,
+    outcome: Option<String>,
+    committed_stage: Option<i64>,
+}
+
 /// Require FINISH on the captured original receipt, never a sibling Run observation.
 async fn terminal_record_written(
     control: &Control,
@@ -1788,13 +1795,23 @@ async fn terminal_record_written(
     let identity = identity.clone();
     let expected_outcome = expected_outcome.to_owned();
     let committed_stage = committed_stage.map(str::to_owned);
-    control.store.database.call(move|db|{
-        let row:Option<(Option<i64>,Option<String>,Option<String>,Option<i64>)>=db.query_row(
+    control.store.database.call(move |db| {
+        let row: Option<TerminalRecord> = db.query_row(
             "SELECT json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token'),json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),CASE WHEN ?4 IS NULL THEN 1 ELSE json_type(a.error_json,'$.automatic_trim_attempt.committed_stages.'||?4)='object' END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
             rusqlite::params![identity.attempt,identity.thread,identity.token,committed_stage],
-            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+            |row| Ok(TerminalRecord {
+                provisional: row.get(0)?,
+                token: row.get(1)?,
+                outcome: row.get(2)?,
+                committed_stage: row.get(3)?,
+            }),
         ).optional()?;
-        Ok(row.is_some_and(|(provisional,token,outcome,stage)|provisional==Some(0)&&token.as_deref()==Some(identity.token.as_str())&&outcome.as_deref()==Some(expected_outcome.as_str())&&stage==Some(1)))
+        Ok(row.is_some_and(|record| {
+            record.provisional == Some(0)
+                && record.token.as_deref() == Some(identity.token.as_str())
+                && record.outcome.as_deref() == Some(expected_outcome.as_str())
+                && record.committed_stage == Some(1)
+        }))
     }).await.unwrap()
 }
 
