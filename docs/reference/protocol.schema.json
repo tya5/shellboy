@@ -4701,9 +4701,6 @@
         "run_stopped",
         "turn_started",
         "turn_changed",
-        "nonappend_generation_changed",
-        "selected_prefix_changed",
-        "current_tail_changed",
         "source_changed",
         "source_pruned"
       ],
