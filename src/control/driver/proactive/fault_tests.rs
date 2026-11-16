@@ -105,11 +105,6 @@ impl Fault {
     fn continues_after_stage(self) -> bool {
         matches!(self, Fault::RejectFinal | Fault::Remeasurement)
     }
-    /// Whether a final record fault allows normal attempt finalization to advance
-    /// the reasoning epoch after the selected stage.
-    fn continues(self) -> bool {
-        matches!(self, Fault::RejectFinal | Fault::RejectFact)
-    }
 }
 
 /// A fault is attached to one policy-reachable stage, not an independent pair
@@ -234,7 +229,7 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary_post() {
     crate::test_watchdog::watchdog("context-limit joins the active proactive job", async {
-        let Fx {
+        let DriverLifecycleFixture {
             owner,
             control,
             target,
@@ -300,7 +295,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_boundary() {
-    let mut retained_fx: Option<Fx> = None;
+    let mut retained_fx: Option<DriverLifecycleFixture> = None;
     let mut retained_summary: Option<Incoming> = None;
     let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
@@ -312,7 +307,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
                 .summary,
         );
         retained_fx = Some(fx);
-        let Fx {
+        let DriverLifecycleFixture {
             root,
             url,
             limits,
@@ -617,7 +612,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         // Keep fixture owners alive until explicit cleanup finishes.
         drop(retained_summary.take());
         if let Some(fx) = retained_fx.take() {
-            let Fx {
+            let DriverLifecycleFixture {
                 root,
                 url,
                 limits,
@@ -642,7 +637,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary() {
     crate::test_watchdog::watchdog("ThreadDelete drains the retained proactive job", async {
-        let Fx {
+        let DriverLifecycleFixture {
             owner,
             control,
             target,
@@ -835,8 +830,8 @@ async fn committed_thread_delete_cancels_and_joins_idle_thread_job_once() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
     for scenario in [Scenario::ClosedSummary, Scenario::ActiveSummary] {
-        let fx = prepare_with_options(Fault::Cancellation, scenario, true, true).await;
-        let Fx {
+        let fx = prepare_driver_scenario(Fault::Cancellation, scenario, true, true).await;
+        let DriverLifecycleFixture {
             control,
             target,
             mut receive,
@@ -869,7 +864,7 @@ async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn closed_spill_uses_effective_thread_target_and_captures_real_stage() {
     crate::test_watchdog::watchdog("closed spill trigger tuple", async {
-        boundary(Fault::Cancellation, Scenario::ClosedSpill).await;
+        direct_boundary_case(Fault::Cancellation, Scenario::ClosedSpill, Some(50)).await;
     })
     .await
     .unwrap();
@@ -877,11 +872,496 @@ async fn closed_spill_uses_effective_thread_target_and_captures_real_stage() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn active_summary_cancellation_captures_committed_boundary() {
-    crate::test_watchdog::watchdog("active summary committed boundary", async {
-        boundary(Fault::Cancellation, Scenario::ActiveSummary).await;
+    crate::test_watchdog::watchdog("direct active summary committed boundary", async {
+        direct_boundary_case(Fault::Cancellation, Scenario::ActiveSummary, Some(20)).await;
     })
     .await
     .unwrap();
+}
+
+async fn direct_snapshot_for_fixture(
+    control: &Arc<Control>,
+    fixture: &crate::control::compaction_test_fixture::StageFixture,
+) -> Box<crate::control::driver::Snapshot> {
+    match crate::control::driver::next_with_clients(
+        control,
+        fixture.thread_id,
+        &fixture.run_id,
+        control.store.clients.snapshot(),
+    )
+    .await
+    .unwrap()
+    {
+        crate::control::driver::Next::Ready(snapshot) => snapshot,
+        _ => panic!("canonical preparation expected a runnable current Turn snapshot"),
+    }
+}
+
+async fn assert_next_control_summary(
+    control: &Arc<Control>,
+    thread: &str,
+    receive: &mut mpsc::Receiver<Incoming>,
+) {
+    let target = thread.to_owned();
+    let node = control.store.database.call(move |db| Ok(db.query_row(
+        "SELECT p.node_id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal LIMIT 1",
+        [target], |row| row.get::<_, String>(0))?)).await.unwrap();
+    let accepted = request(
+        control,
+        Command::ContextEdit(ContextEditArgs {
+            thread_id: Some(thread.to_owned()),
+            action: ContextEditAction::Summary,
+            from_node_id: Some(node.clone()),
+            to_node_id: Some(node),
+            max_chars: None,
+        }),
+    )
+    .await;
+    let operation = accepted["operation_id"].as_str().unwrap().to_owned();
+    let mut requests = 0;
+    let result = loop {
+        tokio::select! {
+            status = request(control, Command::OperationGet(OperationTarget { operation_id: operation.clone() })) => {
+                assert_ne!(status["downstream"]["state"], "failed", "{status}");
+                if status["downstream"]["state"] == "completed" {
+                    break status["downstream"]["outcome"]["result"].clone();
+                }
+                tokio::task::yield_now().await;
+            }
+            incoming = receive.recv() => {
+                let incoming = incoming.expect("provider remains available for the next Control operation");
+                assert_eq!(incoming.body["tools"], json!([]));
+                requests += 1;
+                incoming.reply.send((200, answer("ok"))).unwrap();
+            }
+        }
+    };
+    assert!(
+        requests > 0,
+        "the next normal Control summary request is exercised"
+    );
+    assert_eq!(
+        result["compact"]["no_target"], false,
+        "next Control operation adopts a real summary"
+    );
+    assert!(result["compact"]["summary_node_id"].is_string());
+    assert!(result["compact"]["source_nodes"].as_u64().unwrap() > 0);
+    assert!(
+        result["after_characters"].as_u64().unwrap()
+            < result["before_characters"].as_u64().unwrap()
+    );
+}
+
+pub(super) struct DirectBoundaryReceipt {
+    pub(super) checkpoint: Value,
+    pub(super) terminal: Value,
+}
+
+async fn automatic_attempt_record(
+    control: &Control,
+    fixture: &crate::control::compaction_test_fixture::StageFixture,
+) -> Value {
+    let (thread, attempt) = (fixture.thread_id.to_owned(), fixture.attempt_id.to_owned());
+    let record = control.store.database.call(move |db| {
+        db.query_row(
+            "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE id=?1 AND turn_id IN (SELECT id FROM turn WHERE thread_id=?2)",
+            rusqlite::params![attempt, thread],
+            |row| row.get::<_, String>(0),
+        ).map_err(Into::into)
+    }).await.unwrap();
+    serde_json::from_str(&record).unwrap()
+}
+
+async fn direct_boundary_case(
+    fault: Fault,
+    scenario: Scenario,
+    thread_target_percent: Option<u64>,
+) -> DirectBoundaryReceipt {
+    assert!(matches!(
+        fault,
+        Fault::Storage
+            | Fault::Cancellation
+            | Fault::Remeasurement
+            | Fault::RetiredWritesAbsent
+            | Fault::Persistent
+            | Fault::RejectFinal
+            | Fault::RejectFact
+    ));
+    use crate::control::compaction_test_fixture::{StagePlacement, stage_fixture};
+
+    let root = tempfile::tempdir().unwrap();
+    let (url, mut receive, _heads, server) = proxy().await;
+    let connection_target = thread_target_percent.unwrap_or(scenario.target_percent());
+    let limits = format!(
+        "auto_compact_target_percent={connection_target}\n[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n"
+    );
+    let owner = proactive_owner(root.path(), &url, &limits).await;
+    let control = Control::new(&owner, root.path().into());
+    let cwd = root.path().to_string_lossy().into_owned();
+    let agents = root.path().join("AGENTS.md").to_string_lossy().into_owned();
+    control.store.database.call(move |db| {
+        db.execute(
+            "INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,auto_compact_at,auto_compact_target_percent,updated_at) VALUES('t',?1,?2,'fixture','fixture',200,?3,'now')",
+            rusqlite::params![cwd, agents, thread_target_percent.map(|value| value as i64)],
+        )?;
+        Ok(())
+    }).await.unwrap();
+    let placement = if scenario.active() {
+        StagePlacement::ActiveTurn
+    } else {
+        StagePlacement::ClosedPrefix
+    };
+    let target_percent = thread_target_percent.unwrap_or(scenario.target_percent());
+    let fixture = stage_fixture(&control.store.database, placement, target_percent).await;
+
+    let slot = DriverSlot {
+        id: "direct-slot".into(),
+        run_id: fixture.run_id.clone(),
+        ..DriverSlot::default()
+    };
+    if scenario.active() {
+        slot.turn
+            .lock()
+            .await
+            .replace(crate::control::turn_interrupt::TurnBinding {
+                turn: fixture.turn_id.into(),
+                cancel: tokio_util::sync::CancellationToken::new(),
+                start_gate: Arc::new(tokio::sync::Mutex::new(false)),
+            });
+    }
+    let mut snapshot = direct_snapshot_for_fixture(&control, &fixture).await;
+    // maybe_compact_with_run_stop drops an active replay lease before compaction.
+    let plan = preflight(&control, &snapshot)
+        .await
+        .unwrap()
+        .expect("saved provider usage makes this threshold attempt eligible");
+    assert_eq!(plan.attempt_id, fixture.attempt_id);
+    assert_eq!(plan.input_tokens, fixture.input_tokens);
+    assert_eq!(plan.a_input_tokens, Some(fixture.a_input_tokens));
+    assert_eq!(plan.target_percent, fixture.target_percent);
+    assert_eq!(plan.target_tokens, scenario.target_tokens());
+    assert!(plan.spill_effective);
+    let expected_attempt = plan.attempt_id.clone();
+
+    let checkpoint_reached = Arc::new(AtomicBool::new(false));
+    let release_checkpoint = Arc::new(tokio::sync::Notify::new());
+    let reached = Arc::new(AtomicBool::new(false));
+    let stage = scenario.stage();
+    let kind = match fault {
+        Fault::Cancellation => 0,
+        Fault::Storage => 1,
+        Fault::Remeasurement => 2,
+        Fault::Persistent => 4,
+        Fault::RejectFinal => 6,
+        Fault::RejectFact => 8,
+        Fault::RetiredWritesAbsent => 9,
+    };
+    *control.automatic_fault.lock().unwrap() = Some(crate::control::AutomaticFault {
+        stage,
+        kind,
+        reached: reached.clone(),
+        checkpoint_reached: checkpoint_reached.clone(),
+        release_checkpoint: release_checkpoint.clone(),
+    });
+    if fault == Fault::RejectFact {
+        let hit = reached.clone();
+        let stage_name = stage;
+        control.store.database.call(move |db| {
+            db.create_scalar_function("direct_fault_fact_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
+                hit.store(true, Ordering::SeqCst);
+                Ok(1i64)
+            })?;
+            db.execute_batch(&format!("CREATE TEMP TRIGGER direct_fault_fact BEFORE UPDATE OF error_json ON model_attempt
+                WHEN json_type(NEW.error_json,'$.automatic_trim_attempt.committed_stages.{stage_name}')='object'
+                BEGIN SELECT direct_fault_fact_hit(); SELECT RAISE(ABORT,'injected direct stage-fact rejection'); END;"))?;
+            Ok(())
+        }).await.unwrap();
+    }
+    let boundary_mutex = tokio::sync::Mutex::new(());
+    let guard = boundary_mutex.lock().await;
+    let mut boundary = crate::compaction::boundary::Boundary::new(&boundary_mutex, guard);
+    let run_stop = slot.stop.clone();
+    let (result, identity, checkpoint_record) = {
+        let direct = maybe_compact_with_run_stop(
+            &control,
+            &mut snapshot,
+            &slot,
+            &mut boundary,
+            run_stop,
+            plan,
+        );
+        tokio::pin!(direct);
+        let mut identity = None;
+        if fault == Fault::RejectFact {
+            let result = loop {
+                tokio::select! {
+                    result = &mut direct => break result,
+                    request = receive.recv() => {
+                        let request = request.expect("direct summary keeps provider available through rejected stage");
+                        assert!(request.body["tools"].as_array().is_some_and(Vec::is_empty));
+                        if identity.is_none() {
+                            identity = Some(capture_terminal_identity(&control, fixture.thread_id, true).await);
+                        }
+                        request.reply.send((200, answer("## Goal\nPreserve the active turn.\n## Constraints\nDo not alter protected input.\n## Current state\nThree complete groups remain.\n## Open issues and next steps\nContinue after summary.\n## Key references\nCurrent fixture."))).unwrap();
+                    }
+                    _ = tokio::task::yield_now() => {}
+                }
+            };
+            let identity = match identity {
+                Some(identity) => identity,
+                None => capture_terminal_identity(&control, fixture.thread_id, false).await,
+            };
+            let checkpoint_record = automatic_attempt_record(&control, &fixture).await;
+            (result, identity, checkpoint_record)
+        } else {
+            while !checkpoint_reached.load(Ordering::SeqCst) {
+                tokio::select! {
+                    result = &mut direct => panic!("direct boundary returned before checkpoint: fault={fault:?} scenario={scenario:?} stage={stage} reached={} result={result:?}", reached.load(Ordering::SeqCst)),
+                    request = receive.recv() => {
+                        let request = request.expect("direct summary pipeline keeps the provider channel open");
+                        assert!(request.body["tools"].as_array().is_some_and(Vec::is_empty));
+                        if identity.is_none() {
+                            identity = Some(capture_terminal_identity(&control, fixture.thread_id, true).await);
+                        }
+                        request.reply.send((200, answer("## Goal\nPreserve the active turn.\n## Constraints\nDo not alter protected input.\n## Current state\nThree complete groups remain.\n## Open issues and next steps\nContinue after summary.\n## Key references\nCurrent fixture."))).unwrap();
+                    }
+                    _ = tokio::task::yield_now() => {}
+                }
+            }
+            let identity = match identity {
+                Some(identity) => identity,
+                None => capture_terminal_identity(&control, fixture.thread_id, true).await,
+            };
+            assert_eq!(
+                identity.attempt, expected_attempt,
+                "FINISH targets the original captured receipt"
+            );
+            let checkpoint_record = automatic_attempt_record(&control, &fixture).await;
+            if fault == Fault::Remeasurement {
+                assert!(
+                    control.compactor.fail_remeasurement.load(Ordering::SeqCst),
+                    "remeasurement failure is armed at its committed checkpoint"
+                );
+            }
+            release_checkpoint.notify_one();
+            let result = loop {
+                tokio::select! {
+                    result = &mut direct => break result,
+                    request = receive.recv() => {
+                        let request = request.expect("follow-on direct summary keeps the provider channel open");
+                        assert!(request.body["tools"].as_array().is_some_and(Vec::is_empty));
+                        request.reply.send((200, answer("## Goal\nPreserve the active turn.\n## Constraints\nDo not alter protected input.\n## Current state\nThree complete groups remain.\n## Open issues and next steps\nContinue after summary.\n## Key references\nCurrent fixture."))).unwrap();
+                    }
+                }
+            };
+            (result, identity, checkpoint_record)
+        }
+    };
+    let expects_error = matches!(
+        fault,
+        Fault::Storage
+            | Fault::Remeasurement
+            | Fault::Persistent
+            | Fault::RejectFact
+            | Fault::RetiredWritesAbsent
+    ) || fault == Fault::Cancellation && scenario == Scenario::ActiveSpill
+        || fault == Fault::RejectFinal && !scenario.summary();
+    assert_eq!(
+        result.is_err(),
+        expects_error,
+        "direct proactive result: {result:?}"
+    );
+    let reject_final_write_expected = fault == Fault::RejectFinal && !scenario.summary();
+    assert_eq!(
+        reached.load(Ordering::SeqCst),
+        fault != Fault::RejectFinal || reject_final_write_expected,
+        "RejectFinal reaches the terminal-writer hook only for spill stages; summary FINISH is already committed"
+    );
+    if fault == Fault::Cancellation {
+        assert!(
+            slot.stop.is_cancelled(),
+            "the postcommit cancellation hook ran"
+        );
+    }
+    let terminal_outcome =
+        expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart);
+    let terminal_stage = expected_terminal_stage(scenario, fault);
+    let final_record_expected = terminal_outcome != "unknown";
+    if final_record_expected {
+        let stage_check = (fault != Fault::RejectFact).then_some(terminal_stage);
+        assert!(
+            terminal_record_written(&control, &identity, terminal_outcome, stage_check).await,
+            "FINISH targets the exact attempt/token when its terminal write is expected"
+        );
+    }
+    let checkpoint_outcome = if fault == Fault::RejectFact {
+        ObservationPhase::AfterRejectedStageTransaction
+    } else {
+        ObservationPhase::AtCommittedCheckpoint
+    };
+    assert_eq!(
+        checkpoint_record["outcome"],
+        expected_outcome(fault, scenario, checkpoint_outcome),
+        "the captured observation preserves the fault's DB stage contract"
+    );
+    let query_thread = fixture.thread_id.to_owned();
+    let query_attempt = fixture.attempt_id.to_owned();
+    let state = control.store.database.call(move |db| {
+        let summaries: i64 = db.query_row(
+            "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
+            [&query_thread], |row| row.get(0),
+        )?;
+        let spills: i64 = db.query_row(
+            "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='spill'",
+            [&query_thread], |row| row.get(0),
+        )?;
+        let record: String = db.query_row("SELECT error_json FROM model_attempt WHERE id=?1", [&query_attempt], |row| row.get(0))?;
+        let protected: bool = db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread_path WHERE thread_id=?1 AND node_id='current-user')",
+            [&query_thread], |row| row.get(0),
+        )?;
+        let latest_group_nodes: i64 = db.query_row(
+            "SELECT count(*) FROM thread_path WHERE thread_id=?1 AND node_id IN ('g3-call','g3-result')",
+            [&query_thread], |row| row.get(0),
+        )?;
+        Ok((summaries, spills, record, protected, latest_group_nodes))
+    }).await.unwrap();
+    let record: Value = serde_json::from_str(&state.2).unwrap();
+    let summary_committed = fault != Fault::RejectFact
+        && !(fault == Fault::RejectFinal && scenario == Scenario::ActiveSpill)
+        && (scenario.summary()
+            || scenario.continues_to_active_summary(fault) && fault == Fault::Remeasurement);
+    if scenario == Scenario::ClosedSpill {
+        assert_eq!(
+            state.1 > 0,
+            fault != Fault::RejectFact,
+            "closed whole groups spill unless their stage transaction rejects"
+        );
+    }
+    if scenario == Scenario::ClosedSummary {
+        assert!(
+            state.1 > 0,
+            "closed spill precedes the selected summary stage"
+        );
+    }
+    assert_eq!(
+        state.0 > 0,
+        summary_committed,
+        "only a policy-reachable summary stage adopts"
+    );
+    assert!(state.3, "the protected current request remains selected");
+    assert_eq!(
+        state.4, 2,
+        "the latest whole active tool group remains selected"
+    );
+    assert_eq!(
+        record["automatic_trim_attempt"]["provisional"],
+        terminal_outcome == "unknown"
+    );
+    assert_eq!(
+        record["automatic_trim_attempt"]["outcome"],
+        terminal_outcome
+    );
+    assert_eq!(
+        record["automatic_trim_attempt"]["trigger"]["input_tokens"],
+        fixture.input_tokens
+    );
+    assert_eq!(
+        record["automatic_trim_attempt"]["trigger"]["a_input_tokens"],
+        fixture.a_input_tokens
+    );
+    assert_eq!(
+        record["automatic_trim_attempt"]["committed_stages"][scenario.stage()].is_object(),
+        fault != Fault::RejectFact,
+        "precommit fact rejection rolls back its stage while other injected cells commit it",
+    );
+    if summary_committed {
+        let final_summary_stage = if scenario == Scenario::ClosedSummary {
+            "closed_summary"
+        } else {
+            "active_summary"
+        };
+        assert!(
+            record["automatic_trim_attempt"]["committed_stages"][final_summary_stage].is_object()
+        );
+    } else if scenario == Scenario::ActiveSpill {
+        assert!(record["automatic_trim_attempt"]["committed_stages"]["active_summary"].is_null());
+    }
+    if fault == Fault::RetiredWritesAbsent {
+        let retired_hits: i64 = control
+            .store
+            .database
+            .call(|db| {
+                Ok(
+                    db.query_row("SELECT count(*) FROM retired_write_hits", [], |row| {
+                        row.get(0)
+                    })?,
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            retired_hits, 0,
+            "retired attempt/guard/status writes stay absent"
+        );
+    }
+    drop(boundary.into_guard());
+    let storage_failure = matches!(&result, Err(error) if error.is_storage_failure());
+    if storage_failure {
+        control.fail_storage().await;
+    }
+    let shutdown = control.shutdown().await;
+    if storage_failure {
+        assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
+    } else {
+        shutdown.unwrap();
+    }
+    owner.shutdown().await.unwrap();
+
+    let reopened_owner = proactive_owner(root.path(), &url, &limits).await;
+    let reopened = Control::new(&reopened_owner, root.path().into());
+    let reopened_record = automatic_attempt_record(&reopened, &fixture).await;
+    assert_eq!(reopened_record["token"], identity.token);
+    assert_eq!(reopened_record["outcome"], terminal_outcome);
+    assert_eq!(
+        reopened_record["provisional"],
+        terminal_outcome == "unknown",
+        "unknown receipts remain provisional; terminal outcomes are finalized"
+    );
+    if fault == Fault::RejectFact {
+        assert!(
+            reopened_record["committed_stages"][scenario.stage()].is_null(),
+            "rejected stage fact remains absent after reopen"
+        );
+    }
+    let active_key = crate::compaction::CompactionKeys::new(fixture.thread_id).automatic_active();
+    assert_eq!(
+        reopened
+            .store
+            .database
+            .call(move |db| {
+                Ok(db.query_row(
+                    "SELECT count(*) FROM app_meta WHERE key=?1",
+                    [active_key],
+                    |row| row.get::<_, i64>(0),
+                )?)
+            })
+            .await
+            .unwrap(),
+        0,
+        "finished direct attempt removes its activity witness"
+    );
+    if fault != Fault::RejectFact {
+        assert_next_control_summary(&reopened, fixture.thread_id, &mut receive).await;
+    }
+    let terminal_record = automatic_attempt_record(&reopened, &fixture).await;
+    reopened.shutdown().await.unwrap();
+    reopened_owner.shutdown().await.unwrap();
+    server.abort();
+    DirectBoundaryReceipt {
+        checkpoint: checkpoint_record,
+        terminal: terminal_record,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -905,45 +1385,36 @@ async fn proactive_postcommit_retired_writes_are_absent() {
 async fn boundaries(fault: Fault) {
     crate::test_watchdog::watchdog("automatic postcommit data safety", async {
         for scenario in Scenario::ALL {
-            boundary(fault, scenario).await;
+            if fault == Fault::Cancellation && scenario == Scenario::ActiveSummary {
+                continue; // The named cancellation test owns this identical contract.
+            }
+            direct_boundary_case(fault, scenario, Some(scenario.target_percent())).await;
         }
     })
     .await
     .unwrap();
 }
 
-async fn prepare(fault: Fault, scenario: Scenario) -> Fx {
-    prepare_with_thread_override(fault, scenario, true).await
-}
-
-async fn prepare_with_thread_override(
-    fault: Fault,
-    scenario: Scenario,
-    set_thread_percent: bool,
-) -> Fx {
-    prepare_with_options(fault, scenario, set_thread_percent, false).await
-}
-
-async fn prepare_with_options(
+async fn prepare_driver_scenario(
     fault: Fault,
     scenario: Scenario,
     set_thread_percent: bool,
     spill_off: bool,
-) -> Fx {
-    prepare_with_mode(fault, scenario, set_thread_percent, spill_off, false).await
+) -> DriverLifecycleFixture {
+    prepare_driver_lifecycle(fault, scenario, set_thread_percent, spill_off, false).await
 }
 
-async fn prepare_held_summary(scenario: Scenario) -> Fx {
-    prepare_with_mode(Fault::Cancellation, scenario, true, true, true).await
+async fn prepare_held_summary(scenario: Scenario) -> DriverLifecycleFixture {
+    prepare_driver_lifecycle(Fault::Cancellation, scenario, true, true, true).await
 }
 
-async fn prepare_with_mode(
+async fn prepare_driver_lifecycle(
     fault: Fault,
     scenario: Scenario,
     set_thread_percent: bool,
     spill_off: bool,
     hold_summary: bool,
-) -> Fx {
+) -> DriverLifecycleFixture {
     eprintln!(
         "automatic boundary {fault:?} scenario={scenario:?} T=200 P={} A=100 input=200 target={}",
         scenario.target_percent(),
@@ -1049,98 +1520,7 @@ async fn prepare_with_mode(
             release_checkpoint: release_checkpoint.clone(),
         });
     }
-    let kind = if scenario.summary() {
-        "summary"
-    } else {
-        "spill"
-    };
-    let scope = if scenario.active() && scenario.summary() {
-        " AND json_extract(n.payload_json,'$.summary_scope') IN ('active_turn_middle','active_turn_prefix')"
-    } else {
-        ""
-    };
-    // Capture immutable witnesses in the adoption transaction. Fault injection
-    // itself runs after COMMIT, before the next driver stage.
-    // Initial and committed epoch/path witnesses are captured by the same
-    // adoption transaction: OLD is the pre-stage epoch, NEW is the commit.
-    control.store.database.call(move |db| {
-        db.execute_batch(&format!(r#"
-            CREATE TABLE fault_boundary(path TEXT, revision INTEGER, epoch INTEGER);
-            CREATE TABLE fault_initial(epoch INTEGER);
-            CREATE TABLE fault_begin(epoch INTEGER);
-            CREATE TABLE fault_originals AS SELECT * FROM node;
-            CREATE TABLE fault_nodes AS SELECT * FROM node WHERE 0;
-            CREATE TABLE fault_replacements AS SELECT * FROM replacement WHERE 0;
-            CREATE TABLE fault_sources AS SELECT * FROM replacement_source WHERE 0;
-            CREATE TRIGGER fault_adopt AFTER UPDATE OF selection_revision ON thread
-            WHEN NOT EXISTS(SELECT 1 FROM fault_boundary)
-            AND EXISTS(SELECT 1 FROM model_attempt a JOIN turn u ON u.id=a.turn_id
-                       WHERE u.thread_id=NEW.id
-                       AND json_type(a.error_json,'$.automatic_trim_attempt')='object'
-                       AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1)
-            AND EXISTS(SELECT 1 FROM thread_path p JOIN node n ON n.id=p.node_id
-                       WHERE p.thread_id=NEW.id AND n.kind='{kind}'{scope})
-            BEGIN
-              INSERT INTO fault_initial SELECT OLD.reasoning_epoch
-                WHERE NOT EXISTS(SELECT 1 FROM fault_initial);
-              INSERT INTO fault_boundary SELECT
-                (SELECT json_group_array(node_id) FROM (SELECT node_id FROM thread_path WHERE thread_id=NEW.id ORDER BY ordinal)),
-                NEW.selection_revision, NEW.reasoning_epoch;
-              INSERT INTO fault_nodes SELECT * FROM node;
-              INSERT INTO fault_replacements SELECT * FROM replacement;
-              INSERT INTO fault_sources SELECT * FROM replacement_source;
-            END;
-            -- Thread epoch when the attempt's provisional record is begun, the
-            -- reference when no stage of the attempt ever commits.
-            CREATE TRIGGER fault_begin AFTER UPDATE OF error_json ON model_attempt
-            WHEN NOT EXISTS(SELECT 1 FROM fault_begin)
-            AND json_extract(NEW.error_json,'$.automatic_trim_attempt.provisional')=1
-            AND json_type(OLD.error_json,'$.automatic_trim_attempt') IS NULL
-            BEGIN INSERT INTO fault_begin SELECT t.reasoning_epoch FROM thread t JOIN turn u ON u.thread_id=t.id WHERE u.id=NEW.turn_id; END;
-            CREATE TRIGGER fault_epoch AFTER UPDATE OF reasoning_epoch ON thread
-            WHEN EXISTS(SELECT 1 FROM fault_boundary)
-            BEGIN UPDATE fault_boundary SET epoch=NEW.reasoning_epoch; END;
-            -- A later stage of the same provisional attempt (active summary after
-            -- the selected active spill) re-captures the boundary inside its own
-            -- adoption transaction, where the stage fact follows path and epoch.
-            CREATE TRIGGER fault_restage AFTER UPDATE OF error_json ON model_attempt
-            WHEN EXISTS(SELECT 1 FROM fault_boundary)
-            AND json_extract(NEW.error_json,'$.automatic_trim_attempt.provisional')=1
-            AND (SELECT count(*) FROM json_each(NEW.error_json,'$.automatic_trim_attempt.committed_stages'))
-              > (SELECT count(*) FROM json_each(OLD.error_json,'$.automatic_trim_attempt.committed_stages'))
-            BEGIN
-              UPDATE fault_boundary SET
-                path=(SELECT json_group_array(node_id) FROM (SELECT p.node_id FROM thread_path p JOIN turn u ON u.thread_id=p.thread_id WHERE u.id=NEW.turn_id ORDER BY p.ordinal)),
-                revision=(SELECT t.selection_revision FROM thread t JOIN turn u ON u.thread_id=t.id WHERE u.id=NEW.turn_id),
-                epoch=(SELECT t.reasoning_epoch FROM thread t JOIN turn u ON u.thread_id=t.id WHERE u.id=NEW.turn_id);
-            END;
-        "#))?;
-        Ok(())
-    }).await.unwrap();
-    // #226: faults that must precede the stage are installed before it runs.
-    let (hit_flag, stage_name) = (reached.clone(), stage);
-    if fault == Fault::RejectFact {
-        control.store.database.call(move |db| {
-            db.create_scalar_function("fault_fact_hit", 0, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |_| {
-                hit_flag.store(true, Ordering::SeqCst);
-                Ok(1i64)
-            })?;
-            db.execute_batch(&format!("CREATE TEMP TRIGGER fault_fact BEFORE UPDATE OF error_json ON model_attempt
-                WHEN json_type(NEW.error_json,'$.automatic_trim_attempt.committed_stages.{stage_name}')='object'
-                BEGIN SELECT fault_fact_hit(); SELECT RAISE(ABORT,'injected stage fact rejection'); END;"))?;
-            Ok(())
-        }).await.unwrap();
-    }
-    let guard_before = guard_rows(&control).await;
-    let custody = if scenario.active() {
-        Some(capture_active_phase_custody(&control, &target).await)
-    } else {
-        None
-    };
-    let mut active_phase = ActiveTurnPhase::new(custody);
-    if scenario.active() {
-        active_phase.register_initial("boundary-small", "echo last");
-    }
+    let mut driver_pump = DriverToolPump::default();
     request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() || hold_summary {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
     if !scenario.active() && !hold_summary {
         incoming(&control, &mut receive)
@@ -1365,7 +1745,7 @@ async fn prepare_with_mode(
                     break;
                 }
             } else if scenario.active() {
-                active_phase.continue_turn(request);
+                driver_pump.continue_turn(request);
             } else {
                 if hold_summary && !first_normal_facts_recorded {
                     let facts = admission_boundary_facts(&control, &target).await;
@@ -1444,7 +1824,7 @@ async fn prepare_with_mode(
                 if let Ok(request) = receive.try_recv() {
                     assert_ne!(request.body["tools"], json!([]), "one summary POST only");
                     if scenario.active() {
-                        active_phase.continue_turn(request);
+                        driver_pump.continue_turn(request);
                     } else {
                         request
                             .reply
@@ -1503,7 +1883,7 @@ async fn prepare_with_mode(
                 "summary request already completed above"
             );
             if scenario.active() {
-                active_phase.continue_turn(normal);
+                driver_pump.continue_turn(normal);
             } else {
                 normal
                     .reply
@@ -1513,9 +1893,6 @@ async fn prepare_with_mode(
         }
         tokio::task::yield_now().await;
     }
-    if checkpoint_reached.load(Ordering::SeqCst) {
-        active_phase.begin_post_checkpoint();
-    }
     let held_phase = if hold_summary {
         Some(HeldSummaryPhase {
             summary: held_summary.expect("held-summary phase captured its summary request"),
@@ -1524,7 +1901,7 @@ async fn prepare_with_mode(
         None
     };
     if hold_summary {
-        return Fx {
+        return DriverLifecycleFixture {
             root,
             url,
             limits,
@@ -1533,12 +1910,7 @@ async fn prepare_with_mode(
             target,
             receive,
             server,
-            guard_before,
-            reached,
-            checkpoint_reached,
-            release_checkpoint,
             held_phase,
-            active_phase,
             terminal_identity: terminal_identity
                 .expect("capture original attempt before held summary return"),
         };
@@ -1594,7 +1966,7 @@ async fn prepare_with_mode(
             "no provider continuation before the selected checkpoint"
         );
     }
-    Fx {
+    DriverLifecycleFixture {
         root,
         url,
         limits,
@@ -1603,12 +1975,7 @@ async fn prepare_with_mode(
         target,
         receive,
         server,
-        guard_before,
-        reached,
-        checkpoint_reached,
-        release_checkpoint,
         held_phase,
-        active_phase,
         terminal_identity,
     }
 }
@@ -1624,348 +1991,26 @@ struct HeldSummaryPhase {
     summary: Incoming,
 }
 
-/// Keep active fixture Turns open using the same complete shell tool-group lifecycle.
-#[derive(Clone, Debug)]
-struct ActivePhaseCustody {
-    thread: String,
-    run: String,
-    turn: String,
-    generation: i64,
-}
-
-#[derive(Clone, Debug)]
-struct ScriptedPhaseCall {
-    call_id: String,
-    command: String,
-    continuation: bool,
-    checkpoint: bool,
-}
-
-#[derive(Clone, Default)]
-struct ActiveTurnPhase {
-    custody: Option<ActivePhaseCustody>,
-    next_call: u64,
-    continuation_groups: usize,
-    checkpoint_continuations: Option<usize>,
-    post_checkpoint_start: Option<usize>,
-    reject_final_boundary: Option<usize>,
-    scripted: Vec<ScriptedPhaseCall>,
-}
-
-impl ActiveTurnPhase {
-    fn new(custody: Option<ActivePhaseCustody>) -> Self {
-        Self {
-            custody,
-            ..Self::default()
-        }
-    }
-
-    fn register_initial(&mut self, call_id: &str, command: &str) {
-        self.scripted.push(ScriptedPhaseCall {
-            call_id: call_id.to_owned(),
-            command: command.to_owned(),
-            continuation: false,
-            checkpoint: true,
-        });
-    }
-
-    fn continue_turn(&mut self, request: Incoming) {
-        let call_id = format!("active-phase-{}", self.next_call);
-        let response_id = format!("active-phase-response-{}", self.next_call);
-        let command = String::from("echo active-phase");
-        self.next_call = self.next_call.saturating_add(1);
-        self.continuation_groups = self.continuation_groups.saturating_add(1);
-        self.scripted.push(ScriptedPhaseCall {
-            call_id: call_id.clone(),
-            command: command.clone(),
-            continuation: true,
-            checkpoint: self.post_checkpoint_start.is_none(),
-        });
-        request
-            .reply
-            .send((
-                200,
-                json!({
-                    "id": response_id,
-                    "status": "completed",
-                    "usage": {"input_tokens": 100, "output_tokens": 1},
-                    "output": [{
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": "shell",
-                        "arguments": json!({"command": command}).to_string()
-                    }]
-                }),
-            ))
-            .unwrap();
-    }
-
-    fn begin_post_checkpoint(&mut self) {
-        self.checkpoint_continuations = Some(self.continuation_groups);
-        self.post_checkpoint_start = Some(self.scripted.len());
-    }
-
-    fn mark_reject_final_entry(&mut self) {
-        self.reject_final_boundary = Some(self.scripted.len());
-    }
-
-    fn begin_post_release(&mut self) {
-        self.post_checkpoint_start = Some(self.scripted.len());
-    }
-
-    fn checkpoint_continuations(&self) -> usize {
-        self.checkpoint_continuations
-            .unwrap_or(self.continuation_groups)
-    }
-
-    fn certificate(
-        &self,
-        db: &rusqlite::Connection,
-        allow_post_checkpoint: bool,
-    ) -> Result<ActivePhaseCertificate, crate::storage::StorageError> {
-        let mut certificate = ActivePhaseCertificate::default();
-        let Some(custody) = self.custody.as_ref() else {
-            assert!(
-                self.scripted.is_empty(),
-                "closed phase has no scripted active continuations"
-            );
-            return Ok(certificate);
-        };
-        for scripted in &self.scripted {
-            let post_checkpoint = !scripted.checkpoint;
-            if post_checkpoint && !allow_post_checkpoint {
-                continue;
-            }
-            let mut statement = db.prepare(
-                "SELECT a.id,oi.node_id,oi.payload_json,oi.status,a.state,t.thread_id,t.run_id,t.id,a.generation,n.kind,n.turn_id,n.payload_json FROM output_item oi JOIN model_attempt a ON a.id=oi.attempt_id JOIN turn t ON t.id=a.turn_id JOIN node n ON n.id=oi.node_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND oi.item_type='function_call' AND json_extract(oi.payload_json,'$.call_id')=?5 ORDER BY a.rowid,oi.ordinal",
-            )?;
-            let rows = statement
-                .query_map(
-                    rusqlite::params![
-                        custody.thread,
-                        custody.run,
-                        custody.turn,
-                        custody.generation,
-                        scripted.call_id
-                    ],
-                    ActivePhaseCustodyRow::read,
-                )?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            assert_eq!(
-                rows.len(),
-                1,
-                "every registered continuation has exactly one original output item"
-            );
-            let row = rows.into_iter().next().unwrap();
-            let ActivePhaseCustodyRow {
-                attempt_id: attempt,
-                assistant_node_id: assistant_node,
-                output_item_json: item_json,
-                output_item_status: item_status,
-                attempt_state,
-                thread_id: thread,
-                run_id: run,
-                turn_id: turn,
-                attempt_generation,
-                assistant_node_kind: node_kind,
-                assistant_node_turn_id: assistant_turn,
-                assistant_node_json: assistant_json,
-            } = row;
-            assert_eq!(thread, custody.thread, "scripted continuation Thread");
-            assert_eq!(run, custody.run, "scripted continuation Run");
-            assert_eq!(turn, custody.turn, "scripted continuation Turn");
-            assert_eq!(
-                attempt_generation, custody.generation,
-                "immutable model-attempt generation"
-            );
-            assert_eq!(
-                assistant_turn.as_deref(),
-                Some(custody.turn.as_str()),
-                "assistant node Turn owner"
-            );
-            assert_eq!(
-                attempt_state, "completed",
-                "scripted response attempt state"
-            );
-            assert_eq!(item_status, "completed", "scripted output item state");
-            assert_eq!(node_kind, "assistant_response");
-            let expected_item = json!({"type":"function_call","call_id":scripted.call_id,"name":"shell","arguments":json!({"command":scripted.command}).to_string()});
-            let item: Value = serde_json::from_str(&item_json).unwrap();
-            assert_eq!(
-                item, expected_item,
-                "output_item must match the registered call and command"
-            );
-            let assistant: Value = serde_json::from_str(&assistant_json).unwrap();
-            assert_eq!(
-                assistant["output"],
-                json!([expected_item]),
-                "assistant node must own exactly the scripted output item"
-            );
-            let group = assistant["group_id"]
-                .as_str()
-                .expect("assistant response has its exact tool group")
-                .to_owned();
-            let (group_attempt,group_turn,group_state,tool_name,args,call_state,operation):(String,String,String,String,String,String,Option<String>)=db.query_row(
-                "SELECT g.attempt_id,g.turn_id,g.state,c.tool_name,c.arguments_json,c.state,c.operation_id FROM tool_group g JOIN tool_call c ON c.group_id=g.id WHERE g.id=?1 AND c.call_id=?2",
-                rusqlite::params![group,scripted.call_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?,row.get(6)?)),
-            )?;
-            assert_eq!(group_attempt, attempt, "tool group attempt owner");
-            assert_eq!(group_turn, custody.turn, "tool group Turn owner");
-            assert_eq!(
-                group_state, "completed",
-                "scripted tool group has a terminal result"
-            );
-            assert_eq!(tool_name, "shell");
-            assert_eq!(args, json!({"command":scripted.command}).to_string());
-            assert_eq!(
-                call_state, "completed",
-                "scripted tool call has a saved result"
-            );
-            let (result_node,result_status,result_turn,result_json):(String,String,String,String)=db.query_row(
-                "SELECT r.node_id,r.status,n.turn_id,n.payload_json FROM tool_result r JOIN node n ON n.id=r.node_id WHERE r.group_id=?1 AND r.call_id=?2",
-                rusqlite::params![group,scripted.call_id],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
-            )?;
-            assert_eq!(result_turn, custody.turn, "tool result Turn owner");
-            let result_node_value: Value = serde_json::from_str(&result_json).unwrap();
-            assert_eq!(result_node_value["group_id"], group);
-            assert_eq!(result_node_value["item"]["type"], "function_call_output");
-            assert_eq!(result_node_value["item"]["call_id"], scripted.call_id);
-            let output: Value =
-                serde_json::from_str(result_node_value["item"]["output"].as_str().unwrap())
-                    .unwrap();
-            assert_eq!(
-                output["status"], result_status,
-                "tool result row matches its exact output payload"
-            );
-            assert_eq!(
-                result_status, "exited",
-                "scripted no-op shell group completes normally"
-            );
-            assert_eq!(output["status"], "exited");
-            assert_eq!(output["command"], scripted.command);
-            assert_eq!(output["thread_id"], custody.thread);
-            assert_eq!(output["run_id"], custody.run);
-            assert_eq!(output["turn_id"], custody.turn);
-            assert_eq!(output["exit_code"], 0);
-            let execution = output["execution_id"]
-                .as_str()
-                .expect("successful shell result owns its actual execution");
-            assert_eq!(operation.as_deref(), Some(execution));
-            let (owner_run, owner_turn, state, exit_code, command): (
-                String,
-                String,
-                String,
-                i64,
-                String,
-            ) = db.query_row(
-                "SELECT owner_run_id,turn_id,state,exit_code,json_extract(shell_json,'$.command') FROM shell_execution WHERE id=?1",
-                [execution],
-                |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?)),
-            )?;
-            assert_eq!(owner_run, custody.run);
-            assert_eq!(owner_turn, custody.turn);
-            assert_eq!(state, "exited");
-            assert_eq!(exit_code, 0);
-            assert_eq!(command, scripted.command);
-            assert!(
-                certificate
-                    .groups_by_call
-                    .insert(scripted.call_id.clone(), group)
-                    .is_none(),
-                "scripted call id is unique"
-            );
-            let nodes = if post_checkpoint {
-                &mut certificate.post_checkpoint_nodes
-            } else {
-                &mut certificate.nodes
-            };
-            assert!(
-                nodes.insert(assistant_node, "assistant_response").is_none(),
-                "assistant node is unique"
-            );
-            assert!(
-                nodes.insert(result_node, "tool_result").is_none(),
-                "tool result node is unique"
-            );
-        }
-        Ok(certificate)
-    }
-}
-
-struct ActivePhaseCustodyRow {
-    attempt_id: String,
-    assistant_node_id: String,
-    output_item_json: String,
-    output_item_status: String,
-    attempt_state: String,
-    thread_id: String,
-    run_id: String,
-    turn_id: String,
-    attempt_generation: i64,
-    assistant_node_kind: String,
-    assistant_node_turn_id: Option<String>,
-    assistant_node_json: String,
-}
-
-impl ActivePhaseCustodyRow {
-    fn read(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            attempt_id: row.get(0)?,
-            assistant_node_id: row.get(1)?,
-            output_item_json: row.get(2)?,
-            output_item_status: row.get(3)?,
-            attempt_state: row.get(4)?,
-            thread_id: row.get(5)?,
-            run_id: row.get(6)?,
-            turn_id: row.get(7)?,
-            attempt_generation: row.get(8)?,
-            assistant_node_kind: row.get(9)?,
-            assistant_node_turn_id: row.get(10)?,
-            assistant_node_json: row.get(11)?,
-        })
-    }
-}
-
+/// Minimal normal-driver provider pump retained by lifecycle integration tests.
 #[derive(Default)]
-struct ActivePhaseCertificate {
-    nodes: std::collections::BTreeMap<String, &'static str>,
-    post_checkpoint_nodes: std::collections::BTreeMap<String, &'static str>,
-    groups_by_call: std::collections::BTreeMap<String, String>,
+struct DriverToolPump {
+    next_call: u64,
 }
-
-async fn capture_active_phase_custody(control: &Control, thread: &str) -> ActivePhaseCustody {
-    let run = control
-        .live
-        .test_drivers()
-        .lock()
-        .await
-        .get(thread)
-        .cloned()
-        .expect("active provider boundary belongs to a registered original Run slot")
-        .run_id;
-    let thread_id = thread.to_owned();
-    let run_id = run.clone();
-    let rows = control.store.database.call(move |db| {
-        db.prepare("SELECT id,generation FROM turn WHERE thread_id=?1 AND run_id=?2 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid")?
-            .query_map(rusqlite::params![thread_id,run_id], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
-    }).await.unwrap();
-    assert_eq!(
-        rows.len(),
-        1,
-        "captured original active Run must own exactly one live Turn"
-    );
-    let (turn, generation) = rows.into_iter().next().unwrap();
-    ActivePhaseCustody {
-        thread: thread.to_owned(),
-        run,
-        turn,
-        generation,
+impl DriverToolPump {
+    fn continue_turn(&mut self, request: Incoming) {
+        let call_id = format!("driver-pump-{}", self.next_call);
+        let response_id = format!("driver-pump-response-{}", self.next_call);
+        self.next_call = self.next_call.saturating_add(1);
+        request.reply.send((200, json!({
+            "id":response_id,
+            "status":"completed",
+            "usage":{"input_tokens":100,"output_tokens":1},
+            "output":[{"type":"function_call","call_id":call_id,"name":"shell","arguments":json!({"command":"echo integration"}).to_string()}]
+        }))).unwrap();
     }
 }
 
-struct Fx {
+struct DriverLifecycleFixture {
     root: tempfile::TempDir,
     url: String,
     limits: String,
@@ -1974,12 +2019,7 @@ struct Fx {
     target: String,
     receive: mpsc::Receiver<Incoming>,
     server: tokio::task::JoinHandle<()>,
-    guard_before: Vec<(String, String)>,
-    reached: Arc<AtomicBool>,
-    checkpoint_reached: Arc<AtomicBool>,
-    release_checkpoint: Arc<tokio::sync::Notify>,
     held_phase: Option<HeldSummaryPhase>,
-    active_phase: ActiveTurnPhase,
     terminal_identity: TerminalAttemptIdentity,
 }
 
@@ -2064,474 +2104,6 @@ fn expected_terminal_stage(scenario: Scenario, fault: Fault) -> &'static str {
     }
 }
 
-/// After the checkpoint is released: answer the active summary request the
-/// driver legitimately sends after a continuing active-spill fault (it must be
-/// a summary request, tools=[]), then wait for the continued attempt to reach
-/// the fault's own operation before shutdown can cancel it: the armed
-/// remeasurement is consumed and its failure is recorded, or the rejected
-/// final write is hit.
-async fn after_release(
-    control: &Control,
-    receive: &mut mpsc::Receiver<Incoming>,
-    fault: Fault,
-    scenario: Scenario,
-    reached: &AtomicBool,
-    terminal_identity: &TerminalAttemptIdentity,
-    active_phase: &mut ActiveTurnPhase,
-) {
-    if !scenario.continues_to_active_summary(fault) {
-        if fault == Fault::Remeasurement {
-            crate::test_watchdog::watchdog("remeasurement failure consumed", async {
-                while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
-                    tokio::task::yield_now().await;
-                }
-                while !terminal_record_written(
-                    control,
-                    terminal_identity,
-                    expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart),
-                    Some(expected_terminal_stage(scenario, fault)),
-                )
-                .await
-                {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-        }
-        if fault == Fault::RejectFinal && !scenario.summary() {
-            crate::test_watchdog::watchdog("rejected final write reached", async {
-                while !reached.load(Ordering::SeqCst) {
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-        }
-        return;
-    }
-    active_phase.begin_post_release();
-    if fault == Fault::RejectFinal {
-        active_phase.mark_reject_final_entry();
-    }
-    let mut summary_seen = false;
-    crate::test_watchdog::watchdog("active spill continuation provider pump", async {
-        loop {
-            if let Ok(request) = receive.try_recv() {
-                if request.body["tools"] == json!([]) {
-                    assert!(
-                        !summary_seen,
-                        "active spill may issue one follow-on summary"
-                    );
-                    request
-                        .reply
-                        .send((200, answer("Short adopted summary.")))
-                        .unwrap();
-                    summary_seen = true;
-                    active_phase.begin_post_release();
-                } else {
-                    active_phase.continue_turn(request);
-                }
-                continue;
-            }
-            let stage_complete = match fault {
-                Fault::Remeasurement => {
-                    !control.compactor.fail_remeasurement.load(Ordering::SeqCst)
-                        && terminal_record_written(
-                            control,
-                            terminal_identity,
-                            expected_outcome(
-                                fault,
-                                scenario,
-                                ObservationPhase::AfterShutdownAndRestart,
-                            ),
-                            Some(expected_terminal_stage(scenario, fault)),
-                        )
-                        .await
-                }
-                Fault::RejectFinal => reached.load(Ordering::SeqCst),
-                _ => unreachable!("only continuing active-spill faults reach this pump"),
-            };
-            if stage_complete {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert!(
-        summary_seen,
-        "released active spill reached its active summary request"
-    );
-}
-
-/// Persisted #180 guard and status rows, byte-exact.
-async fn guard_rows(control: &Control) -> Vec<(String, String)> {
-    control.store.database.call(|db| {
-        Ok(db.prepare("SELECT key,value FROM app_meta WHERE key GLOB 'compact.automatic_guard.*' OR key GLOB 'compact.automatic_status.*' ORDER BY key")?
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?)
-    }).await.unwrap()
-}
-
-async fn boundary(fault: Fault, scenario: Scenario) {
-    boundary_with_thread_override(fault, scenario, true).await;
-}
-
-async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thread_percent: bool) {
-    let Fx {
-        root,
-        url,
-        limits,
-        owner,
-        control,
-        target,
-        mut receive,
-        server,
-        guard_before: _,
-        reached,
-        checkpoint_reached,
-        release_checkpoint,
-        terminal_identity,
-        mut active_phase,
-        ..
-    } = prepare_with_thread_override(fault, scenario, set_thread_percent).await;
-    if fault != Fault::RejectFact {
-        assert!(
-            checkpoint_reached.load(Ordering::SeqCst),
-            "postcommit barrier reached"
-        );
-        assert_boundary(
-            &control,
-            &target,
-            scenario,
-            fault,
-            "checkpoint",
-            &active_phase,
-        )
-        .await;
-        if fault == Fault::Remeasurement {
-            assert!(
-                control.compactor.fail_remeasurement.load(Ordering::SeqCst),
-                "remeasurement failure is armed before checkpoint release"
-            );
-        }
-        release_checkpoint.notify_one();
-        after_release(
-            &control,
-            &mut receive,
-            fault,
-            scenario,
-            &reached,
-            &terminal_identity,
-            &mut active_phase,
-        )
-        .await;
-    }
-    let shutdown = control.shutdown().await;
-    if matches!(
-        fault,
-        Fault::Persistent
-            | Fault::RejectFinal
-            | Fault::Remeasurement
-            | Fault::RejectFact
-            | Fault::Storage
-            | Fault::RetiredWritesAbsent
-    ) {
-        assert_eq!(shutdown.unwrap_err().code, ErrorCode::SaveFailed);
-    } else {
-        shutdown.unwrap();
-    }
-    if fault != Fault::RejectFact {
-        assert!(
-            reached.load(Ordering::SeqCst),
-            "fault hook reached its configured checkpoint"
-        );
-    }
-    assert_boundary(
-        &control,
-        &target,
-        scenario,
-        fault,
-        "shutdown",
-        &active_phase,
-    )
-    .await;
-    control
-        .store
-        .database
-        .call(|db| {
-            db.execute_batch(
-                "DROP TRIGGER fault_adopt; DROP TRIGGER fault_epoch; DROP TRIGGER fault_restage; DROP TRIGGER fault_begin;",
-            )?;
-            Ok(())
-        })
-        .await
-        .unwrap();
-    // Reopen through normal startup repair, not by patching run/turn states.
-    drop(control);
-    owner.shutdown().await.unwrap();
-    let owner = proactive_owner(root.path(), &url, &limits).await;
-    let control = Control::new(&owner, root.path().into());
-    assert_boundary(&control, &target, scenario, fault, "reopen", &active_phase).await;
-    let id = target.clone();
-    control
-        .store
-        .database
-        .call(move |db| {
-            assert_eq!(
-                db.query_row(
-                    "SELECT count(*) FROM app_meta WHERE key='compact.automatic_active.'||?1",
-                    [id],
-                    |r| r.get::<_, i64>(0)
-                )?,
-                0
-            );
-            Ok(())
-        })
-        .await
-        .unwrap();
-    // The synthetic protected user exceeds the ordinary 64K segment baseline.
-    // Use the public manual whole-group summary operation on one replacement,
-    // without altering the saved user, widening limits, or bypassing validation.
-    let id = target.clone();
-    let node = control.store.database.call(move |db| Ok(db.query_row(
-        "SELECT p.node_id FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal LIMIT 1",
-        [id], |r| r.get::<_, String>(0))?)).await.unwrap();
-    let edit = ContextEditArgs {
-        thread_id: Some(target.clone()),
-        action: ContextEditAction::Summary,
-        from_node_id: Some(node.clone()),
-        to_node_id: Some(node),
-        max_chars: None,
-    };
-    // Normal Control admission, queue and Thread boundary, not a direct edit.
-    let accepted = request(&control, Command::ContextEdit(edit)).await;
-    let operation = accepted["operation_id"].as_str().unwrap().to_owned();
-    let mut requests = 0;
-    let result = loop {
-        tokio::select! {
-            status = request(&control, Command::OperationGet(OperationTarget { operation_id: operation.clone() })) => {
-                assert_ne!(status["downstream"]["state"], "failed", "{status}");
-                if status["downstream"]["state"] == "completed" {
-                    break status["downstream"]["outcome"]["result"].clone();
-                }
-                tokio::task::yield_now().await;
-            }
-            request = receive.recv() => {
-                let request = request.expect("loopback remains available");
-                assert_eq!(request.body["tools"], json!([]));
-                requests += 1;
-                request.reply.send((200, answer("ok"))).unwrap();
-            }
-        }
-    };
-    assert!(
-        requests > 0,
-        "exercise the next summary, including map/reduce if needed"
-    );
-    assert!(
-        result["compact"]["no_target"] == false,
-        "next compaction must actually adopt, not silently skip"
-    );
-    assert!(result["compact"]["summary_node_id"].is_string(), "{result}");
-    assert!(result["compact"]["source_nodes"].as_u64().unwrap() > 0);
-    assert!(
-        result["after_characters"].as_u64().unwrap()
-            < result["before_characters"].as_u64().unwrap()
-    );
-    assert_immutable(&control).await;
-    control.shutdown().await.unwrap();
-    owner.shutdown().await.unwrap();
-    server.abort();
-}
-
-async fn assert_immutable(control: &Control) {
-    control.store.database.call(|db| {
-        // Exact row comparison protects originals, replacement records and ordered
-        // provenance, including hashes/revisions, even after another compaction.
-        for (saved, current) in [("fault_originals", "node"), ("fault_nodes", "node"), ("fault_replacements", "replacement"), ("fault_sources", "replacement_source")] {
-            let missing: i64 = db.query_row(&format!("SELECT count(*) FROM (SELECT * FROM {saved} EXCEPT SELECT * FROM {current})"), [], |r| r.get(0))?;
-            assert_eq!(missing, 0, "immutable rows changed: {current}");
-        }
-        let replacements: Vec<(String, String, String)> = db.prepare("SELECT r.id,n.kind,n.payload_json FROM replacement r JOIN node n ON n.id=r.output_node_id")?.query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect::<rusqlite::Result<_>>()?;
-        for (replacement, kind, body) in replacements {
-            let payload: Value = serde_json::from_str(&body).unwrap();
-            let sources: Vec<String> = db.prepare("SELECT source_node_id FROM replacement_source WHERE replacement_id=?1 ORDER BY ordinal")?.query_map([replacement], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(payload["source_node_ids"], json!(sources), "payload and ordered provenance describe the same complete replacement");
-            if kind == "spill" { assert_eq!(sources.len(), 2, "one whole call/result group"); }
-        }
-        assert_eq!(db.query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r.get::<_, i64>(0))?, 0);
-        assert_eq!(db.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))?, "ok");
-        Ok(())
-    }).await.unwrap();
-}
-
-async fn assert_boundary(
-    control: &Control,
-    target: &str,
-    scenario: Scenario,
-    fault: Fault,
-    phase: &'static str,
-    active_phase: &ActiveTurnPhase,
-) {
-    assert_immutable(control).await;
-    let target = target.to_owned();
-    let active_phase = active_phase.clone();
-    control.store.database.call(move |db| {
-        let (path, revision, epoch): (String, i64, i64) = db.query_row("SELECT path,revision,epoch FROM fault_boundary", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        let (current_revision, current_epoch, cursor): (i64, i64, String) = db.query_row("SELECT selection_revision,reasoning_epoch,cursor_node_id FROM thread WHERE id=?1", [&target], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-        let current_path: Vec<String> = db.prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        let committed_path: Vec<String> = serde_json::from_str(&path).unwrap();
-        assert!(current_path.len() >= committed_path.len());
-        assert_eq!(&current_path[..committed_path.len()], committed_path, "committed selection is preserved exactly");
-        let appended = &current_path[committed_path.len()..];
-        let allow_post_checkpoint = phase != "checkpoint"
-            && scenario == Scenario::ActiveSpill
-            && fault == Fault::Remeasurement;
-        let phase_certificate = active_phase.certificate(db, allow_post_checkpoint)?;
-        let mut allowed_suffix = phase_certificate.nodes.clone();
-        if phase != "checkpoint"
-            && scenario == Scenario::ActiveSpill
-            && fault == Fault::Remeasurement
-        {
-            for (node, kind) in &phase_certificate.post_checkpoint_nodes {
-                assert!(allowed_suffix.insert(node.clone(), *kind).is_none());
-            }
-        }
-        assert_interruption_audits(
-            db,
-            appended,
-            phase,
-            committed_path.len(),
-            &allowed_suffix,
-        )?;
-        assert_eq!(current_path.last(), Some(&cursor));
-        assert_eq!(current_revision, revision + appended.len() as i64, "only validated audit append commits advance selection_revision");
-        assert_eq!(current_epoch, epoch, "committed reasoning epoch survives failure/restart");
-        let initial_epoch: i64 = db.query_row("SELECT epoch FROM fault_initial", [], |r| r.get(0))?;
-        let record_text: String = db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object'", [], |r| r.get(0))?;
-        let record: Value = serde_json::from_str(&record_text).unwrap();
-        let continued = phase != "checkpoint"
-            && scenario.continues_to_active_summary(fault)
-            && fault != Fault::RejectFinal;
-        // The boundary is the last committed stage: the selected one, or the
-        // active summary the driver entered after a released active spill.
-        let last = if continued { "active_summary" } else { scenario.stage() };
-        assert!(record["committed_stages"][last].is_object(), "the continued stage committed: {record}");
-        let last_fact = &record["committed_stages"][last];
-        assert_eq!(revision, last_fact["selection_revision"].as_i64().unwrap(), "boundary is the last committed stage: {record}");
-        let committed_epoch = last_fact["reasoning_epoch"]
-            .as_i64().expect("selected committed stage contains its exact reasoning epoch");
-        assert_eq!(epoch, committed_epoch, "Thread epoch equals the exact adopted stage fact; initial={initial_epoch}, record={record}");
-        assert!(committed_epoch >= initial_epoch, "committed stage does not reverse reasoning epoch");
-        assert_trigger_evidence(&record["trigger"], scenario);
-        assert!(record["committed_stages"][scenario.stage()].is_object(), "fault reached the intended stage: {record}");
-        if scenario == Scenario::ActiveSpill && fault == Fault::RejectFinal {
-            assert!(record["committed_stages"]["active_summary"].is_null(), "rejected active-summary FINISH rolls back its path and stage: {record}");
-            assert_eq!(record["outcome"], "unknown", "rejected final writer preserves the provisional original spill: {record}");
-            assert!(active_phase.reject_final_boundary.is_some(), "the fixture served the ordinary request that entered the rejected summary transaction");
-            let committed: i64 = db.query_row(
-                "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
-                [&target], |row| row.get(0),
-            )?;
-            assert_eq!(committed, 0, "rejected follow-on active summary leaves no adopted summary node");
-            let custody = active_phase.custody.as_ref().expect("active RejectFinal has original Turn custody");
-            let active_attempts: i64 = db.query_row(
-                "SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND json_extract(error_json,'$.automatic_trim_attempt.stages.active_summary') IS NOT NULL",
-                [&custody.turn], |row| row.get(0),
-            )?;
-            assert_eq!(active_attempts, 0, "no committed active-summary automatic attempt survives rejected FINISH");
-        }
-        let kinds: Vec<String> = db.prepare("SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-        let expected: Vec<&str> = match scenario {
-            Scenario::ClosedSpill => vec!["spill", "spill"],
-            Scenario::ActiveSpill => {
-                vec!["spill"; 2 + active_phase.checkpoint_continuations()]
-            }
-            Scenario::ClosedSummary => vec!["summary", "spill", "spill"],
-            Scenario::ActiveSummary => vec!["summary"],
-        };
-        // The entered active summary replaces the active range from its first
-        // work group, the committed spills included (§4.1 active).
-        let expected = if continued { vec!["summary"] } else { expected };
-        assert_eq!(kinds, expected, "all intended replacements, not a partial group");
-        if scenario == Scenario::ActiveSpill && !continued {
-            let custody = active_phase
-                .custody
-                .as_ref()
-                .expect("active spill proof has original phase custody");
-            let continuation_count = active_phase.checkpoint_continuations();
-            assert!(
-                continuation_count <= active_phase.continuation_groups,
-                "checkpoint continuation count is bound to registered script entries"
-            );
-            let checkpoint_scripts: Vec<_> = active_phase
-                .scripted
-                .iter()
-                .filter(|script| script.continuation && script.checkpoint)
-                .take(continuation_count)
-                .collect();
-            assert_eq!(checkpoint_scripts.len(), continuation_count);
-            let mut expected_groups = std::collections::BTreeSet::new();
-            for call_id in ["boundary-0", "boundary-1"] {
-                let group: String = db.query_row(
-                    "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id JOIN model_attempt a ON a.id=g.attempt_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND c.call_id=?5 AND g.state='completed'",
-                    rusqlite::params![custody.thread,custody.run,custody.turn,custody.generation,call_id],
-                    |row| row.get(0),
-                )?;
-                expected_groups.insert(group);
-            }
-            let latest_call = if continuation_count == 0 {
-                String::from("boundary-small")
-            } else {
-                let boundary_group: String = db.query_row(
-                    "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id JOIN model_attempt a ON a.id=g.attempt_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND c.call_id='boundary-small' AND g.state='completed'",
-                    rusqlite::params![custody.thread,custody.run,custody.turn,custody.generation],
-                    |row| row.get(0),
-                )?;
-                expected_groups.insert(boundary_group);
-                for script in checkpoint_scripts.iter().take(continuation_count - 1) {
-                    expected_groups.insert(
-                        phase_certificate.groups_by_call
-                            .get(&script.call_id)
-                            .expect("pre-latest scripted tool group has exact saved result")
-                            .clone(),
-                    );
-                }
-                checkpoint_scripts[continuation_count - 1].call_id.clone()
-            };
-            for script in checkpoint_scripts {
-                assert!(
-                    phase_certificate.groups_by_call.contains_key(&script.call_id),
-                    "each checkpoint script has exact attempt/output/node/group/result custody: {}",
-                    script.call_id
-                );
-            }
-            let actual_groups: std::collections::BTreeSet<String> = db.prepare(
-                "SELECT DISTINCT json_extract(source.payload_json,'$.group_id') FROM fault_sources s JOIN fault_replacements r ON r.id=s.replacement_id JOIN fault_nodes output ON output.id=r.output_node_id JOIN fault_nodes source ON source.id=s.source_node_id WHERE output.kind='spill' AND json_extract(source.payload_json,'$.group_id') IS NOT NULL ORDER BY 1",
-            )?.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(actual_groups, expected_groups, "spill provenance is exactly the two original groups plus eligible complete scripted groups; latest remains protected");
-            let latest_group: String = db.query_row(
-                "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id JOIN model_attempt a ON a.id=g.attempt_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND c.call_id=?5 AND g.state='completed'",
-                rusqlite::params![custody.thread,custody.run,custody.turn,custody.generation,latest_call],
-                |row| row.get(0),
-            )?;
-            let latest_nodes: Vec<String> = db.prepare(
-                "SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND json_extract(n.payload_json,'$.group_id')=?2 AND n.kind IN ('assistant_response','tool_result') ORDER BY p.ordinal",
-            )?.query_map(rusqlite::params![target,latest_group], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
-            assert_eq!(latest_nodes, ["assistant_response", "tool_result"], "exact latest complete tool group remains whole on the active path");
-        }
-        let incomplete: i64 = db.query_row("SELECT count(*) FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id WHERE tr.thread_id=?1 AND (r.state!='completed' OR NOT EXISTS(SELECT 1 FROM replacement_source s WHERE s.replacement_id=r.id) OR NOT EXISTS(SELECT 1 FROM node n WHERE n.id=r.output_node_id AND n.payload_json IS NOT NULL))", [&target], |r| r.get(0))?;
-        assert_eq!(incomplete, 0);
-        let missing: i64 = db.query_row("SELECT count(*) FROM replacement_source s LEFT JOIN node n ON n.id=s.source_node_id WHERE n.id IS NULL OR n.payload_json IS NULL OR n.payload_revision!=s.source_revision", [], |r| r.get(0))?;
-        assert_eq!(missing, 0);
-        Ok(())
-    }).await.unwrap();
-}
-
-// Per-Control, single-use synchronization point: the adoption future has returned
-// (including its epoch write and COMMIT), and no subsequent stage has begun.
 pub(super) async fn checkpoint(
     control: &Arc<Control>,
     slot: &DriverSlot,
@@ -3147,162 +2719,6 @@ async fn proxy() -> (
         head_receive,
         server,
     )
-}
-
-fn assert_interruption_audits(
-    db: &rusqlite::Connection,
-    appended: &[String],
-    phase: &'static str,
-    captured_prefix_len: usize,
-    certified_phase_nodes: &std::collections::BTreeMap<String, &'static str>,
-) -> Result<(), crate::storage::StorageError> {
-    let sections = [
-        "runs",
-        "turns",
-        "shells",
-        "tool_calls",
-        "unreflected_messages",
-        "pending_operations_with_unknown_targets",
-    ];
-    let mut details = std::collections::BTreeMap::new();
-    let mut reasons = std::collections::BTreeSet::new();
-    let mut certified_suffix_nodes_seen = std::collections::BTreeSet::new();
-    for (offset, id) in appended.iter().enumerate() {
-        let (kind, turn, at, body): (String, Option<String>, String, String) = db.query_row(
-            "SELECT kind,turn_id,created_at,payload_json FROM node WHERE id=?1",
-            [id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-        )?;
-        if kind == "event" {
-            let turn_id = turn
-                .as_deref()
-                .expect("only the notification event belongs to the interrupted turn");
-            let (thread, run, state, generation): (String, String, String, i64) = db.query_row(
-                "SELECT thread_id,run_id,state,generation FROM turn WHERE id=?1",
-                [turn_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
-            )?;
-            assert_eq!(
-                state, "stopped",
-                "notification targets the durably stopped Turn"
-            );
-            let (event_kind, source, target_thread, target_run): (String,String,String,Option<String>) = db.query_row(
-                "SELECT e.kind,e.source_json,e.target_thread_id,e.target_run_id FROM event e WHERE e.id=json_extract(?1,'$.event_id')",
-                [&body], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)),
-            )?;
-            assert_eq!(event_kind, "context_changed");
-            assert_eq!(source, r#"{"kind":"shellboy","source":"shutdown"}"#);
-            assert_eq!(target_thread, thread);
-            assert_eq!(
-                target_run, None,
-                "shutdown context is saved after the run stops and has no replay target"
-            );
-            assert!(generation > 0);
-            let delivery: String = db.query_row(
-                "SELECT state FROM delivery WHERE event_id=json_extract(?1,'$.event_id') AND recipient_id=?2",
-                rusqlite::params![body,run], |r| r.get(0),
-            )?;
-            assert_eq!(
-                delivery, "pending",
-                "shutdown notice remains queued for the next legitimate admission"
-            );
-        } else if let Some(expected_kind) = certified_phase_nodes.get(id) {
-            assert_eq!(
-                kind, *expected_kind,
-                "scripted active-phase node kind remains exact"
-            );
-            assert!(
-                certified_suffix_nodes_seen.insert(id.clone()),
-                "an exact scripted phase node cannot be duplicated in the suffix"
-            );
-        } else {
-            assert!(turn.is_none(), "postcommit audit suffix metadata: {}", {
-                // Failure-only closed metadata: never print node/Turn IDs, payload,
-                // paths, or provider fields. Unknown kinds/states are not forwarded.
-                // Node `kind` is a bounded internal enum; expose it verbatim in the
-                // isolated test diagnostic so a real lifecycle mismatch is classified.
-                let node_kind = kind.as_str();
-                let metadata=db.query_row(
-                "SELECT r.state,t.generation FROM turn t JOIN run r ON r.id=t.run_id WHERE t.id=?1",
-                [turn.as_deref()],|r|Ok((r.get(0)?,r.get(1)?)),
-            ).optional();
-                let query_failed = metadata.is_err();
-                let (run_state, generation): (Option<String>, Option<i64>) =
-                    metadata.unwrap_or(None).unwrap_or((None, None));
-                let run_state = match run_state.as_deref() {
-                    Some("live" | "stopping" | "completed" | "cancelled" | "failed") => {
-                        run_state.as_deref().unwrap()
-                    }
-                    _ if query_failed => "query_failed",
-                    _ => "other_or_missing",
-                };
-                json!({"node_kind":node_kind,"turn_present":turn.is_some(),"ordinal":captured_prefix_len+offset,"phase":phase,"run_state":run_state,"turn_generation":generation,"captured_prefix_len":captured_prefix_len})
-            });
-        }
-        let payload: Value = serde_json::from_str(&body).unwrap();
-        let audit: Value = if kind == "event" {
-            Value::Null // event kind/id/recipient were validated against the event ledger above
-        } else {
-            serde_json::from_str(payload["text"].as_str().unwrap()).unwrap()
-        };
-        match kind.as_str() {
-            "event" => {
-                assert!(
-                    payload["event_id"]
-                        .as_str()
-                        .is_some_and(|id| !id.is_empty())
-                );
-            }
-            "interruption_details" => {
-                assert!(sections.contains(&audit["section"].as_str().unwrap()));
-                assert!(!audit["items"].as_array().unwrap().is_empty());
-                details.insert(
-                    id.clone(),
-                    (audit["section"].clone(), at, audit["items"].clone()),
-                );
-            }
-            "interruption_context" => {
-                assert_eq!(audit["snapshot_node_id"], *id);
-                assert_eq!(audit["observed_at"], at);
-                let reason = audit["kind"].as_str().unwrap();
-                let source = match reason {
-                    "app_shutdown" => "shutdown",
-                    "previous_instance_interrupted" => "startup",
-                    _ => panic!("unexpected audit reason {reason}"),
-                };
-                assert!(reasons.insert(reason.to_owned()));
-                assert_eq!(audit["actor"], json!({"kind":"shellboy","source":source}));
-                assert_eq!(audit["change"]["reason"], reason);
-                assert_eq!(audit["change"]["automatic_replay"], false);
-                assert_eq!(audit["change"]["result_uncertain"], true);
-                let mut referenced = std::collections::BTreeSet::new();
-                for section in sections {
-                    for detail in audit["change"][section]["detail_node_ids"]
-                        .as_array()
-                        .unwrap()
-                    {
-                        let detail = detail.as_str().unwrap();
-                        assert!(referenced.insert(detail.to_owned()));
-                        let (actual_section, actual_at, items) = details
-                            .get(detail)
-                            .expect("only preceding audit details allowed");
-                        assert_eq!(actual_section, section);
-                        assert_eq!(actual_at, &at);
-                        assert_eq!(items, &audit["change"][section]["items"]);
-                    }
-                }
-                assert_eq!(
-                    referenced,
-                    details.keys().cloned().collect(),
-                    "no unreferenced suffix nodes"
-                );
-                details.clear();
-            }
-            _ => panic!("unexpected selected suffix kind {kind}"),
-        }
-    }
-    assert!(details.is_empty(), "no incomplete audit batch");
-    Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

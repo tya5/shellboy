@@ -30,6 +30,8 @@ pub(crate) mod request_parts {
     pub(crate) use super::attachment_input::{has_attachment_ref, strip_local};
     pub(crate) use super::driver::{ContextLine, context_item, last_saved_context, leading_items};
 }
+#[cfg(test)]
+pub(crate) mod compaction_test_fixture;
 pub mod output;
 pub(crate) mod receipt;
 pub mod replay;
