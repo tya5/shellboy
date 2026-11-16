@@ -179,7 +179,19 @@ async fn terminal_public_case(case: &str) {
         let mut summary_posts = 0;
         let mut held_sse_release = None;
         loop {
-            let event = next_held_fixture_event(&control, &target, &mut receive, &mut heads, &slot).await;
+            let event = if let Some(identity) = terminal_identity.as_ref() {
+                next_held_fixture_event_for_attempt(
+                    &control,
+                    &target,
+                    &mut receive,
+                    &mut heads,
+                    &slot,
+                    identity,
+                )
+                .await
+            } else {
+                next_held_fixture_event(&control, &target, &mut receive, &mut heads, &slot).await
+            };
             match event {
                 HeldFixtureEvent::Request(mut next) => {
                     let automatic_summary = if chat_api {
@@ -244,7 +256,7 @@ async fn terminal_public_case(case: &str) {
                     }
                 }
                 HeldFixtureEvent::Header(_) => {}
-                HeldFixtureEvent::JobFinished(facts) => {
+                HeldFixtureEvent::OriginalFinished => {
                     let identity = terminal_identity
                         .as_ref()
                         .expect("capture original receipt at first summary request");
@@ -256,10 +268,13 @@ async fn terminal_public_case(case: &str) {
                             if s2_success { Some("closed_summary") } else { None },
                         )
                         .await,
-                        "same proactive job completion must follow original attempt FINISH: {facts:?}"
+                        "exact original FINISH must preserve the case outcome and stage"
                     );
                     break;
                 }
+                HeldFixtureEvent::JobFinished(facts) => panic!(
+                    "job-slot completion without the original terminal predicate is not acceptance: {facts:?}"
+                ),
             }
         }
         if !ordinary_replied {

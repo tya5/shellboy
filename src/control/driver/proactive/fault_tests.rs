@@ -1216,6 +1216,9 @@ async fn prepare_with_mode(
                 HeldFixtureEvent::JobFinished(facts) => panic!(
                     "proactive job terminated before both held provider requests were captured: {facts:?}"
                 ),
+                HeldFixtureEvent::OriginalFinished => panic!(
+                    "original automatic attempt FINISH arrived before both held provider requests were captured"
+                ),
             };
             if hold_summary
                 && !observed_heads
@@ -1633,6 +1636,21 @@ struct TerminalRecord {
     token: Option<String>,
     outcome: Option<String>,
     committed_stage: Option<i64>,
+}
+
+/// Observe only terminal FINISH on the exact captured receipt; callers assert its meaning separately.
+async fn terminal_attempt_finished(control: &Control, identity: &TerminalAttemptIdentity) -> bool {
+    let identity = identity.clone();
+    control.store.database.call(move |db| {
+        let row: Option<(Option<i64>, Option<String>)> = db.query_row(
+            "SELECT json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2",
+            rusqlite::params![identity.attempt, identity.thread],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        Ok(row.is_some_and(|(provisional, token)| {
+            provisional == Some(0) && token.as_deref() == Some(identity.token.as_str())
+        }))
+    }).await.unwrap()
 }
 
 /// Require FINISH on the captured original receipt, never a sibling Run observation.
@@ -2177,6 +2195,7 @@ enum HeldFixtureEvent {
     Request(Incoming),
     Header(ProxyRequestEvent),
     JobFinished(AdmissionBoundaryFacts),
+    OriginalFinished,
 }
 
 async fn next_held_fixture_event(
@@ -2186,7 +2205,37 @@ async fn next_held_fixture_event(
     heads: &mut mpsc::UnboundedReceiver<ProxyRequestEvent>,
     slot: &DriverSlot,
 ) -> HeldFixtureEvent {
+    next_held_fixture_event_with_completion(control, thread, receive, heads, slot, None).await
+}
+
+async fn next_held_fixture_event_for_attempt(
+    control: &Control,
+    thread: &str,
+    receive: &mut mpsc::Receiver<Incoming>,
+    heads: &mut mpsc::UnboundedReceiver<ProxyRequestEvent>,
+    slot: &DriverSlot,
+    identity: &TerminalAttemptIdentity,
+) -> HeldFixtureEvent {
+    next_held_fixture_event_with_completion(control, thread, receive, heads, slot, Some(identity))
+        .await
+}
+
+async fn next_held_fixture_event_with_completion(
+    control: &Control,
+    thread: &str,
+    receive: &mut mpsc::Receiver<Incoming>,
+    heads: &mut mpsc::UnboundedReceiver<ProxyRequestEvent>,
+    slot: &DriverSlot,
+    identity: Option<&TerminalAttemptIdentity>,
+) -> HeldFixtureEvent {
+    // Subscribe before reading FINISH so a terminal write cannot race past the waiter.
+    let mut events = control.subscribe();
     loop {
+        if let Some(identity) = identity {
+            if terminal_attempt_finished(control, identity).await {
+                return HeldFixtureEvent::OriginalFinished;
+            }
+        }
         let notified = slot.nudge.notified();
         tokio::pin!(notified);
         let finished = {
@@ -2195,19 +2244,45 @@ async fn next_held_fixture_event(
                 .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
         };
         if finished {
-            return HeldFixtureEvent::JobFinished(admission_boundary_facts(control, thread).await);
+            if let Some(identity) = identity {
+                if terminal_attempt_finished(control, identity).await {
+                    return HeldFixtureEvent::OriginalFinished;
+                }
+            } else {
+                return HeldFixtureEvent::JobFinished(
+                    admission_boundary_facts(control, thread).await,
+                );
+            }
         }
         tokio::select! {
             biased;
             event = heads.recv() => return HeldFixtureEvent::Header(event.expect("mock head channel remains open")),
             request = receive.recv() => return HeldFixtureEvent::Request(request.expect("mock body channel remains open")),
+            event = events.recv(), if identity.is_some() => match event {
+                Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => {
+                    if let Some(identity) = identity {
+                        if terminal_attempt_finished(control, identity).await {
+                            return HeldFixtureEvent::OriginalFinished;
+                        }
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => panic!("engine event stream closed while awaiting original automatic-attempt FINISH"),
+                _ => {},
+            },
             _ = &mut notified => {
                 let finished = {
                     let job = slot.proactive_job.lock().await;
                     job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
                 };
                 if finished {
-                    return HeldFixtureEvent::JobFinished(admission_boundary_facts(control, thread).await);
+                    if let Some(identity) = identity {
+                        if terminal_attempt_finished(control, identity).await {
+                            return HeldFixtureEvent::OriginalFinished;
+                        }
+                    } else {
+                        return HeldFixtureEvent::JobFinished(admission_boundary_facts(control, thread).await);
+                    }
                 }
             }
         }
@@ -2759,6 +2834,9 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
                 HeldFixtureEvent::Header(_) => {}
                 HeldFixtureEvent::JobFinished(facts) => panic!(
                     "proactive job finished before its summary was captured: {facts:?}"
+                ),
+                HeldFixtureEvent::OriginalFinished => panic!(
+                    "original automatic attempt FINISH arrived before its summary was captured"
                 ),
             }
         }
