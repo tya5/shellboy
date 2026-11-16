@@ -43,8 +43,10 @@ class PublicUpgradeArguments(unittest.TestCase):
         self.assertIn('(44, "0044_thread_max_tokens")', names)
         self.assertIn('(45, "0045_thread_spill_override")', names)
         self.assertIn('(46, "0046_scope_identity_v2")', names)
-        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 46)
+        self.assertIn('(47, "0047_drop_selection_nonappend_generation")', names)
+        self.assertEqual(upgrade.CURRENT_SCHEMA_VERSION, 47)
         self.assertTrue((ROOT / 'migrations/0046_scope_identity_v2.sql').is_file())
+        self.assertTrue((ROOT / 'migrations/0047_drop_selection_nonappend_generation.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0045_thread_spill_override.sql').is_file())
         self.assertTrue((ROOT / 'migrations/0039_independent_runs.sql').is_file())
 
@@ -60,9 +62,9 @@ class PublicUpgradeArguments(unittest.TestCase):
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('old','/','','p','m','now')")
         upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
         self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0046_scope_identity_v2'))
+        self.assertEqual(db.execute("SELECT version,name FROM schema_migration ORDER BY version DESC LIMIT 1").fetchone(), (upgrade.CURRENT_SCHEMA_VERSION, '0047_drop_selection_nonappend_generation'))
         self.assertIsNone(db.execute("SELECT spill_override FROM thread WHERE id='old'").fetchone()[0])
-        # The spill constraint remains pinned to 45 even after data-only 46.
+        # The spill constraint remains pinned to 45 after schema 46 and 47.
         upgrade.check_migration(db, before_45, 44, upgrade.CURRENT_SCHEMA_VERSION)
         columns = [tuple(row) for row in db.execute('PRAGMA table_info(thread)')]
         fresh = sqlite3.connect(':memory:')
@@ -117,13 +119,13 @@ class PublicUpgradeArguments(unittest.TestCase):
                 db.executescript((ROOT / 'tests/fixtures/storage-current-schema43.sql').read_text())
                 upgrade.prepare_schema(db, start)
                 before = upgrade.ledger(db)
-                upgrade.prepare_schema(db, 46)
-                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 46)
+                upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
+                self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], upgrade.CURRENT_SCHEMA_VERSION)
                 self.assertEqual(upgrade.ledger(db)[:len(before)], before)
-                self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=46').fetchone()[0], 1)
+                self.assertEqual(db.execute('SELECT count(*) FROM schema_migration WHERE version=47').fetchone()[0], 1)
                 self.assertEqual(db.execute("SELECT count(*) FROM app_meta WHERE key GLOB 'compact.a_state.*'").fetchone()[0], 0)
                 after = upgrade.ledger(db)
-                upgrade.prepare_schema(db, 46)
+                upgrade.prepare_schema(db, upgrade.CURRENT_SCHEMA_VERSION)
                 self.assertEqual(upgrade.ledger(db), after)
 
     def test_migration_registry_version_derivation_rejects_empty_duplicate_and_gap(self):
