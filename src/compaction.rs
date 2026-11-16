@@ -1096,7 +1096,13 @@ impl Compactor {
                 crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
                 crate::model::http::RateAdmission::Lease(_) => {
                     client
-                        .response_for_thread_pre_admitted(thread, request, cancel)
+                        .response_for_thread_pre_admitted(
+                            thread,
+                            request,
+                            cancel,
+                            #[cfg(test)]
+                            gc_dispatch_stage,
+                        )
                         .await
                 }
             };

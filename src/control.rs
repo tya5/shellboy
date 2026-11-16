@@ -139,7 +139,8 @@ pub(crate) enum GcDispatchStage {
     RateWaitGranted,
     LedgerObservationStarted,
     LedgerObservationRecorded,
-    ProviderSendEntered,
+    ResponsePathEntered,
+    TransportSendEntered,
 }
 
 #[cfg(test)]

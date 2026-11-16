@@ -363,6 +363,9 @@ impl HttpModelClient {
         cancel: &CancellationToken,
         deadline: &Deadline,
         session_header: Option<&HeaderValue>,
+        #[cfg(test)] _gc_dispatch_stage: Option<
+            &Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<(Response, Vec<String>, HttpObservation), ModelError> {
         if cancel.is_cancelled() {
             return Err(cancelled());
@@ -544,6 +547,8 @@ impl HttpModelClient {
                 cancel,
                 deadline,
                 None,
+                #[cfg(test)]
+                None,
             )
             .await?;
         deadline.received();
@@ -665,6 +670,8 @@ impl HttpModelClient {
                 Some(&request),
                 &cancel,
                 &deadline,
+                None,
+                #[cfg(test)]
                 None,
             )
             .await?;

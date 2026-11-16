@@ -132,8 +132,16 @@ impl HttpModelClient {
             _ if cancel.is_cancelled() => Err(cancelled().into()),
             RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             RateAdmission::Lease(_) => {
-                self.response_inner(request, cancel, events, thread, None)
-                    .await
+                self.response_inner(
+                    request,
+                    cancel,
+                    events,
+                    thread,
+                    None,
+                    #[cfg(test)]
+                    None,
+                )
+                .await
             }
         };
         match &mut result {
@@ -163,9 +171,20 @@ impl HttpModelClient {
         thread: &str,
         request: Value,
         cancel: CancellationToken,
+        #[cfg(test)] gc_dispatch_stage: Option<
+            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(request, cancel, None, Some(thread), None)
-            .await
+        self.response_inner(
+            request,
+            cancel,
+            None,
+            Some(thread),
+            None,
+            #[cfg(test)]
+            gc_dispatch_stage,
+        )
+        .await
     }
     // Preserve the same bounded recovery payload as response().
     #[allow(clippy::result_large_err)]
@@ -176,6 +195,9 @@ impl HttpModelClient {
         cancel: CancellationToken,
         events: Option<mpsc::Sender<ObservedEvent>>,
         bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
+        #[cfg(test)] gc_dispatch_stage: Option<
+            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<ModelResponse, AttemptFailure> {
         self.response_inner(
             request,
@@ -183,6 +205,8 @@ impl HttpModelClient {
             events.map(Events::Observed),
             Some(thread),
             bypass_usage_limit,
+            #[cfg(test)]
+            None,
         )
         .await
     }
@@ -416,6 +440,9 @@ impl HttpModelClient {
         context: RequestContext<'_>,
         facts: &mut ResponseFacts,
         session_header: Option<HeaderValue>,
+        #[cfg(test)] gc_dispatch_stage: Option<
+            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<ModelResponse, AttemptFailure> {
         let (response, secrets, observation) = self
             .send(
@@ -425,6 +452,8 @@ impl HttpModelClient {
                 context.cancel,
                 context.deadline,
                 session_header.as_ref(),
+                #[cfg(test)]
+                gc_dispatch_stage,
             )
             .await?;
         facts.http_observation = Some(observation);
