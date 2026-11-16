@@ -544,8 +544,6 @@ impl HttpModelClient {
                 cancel,
                 deadline,
                 None,
-                #[cfg(test)]
-                None,
             )
             .await?;
         deadline.received();
@@ -667,8 +665,6 @@ impl HttpModelClient {
                 Some(&request),
                 &cancel,
                 &deadline,
-                None,
-                #[cfg(test)]
                 None,
             )
             .await?;

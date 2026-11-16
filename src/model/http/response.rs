@@ -132,16 +132,8 @@ impl HttpModelClient {
             _ if cancel.is_cancelled() => Err(cancelled().into()),
             RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             RateAdmission::Lease(_) => {
-                self.response_inner(
-                    request,
-                    cancel,
-                    events,
-                    thread,
-                    None,
-                    #[cfg(test)]
-                    None,
-                )
-                .await
+                self.response_inner(request, cancel, events, thread, None)
+                    .await
             }
         };
         match &mut result {
