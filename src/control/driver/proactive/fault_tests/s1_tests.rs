@@ -148,7 +148,7 @@ async fn terminal_public_case(case: &str) {
         };
     crate::test_watchdog::watchdog("public terminal compaction contract", async {
         let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, _heads, server) = proxy().await;
+        let (url, mut receive, mut heads, server) = proxy().await;
         let owner = if stream_case {
             proactive_owner_retries(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n", retry_limit, chat_api).await
         } else {
@@ -166,63 +166,128 @@ async fn terminal_public_case(case: &str) {
         initial.reply.send((200, first(&"D".repeat(8192), 200))).unwrap();
         settled(&control, &target).await;
         send(&control, &target, "trigger summary").await;
+        let slot = control
+            .live
+            .test_drivers()
+            .lock()
+            .await
+            .get(&target)
+            .cloned()
+            .expect("trigger Run retains the original proactive summary job");
+        let mut terminal_identity = None;
+        let mut ordinary_replied = false;
         let mut summary_posts = 0;
         let mut held_sse_release = None;
         loop {
+            let event = next_held_fixture_event(&control, &target, &mut receive, &mut heads, &slot).await;
+            let Some(event) = event else {
+                break;
+            };
+            match event {
+                HeldFixtureEvent::Request(mut next) => {
+                    let automatic_summary = if chat_api {
+                        next.body
+                            .get("tools")
+                            .and_then(Value::as_array)
+                            .is_none_or(Vec::is_empty)
+                    } else {
+                        next.body["tools"] == json!([])
+                    };
+                    if automatic_summary {
+                        if terminal_identity.is_none() {
+                            terminal_identity =
+                                Some(capture_terminal_identity(&control, &target, true).await);
+                        }
+                        summary_posts += 1;
+                        if sse_terminal || sse_eof {
+                            let raw = if sse_eof {
+                                if chat_api {
+                                    String::from("data: {\"id\":\"eof\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}\n\n")
+                                } else {
+                                    String::from("data: {\"type\":\"response.created\",\"response\":{\"id\":\"eof\",\"status\":\"in_progress\"}}\n\n")
+                                }
+                            } else {
+                                format!("data: {{\"error\":{{\"code\":\"{embedded_status}\",\"message\":\"SECRET_PROVIDER_MESSAGE\"}}}}\n\n")
+                            };
+                            if !sse_eof {
+                                held_sse_release = next.release.take();
+                            }
+                            next.reply.send((200,json!({"_test_sse_body":raw,"_test_hold_sse_open":!sse_eof}))).unwrap();
+                            continue;
+                        }
+                        let code = if context { "context_length_exceeded" } else if s2_minimum { if case.ends_with("body500") { "500" } else { "invalid_request_error" } } else if case == "s2_http500_body400" { "400" } else { "SECRET_PROVIDER_CODE" };
+                        let response = if case == "protocol" {
+                            (200, json!({"status":"completed","output":"SECRET_PROVIDER_MESSAGE"}))
+                        } else if case == "s2_minimum_http400_success" && summary_posts == 2 {
+                            (200, answer("summary"))
+                        } else {
+                            let body = if case == "s2_veto_quota_context" {
+                                json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":"context_length_exceeded","type":"usage_limit_reached","resets_at":chrono::Utc::now().timestamp()+3600}})
+                            } else if case == "s2_retry_after_429" {
+                                json!({"_test_retry_after":true,"error":{"message":"SECRET_PROVIDER_MESSAGE"}})
+                            } else if s2_incomplete {
+                                json!({"_test_incomplete":if case == "s2_truncated_http413" {"bounded"} else {"cutoff"}})
+                            } else {
+                                json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":code,"compaction_outcome":{"kind":"rejected","reason":"profile_changed"}}})
+                            };
+                            (match case { "context" | "s2_minimum_http400" | "s2_minimum_http400_success" | "s2_minimum_http400_body500" | "s2_incomplete_http400" => 400, "s2_minimum_http413" | "s2_truncated_http413" => 413, "s2_minimum_http422" => 422, "s2_http500_body400" | "provider500" => 500, "provider429" | "s2_veto_429_context" | "s2_veto_quota_context" | "s2_retry_after_429" => 429, "s2_veto_403_context" => 403, "s2_veto_404_context" => 404, _ => 401 }, body)
+                        };
+                        next.reply.send(response).unwrap();
+                    } else {
+                        if let Some(release) = held_sse_release.take() {
+                            let _ = release.send(());
+                        }
+                        let response = if chat_api {
+                            chat_answer_with_usage("conversation continues", 10)
+                        } else {
+                            answer_with_usage("conversation continues", 10)
+                        };
+                        next.reply.send((200, response)).unwrap();
+                        ordinary_replied = true;
+                    }
+                }
+                HeldFixtureEvent::Header(_) => {}
+                HeldFixtureEvent::JobFinished(facts) => {
+                    let identity = terminal_identity
+                        .as_ref()
+                        .expect("capture original receipt at first summary request");
+                    assert!(
+                        terminal_record_written(
+                            &control,
+                            identity,
+                            if s2_success { "adopted" } else { "failed" },
+                            if s2_success { Some("closed_summary") } else { None },
+                        )
+                        .await,
+                        "same proactive job completion must follow original attempt FINISH: {facts:?}"
+                    );
+                    break;
+                }
+            }
+        }
+        if !ordinary_replied {
             let mut next = incoming(&control, &mut receive).await;
             let automatic_summary = if chat_api {
-                next.body.get("tools").and_then(Value::as_array).is_none_or(Vec::is_empty)
+                next.body
+                    .get("tools")
+                    .and_then(Value::as_array)
+                    .is_none_or(Vec::is_empty)
             } else {
                 next.body["tools"] == json!([])
             };
-            if automatic_summary {
-                summary_posts += 1;
-                if sse_terminal || sse_eof {
-                    let raw = if sse_eof {
-                        if chat_api {
-                            String::from("data: {\"id\":\"eof\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":null}]}\n\n")
-                        } else {
-                            String::from("data: {\"type\":\"response.created\",\"response\":{\"id\":\"eof\",\"status\":\"in_progress\"}}\n\n")
-                        }
-                    } else {
-                        format!("data: {{\"error\":{{\"code\":\"{embedded_status}\",\"message\":\"SECRET_PROVIDER_MESSAGE\"}}}}\n\n")
-                    };
-                    if !sse_eof {
-                        held_sse_release = next.release.take();
-                    }
-                    next.reply.send((200,json!({"_test_sse_body":raw,"_test_hold_sse_open":!sse_eof}))).unwrap();
-                    continue;
-                }
-                let code = if context { "context_length_exceeded" } else if s2_minimum { if case.ends_with("body500") { "500" } else { "invalid_request_error" } } else if case == "s2_http500_body400" { "400" } else { "SECRET_PROVIDER_CODE" };
-                        let response = if case == "protocol" {
-                    (200, json!({"status":"completed","output":"SECRET_PROVIDER_MESSAGE"}))
-                } else if case == "s2_minimum_http400_success" && summary_posts == 2 {
-                    (200, answer("summary"))
-                } else {
-                    let body = if case == "s2_veto_quota_context" {
-                        json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":"context_length_exceeded","type":"usage_limit_reached","resets_at":chrono::Utc::now().timestamp()+3600}})
-                    } else if case == "s2_retry_after_429" {
-                        json!({"_test_retry_after":true,"error":{"message":"SECRET_PROVIDER_MESSAGE"}})
-                    } else if s2_incomplete {
-                        json!({"_test_incomplete":if case == "s2_truncated_http413" {"bounded"} else {"cutoff"}})
-                    } else {
-                        json!({"error":{"message":"SECRET_PROVIDER_MESSAGE","code":code,"compaction_outcome":{"kind":"rejected","reason":"profile_changed"}}})
-                    };
-                    (match case { "context" | "s2_minimum_http400" | "s2_minimum_http400_success" | "s2_minimum_http400_body500" | "s2_incomplete_http400" => 400, "s2_minimum_http413" | "s2_truncated_http413" => 413, "s2_minimum_http422" => 422, "s2_http500_body400" | "provider500" => 500, "provider429" | "s2_veto_429_context" | "s2_veto_quota_context" | "s2_retry_after_429" => 429, "s2_veto_403_context" => 403, "s2_veto_404_context" => 404, _ => 401 }, body)
-                };
-                next.reply.send(response).unwrap();
-                if case == "s2_veto_quota_context" || case == "s2_retry_after_429" {
-                    break;
-                }
-            } else {
-                if let Some(release) = held_sse_release.take() {
-                    let _ = release.send(());
-                }
-                let response = if chat_api { chat_answer_with_usage("conversation continues", 10) } else { answer_with_usage("conversation continues", 10) };
-                next.reply.send((200, response)).unwrap();
-                break;
+            assert!(!automatic_summary, "finished original job cannot produce another summary request");
+            if let Some(release) = held_sse_release.take() {
+                let _ = release.send(());
             }
+            let response = if chat_api {
+                chat_answer_with_usage("conversation continues", 10)
+            } else {
+                answer_with_usage("conversation continues", 10)
+            };
+            next.reply.send((200, response)).unwrap();
+            ordinary_replied = true;
         }
+        assert!(ordinary_replied, "service the ordinary trigger response before readback");
         settled(&control, &target).await;
         let page = request(&control, Command::Status(StatusArgs { thread_id: Some(target.clone()), all: true, limit: 200, ..Default::default() })).await;
         let list = request(&control, Command::CompactList(CompactListArgs { thread_id: Some(target.clone()), since: None, until: None, limit: 20 })).await;
