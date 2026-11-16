@@ -178,7 +178,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
         let summary = held_summary
             .take()
             .expect("one proactive summary request is held");
-        let normal = incoming(control, receive).await;
+        let normal = incoming(&control, &mut receive).await;
         assert_ne!(normal.body, summary.body);
         normal
             .reply

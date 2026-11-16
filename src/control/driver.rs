@@ -227,7 +227,7 @@ async fn drive_inner(
         // Safe request boundary: tool groups are complete and no request is in
         // flight. A reported input over the threshold compacts here, one step
         // after the large request; the new snapshot is then read again.
-        let mut snapshot = snapshot;
+        let snapshot = snapshot;
         let proactive_job_exists = slot.proactive_job.lock().await.is_some();
         if !proactive_job_exists {
             drop(boundary_guard);
