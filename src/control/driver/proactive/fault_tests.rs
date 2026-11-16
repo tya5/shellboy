@@ -177,7 +177,11 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
         } = prepare_held_summary(Scenario::ClosedSummary).await;
         let HeldSummaryPhase { summary, normal } = held_phase
             .take()
-            .expect("summary and normal request are held as one phase");
+            .expect("proactive summary reached its provider boundary");
+        let normal = match normal {
+            Some(normal) => normal,
+            None => incoming(&control, &mut receive).await,
+        };
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -246,8 +250,12 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         } = &mut fx;
         let HeldSummaryPhase { summary, normal } = held_phase
             .take()
-            .expect("summary and normal request are held at the provider boundary");
+            .expect("proactive summary reached its provider boundary");
         assert_eq!(summary.body["tools"], json!([]));
+        let normal = match normal {
+            Some(normal) => normal,
+            None => incoming(control, receive).await,
+        };
         let before: Vec<String> = control
             .store
             .database
@@ -498,12 +506,17 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             target,
             server,
             mut held_phase,
+            mut receive,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
         let HeldSummaryPhase { summary, normal } = held_phase
             .take()
-            .expect("summary and normal request are held before natural Run A completion");
+            .expect("proactive summary reached its provider boundary");
         assert_eq!(summary.body["tools"], json!([]));
+        let normal = match normal {
+            Some(normal) => normal,
+            None => incoming(&control, &mut receive).await,
+        };
         normal
             .reply
             .send((200, answer_with_usage("finish Run A", 100)))
@@ -1003,11 +1016,15 @@ async fn prepare_with_mode(
                 "Run A must retain the eligible summary job before it naturally retires: {facts:?}"
             );
         }
-        eprintln!("U2 closed trigger before next Turn: {facts:?}");
-        send(&control, &target, "next turn").await;
+        eprintln!("U2 closed trigger before continuation send: {facts:?}");
+        let accepted: MessageAccepted =
+            serde_json::from_value(send(&control, &target, "next turn").await).unwrap();
+        eprintln!(
+            "U2 trigger continuation receipt: assignment={:?} run_id={:?} turn_id={:?} delivery={:?}",
+            accepted.assignment, accepted.run_id, accepted.turn_id, accepted.delivery_status
+        );
     }
     let mut held_summary = None;
-    let mut held_normal = None;
     let held_slot = if hold_summary {
         let drivers = control.live.test_drivers().lock().await;
         Some(
@@ -1093,6 +1110,7 @@ async fn prepare_with_mode(
             if request.body["tools"] == json!([]) {
                 if hold_summary {
                     held_summary = Some(request);
+                    break;
                 } else {
                     let summary_request = request;
                     let diagnostic = control
@@ -1254,20 +1272,10 @@ async fn prepare_with_mode(
                     );
                     first_normal_facts_recorded = true;
                 }
-                if hold_summary && held_summary.is_some() {
-                    assert!(
-                        held_normal.replace(request).is_none(),
-                        "only one post-summary ordinary request is held"
-                    );
-                } else {
-                    request
-                        .reply
-                        .send((200, answer_with_usage("normal continuation", 100)))
-                        .unwrap();
-                }
-            }
-            if hold_summary && held_summary.is_some() && held_normal.is_some() {
-                break;
+                request
+                    .reply
+                    .send((200, answer_with_usage("normal continuation", 100)))
+                    .unwrap();
             }
         }
     }
@@ -1307,7 +1315,7 @@ async fn prepare_with_mode(
     let held_phase = if hold_summary {
         Some(HeldSummaryPhase {
             summary: held_summary.expect("held-summary phase captured its summary request"),
-            normal: held_normal.expect("held-summary phase captured its ordinary request"),
+            normal: None,
         })
     } else {
         None
@@ -1395,7 +1403,7 @@ async fn prepare_with_mode(
 
 struct HeldSummaryPhase {
     summary: Incoming,
-    normal: Incoming,
+    normal: Option<Incoming>,
 }
 
 struct Fx {
