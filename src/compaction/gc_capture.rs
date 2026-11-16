@@ -92,7 +92,6 @@ pub(crate) struct GcRangePlan {
     pub(crate) profile_revision: i64,
     pub(crate) epoch: i64,
     pub(crate) active_turn: bool,
-    pub(crate) spill_epoch_advanced: bool,
     pub(crate) active_user_messages: Vec<String>,
 }
 
@@ -321,7 +320,6 @@ fn plan_gc_prefix_tx(
         profile_revision,
         epoch,
         active_turn: false,
-        spill_epoch_advanced,
         active_user_messages: Vec::new(),
     }))
 }
@@ -553,7 +551,6 @@ pub(super) fn plan_gc_active_turn_tx(
         profile_revision,
         epoch,
         active_turn: true,
-        spill_epoch_advanced,
         active_user_messages,
     }))
 }

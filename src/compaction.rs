@@ -2659,7 +2659,7 @@ mod tests {
             "post-spill active plan inputs (current turn/current user/latest complete tool/spill markers/committed epoch witness) must still select R"
         );
         let plan = planned.unwrap();
-        assert!(plan.active_turn && plan.spill_epoch_advanced);
+        assert!(plan.active_turn);
         assert!(plan.range.end > plan.range.start);
         assert_eq!(plan.sources.len(), 2);
         assert!(
