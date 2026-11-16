@@ -1138,6 +1138,9 @@ async fn prepare_with_mode(
         None
     };
     let mut active_phase = ActiveTurnPhase::new(custody);
+    if scenario.active() {
+        active_phase.register_initial("boundary-small", "echo last");
+    }
     request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() || hold_summary {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
     if !scenario.active() && !hold_summary {
         incoming(&control, &mut receive)
@@ -1511,7 +1514,7 @@ async fn prepare_with_mode(
         tokio::task::yield_now().await;
     }
     if checkpoint_reached.load(Ordering::SeqCst) {
-        active_phase.checkpoint_continuations = Some(active_phase.continuation_groups);
+        active_phase.begin_post_checkpoint();
     }
     let held_phase = if hold_summary {
         Some(HeldSummaryPhase {
@@ -1634,6 +1637,8 @@ struct ActivePhaseCustody {
 struct ScriptedPhaseCall {
     call_id: String,
     command: String,
+    continuation: bool,
+    checkpoint: bool,
 }
 
 #[derive(Clone, Default)]
@@ -1642,6 +1647,8 @@ struct ActiveTurnPhase {
     next_call: u64,
     continuation_groups: usize,
     checkpoint_continuations: Option<usize>,
+    post_checkpoint_start: Option<usize>,
+    reject_final_boundary: Option<usize>,
     scripted: Vec<ScriptedPhaseCall>,
 }
 
@@ -1653,6 +1660,15 @@ impl ActiveTurnPhase {
         }
     }
 
+    fn register_initial(&mut self, call_id: &str, command: &str) {
+        self.scripted.push(ScriptedPhaseCall {
+            call_id: call_id.to_owned(),
+            command: command.to_owned(),
+            continuation: false,
+            checkpoint: true,
+        });
+    }
+
     fn continue_turn(&mut self, request: Incoming) {
         let call_id = format!("active-phase-{}", self.next_call);
         let response_id = format!("active-phase-response-{}", self.next_call);
@@ -1662,6 +1678,8 @@ impl ActiveTurnPhase {
         self.scripted.push(ScriptedPhaseCall {
             call_id: call_id.clone(),
             command: command.clone(),
+            continuation: true,
+            checkpoint: self.post_checkpoint_start.is_none(),
         });
         request
             .reply
@@ -1682,6 +1700,19 @@ impl ActiveTurnPhase {
             .unwrap();
     }
 
+    fn begin_post_checkpoint(&mut self) {
+        self.checkpoint_continuations = Some(self.continuation_groups);
+        self.post_checkpoint_start = Some(self.scripted.len());
+    }
+
+    fn mark_reject_final_entry(&mut self) {
+        self.reject_final_boundary = Some(self.scripted.len());
+    }
+
+    fn begin_post_release(&mut self) {
+        self.post_checkpoint_start = Some(self.scripted.len());
+    }
+
     fn checkpoint_continuations(&self) -> usize {
         self.checkpoint_continuations
             .unwrap_or(self.continuation_groups)
@@ -1690,6 +1721,7 @@ impl ActiveTurnPhase {
     fn certificate(
         &self,
         db: &rusqlite::Connection,
+        allow_post_checkpoint: bool,
     ) -> Result<ActivePhaseCertificate, crate::storage::StorageError> {
         let mut certificate = ActivePhaseCertificate::default();
         let Some(custody) = self.custody.as_ref() else {
@@ -1700,8 +1732,12 @@ impl ActiveTurnPhase {
             return Ok(certificate);
         };
         for scripted in &self.scripted {
+            let post_checkpoint = !scripted.checkpoint;
+            if post_checkpoint && !allow_post_checkpoint {
+                continue;
+            }
             let mut statement = db.prepare(
-                "SELECT a.id,oi.node_id,oi.payload_json,oi.status,a.state,t.thread_id,t.run_id,t.id,t.generation,n.kind,n.payload_json FROM output_item oi JOIN model_attempt a ON a.id=oi.attempt_id JOIN turn t ON t.id=a.turn_id JOIN node n ON n.id=oi.node_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND t.generation=?4 AND oi.item_type='function_call' AND json_extract(oi.payload_json,'$.call_id')=?5 ORDER BY a.rowid,oi.ordinal",
+                "SELECT a.id,oi.node_id,oi.payload_json,oi.status,a.state,t.thread_id,t.run_id,t.id,a.generation,n.kind,n.thread_id,n.turn_id,n.payload_json FROM output_item oi JOIN model_attempt a ON a.id=oi.attempt_id JOIN turn t ON t.id=a.turn_id JOIN node n ON n.id=oi.node_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND oi.item_type='function_call' AND json_extract(oi.payload_json,'$.call_id')=?5 ORDER BY a.rowid,oi.ordinal",
             )?;
             let rows = statement
                 .query_map(
@@ -1725,17 +1761,17 @@ impl ActiveTurnPhase {
                             row.get::<_, i64>(8)?,
                             row.get::<_, String>(9)?,
                             row.get::<_, String>(10)?,
+                            row.get::<_, String>(11)?,
+                            row.get::<_, Option<String>>(12)?,
+                            row.get::<_, String>(13)?,
                         ))
                     },
                 )?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
-            if rows.is_empty() {
-                continue;
-            }
             assert_eq!(
                 rows.len(),
                 1,
-                "one scripted call has one captured original output item"
+                "every registered continuation has exactly one original output item"
             );
             let (
                 attempt,
@@ -1748,6 +1784,8 @@ impl ActiveTurnPhase {
                 turn,
                 generation,
                 node_kind,
+                assistant_thread,
+                assistant_turn,
                 assistant_json,
             ) = rows.into_iter().next().unwrap();
             assert_eq!(thread, custody.thread, "scripted continuation Thread");
@@ -1755,7 +1793,16 @@ impl ActiveTurnPhase {
             assert_eq!(turn, custody.turn, "scripted continuation Turn");
             assert_eq!(
                 generation, custody.generation,
-                "scripted continuation generation"
+                "immutable model-attempt generation"
+            );
+            assert_eq!(
+                assistant_thread, custody.thread,
+                "assistant node Thread owner"
+            );
+            assert_eq!(
+                assistant_turn.as_deref(),
+                Some(custody.turn.as_str()),
+                "assistant node Turn owner"
             );
             assert_eq!(
                 attempt_state, "completed",
@@ -1848,18 +1895,17 @@ impl ActiveTurnPhase {
                     .is_none(),
                 "scripted call id is unique"
             );
+            let nodes = if post_checkpoint {
+                &mut certificate.post_checkpoint_nodes
+            } else {
+                &mut certificate.nodes
+            };
             assert!(
-                certificate
-                    .nodes
-                    .insert(assistant_node, "assistant_response")
-                    .is_none(),
+                nodes.insert(assistant_node, "assistant_response").is_none(),
                 "assistant node is unique"
             );
             assert!(
-                certificate
-                    .nodes
-                    .insert(result_node, "tool_result")
-                    .is_none(),
+                nodes.insert(result_node, "tool_result").is_none(),
                 "tool result node is unique"
             );
         }
@@ -1870,6 +1916,7 @@ impl ActiveTurnPhase {
 #[derive(Default)]
 struct ActivePhaseCertificate {
     nodes: std::collections::BTreeMap<String, &'static str>,
+    post_checkpoint_nodes: std::collections::BTreeMap<String, &'static str>,
     groups_by_call: std::collections::BTreeMap<String, String>,
 }
 
@@ -2050,6 +2097,10 @@ async fn after_release(
         }
         return;
     }
+    active_phase.begin_post_release();
+    if fault == Fault::RejectFinal {
+        active_phase.mark_reject_final_entry();
+    }
     let mut summary_seen = false;
     crate::test_watchdog::watchdog("active spill continuation provider pump", async {
         loop {
@@ -2064,6 +2115,7 @@ async fn after_release(
                         .send((200, answer("Short adopted summary.")))
                         .unwrap();
                     summary_seen = true;
+                    active_phase.begin_post_release();
                 } else {
                     active_phase.continue_turn(request);
                 }
@@ -2321,13 +2373,25 @@ async fn assert_boundary(
         assert!(current_path.len() >= committed_path.len());
         assert_eq!(&current_path[..committed_path.len()], committed_path, "committed selection is preserved exactly");
         let appended = &current_path[committed_path.len()..];
-        let phase_certificate = active_phase.certificate(db)?;
+        let allow_post_checkpoint = phase != "checkpoint"
+            && scenario == Scenario::ActiveSpill
+            && fault == Fault::Remeasurement;
+        let phase_certificate = active_phase.certificate(db, allow_post_checkpoint)?;
+        let mut allowed_suffix = phase_certificate.nodes.clone();
+        if phase != "checkpoint"
+            && scenario == Scenario::ActiveSpill
+            && fault == Fault::Remeasurement
+        {
+            for (node, kind) in &phase_certificate.post_checkpoint_nodes {
+                assert!(allowed_suffix.insert(node.clone(), *kind).is_none());
+            }
+        }
         assert_interruption_audits(
             db,
             appended,
             phase,
             committed_path.len(),
-            &phase_certificate.nodes,
+            &allowed_suffix,
         )?;
         assert_eq!(current_path.last(), Some(&cursor));
         assert_eq!(current_revision, revision + appended.len() as i64, "only validated audit append commits advance selection_revision");
@@ -2353,6 +2417,17 @@ async fn assert_boundary(
         if scenario == Scenario::ActiveSpill && fault == Fault::RejectFinal {
             assert!(record["committed_stages"]["active_summary"].is_null(), "rejected active-summary FINISH rolls back its path and stage: {record}");
             assert_eq!(record["outcome"], "unknown", "rejected final writer preserves the provisional original spill: {record}");
+            assert!(active_phase.reject_final_boundary.is_some(), "the fixture served the ordinary request that entered the rejected summary transaction");
+            let committed: i64 = db.query_row(
+                "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
+                [&target], |row| row.get(0),
+            )?;
+            assert_eq!(committed, 0, "rejected follow-on active summary leaves no adopted summary node");
+            let active_attempts: i64 = db.query_row(
+                "SELECT count(*) FROM model_attempt WHERE turn_id=?1 AND json_extract(error_json,'$.automatic_trim_attempt.stages.active_summary') IS NOT NULL",
+                [custody.turn], |row| row.get(0),
+            )?;
+            assert_eq!(active_attempts, 0, "no committed active-summary automatic attempt survives rejected FINISH");
         }
         let kinds: Vec<String> = db.prepare("SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let expected: Vec<&str> = match scenario {
@@ -2374,27 +2449,20 @@ async fn assert_boundary(
                 .expect("active spill proof has original phase custody");
             let continuation_count = active_phase.checkpoint_continuations();
             assert!(
-                continuation_count <= active_phase.scripted.len(),
+                continuation_count <= active_phase.continuation_groups,
                 "checkpoint continuation count is bound to registered script entries"
             );
-            let checkpoint_scripts = &active_phase.scripted[..continuation_count];
+            let checkpoint_scripts: Vec<_> = active_phase
+                .scripted
+                .iter()
+                .filter(|script| script.continuation && script.checkpoint)
+                .take(continuation_count)
+                .collect();
             assert_eq!(checkpoint_scripts.len(), continuation_count);
-            for script in checkpoint_scripts {
-                assert!(
-                    phase_certificate.groups_by_call.contains_key(&script.call_id),
-                    "checkpoint script has exact attempt/output-item/node/group/result custody: {}",
-                    script.call_id
-                );
-            }
-            assert_eq!(
-                active_phase.scripted.len(),
-                active_phase.continuation_groups,
-                "phase group count equals registered script entries"
-            );
             let mut expected_groups = std::collections::BTreeSet::new();
             for call_id in ["boundary-0", "boundary-1"] {
                 let group: String = db.query_row(
-                    "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND t.generation=?4 AND c.call_id=?5 AND g.state='completed'",
+                    "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id JOIN model_attempt a ON a.id=g.attempt_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND c.call_id=?5 AND g.state='completed'",
                     rusqlite::params![custody.thread,custody.run,custody.turn,custody.generation,call_id],
                     |row| row.get(0),
                 )?;
@@ -2404,12 +2472,12 @@ async fn assert_boundary(
                 String::from("boundary-small")
             } else {
                 let boundary_group: String = db.query_row(
-                    "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND t.generation=?4 AND c.call_id='boundary-small' AND g.state='completed'",
+                    "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id JOIN model_attempt a ON a.id=g.attempt_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND c.call_id='boundary-small' AND g.state='completed'",
                     rusqlite::params![custody.thread,custody.run,custody.turn,custody.generation],
                     |row| row.get(0),
                 )?;
                 expected_groups.insert(boundary_group);
-                for script in active_phase.scripted.iter().take(continuation_count - 1) {
+                for script in checkpoint_scripts.iter().take(continuation_count - 1) {
                     expected_groups.insert(
                         phase_certificate.groups_by_call
                             .get(&script.call_id)
@@ -2417,9 +2485,9 @@ async fn assert_boundary(
                             .clone(),
                     );
                 }
-                active_phase.scripted[continuation_count - 1].call_id.clone()
+                checkpoint_scripts[continuation_count - 1].call_id.clone()
             };
-            for script in active_phase.scripted.iter().take(continuation_count) {
+            for script in checkpoint_scripts {
                 assert!(
                     phase_certificate.groups_by_call.contains_key(&script.call_id),
                     "each checkpoint script has exact attempt/output/node/group/result custody: {}",
@@ -2431,7 +2499,7 @@ async fn assert_boundary(
             )?.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;
             assert_eq!(actual_groups, expected_groups, "spill provenance is exactly the two original groups plus eligible complete scripted groups; latest remains protected");
             let latest_group: String = db.query_row(
-                "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND t.generation=?4 AND c.call_id=?5 AND g.state='completed'",
+                "SELECT g.id FROM tool_group g JOIN tool_call c ON c.group_id=g.id JOIN turn t ON t.id=g.turn_id JOIN model_attempt a ON a.id=g.attempt_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND c.call_id=?5 AND g.state='completed'",
                 rusqlite::params![custody.thread,custody.run,custody.turn,custody.generation,latest_call],
                 |row| row.get(0),
             )?;
