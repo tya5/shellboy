@@ -142,7 +142,7 @@ pub(super) async fn drive(
     thread: String,
     slot: DriverSlot,
 ) -> Result<(), ApiError> {
-    let result = drive_inner(control, thread, slot.clone()).await;
+    let result = drive_inner(control.clone(), thread.clone(), slot.clone()).await;
     if result.is_err() || slot.stop.is_cancelled() {
         control.live.cancel_join_proactive_job(&thread, &slot).await;
     }
@@ -235,7 +235,7 @@ async fn drive_inner(
                 .store(true, std::sync::atomic::Ordering::Release);
             let mut job = proactive::spawn_background(
                 control.clone(),
-                snapshot.clone(),
+                *snapshot.clone(),
                 slot.clone(),
                 boundary.clone(),
                 slot.stop.clone(),

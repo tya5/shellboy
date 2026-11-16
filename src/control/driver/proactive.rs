@@ -57,7 +57,7 @@ impl BackgroundJob {
         self.task.is_finished()
     }
 
-    pub(super) fn cancel(&self) {
+    pub(in crate::control) fn cancel(&self) {
         self.cancel.cancel();
     }
 
@@ -74,7 +74,7 @@ impl BackgroundJob {
             })
     }
 
-    pub(super) async fn join(
+    pub(in crate::control) async fn join(
         &mut self,
     ) -> Result<Result<ProactiveOutcome, ApiError>, tokio::task::JoinError> {
         (&mut self.task).await
