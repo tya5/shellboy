@@ -95,6 +95,8 @@ pub struct MutationResult {
     /// Notify a driver without interrupting its foreground shell/tool group.
     pub quiet_wake_threads: Vec<String>,
     pub stop_runs: Vec<String>,
+    /// Cancel Thread-owned background jobs only after a committed deletion.
+    pub deleted_threads: Vec<String>,
     pub compact_threads: Vec<String>,
 }
 impl MutationResult {
@@ -3061,6 +3063,7 @@ fn retry_run(
         changed_threads: vec![],
         quiet_wake_threads: vec![details.thread_id],
         stop_runs: vec![],
+        deleted_threads: vec![],
         compact_threads: vec![],
     })
 }
@@ -3156,7 +3159,8 @@ fn delete_thread(
     let mut result = MutationResult::value(Accepted { accepted: true })?;
     // The caller publishes these existing notifications only after commit.
     // A receipt replay returns its saved value without repeating the effects.
-    result.changed_threads = targets;
+    result.changed_threads = targets.clone();
+    result.deleted_threads = targets;
     result.quiet_wake_threads = reply_wakes;
     Ok(result)
 }
@@ -5737,6 +5741,14 @@ mod thread_deletion_notification_tests {
             };
             assert_eq!(targets, expected);
             assert_eq!(first.changed_threads.len(), targets.len());
+            assert_eq!(
+                first
+                    .deleted_threads
+                    .iter()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+                expected
+            );
             assert!(
                 first.wake_threads.is_empty()
                     && first.quiet_wake_threads.is_empty()
@@ -5747,6 +5759,7 @@ mod thread_deletion_notification_tests {
             assert_eq!(replay.result, first.result);
             assert!(
                 replay.changed_threads.is_empty()
+                    && replay.deleted_threads.is_empty()
                     && replay.wake_threads.is_empty()
                     && replay.quiet_wake_threads.is_empty()
             );

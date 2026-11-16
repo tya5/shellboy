@@ -506,6 +506,191 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary() {
+    crate::test_watchdog::watchdog("ThreadDelete drains the retained proactive job", async {
+        let Fx {
+            owner,
+            control,
+            target,
+            server,
+            mut held_summary,
+            ..
+        } = prepare_held_summary(Scenario::ClosedSummary).await;
+        let summary = held_summary
+            .take()
+            .expect("Run A retired while its tool-free summary POST is held");
+        assert_eq!(summary.body["tools"], json!([]));
+        let slot = {
+            let drivers = control.live.test_drivers().lock().await;
+            drivers
+                .get(&target)
+                .cloned()
+                .expect("natural Run exit retains the Thread slot")
+        };
+        assert!(!slot.driver_active.load(Ordering::Acquire));
+        let job_arc = slot.proactive_job.clone();
+        let cancel = {
+            let job = job_arc.lock().await;
+            job.as_ref()
+                .expect("the retained summary has one job handle")
+                .cancel
+                .clone()
+        };
+        let before: i64 = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    Ok(db.query_row(
+                        "SELECT count(*) FROM thread_replacement WHERE thread_id=?1",
+                        [thread],
+                        |row| row.get(0),
+                    )?)
+                }
+            })
+            .await
+            .unwrap();
+        let operation = format!("{}:delete-held-proactive", control.store.instance_id);
+        let make_request = || {
+            Request::new(
+                operation.clone(),
+                Command::ThreadDelete(ThreadDeleteArgs {
+                    thread_id: target.clone(),
+                    descendants: false,
+                    preview_marker: None,
+                }),
+            )
+        };
+        let deleted = control.request(make_request()).await;
+        assert!(deleted.ok, "{:?}", deleted.error);
+        let replay = control.request(make_request()).await;
+        assert!(replay.ok, "{:?}", replay.error);
+        assert_eq!(
+            replay.result, deleted.result,
+            "receipt replay returns saved delete result"
+        );
+        assert!(
+            cancel.is_cancelled(),
+            "committed delete cancels the Thread-owned provider job"
+        );
+        assert!(
+            job_arc.lock().await.is_none(),
+            "delete effect joins and takes the job exactly once"
+        );
+        assert!(
+            control
+                .live
+                .test_drivers()
+                .lock()
+                .await
+                .get(&target)
+                .is_none(),
+            "deleted idle Thread slot is pruned after its owned job joins"
+        );
+        let after: i64 = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    Ok(db.query_row(
+                        "SELECT count(*) FROM thread_replacement WHERE thread_id=?1",
+                        [thread],
+                        |row| row.get(0),
+                    )?)
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "no held result adopts after committed Thread deletion"
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn committed_thread_delete_cancels_and_joins_idle_thread_job_once() {
+    crate::test_watchdog::watchdog("delete effect joins the retained Thread job", async {
+        let root = tempfile::tempdir().unwrap();
+        let owner = proactive_owner(root.path(), "http://127.0.0.1:9/v1", "").await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        let owner_stop = tokio_util::sync::CancellationToken::new();
+        let slot = control
+            .live
+            .register_or_nudge_driver(&target, "naturally-ended-run".into(), &owner_stop, false)
+            .await
+            .unwrap();
+        slot.driver_active.store(false, Ordering::Release);
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let task_cancel = cancel.clone();
+        let joined = Arc::new(AtomicBool::new(false));
+        let joined_by_task = joined.clone();
+        let task = tokio::spawn(async move {
+            task_cancel.cancelled().await;
+            joined_by_task.store(true, Ordering::Release);
+            Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
+        });
+        let job_arc = slot.proactive_job.clone();
+        *job_arc.lock().await = Some(
+            crate::control::driver::proactive::BackgroundJob::test_started(cancel.clone(), task),
+        );
+        assert!(
+            !control
+                .live
+                .remove_driver_if_current(&target, &slot.id)
+                .await
+        );
+
+        let operation = format!("{}:delete-idle-job", control.store.instance_id);
+        let make_request = || {
+            Request::new(
+                operation.clone(),
+                Command::ThreadDelete(ThreadDeleteArgs {
+                    thread_id: target.clone(),
+                    descendants: false,
+                    preview_marker: None,
+                }),
+            )
+        };
+        let first = control.request(make_request()).await;
+        assert!(first.ok, "{:?}", first.error);
+        let replay = control.request(make_request()).await;
+        assert!(replay.ok, "{:?}", replay.error);
+        assert_eq!(replay.result, first.result);
+        assert!(cancel.is_cancelled(), "committed deletion cancels the job");
+        assert!(
+            joined.load(Ordering::Acquire),
+            "delete effect joins the job before returning"
+        );
+        assert!(
+            job_arc.lock().await.is_none(),
+            "job handle is taken exactly once"
+        );
+        assert!(
+            control
+                .live
+                .test_drivers()
+                .lock()
+                .await
+                .get(&target)
+                .is_none()
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
     for scenario in [Scenario::ClosedSummary, Scenario::ActiveSummary] {
         let fx = prepare_with_options(Fault::Cancellation, scenario, true, true).await;

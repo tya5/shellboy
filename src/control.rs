@@ -1155,6 +1155,11 @@ impl Control {
             return;
         }
         self.index.wake();
+        for thread in effects.deleted_threads {
+            self.live
+                .cancel_join_proactive_job_for_deleted_thread(&thread)
+                .await;
+        }
         for thread in effects.changed_threads {
             self.changed(&thread);
         }

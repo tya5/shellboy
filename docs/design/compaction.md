@@ -17,7 +17,14 @@ The reasoning projection is a single path-state invariant shared with `history::
 
 Context restore has its own undo operation, not summary replacement. Before any retained-anchor removal, every anchor must be present exactly once after the selected marker and in the recorded original order; reject reordered anchors as `SourceChanged` before mutation. Only then remove verified positions descending and splice the originals while preserving the current unrelated prefix/suffix.
 
-Cancellation remains an authority boundary: explicit Run Stop, owner shutdown and Thread deletion cancel the job; cancellation before or during final adoption rolls back the transaction. The operation does not publish a result after cancellation. Source, protection, pruning and tool-closure checks remain mandatory even when outside-R state changes.
+Cancellation remains an authority boundary: explicit Run Stop, owner shutdown and
+Thread deletion cancel the job; cancellation before or during final adoption
+rolls back the transaction. ThreadDelete emits deleted Thread IDs only from its
+committed MutationResult; Control applies that effect to the matching retained
+Thread slot and joins its job. Receipt replay returns the saved value without
+replaying cancellation effects. The operation does not publish a result after
+cancellation. Source, protection, pruning and tool-closure checks remain
+mandatory even when outside-R state changes.
 
 ## Other path edits
 
@@ -107,9 +114,11 @@ source, cancellation, protection, tool-closure and atomic terminal-write rules.
 - Writer-owned proactive lifecycle: `src/compaction/gc_coordinator.rs`, `src/control/driver/proactive.rs`, `src/control/driver.rs`
 - FINISH and source-reason facts: `src/compaction/attempt.rs`, `src/compaction/discard.rs`
 
-The active GC planner may cross an epoch change only when the original `model_attempt`
-reasoning epoch, exact automatic-attempt token, and committed spill stage fact all match
-that attempt and the current Thread epoch. An unrelated later epoch change cannot borrow
-the earlier spill witness. The proactive entry guard also refuses to re-trigger from a
-provider report marked `next_request_pending`; tests of post-spill stage continuation must
-enter the already-admitted stage path rather than weakening that gate.
+The proactive eligibility preflight uses only the latest provider-reported
+`input_tokens`, configured threshold and `next_request_pending`; it runs before
+BackgroundJob allocation. The worker carries that typed plan, then rechecks its
+sampled profile/revision and exact original attempt receipt before beginning the
+provisional attempt. Current summary request profile/model/effort/epoch are
+captured coherently from the Thread inside the capture transaction, not vetoed
+against the origin receipt configuration. Receipt Thread/attempt/token identity
+and provisional FINISH ownership remain mandatory.

@@ -108,6 +108,14 @@ impl LiveRegistry {
             .await;
     }
 
+    /// Deletion is committed before this effect is applied; cancel only the deleted Thread's job.
+    pub(super) async fn cancel_join_proactive_job_for_deleted_thread(&self, thread: &str) {
+        let slot = self.drivers.lock().await.get(thread).cloned();
+        if let Some(slot) = slot {
+            self.cancel_join_proactive_job(thread, &slot).await;
+        }
+    }
+
     /// Drain jobs retained by naturally completed Runs before owner teardown.
     pub(super) async fn cancel_join_proactive_jobs(&self) {
         let slots = self
