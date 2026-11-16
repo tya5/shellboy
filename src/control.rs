@@ -112,6 +112,7 @@ pub(super) enum DriverAwaitPhase {
     HttpFutureFirstPoll(HttpPollResult),
     HttpFutureSecondPoll(HttpPollResult),
     HttpResponseFutureCompleted(HttpPollResult),
+    TestWatchdogExpired,
 }
 
 #[cfg(test)]
@@ -129,6 +130,7 @@ pub(super) struct DriverPhaseEvent {
     pub(super) run: String,
     pub(super) attempt: Option<String>,
     pub(super) phase: DriverAwaitPhase,
+    pub(super) order: u64,
 }
 
 #[cfg(test)]
@@ -138,6 +140,8 @@ static DRIVER_AWAIT_PHASES: std::sync::OnceLock<tokio::sync::broadcast::Sender<D
 static DRIVER_PHASE_RUNS: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<String, String>>,
 > = std::sync::OnceLock::new();
+#[cfg(test)]
+static DRIVER_PHASE_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(test)]
 pub(super) fn subscribe_driver_await_phases() -> tokio::sync::broadcast::Receiver<DriverPhaseEvent>
@@ -165,6 +169,7 @@ pub(super) fn record_driver_await_phase(thread: &str, run: &str, phase: DriverAw
         run: run.to_owned(),
         attempt: None,
         phase,
+        order: 0,
     });
 }
 
@@ -179,18 +184,35 @@ pub(super) fn record_live_attempt_phase(thread: &str, attempt: &str, phase: Driv
         run,
         attempt: Some(attempt.to_owned()),
         phase,
+        order: 0,
     });
 }
 
 #[cfg(test)]
-fn record_driver_phase(event: DriverPhaseEvent) {
+pub(super) fn record_test_watchdog_expired(thread: &str) {
+    let run = DRIVER_PHASE_RUNS
+        .get()
+        .and_then(|runs| runs.lock().ok()?.get(thread).cloned())
+        .unwrap_or_default();
+    record_driver_phase(DriverPhaseEvent {
+        thread: thread.to_owned(),
+        run,
+        attempt: None,
+        phase: DriverAwaitPhase::TestWatchdogExpired,
+        order: 0,
+    });
+}
+
+#[cfg(test)]
+fn record_driver_phase(mut event: DriverPhaseEvent) {
+    event.order = DRIVER_PHASE_ORDER.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let Some(sender) = DRIVER_AWAIT_PHASES.get() else {
         return;
     };
     if sender.receiver_count() > 0 {
         eprintln!(
-            "U2 driver await phase: thread={} run={} attempt={:?} phase={:?}",
-            event.thread, event.run, event.attempt, event.phase
+            "U2 driver await phase: order={} thread={} run={} attempt={:?} phase={:?}",
+            event.order, event.thread, event.run, event.attempt, event.phase
         );
         let _ = sender.send(event);
     }

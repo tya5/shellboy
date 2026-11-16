@@ -352,8 +352,12 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_boundary() {
-    crate::test_watchdog::watchdog("proactive summary request barrier", async {
+    let mut trace_keepalive = None;
+    let mut trace_thread = None;
+    let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
+        trace_thread = Some(fx.target.clone());
+        trace_keepalive = Some(crate::control::subscribe_driver_await_phases());
         let Fx {
             root,
             url,
@@ -655,8 +659,14 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         server.abort();
         let _ = (root, url, limits, owner);
     })
-    .await
-    .unwrap();
+    .await;
+    if result.is_err()
+        && let Some(thread) = trace_thread.as_deref()
+    {
+        crate::control::record_test_watchdog_expired(thread);
+    }
+    drop(trace_keepalive);
+    result.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
