@@ -900,6 +900,7 @@ mod final_r_adoption_tests {
                 |row| row.get(0),
             )?;
             assert!(epoch > 8, "drop-all advances the live projected epoch");
+            let mut payload_epoch = None;
             for node in &nodes {
                 let body: String =
                     tx.query_row("SELECT payload_json FROM node WHERE id=?1", [node], |row| {

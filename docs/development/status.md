@@ -455,3 +455,15 @@ that `select_path` recomputes the same keep/epoch, then increments the Thread ep
 clears keep and leaves payloads stale for replay. This is in the unvalidated working
 correction; rerun of the complete focused group is pending. Original `ac06` focused RED
 log/resource receipt remains saved at `core-v21-u1-closeout-focused-ac06f3d4.*`.
+
+The first rerun on `5b6455bf` reached the focused tests and passed the entire
+`final_r_adoption_tests` module (12/12) plus `same_captured_e_reopens_for_new_real_run_and_turn_scope`
+(1/1). The existing active-spill replay control then failed: stamping replacements with
+the *new* Thread epoch re-enabled their signed reasoning. The kernel was corrected so all
+active-spill replacements retain the single current projected pre-drop epoch; the kernel
+then increments the Thread once and clears keep, intentionally making those payloads stale
+for replay. This preserves the existing DROP_ALL effect while removing the captured-epoch
+caller write. The new multi-spill test asserts all replacements share that projected epoch
+and the Thread is exactly one newer. A follow-up compile caught a missing local test
+accumulator; fixed in the next working-tree edit. These are distinct compile/test REDs and
+remain preserved. The corrected candidate must rerun compile and all four focused groups.
