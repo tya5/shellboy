@@ -1077,7 +1077,15 @@ impl Compactor {
         request: Value,
         cancel: CancellationToken,
         (admission, elapsed): (crate::model::http::RateAdmission, u64),
+        #[cfg(test)] gc_dispatch_stage: Option<
+            &Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
+        #[cfg(test)]
+        if let Some(stage) = gc_dispatch_stage {
+            *stage.lock().expect("GC dispatch stage observer poisoned") =
+                crate::control::GcDispatchStage::ProviderSendEntered;
+        }
         let mut response: Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> =
             match &admission {
                 _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
