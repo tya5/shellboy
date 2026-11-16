@@ -59,10 +59,10 @@ async fn wait_for_http_future_first_poll(
     loop {
         match phases.recv().await {
             Ok(event) if event.thread == thread && event.run == run => {
-                if let crate::control::DriverAwaitPhase::HttpFutureFirstPoll(result) = event.phase {
-                    if let Some(attempt) = event.attempt {
-                        return (attempt, result);
-                    }
+                if let crate::control::DriverAwaitPhase::HttpFutureFirstPoll(result) = event.phase
+                    && let Some(attempt) = event.attempt
+                {
+                    return (attempt, result);
                 }
             }
             Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
@@ -73,16 +73,32 @@ async fn wait_for_http_future_first_poll(
     }
 }
 
-async fn wait_for_run_b_provider_request(
-    control: &Control,
-    thread: &str,
-    run: &str,
-    turn: &str,
-    receive: &mut mpsc::Receiver<Incoming>,
-    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
-    events: &mut tokio::sync::broadcast::Receiver<EngineEvent>,
-    slot: &DriverSlot,
-) -> Incoming {
+#[derive(Clone, Copy)]
+struct RunTurnWaitIdentity<'a> {
+    thread: &'a str,
+    run: &'a str,
+    turn: &'a str,
+}
+
+struct RunBWaitContext<'a> {
+    control: &'a Control,
+    identity: RunTurnWaitIdentity<'a>,
+    receive: &'a mut mpsc::Receiver<Incoming>,
+    phases: &'a mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
+    events: &'a mut tokio::sync::broadcast::Receiver<EngineEvent>,
+    slot: &'a DriverSlot,
+}
+
+async fn wait_for_run_b_provider_request(wait: &mut RunBWaitContext<'_>) -> Incoming {
+    let control = wait.control;
+    let identity = wait.identity;
+    let thread = identity.thread;
+    let run = identity.run;
+    let turn = identity.turn;
+    let receive = &mut *wait.receive;
+    let phases = &mut *wait.phases;
+    let events = &mut *wait.events;
+    let slot = wait.slot;
     loop {
         let notified = slot.nudge.notified();
         tokio::pin!(notified);
@@ -598,17 +614,19 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         assert_eq!(live_attempt, granted_attempt, "live admission events refer to the same persisted attempt");
         assert_eq!(granted_attempt, first_polled_attempt, "HTTP first poll belongs to the live-admitted attempt");
         eprintln!("Run B HTTP response future first-poll result: {first_poll_outcome:?}");
-        let overflow_request = wait_for_run_b_provider_request(
+        let mut run_b_wait = RunBWaitContext {
             control,
-            target,
-            &run_id,
-            &turn_id,
+            identity: RunTurnWaitIdentity {
+                thread: target,
+                run: &run_id,
+                turn: &turn_id,
+            },
             receive,
-            &mut driver_phases,
-            &mut driver_events,
-            &slot,
-        )
-        .await;
+            phases: &mut driver_phases,
+            events: &mut driver_events,
+            slot: &slot,
+        };
+        let overflow_request = wait_for_run_b_provider_request(&mut run_b_wait).await;
         assert_ne!(
             overflow_request.body,
             retained_summary.as_ref().unwrap().body,
