@@ -69,6 +69,7 @@ pub(crate) const MIGRATION_NAMES: &[(i64, &str)] = &[
     (44, "0044_thread_max_tokens"),
     (45, "0045_thread_spill_override"),
     (46, "0046_scope_identity_v2"),
+    (47, "0047_drop_selection_nonappend_generation"),
 ];
 pub const SCHEMA_VERSION: i64 = MIGRATION_NAMES.len() as i64;
 pub const DEFAULT_QUEUE_CAPACITY: usize = 128;
@@ -466,7 +467,8 @@ impl GcRetirementWake {
 }
 fn make_gc_retirement_job(id: crate::compaction::WriterJobId) -> Command {
     let job: Job = Box::new(move |connection, _, _, writer_gc| {
-        let _ = writer_gc.reconcile_joined_retirement(connection, id);
+        let _ = connection;
+        let _ = writer_gc.reconcile_joined_retirement(id);
         JobOutcome::default()
     });
     Command::Run {
@@ -611,29 +613,6 @@ impl DbWorker {
                 job,
                 queued_at: Instant::now(),
                 kind: "gc::explicit_stop",
-                lane: Lane::Foreground,
-                requester: None,
-            },
-        )
-        .await?;
-        rx.await.map_err(|_| StorageError::Closed)?
-    }
-    pub(crate) async fn validate_gc_job(
-        &self,
-        id: crate::compaction::WriterJobId,
-    ) -> Result<Option<crate::compaction::discard::RejectionReason>, StorageError> {
-        let (tx, rx) = oneshot::channel();
-        let job: Job = Box::new(move |db, _, _, coordinator| {
-            let result = coordinator.validate_job(db, id).map_err(StorageError::from);
-            let _ = tx.send(result);
-            JobOutcome::default()
-        });
-        self.admit(
-            Lane::Foreground,
-            Command::Run {
-                job,
-                queued_at: Instant::now(),
-                kind: "gc::witness_validate",
                 lane: Lane::Foreground,
                 requester: None,
             },
@@ -1373,30 +1352,24 @@ fn make_gc_completion_job(
 ) -> (Command, DbReply<crate::compaction::CompletionDisposition>) {
     let (sender, receiver) = oneshot::channel();
     let job: Job = Box::new(move |db, _, _, coordinator| {
-        let write = if result.is_err() {
-            failure.map(|failure| match coordinator.validate_job(db, id) {
-                Ok(None) => match db.transaction() {
-                    Ok(tx) => match crate::compaction::remember_gc_failure_tx(&tx, &failure) {
-                        Ok(wrote) => {
-                            if wrote {
-                                tx.commit().map(|_| ()).map_err(StorageError::from)
-                            } else {
-                                Ok(())
-                            }
+        let write = if result.is_err() && coordinator.failure_write_allowed(id) {
+            failure.map(|failure| match db.transaction() {
+                Ok(tx) => match crate::compaction::remember_gc_failure_tx(&tx, &failure) {
+                    Ok(wrote) => {
+                        if wrote {
+                            tx.commit().map(|_| ()).map_err(StorageError::from)
+                        } else {
+                            Ok(())
                         }
-                        Err(error) => Err(error),
-                    },
-                    Err(error) => Err(StorageError::from(error)),
+                    }
+                    Err(error) => Err(error),
                 },
-                Ok(Some(_)) => Ok(()),
                 Err(error) => Err(StorageError::from(error)),
             })
         } else {
             None
         };
-        let completion = coordinator
-            .complete_before_db_reply(db, id, result)
-            .map_err(StorageError::from);
+        let completion = Ok(coordinator.complete_before_db_reply(id, result));
         let result = write.unwrap_or(Ok(())).and(completion);
         reconcile_gc_before_reply(db, coordinator);
         let _ = sender.send(result);
@@ -1452,10 +1425,10 @@ where
 }
 
 fn reconcile_gc_before_reply(
-    connection: &Connection,
+    _connection: &Connection,
     coordinator: &mut crate::compaction::WriterGcCoordinator,
 ) {
-    let _ = coordinator.reconcile_before_db_reply(connection);
+    coordinator.process_lifecycle_before_db_reply();
 }
 
 fn make_job<T, F>(operation: F) -> (Command, DbReply<T>)
@@ -2686,7 +2659,30 @@ mod lane_budget_tests {
     use super::*;
     use std::sync::mpsc as sync_mpsc;
 
-    async fn active_gc_source_fixture() -> (tempfile::TempDir, DbWorker, oneshot::Receiver<()>) {
+    fn synthetic_gc_summary() -> crate::compaction::Dispatched {
+        crate::compaction::Dispatched {
+            selected: 0..1,
+            response: crate::model::ModelResponse {
+                raw: serde_json::json!({}),
+                output: Vec::new(),
+                calls: Vec::new(),
+                text: "summary".into(),
+                stream_observation: None,
+                http_observation: None,
+                response_facts: crate::model::http::ResponseFacts::default(),
+            },
+            size: crate::compaction::AdoptionSize {
+                exceeded_output_limit: false,
+            },
+        }
+    }
+
+    async fn active_gc_source_fixture() -> (
+        tempfile::TempDir,
+        DbWorker,
+        crate::compaction::WriterJobId,
+        oneshot::Receiver<()>,
+    ) {
         let root = tempfile::tempdir().unwrap();
         let db = DbWorker::open_with_capacity(root.path().join("db"), 1)
             .await
@@ -2725,9 +2721,6 @@ mod lane_budget_tests {
         };
         let captured = crate::compaction::CapturedSummaryInput {
             thread: "t".into(),
-            selection_revision: 0,
-            profile_revision: 0,
-            nonappend_generation: 0,
             epoch: 0,
             profile: "fixture".into(),
             model: "fixture".into(),
@@ -2736,8 +2729,6 @@ mod lane_budget_tests {
             origin_turn: Some("u".into()),
             origin_run: Some("r".into()),
             origin_generation: Some(0),
-            request_turn_id: None,
-            request_generation: None,
             groups: vec![group],
             active_turn: false,
             spill_epoch_advanced: false,
@@ -2754,7 +2745,8 @@ mod lane_budget_tests {
             stage: "closed_summary",
         };
         let (tx, rx) = oneshot::channel();
-        let _ = db
+        let (started_tx, started_rx) = oneshot::channel();
+        let admission = db
             .call_with_gc_capture_cancellable(
                 stage,
                 move |_, _| {
@@ -2762,7 +2754,8 @@ mod lane_budget_tests {
                         captured,
                     )))
                 },
-                move |_, _, cancel| async move {
+                move |id, _, cancel| async move {
+                    let _ = started_tx.send(id);
                     let _ = cancel.cancelled().await;
                     let _ = tx.send(());
                     None
@@ -2771,7 +2764,32 @@ mod lane_budget_tests {
             )
             .await
             .unwrap();
-        (root, db, rx)
+        let GcCaptureAdmission::Started(job_id) = admission else {
+            panic!("fixture producer must be admitted")
+        };
+        assert_eq!(started_rx.await.unwrap(), job_id);
+        (root, db, job_id, rx)
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn gc_completion_job_id_isolated_between_writer_slots() {
+        let (_root_a, db_a, job_a, cancelled_a) = active_gc_source_fixture().await;
+        let (_root_b, db_b, job_b, cancelled_b) = active_gc_source_fixture().await;
+        assert_ne!(job_a, job_b);
+        let mut result = Some(Ok(synthetic_gc_summary()));
+        assert_eq!(
+            db_b.complete_gc_job_cancellable(job_a, &mut result, None, None)
+                .await
+                .unwrap(),
+            crate::compaction::CompletionDisposition::Stale
+        );
+        assert!(result.is_none());
+        assert!(db_a.cancel_gc_job(job_a).await.unwrap());
+        assert!(db_b.cancel_gc_job(job_b).await.unwrap());
+        cancelled_a.await.unwrap();
+        cancelled_b.await.unwrap();
+        db_a.shutdown().await.unwrap();
+        db_b.shutdown().await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2825,9 +2843,9 @@ mod lane_budget_tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn ordinary_and_background_source_mutations_reconcile_before_success_reply() {
+    async fn ordinary_and_background_source_mutations_do_not_cancel_before_final_adoption() {
         for background in [false, true] {
-            let (_root, db, cancelled) = active_gc_source_fixture().await;
+            let (_root, db, job_id, cancelled) = active_gc_source_fixture().await;
             if background {
                 assert!(matches!(
                     db.call_background_kind("gc_witness_fixture", |db| {
@@ -2853,6 +2871,23 @@ mod lane_budget_tests {
                     1
                 );
             }
+            let mut pending = Some(Ok(synthetic_gc_summary()));
+            assert_eq!(
+                db.complete_gc_job_cancellable(job_id, &mut pending, None, None)
+                    .await
+                    .unwrap(),
+                crate::compaction::CompletionDisposition::Accepted
+            );
+            assert!(pending.is_none());
+            let mut duplicate = Some(Ok(synthetic_gc_summary()));
+            assert_eq!(
+                db.complete_gc_job_cancellable(job_id, &mut duplicate, None, None)
+                    .await
+                    .unwrap(),
+                crate::compaction::CompletionDisposition::Closed
+            );
+            assert!(duplicate.is_none(), "the completion event is consumed once");
+            assert!(db.cancel_gc_job(job_id).await.unwrap());
             cancelled.await.unwrap();
             db.shutdown().await.unwrap();
         }
@@ -2871,7 +2906,7 @@ mod lane_budget_tests {
                 Ok(())
             }).await.unwrap();
             let stage=crate::compaction::GcStage{attempt_id:"a".into(),token:"tok".into(),thread_id:"t".into(),profile_id:"fixture".into(),model_id:"fixture".into(),effort:None,reasoning_epoch:0,stage:"active_summary"};
-            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),selection_revision:0,profile_revision:0,nonappend_generation:0,epoch:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,request_turn_id:None,request_generation:None,groups:Vec::new(),active_turn:false,spill_epoch_advanced:false,active_user_messages:Vec::new()};
+            let captured=crate::compaction::CapturedSummaryInput{thread:"t".into(),epoch:0,profile:"fixture".into(),model:"fixture".into(),thread_summary_max_chars:None,effort:None,origin_turn:None,origin_run:None,origin_generation:None,groups:Vec::new(),active_turn:false,spill_epoch_advanced:false,active_user_messages:Vec::new()};
             let (producer_ready_tx,producer_ready_rx)=oneshot::channel();
             let (complete_tx,complete_rx)=oneshot::channel();
             let (admitted_tx,admitted_rx)=oneshot::channel();
@@ -2888,7 +2923,7 @@ mod lane_budget_tests {
                 let _=reply_tx.send(observed);
                 let _=cancel.cancelled().await;
                 let _=release_rx.await;
-                Some(crate::compaction::WriterCompletion::Failed)
+                panic!("synthetic GC producer panic after its completion reply");
             },None).await.unwrap();
             assert!(matches!(_job,GcCaptureAdmission::Started(_)));
             producer_ready_rx.await.unwrap();
@@ -3242,4 +3277,4 @@ mod integrity_policy_tests {
 
 #[cfg(test)]
 #[path = "storage/selection_generation_tests.rs"]
-mod selection_generation_tests;
+mod selection_generation_migration_tests;

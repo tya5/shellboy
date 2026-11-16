@@ -1,0 +1,10 @@
+DROP TRIGGER IF EXISTS selection_generation_combined_write;
+DROP TRIGGER IF EXISTS selection_generation_update;
+DROP TRIGGER IF EXISTS selection_generation_insert;
+DROP TRIGGER IF EXISTS selection_path_insert;
+DROP TRIGGER IF EXISTS selection_path_delete;
+DROP TRIGGER IF EXISTS selection_path_update;
+DROP TRIGGER IF EXISTS selection_revision_same_cursor;
+ALTER TABLE thread DROP COLUMN selection_nonappend_generation;
+INSERT INTO schema_migration(version,name) VALUES(47,'0047_drop_selection_nonappend_generation');
+PRAGMA user_version=47;

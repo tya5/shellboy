@@ -2,7 +2,6 @@
 //! entry points. Request trials end here; adoption performs atomic revalidation.
 use super::*;
 use crate::model;
-use futures_util::future::BoxFuture;
 
 /// Request construction consumes an already-resolved output policy.
 pub(super) struct SummaryRequest<'a, 'boundary> {
@@ -180,8 +179,8 @@ fn after_input_classified_result(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct AdoptionSize {
-    pub(super) exceeded_output_limit: bool,
+pub(crate) struct AdoptionSize {
+    pub(crate) exceeded_output_limit: bool,
 }
 /// Output cap is a request instruction, not a resend/quality gate.
 #[cfg(test)]
@@ -212,19 +211,9 @@ pub(super) fn is_typed_refusal(output: &[Value]) -> bool {
 /// One real HTTP request loop; the owner derives the retry range and performs adoption.
 pub(super) enum DispatchOwner<'a, 'b> {
     Manual {
-        snapshot: &'a Snapshot,
         boundary: Option<&'a mut boundary::Boundary<'b>>,
     },
-    Gc {
-        job_id: super::gc_coordinator::WriterJobId,
-        validate: Box<
-            dyn FnMut(
-                    super::gc_coordinator::WriterJobId,
-                ) -> BoxFuture<'static, Result<(), ApiError>>
-                + Send
-                + 'a,
-        >,
-    },
+    Gc,
 }
 pub(super) struct DispatchRequest<'a, 'b> {
     pub(super) input: &'a SummaryMaterial<'a>,
@@ -237,9 +226,9 @@ pub(super) struct DispatchRequest<'a, 'b> {
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Dispatched {
-    pub(super) selected: Range<usize>,
-    pub(super) response: model::ModelResponse,
-    pub(super) size: AdoptionSize,
+    pub(crate) selected: Range<usize>,
+    pub(crate) response: model::ModelResponse,
+    pub(crate) size: AdoptionSize,
 }
 impl Compactor {
     pub(super) async fn summarize_single(
@@ -349,10 +338,7 @@ impl Compactor {
         let dispatched = self
             .dispatch_single_summary(DispatchRequest {
                 input: &material,
-                owner: DispatchOwner::Manual {
-                    snapshot: &snapshot,
-                    boundary,
-                },
+                owner: DispatchOwner::Manual { boundary },
                 selected: 0..material_groups.len(),
                 limit,
                 cancel: &cancel,
@@ -606,11 +592,7 @@ impl Compactor {
                 .selected()
                 .ok_or_else(|| invalid("Summary trial already ended"))?;
             let payload = super::single_request::request(input, selected.clone(), limit);
-            // Preserve the existing manual snapshot fence; GC supplies its own typed R witness.
             let admission = self.summary_admission(&client, &mut owner, cancel).await?;
-            if let DispatchOwner::Gc { job_id, validate } = &mut owner {
-                validate(*job_id).await?;
-            }
             let observation = ledger.begin(&self.database).await?;
             let result =
                 Self::summary_response(&client, input.thread, payload, cancel.clone(), admission)

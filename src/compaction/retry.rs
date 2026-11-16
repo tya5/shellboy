@@ -47,8 +47,7 @@ fn cancelled() -> ApiError {
 }
 
 impl Compactor {
-    /// Waits `delay` (cancellable) with the Thread boundary released, then
-    /// revalidates the snapshot, as an admission wait does.
+    /// Waits `delay` cancellably with the Thread boundary released when owned.
     pub(super) async fn summary_backoff(
         &self,
         owner: &mut super::single_request::DispatchOwner<'_, '_>,
@@ -59,7 +58,7 @@ impl Compactor {
             return Ok(());
         }
         match owner {
-            super::single_request::DispatchOwner::Manual { snapshot, boundary } => {
+            super::single_request::DispatchOwner::Manual { boundary } => {
                 let wait = async {
                     tokio::select! {biased;_=cancel.cancelled()=>{},_=tokio::time::sleep(delay)=>{}}
                 };
@@ -68,26 +67,12 @@ impl Compactor {
                         .pause(cancel, wait)
                         .await
                         .map_err(|_| cancelled())?;
-                    let witness = (*snapshot).clone();
-                    self.database
-                        .call(move |db| {
-                            let tx = db.transaction()?;
-                            validate(&tx, &witness)?;
-                            tx.commit()?;
-                            Ok(())
-                        })
-                        .await
-                        .map_err(storage_error)?;
                 } else {
                     wait.await;
                 }
             }
-            super::single_request::DispatchOwner::Gc { job_id, validate } => {
+            super::single_request::DispatchOwner::Gc => {
                 tokio::select! {biased;_=cancel.cancelled()=>{},_=tokio::time::sleep(delay)=>{}};
-                if cancel.is_cancelled() {
-                    return Err(cancelled());
-                }
-                validate(*job_id).await?;
             }
         }
         if cancel.is_cancelled() {

@@ -46,7 +46,7 @@ mod guard_tests;
 mod policy;
 mod range;
 mod single_request;
-pub(crate) use single_request::Dispatched;
+pub(crate) use single_request::{AdoptionSize, Dispatched};
 mod summary;
 mod usage;
 pub(crate) use keys::CompactionKeys;
@@ -187,7 +187,6 @@ struct Snapshot {
     // Additional immutable source facts needed when a selected marker is
     // expanded virtually for summary generation before atomic adoption.
     extra_sources: Vec<Source>,
-    append_witness: Option<(i64, Vec<String>)>,
     protected: HashSet<String>,
     latest_complete_turn: Option<String>,
     current_turn: Option<String>,
@@ -458,7 +457,7 @@ impl Compactor {
     async fn snapshot(&self, thread: &str, for_summary: bool) -> Result<Snapshot, ApiError> {
         let thread = thread.to_owned();
         self.database.call(move |db| {
-            // Capture revision, selected IDs and the mutation witness from one read view.
+            // Capture the selected source facts from one read view.
             let read = db.transaction()?;
             let db = &read;
             let data=db.query_row("SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",[&thread],|r|Ok((r.get::<_,i64>(0)?,r.get::<_,i64>(1)?,r.get::<_,i64>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,Option<String>>(5)?,r.get::<_,Option<i64>>(6)?))).optional()?.ok_or_else(||StorageError::from(ApiError::new(ErrorCode::ThreadNotFound,"Context target Thread is unavailable")))?;
@@ -483,8 +482,6 @@ impl Compactor {
                 let attachments=db.prepare("SELECT a.id,a.absolute_path,a.input_kind,COALESCE(s.state,'not_selected'),s.reason FROM attachment_ref a LEFT JOIN attachment_selection s ON s.attachment_id=a.id AND s.thread_id=?2 WHERE a.source_node_id=?1 ORDER BY a.created_at,a.id")?.query_map(params![id,thread],|r|Ok(json!({"id":r.get::<_,String>(0)?,"path":r.get::<_,String>(1)?,"kind":r.get::<_,String>(2)?,"state":r.get::<_,String>(3)?,"reason":r.get::<_,Option<String>>(4)?})))?.collect::<Result<Vec<_>,_>>()?;
                 sources.push(Source{id,turn,revision,hash,payload,attachments});
             }
-            let selected=sources.iter().map(|source|source.id.clone()).collect::<Vec<_>>();
-            let generation=db.query_row("SELECT selection_nonappend_generation FROM thread WHERE id=?1",[&thread],|r|r.get::<_,i64>(0))?;
             let groups=source_groups(sources,&completed);
             let mut turn_boundaries=HashMap::new();
             // Spill uses complete-group fences, not the summary prefix. Do not
@@ -496,7 +493,7 @@ impl Compactor {
                     }
                 }
             }
-            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),append_witness:Some((generation,selected)),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,summary_max_chars:data.6})
+            Ok(Snapshot{thread,revision:data.0 as u64,profile_revision:data.1,epoch:data.2,profile:data.3,model:data.4,effort:data.5,groups,extra_sources:Vec::new(),protected,latest_complete_turn,current_turn,turn_boundaries,turn_fence,run_fence,summary_max_chars:data.6})
         }).await.map_err(storage_error)
     }
 
@@ -890,16 +887,6 @@ impl Compactor {
             let output_limit=single_request::resolved_limit(None,captured.thread_summary_max_chars,config.connections.get(&captured.profile),&config.compaction);
             let failure_setup=compactor.prepare_gc_failure_setup(&captured,output_limit).await;
             let mut ledger=usage::UsageLedger::from_context(&captured.thread,&captured.profile,&captured.model,captured.origin_turn.clone(),captured.origin_run.clone());
-            let validator_db=db.clone();
-            let validator_stop=stop_for_job.clone();
-            let validate=Box::new(move|id|{
-                let db=validator_db.clone();let stop=validator_stop.clone();
-                Box::pin(async move{match db.validate_gc_job(id).await{
-                    Ok(None)=>Ok(()),
-                    Ok(Some(reason))=>Err(discard::rejected(gc_coordinator::owner_rejection_reason(reason,stop.is_cancelled()),"GC source witness changed before request; original path retained")),
-                    Err(e)=>Err(storage_error(e)),
-                }}) as futures_util::future::BoxFuture<'static,Result<(),ApiError>>
-            });
             let eligible_capture=captured.clone();
             let eligible=Box::new(move|range:Range<usize>|{
                 if range.is_empty()||range.end>eligible_capture.groups.len()||range.clone().any(|i|!eligible_capture.groups[i].complete||eligible_capture.groups[i].stamps.iter().any(|s|s.protected)){return false;}
@@ -909,7 +896,7 @@ impl Compactor {
                 Err(error)=>Err(error.clone()),
                 Ok(setup) if failure_memory::blocks(&setup.observed,&setup.identity,setup.provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
                 Ok(_)=>{
-                    let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc{job_id,validate},selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible};
+                    let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible};
                     let dispatched_future=compactor.dispatch_single_summary(request);tokio::pin!(dispatched_future);
                     tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();dispatched_future.as_mut().await},result=dispatched_future.as_mut()=>result}
                 }
@@ -995,7 +982,7 @@ impl Compactor {
                     (result, started.elapsed())
                 };
                 let (result, elapsed) = match owner {
-                    single_request::DispatchOwner::Manual { snapshot, boundary } => {
+                    single_request::DispatchOwner::Manual { boundary } => {
                         if let Some(boundary) = boundary.as_deref_mut() {
                             let (result, elapsed) =
                                 boundary.pause(cancel, wait).await.map_err(|_| {
@@ -1004,22 +991,12 @@ impl Compactor {
                                         "Summary cancelled; original path retained",
                                     )
                                 })?;
-                            let witness = (*snapshot).clone();
-                            self.database
-                                .call(move |db| {
-                                    let tx = db.transaction()?;
-                                    validate(&tx, &witness)?;
-                                    tx.commit()?;
-                                    Ok(())
-                                })
-                                .await
-                                .map_err(storage_error)?;
                             (result, elapsed)
                         } else {
                             wait.await
                         }
                     }
-                    single_request::DispatchOwner::Gc { .. } => wait.await,
+                    single_request::DispatchOwner::Gc => wait.await,
                 };
                 let lease = client.admission_after_wait(result, None).map_err(|error| {
                     if error.kind == "cancelled" {
@@ -1383,35 +1360,6 @@ fn store_replacement(
     )
 }
 
-pub(super) fn replace_selected_path(
-    path: &[String],
-    start: usize,
-    count: usize,
-    node: &str,
-    append: &[String],
-) -> Result<Vec<String>, StorageError> {
-    let end = start
-        .checked_add(count)
-        .ok_or_else(|| StorageError::InvalidInput("replacement path range overflow".into()))?;
-    if end > path.len() {
-        return Err(StorageError::InvalidInput(
-            "replacement path range is outside current path".into(),
-        ));
-    }
-    let capacity = path
-        .len()
-        .checked_sub(count)
-        .and_then(|n| n.checked_add(1))
-        .and_then(|n| n.checked_add(append.len()))
-        .ok_or_else(|| StorageError::InvalidInput("replacement path length overflow".into()))?;
-    let mut next = Vec::with_capacity(capacity);
-    next.extend_from_slice(&path[..start]);
-    next.push(node.to_owned());
-    next.extend_from_slice(&path[end..]);
-    next.extend_from_slice(append);
-    Ok(next)
-}
-
 fn summary_input_key(
     profile: &str,
     model: &str,
@@ -1612,7 +1560,6 @@ mod tests {
             effort: None,
             groups,
             extra_sources: Vec::new(),
-            append_witness: None,
             protected: HashSet::new(),
             latest_complete_turn: Some("last".into()),
             current_turn: Some("current".into()),

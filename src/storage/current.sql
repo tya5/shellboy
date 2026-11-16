@@ -10,7 +10,7 @@ CREATE TABLE thread(
  revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0), reasoning_epoch INTEGER NOT NULL DEFAULT 0 CHECK(reasoning_epoch>=0),
  cursor_node_id TEXT REFERENCES node(id), deleted_at TEXT, updated_at TEXT NOT NULL,
  selection_revision INTEGER NOT NULL DEFAULT 0 CHECK(selection_revision>=0),
- profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0), archived_at TEXT, branch_kind TEXT CHECK(branch_kind IS NULL OR branch_kind IN ('fork','rewind')), selection_nonappend_generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(selection_nonappend_generation)='integer' AND selection_nonappend_generation>=0));
+ profile_revision INTEGER NOT NULL DEFAULT 0 CHECK(profile_revision>=0), auto_compact_at INTEGER CHECK(auto_compact_at IS NULL OR auto_compact_at>=0), archived_at TEXT, branch_kind TEXT CHECK(branch_kind IS NULL OR branch_kind IN ('fork','rewind')));
 
 CREATE INDEX threads_updated ON thread(deleted_at,updated_at DESC,id);
 CREATE INDEX threads_visible_updated ON thread(updated_at DESC,id DESC) WHERE deleted_at IS NULL AND archived_at IS NULL;
@@ -727,46 +727,10 @@ INSERT INTO schema_migration(version,name) VALUES(39,'0039_independent_runs');
 
 PRAGMA user_version=39;
 
--- A revision writer must never carry a stale explicit witness assignment. This
--- column-list guard runs independently of nested trigger order/recursive_triggers.
-CREATE TRIGGER IF NOT EXISTS selection_generation_combined_write BEFORE UPDATE OF selection_nonappend_generation ON thread
-WHEN NEW.selection_revision != OLD.selection_revision
-BEGIN SELECT RAISE(ABORT,'combined revision and generation write is not supported'); END;
--- Constant-space witness: every non-tail selected-path mutation invalidates snapshots.
-CREATE TRIGGER IF NOT EXISTS selection_generation_update BEFORE UPDATE OF selection_nonappend_generation ON thread
-WHEN typeof(NEW.selection_nonappend_generation) != 'integer' OR NEW.selection_nonappend_generation < OLD.selection_nonappend_generation OR NEW.selection_nonappend_generation < 0
-BEGIN SELECT RAISE(ABORT,'invalid selection generation'); END;
--- Supported thread writers never conflict-insert an existing owner. Forbid REPLACE
--- independently of recursive_triggers, including stale whole-thread UPSERT resets.
+-- Retained from migration 40: existing Thread owners are never replaced by conflict insert.
 CREATE TRIGGER IF NOT EXISTS selection_thread_conflict BEFORE INSERT ON thread
 WHEN EXISTS(SELECT 1 FROM thread WHERE id=NEW.id)
 BEGIN SELECT RAISE(ABORT,'thread conflict insert is not supported'); END;
-CREATE TRIGGER IF NOT EXISTS selection_generation_insert BEFORE INSERT ON thread
-WHEN typeof(NEW.selection_nonappend_generation) != 'integer' OR NEW.selection_nonappend_generation < 0
-BEGIN SELECT RAISE(ABORT,'invalid selection generation'); END;
-CREATE TRIGGER IF NOT EXISTS selection_path_insert BEFORE INSERT ON thread_path
-WHEN NEW.ordinal != COALESCE((SELECT MAX(ordinal)+1 FROM thread_path WHERE thread_id=NEW.thread_id),0)
- OR EXISTS(SELECT 1 FROM thread_path WHERE thread_id=NEW.thread_id AND (ordinal=NEW.ordinal OR node_id=NEW.node_id))
-BEGIN
- SELECT CASE WHEN EXISTS(SELECT 1 FROM thread WHERE id=NEW.thread_id AND (typeof(selection_nonappend_generation)!='integer' OR selection_nonappend_generation<0 OR selection_nonappend_generation=9223372036854775807)) THEN RAISE(ABORT,'selection generation exhausted') END;
- UPDATE thread SET selection_nonappend_generation=selection_nonappend_generation+1 WHERE id=NEW.thread_id;
-END;
-CREATE TRIGGER IF NOT EXISTS selection_path_delete BEFORE DELETE ON thread_path BEGIN
- SELECT CASE WHEN EXISTS(SELECT 1 FROM thread WHERE id=OLD.thread_id AND (typeof(selection_nonappend_generation)!='integer' OR selection_nonappend_generation<0 OR selection_nonappend_generation=9223372036854775807)) THEN RAISE(ABORT,'selection generation exhausted') END;
- UPDATE thread SET selection_nonappend_generation=selection_nonappend_generation+1 WHERE id=OLD.thread_id;
-END;
-CREATE TRIGGER IF NOT EXISTS selection_path_update BEFORE UPDATE OF thread_id,ordinal,node_id ON thread_path BEGIN
- SELECT CASE WHEN EXISTS(SELECT 1 FROM thread WHERE id IN (OLD.thread_id,NEW.thread_id) AND (typeof(selection_nonappend_generation)!='integer' OR selection_nonappend_generation<0 OR selection_nonappend_generation=9223372036854775807)) THEN RAISE(ABORT,'selection generation exhausted') END;
- UPDATE thread SET selection_nonappend_generation=selection_nonappend_generation+1 WHERE id IN (OLD.thread_id,NEW.thread_id);
-END;
--- Statement-order independent conservative invalidation for same-cursor metadata
--- changes. Real path rewrites are caught by row triggers in either statement order.
-CREATE TRIGGER IF NOT EXISTS selection_revision_same_cursor BEFORE UPDATE OF selection_revision ON thread
-WHEN NEW.selection_revision != OLD.selection_revision AND NEW.cursor_node_id IS OLD.cursor_node_id
-BEGIN
- SELECT CASE WHEN EXISTS(SELECT 1 FROM thread WHERE id=OLD.id AND (typeof(selection_nonappend_generation)!='integer' OR selection_nonappend_generation<0 OR selection_nonappend_generation=9223372036854775807)) THEN RAISE(ABORT,'selection generation exhausted') END;
- UPDATE thread SET selection_nonappend_generation=selection_nonappend_generation+1 WHERE id=OLD.id;
-END;
 
 INSERT INTO schema_migration(version,name) VALUES(40,'0040_selection_nonappend_generation');
 PRAGMA user_version=40;
@@ -797,3 +761,5 @@ ALTER TABLE thread ADD COLUMN spill_override INTEGER CHECK(spill_override IS NUL
 INSERT INTO schema_migration(version,name) VALUES(45,'0045_thread_spill_override');
 INSERT INTO schema_migration(version,name) VALUES(46,'0046_scope_identity_v2');
 PRAGMA user_version=46;
+INSERT INTO schema_migration(version,name) VALUES(47,'0047_drop_selection_nonappend_generation');
+PRAGMA user_version=47;

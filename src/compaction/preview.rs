@@ -385,7 +385,6 @@ fn load(
         effort,
         groups: source_groups(sources, &complete),
         extra_sources: Vec::new(),
-        append_witness: None,
         protected,
         latest_complete_turn: latest,
         current_turn: current_id,

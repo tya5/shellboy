@@ -236,6 +236,11 @@ pub(super) const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/0046_scope_identity_v2.sql"),
         foreign_keys: None,
     },
+    Migration {
+        version: 47,
+        sql: include_str!("../../migrations/0047_drop_selection_nonappend_generation.sql"),
+        foreign_keys: None,
+    },
 ];
 
 pub(super) fn run(

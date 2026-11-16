@@ -36,7 +36,6 @@ pub(crate) struct CapturedGroup {
 struct ThreadPlanFacts {
     selection: i64,
     profile_revision: i64,
-    generation: i64,
     epoch: i64,
     profile: String,
     model: String,
@@ -72,7 +71,6 @@ pub(crate) struct GcRangePlan {
     pub(crate) sources: Vec<GcPlannedSource>,
     pub(crate) selection_revision: i64,
     pub(crate) profile_revision: i64,
-    pub(crate) nonappend_generation: i64,
     pub(crate) epoch: i64,
     pub(crate) active_turn: bool,
     pub(crate) spill_epoch_advanced: bool,
@@ -82,9 +80,6 @@ pub(crate) struct GcRangePlan {
 #[derive(Clone, Debug)]
 pub(crate) struct CapturedSummaryInput {
     pub(crate) thread: String,
-    pub(crate) selection_revision: i64,
-    pub(crate) profile_revision: i64,
-    pub(crate) nonappend_generation: i64,
     pub(crate) epoch: i64,
     pub(crate) profile: String,
     pub(crate) model: String,
@@ -93,8 +88,6 @@ pub(crate) struct CapturedSummaryInput {
     pub(crate) origin_turn: Option<String>,
     pub(crate) origin_run: Option<String>,
     pub(crate) origin_generation: Option<i64>,
-    pub(crate) request_turn_id: Option<String>,
-    pub(crate) request_generation: Option<i64>,
     pub(crate) groups: Vec<CapturedGroup>,
     pub(crate) active_turn: bool,
     pub(crate) spill_epoch_advanced: bool,
@@ -110,17 +103,16 @@ fn plan_gc_prefix_tx(
     stage: &super::attempt::GcStage,
 ) -> Result<Option<GcRangePlan>, StorageError> {
     let facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
         params![thread,stage.attempt_id,stage.token],
         |row| Ok(ThreadPlanFacts {
-            selection: row.get(0)?, profile_revision: row.get(1)?, generation: row.get(2)?, epoch: row.get(3)?,
-            profile: row.get(4)?, model: row.get(5)?, effort: row.get(6)?, current_turn: row.get(7)?, latest_turn: row.get(8)?, spill_committed: row.get(9)?,
+            selection: row.get(0)?, profile_revision: row.get(1)?, epoch: row.get(2)?,
+            profile: row.get(3)?, model: row.get(4)?, effort: row.get(5)?, current_turn: row.get(6)?, latest_turn: row.get(7)?, spill_committed: row.get(8)?,
         }),
     )?;
     let ThreadPlanFacts {
         selection,
         profile_revision,
-        generation,
         epoch,
         profile,
         model,
@@ -309,7 +301,6 @@ fn plan_gc_prefix_tx(
         sources,
         selection_revision: selection,
         profile_revision,
-        nonappend_generation: generation,
         epoch,
         active_turn: false,
         spill_epoch_advanced,
@@ -324,15 +315,14 @@ fn plan_gc_active_turn_tx(
     expected_turn: &str,
 ) -> Result<Option<GcRangePlan>, StorageError> {
     let facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,(SELECT id FROM turn WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait') ORDER BY rowid DESC LIMIT 1),(SELECT id FROM turn WHERE thread_id=?1 AND state='completed' ORDER BY rowid DESC LIMIT 1),EXISTS(SELECT 1 FROM model_attempt a WHERE a.id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3 AND (json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.active_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1) OR json_extract(a.error_json,'$.automatic_trim_attempt.committed_stages.closed_spill.reasoning_epoch')=(SELECT reasoning_epoch FROM thread WHERE id=?1))) FROM thread WHERE id=?1 AND deleted_at IS NULL",
         params![thread,stage.attempt_id,stage.token],|r|Ok(ThreadPlanFacts {
-        selection:r.get(0)?, profile_revision:r.get(1)?, generation:r.get(2)?, epoch:r.get(3)?,
-        profile:r.get(4)?, model:r.get(5)?, effort:r.get(6)?, current_turn:r.get(7)?, latest_turn:r.get(8)?, spill_committed:r.get(9)?,
+        selection:r.get(0)?, profile_revision:r.get(1)?, epoch:r.get(2)?,
+        profile:r.get(3)?, model:r.get(4)?, effort:r.get(5)?, current_turn:r.get(6)?, latest_turn:r.get(7)?, spill_committed:r.get(8)?,
     }))?;
     let ThreadPlanFacts {
         selection,
         profile_revision,
-        generation,
         epoch,
         profile,
         model,
@@ -543,7 +533,6 @@ fn plan_gc_active_turn_tx(
         sources,
         selection_revision: selection,
         profile_revision,
-        nonappend_generation: generation,
         epoch,
         active_turn: true,
         spill_epoch_advanced,
@@ -608,9 +597,9 @@ fn capture_gc_plan_and_sources(
     let end = i64::try_from(range.end).map_err(|_| overflow())?;
     let range_len = range.end.checked_sub(range.start).ok_or_else(overflow)?;
     let thread_facts = tx.query_row(
-        "SELECT selection_revision,profile_revision,selection_nonappend_generation,reasoning_epoch,profile_id,model_id,effort,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",
+        "SELECT selection_revision,profile_revision,reasoning_epoch,profile_id,model_id,effort,summary_max_chars FROM thread WHERE id=?1 AND deleted_at IS NULL",
         [thread],
-        |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?,row.get::<_, i64>(3)?,row.get::<_, String>(4)?,row.get::<_, String>(5)?,row.get::<_, Option<String>>(6)?,row.get::<_, Option<i64>>(7)?)),
+        |row| Ok((row.get::<_, i64>(0)?,row.get::<_, i64>(1)?,row.get::<_, i64>(2)?,row.get::<_, String>(3)?,row.get::<_, String>(4)?,row.get::<_, Option<String>>(5)?,row.get::<_, Option<i64>>(6)?)),
     ).optional()?.ok_or_else(|| StorageError::from(ApiError::new(ErrorCode::ThreadNotFound, "GC summary target Thread is unavailable")))?;
 
     let rows:i64=tx.query_row(
@@ -632,8 +621,7 @@ fn capture_gc_plan_and_sources(
     let plan = &planned;
     if plan.selection_revision != thread_facts.0
         || plan.profile_revision != thread_facts.1
-        || plan.nonappend_generation != thread_facts.2
-        || plan.epoch != thread_facts.3
+        || plan.epoch != thread_facts.2
         || plan.sources.len() != row_plans.len()
         || plan.sources.iter().zip(&row_plans).any(|(source, row)| {
             source.ordinal != row.ordinal
@@ -716,7 +704,7 @@ fn capture_gc_plan_and_sources(
         drop(payload_rows);
         drop(payload_statement);
         let marker_adapter = super::summary_marker_item(&payload).is_some();
-        let projection = super::edit::projection_characters(&payload, thread_facts.3);
+        let projection = super::edit::projection_characters(&payload, thread_facts.2);
         current.projection_weight = current
             .projection_weight
             .checked_add(u128::from(projection))
@@ -733,7 +721,7 @@ fn capture_gc_plan_and_sources(
                 attachments: &row.attachments,
             },
             payload,
-            thread_facts.3,
+            thread_facts.2,
             &mut current.text,
         );
         current.stamps.push(CapturedSourceStamp {
@@ -742,22 +730,6 @@ fn capture_gc_plan_and_sources(
             marker_adapter,
         });
     }
-    let request_turn = {
-        let turn = trigger["turn_id"].as_str().ok_or_else(|| {
-            StorageError::InvalidInput("GC trigger lacks request Turn provenance".into())
-        })?;
-        let generation: Option<i64> = tx
-            .query_row(
-                "SELECT generation FROM turn WHERE id=?1 AND thread_id=?2",
-                params![turn, thread],
-                |r| r.get(0),
-            )
-            .optional()?;
-        let generation = generation.ok_or_else(|| {
-            StorageError::InvalidInput("GC request Turn provenance disappeared".into())
-        })?;
-        Some((turn.to_owned(), generation))
-    };
     let origin = {
         tx.query_row("SELECT t.id,t.run_id,t.generation FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE a.id=?1 AND t.thread_id=?2",params![stage.attempt_id,thread],|row|Ok((Some(row.get::<_,String>(0)?),Some(row.get::<_,String>(1)?),Some(row.get::<_,i64>(2)?)))).optional()?.ok_or_else(||StorageError::InvalidInput("GC parent attempt provenance disappeared".into()))?
     };
@@ -767,12 +739,12 @@ fn capture_gc_plan_and_sources(
             return Ok(GcCaptureOutcome::Cancelled);
         }
         if stage.thread_id != thread
-            || stage.profile_id != thread_facts.4
-            || stage.model_id != thread_facts.5
-            || stage.effort != thread_facts.6
-            || (stage.reasoning_epoch != thread_facts.3
+            || stage.profile_id != thread_facts.3
+            || stage.model_id != thread_facts.4
+            || stage.effort != thread_facts.5
+            || (stage.reasoning_epoch != thread_facts.2
                 && !(planned.spill_epoch_advanced
-                    && stage.reasoning_epoch.checked_add(1) == Some(thread_facts.3)))
+                    && stage.reasoning_epoch.checked_add(1) == Some(thread_facts.2)))
         {
             return Err(StorageError::InvalidInput(
                 "GC parent receipt context differs from the captured Thread".into(),
@@ -783,19 +755,14 @@ fn capture_gc_plan_and_sources(
     tx.commit()?;
     Ok(GcCaptureOutcome::Captured(Box::new(CapturedSummaryInput {
         thread: thread.to_owned(),
-        selection_revision: thread_facts.0,
-        profile_revision: thread_facts.1,
-        nonappend_generation: thread_facts.2,
-        epoch: thread_facts.3,
-        profile: thread_facts.4,
-        model: thread_facts.5,
-        thread_summary_max_chars: thread_facts.7.and_then(|value| u64::try_from(value).ok()),
-        effort: thread_facts.6,
+        epoch: thread_facts.2,
+        profile: thread_facts.3,
+        model: thread_facts.4,
+        thread_summary_max_chars: thread_facts.6.and_then(|value| u64::try_from(value).ok()),
+        effort: thread_facts.5,
         origin_turn: origin.0,
         origin_run: origin.1,
         origin_generation: origin.2,
-        request_turn_id: request_turn.as_ref().map(|(turn, _)| turn.clone()),
-        request_generation: request_turn.map(|(_, generation)| generation),
         groups,
         active_turn: planned.active_turn,
         spill_epoch_advanced: planned.spill_epoch_advanced,
@@ -934,43 +901,4 @@ pub(super) fn selected_source_facts(
         })
     })
     .collect()
-}
-
-/// One equality authority for both eager job cancellation and strict FINISH.
-/// Early reconciliation may skip separate transactional context/receipt checks;
-/// it never invents a different selected-source equivalence rule.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SourceFactPolicy {
-    EarlyReconcile,
-    StrictFinalAdoption,
-}
-/// One equality authority for early producer invalidation and strict FINISH.
-/// Early validation uses the common captured facts; FINISH adds transactional
-/// safe-to-adopt requirements through the policy argument.
-pub(super) fn classify_selected_source_facts(
-    expected: &[GcSourceFacts],
-    actual: &[GcSourceFacts],
-    policy: SourceFactPolicy,
-) -> Result<(), super::discard::RejectionReason> {
-    use super::discard::RejectionReason::SourceChanged;
-    if expected.len() != actual.len() {
-        return Err(SourceChanged);
-    }
-    for (expected, actual) in expected.iter().zip(actual) {
-        if expected.ordinal != actual.ordinal
-            || expected.id != actual.id
-            || expected.revision != actual.revision
-            || expected.turn != actual.turn
-            || expected.group_id != actual.group_id
-            || expected.protected != actual.protected
-            || expected.group_complete != actual.group_complete
-            || expected.has_summary_marker != actual.has_summary_marker
-            || expected.attachments != actual.attachments
-            || (policy == SourceFactPolicy::StrictFinalAdoption
-                && (!actual.group_complete || actual.protected))
-        {
-            return Err(SourceChanged);
-        }
-    }
-    Ok(())
 }
