@@ -350,6 +350,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             mut receive,
             server,
             mut held_phase,
+            terminal_identity,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
         let HeldSummaryPhase { summary } = held_phase
@@ -369,7 +370,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             .send((200, answer("background summary completed")))
             .unwrap();
         crate::test_watchdog::watchdog("same proactive job terminal", async {
-            while !terminal_record_written(&control).await {
+            while !terminal_record_written(&control,&terminal_identity,"adopted",Some("closed_summary")).await {
                 tokio::task::yield_now().await;
             }
         })
@@ -415,6 +416,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     let mut run_b_branch = RunBBranchReachability::Unreached;
     let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
+        let terminal_identity=fx.terminal_identity.clone();
         trace_thread = Some(fx.target.clone());
         trace_keepalive = Some(crate::control::subscribe_driver_await_phases());
         retained_summary = Some(
@@ -700,12 +702,24 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .send((200, answer("background summary completed")))
             .unwrap();
         settled(control, target).await;
+        let run_b=run_id.clone(); let turn_b=turn_id.clone();
+        control.store.database.call(move|db|{
+            let (turn_state,attempt_state,observation,provisional,token,stages):(String,String,String,Option<i64>,Option<String>,Option<String>)=db.query_row(
+                "SELECT u.state,a.state,json_extract(a.error_json,'$.automatic_trim_attempt'),json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token'),json_type(a.error_json,'$.automatic_trim_attempt.committed_stages') FROM turn u JOIN model_attempt a ON a.turn_id=u.id WHERE u.id=?1 AND u.run_id=?2 ORDER BY a.rowid DESC LIMIT 1",
+                rusqlite::params![turn_b,run_b],|row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?)),
+            )?;
+            assert_eq!(turn_state,"recovery_wait"); assert_eq!(attempt_state,"incomplete");
+            let observation:Value=serde_json::from_str(&observation).unwrap();
+            assert_eq!(observation["outcome"],"adopted"); assert_eq!(observation["reason"],"same_proactive_job");
+            assert_eq!(provisional,None); assert_eq!(token,None); assert_eq!(stages,None);
+            Ok(())
+        }).await.unwrap();
         assert!(
             receive.try_recv().is_err(),
             "an exhausted context-limit ends in the established recovery path without a duplicate POST"
         );
         crate::test_watchdog::watchdog("background summary FINISH", async {
-            while !terminal_record_written(control).await {
+            while !terminal_record_written(control,&terminal_identity,"adopted",Some("closed_summary")).await {
                 tokio::task::yield_now().await;
             }
         })
@@ -1301,6 +1315,7 @@ async fn prepare_with_mode(
         );
     }
     let mut held_summary = None;
+    let mut terminal_identity = None;
     let held_slot = if hold_summary {
         let drivers = control.live.test_drivers().lock().await;
         Some(
@@ -1384,6 +1399,7 @@ async fn prepare_with_mode(
                 }
             }
             if request.body["tools"] == json!([]) {
+                terminal_identity = Some(capture_terminal_identity(&control, &target, true).await);
                 if hold_summary {
                     held_summary = Some(request);
                     break;
@@ -1557,7 +1573,14 @@ async fn prepare_with_mode(
     }
     if spill_off && !hold_summary {
         crate::test_watchdog::watchdog("spill-off summary attempt finishes", async {
-            while !terminal_record_written(&control).await {
+            while !terminal_record_written(
+                &control,
+                &terminal_identity,
+                "adopted",
+                Some(scenario.stage()),
+            )
+            .await
+            {
                 tokio::task::yield_now().await;
             }
         })
@@ -1567,10 +1590,31 @@ async fn prepare_with_mode(
     // RejectFact has no checkpoint: the trigger fires inside the stage's
     // adoption transaction, before the driver's terminal writer runs. The
     // rejected-stage observation point is after that terminal write.
+    let rejected_outcome = expected_outcome(
+        fault,
+        scenario,
+        ObservationPhase::AfterRejectedStageTransaction,
+    );
     while !spill_off
         && !hold_summary
         && !if fault == Fault::RejectFact {
-            reached.load(Ordering::SeqCst) && terminal_record_written(&control).await
+            if !reached.load(Ordering::SeqCst) {
+                false
+            } else {
+                if terminal_identity.is_none() {
+                    terminal_identity =
+                        Some(capture_terminal_identity(&control, &target, false).await);
+                }
+                terminal_record_written(
+                    &control,
+                    terminal_identity
+                        .as_ref()
+                        .expect("rejected attempt identity captured"),
+                    rejected_outcome,
+                    None,
+                )
+                .await
+            }
         } else {
             checkpoint_reached.load(Ordering::SeqCst)
         }
@@ -1610,8 +1654,14 @@ async fn prepare_with_mode(
             checkpoint_reached,
             release_checkpoint,
             held_phase,
+            terminal_identity: terminal_identity
+                .expect("capture original attempt before held summary return"),
         };
     }
+    if terminal_identity.is_none() {
+        terminal_identity = Some(capture_terminal_identity(&control, &target, false).await);
+    }
+    let terminal_identity = terminal_identity.expect("fixture captured original attempt/token");
     let saved = control.store.database.call(|db| Ok(db.query_row(
         "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
         [], |row| row.get::<_, String>(0))?)).await.unwrap();
@@ -1673,7 +1723,15 @@ async fn prepare_with_mode(
         checkpoint_reached,
         release_checkpoint,
         held_phase,
+        terminal_identity,
     }
+}
+
+#[derive(Clone, Debug)]
+struct TerminalAttemptIdentity {
+    thread: String,
+    attempt: String,
+    token: String,
 }
 
 struct HeldSummaryPhase {
@@ -1694,14 +1752,56 @@ struct Fx {
     checkpoint_reached: Arc<AtomicBool>,
     release_checkpoint: Arc<tokio::sync::Notify>,
     held_phase: Option<HeldSummaryPhase>,
+    terminal_identity: TerminalAttemptIdentity,
 }
 
-/// Whether the latest automatic attempt record has left the provisional state,
-/// i.e. the driver's terminal writer for the attempt has committed.
-async fn terminal_record_written(control: &Control) -> bool {
-    control.store.database.call(|db| Ok(db.query_row(
-        "SELECT json_extract(error_json,'$.automatic_trim_attempt.provisional') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
-        [], |row| row.get::<_, Option<i64>>(0)).optional()?.flatten() == Some(0))).await.unwrap()
+/// Capture the fixture's original attempt/token before another Run can add an observation.
+async fn capture_terminal_identity(
+    control: &Control,
+    thread: &str,
+    require_provisional: bool,
+) -> TerminalAttemptIdentity {
+    let thread_id = thread.to_owned();
+    let (attempt, token) = control.store.database.call(move |db| {
+        db.query_row(
+            "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' AND json_type(a.error_json,'$.automatic_trim_attempt.token')='text' AND (?2=0 OR json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1) ORDER BY a.rowid DESC LIMIT 1",
+            rusqlite::params![thread_id, require_provisional],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+    }).await.unwrap();
+    TerminalAttemptIdentity {
+        thread: thread.to_owned(),
+        attempt,
+        token,
+    }
+}
+
+/// Require FINISH on the captured original receipt, never a sibling Run observation.
+async fn terminal_record_written(
+    control: &Control,
+    identity: &TerminalAttemptIdentity,
+    expected_outcome: &str,
+    committed_stage: Option<&str>,
+) -> bool {
+    let identity = identity.clone();
+    let expected_outcome = expected_outcome.to_owned();
+    let committed_stage = committed_stage.map(str::to_owned);
+    control.store.database.call(move|db|{
+        let row:Option<(Option<i64>,Option<String>,Option<String>,Option<i64>)>=db.query_row(
+            "SELECT json_extract(a.error_json,'$.automatic_trim_attempt.provisional'),json_extract(a.error_json,'$.automatic_trim_attempt.token'),json_extract(a.error_json,'$.automatic_trim_attempt.outcome'),CASE WHEN ?4 IS NULL THEN 1 ELSE json_type(a.error_json,'$.automatic_trim_attempt.committed_stages.'||?4)='object' END FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
+            rusqlite::params![identity.attempt,identity.thread,identity.token,committed_stage],
+            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?)),
+        ).optional()?;
+        Ok(row.is_some_and(|(provisional,token,outcome,stage)|provisional==Some(0)&&token.as_deref()==Some(identity.token.as_str())&&outcome.as_deref()==Some(expected_outcome.as_str())&&stage==Some(1)))
+    }).await.unwrap()
+}
+
+fn expected_terminal_stage(scenario: Scenario, fault: Fault) -> &'static str {
+    if scenario.continues_to_active_summary(fault) {
+        "active_summary"
+    } else {
+        scenario.stage()
+    }
 }
 
 /// After the checkpoint is released: answer the active summary request the
@@ -1716,6 +1816,7 @@ async fn after_release(
     fault: Fault,
     scenario: Scenario,
     reached: &AtomicBool,
+    terminal_identity: &TerminalAttemptIdentity,
 ) {
     if scenario.continues_to_active_summary(fault) {
         let summary_request = incoming(control, receive).await;
@@ -1736,7 +1837,14 @@ async fn after_release(
             }
             // The failed remeasurement is classified by the driver's own
             // terminal write; shutdown must not race that classification.
-            while !terminal_record_written(control).await {
+            while !terminal_record_written(
+                control,
+                terminal_identity,
+                expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart),
+                Some(expected_terminal_stage(scenario, fault)),
+            )
+            .await
+            {
                 tokio::task::yield_now().await;
             }
         })
@@ -1782,6 +1890,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
         reached,
         checkpoint_reached,
         release_checkpoint,
+        terminal_identity,
         ..
     } = prepare_with_thread_override(fault, scenario, set_thread_percent).await;
     if fault != Fault::RejectFact {
@@ -1797,7 +1906,15 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             );
         }
         release_checkpoint.notify_one();
-        after_release(&control, &mut receive, fault, scenario, &reached).await;
+        after_release(
+            &control,
+            &mut receive,
+            fault,
+            scenario,
+            &reached,
+            &terminal_identity,
+        )
+        .await;
     }
     let shutdown = control.shutdown().await;
     if matches!(
@@ -2729,14 +2846,13 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
         let summary = incoming(&control, &mut receive).await;
         assert_eq!(summary.body["tools"], json!([]));
         let scope = target.clone();
-        let attempt = control
+        let (attempt,token) = control
             .store
             .database
             .call(move |db| {
-                let attempt: String = db.query_row(
-                    "SELECT a.id FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND json_extract(a.error_json,'$.automatic_trim_attempt.token') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",
-                    [&scope],
-                    |row| row.get(0),
+                let (attempt,token):(String,String)=db.query_row(
+                    "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1 AND json_type(a.error_json,'$.automatic_trim_attempt.token')='text' ORDER BY a.rowid DESC LIMIT 1",
+                    [&scope],|row|Ok((row.get(0)?,row.get(1)?)),
                 )?;
                 match change {
                     "profile_changed" => {
@@ -2758,8 +2874,9 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
             .reply
             .send((200, answer("short synthetic summary")))
             .unwrap();
+        let terminal_identity=TerminalAttemptIdentity{thread:target.clone(),attempt:attempt.clone(),token};
         crate::test_watchdog::watchdog("outside-R current adoption terminal", async {
-            while !terminal_record_written(&control).await {
+            while !terminal_record_written(&control,&terminal_identity,"adopted",Some("closed_summary")).await {
                 tokio::task::yield_now().await;
             }
         })
