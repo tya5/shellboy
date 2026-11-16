@@ -808,7 +808,7 @@ async fn prepare_with_mode(
         scenario.target_tokens()
     );
     let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
+    let (url, mut receive, mut heads, server) = proxy().await;
     let limits = format!(
         "auto_compact_target_percent={}\n[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n",
         scenario.target_percent()
@@ -1020,8 +1020,48 @@ async fn prepare_with_mode(
     let mut held_summary = None;
     if scenario.summary() {
         let mut first_normal_facts_recorded = false;
+        let mut observed_heads = Vec::new();
         loop {
-            let request = incoming(&control, &mut receive).await;
+            let request = if hold_summary {
+                loop {
+                    tokio::select! {
+                        head = heads.recv() => {
+                            let head = head.expect("mock server head channel remains open");
+                            assert!(head.request_line.starts_with("POST /v1/responses "), "unexpected accepted request line: {head:?}");
+                            assert!(head.content_length.is_some(), "fixture expects Content-Length framing: {head:?}");
+                            assert!(head.transfer_encoding.is_none(), "fixture does not decode chunked request bodies: {head:?}");
+                            assert!(head.content_encoding.is_none(), "fixture does not decode compressed request bodies: {head:?}");
+                            eprintln!("U2 accepted HTTP request head: {head:?}");
+                            observed_heads.push(head);
+                        }
+                        request = receive.recv() => break request.expect("mock server body channel remains open"),
+                    }
+                }
+            } else {
+                incoming(&control, &mut receive).await
+            };
+            if hold_summary
+                && !observed_heads
+                    .iter()
+                    .any(|head| head.request_id == request.request_id)
+            {
+                loop {
+                    let head = heads
+                        .recv()
+                        .await
+                        .expect("completed body has an accepted HTTP head");
+                    assert!(head.request_line.starts_with("POST /v1/responses "));
+                    assert!(head.content_length.is_some());
+                    assert!(head.transfer_encoding.is_none());
+                    assert!(head.content_encoding.is_none());
+                    eprintln!("U2 accepted HTTP request head: {head:?}");
+                    let matched = head.request_id == request.request_id;
+                    observed_heads.push(head);
+                    if matched {
+                        break;
+                    }
+                }
+            }
             if request.body["tools"] == json!([]) {
                 if hold_summary {
                     held_summary = Some(request);
@@ -1176,8 +1216,17 @@ async fn prepare_with_mode(
                         .gc_dispatch_stage
                         .lock()
                         .expect("GC dispatch stage observer poisoned");
+                    let paired_head = observed_heads
+                        .iter()
+                        .find(|head| head.request_id == request.request_id)
+                        .expect("every completed request body has its accepted HTTP head");
+                    assert!(paired_head.request_line.starts_with("POST /v1/responses "));
+                    assert_eq!(paired_head.content_length, Some(request.body_bytes));
+                    assert!(paired_head.transfer_encoding.is_none());
+                    assert!(paired_head.content_encoding.is_none());
                     eprintln!(
-                        "U2 first ordinary request while Run A active: facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?} dispatch_stage={dispatch_stage:?}"
+                        "U2 first ordinary request HTTP head/body: head={paired_head:?} body_request_id={} body_bytes={} facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?} dispatch_stage={dispatch_stage:?}",
+                        request.request_id, request.body_bytes
                     );
                     first_normal_facts_recorded = true;
                 }
@@ -1249,6 +1298,7 @@ async fn prepare_with_mode(
             control,
             target,
             receive,
+            heads,
             server,
             guard_before,
             reached,
@@ -1312,6 +1362,7 @@ async fn prepare_with_mode(
         control,
         target,
         receive,
+        heads,
         server,
         guard_before,
         reached,
@@ -1329,6 +1380,7 @@ struct Fx {
     control: Arc<Control>,
     target: String,
     receive: mpsc::Receiver<Incoming>,
+    heads: mpsc::UnboundedReceiver<ProxyHead>,
     server: tokio::task::JoinHandle<()>,
     guard_before: Vec<(String, String)>,
     reached: Arc<AtomicBool>,
@@ -1969,42 +2021,80 @@ fn chat_answer_with_usage(text: &str, input_tokens: u64) -> Value {
 }
 
 struct Incoming {
+    request_id: u64,
+    body_bytes: usize,
     body: Value,
     reply: oneshot::Sender<(u16, Value)>,
     release: Option<oneshot::Sender<()>>,
 }
+#[derive(Clone, Debug)]
+struct ProxyHead {
+    request_id: u64,
+    request_line: String,
+    content_length: Option<usize>,
+    transfer_encoding: Option<String>,
+    content_encoding: Option<String>,
+}
+
 async fn proxy() -> (
     String,
     mpsc::Receiver<Incoming>,
+    mpsc::UnboundedReceiver<ProxyHead>,
     tokio::task::JoinHandle<()>,
 ) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (send, receive) = mpsc::channel(8);
+    let (head_send, head_receive) = mpsc::unbounded_channel();
+    let request_ids = Arc::new(AtomicU64::new(0));
     let server = tokio::spawn(async move {
         loop {
             let (mut stream, _) = listener.accept().await.unwrap();
             let send = send.clone();
+            let head_send = head_send.clone();
+            let request_id = request_ids.fetch_add(1, Ordering::Relaxed);
             tokio::spawn(async move {
                 let mut bytes = Vec::new();
                 let mut buffer = [0; 8192];
-                let body = loop {
+                let mut head_sent = false;
+                let (body, body_bytes) = loop {
                     let read = stream.read(&mut buffer).await.unwrap();
                     if read == 0 {
                         return;
                     }
                     bytes.extend_from_slice(&buffer[..read]);
                     if let Some(at) = bytes.windows(4).position(|s| s == b"\r\n\r\n") {
-                        let size: usize = String::from_utf8_lossy(&bytes[..at])
-                            .lines()
-                            .find_map(|line| {
-                                line.to_lowercase()
-                                    .strip_prefix("content-length:")
-                                    .and_then(|s| s.trim().parse().ok())
+                        let header_text = String::from_utf8_lossy(&bytes[..at]);
+                        let mut lines = header_text.lines();
+                        let request_line = lines.next().unwrap_or_default().to_owned();
+                        let headers = lines.collect::<Vec<_>>();
+                        let header_value = |name: &str| {
+                            headers.iter().find_map(|line| {
+                                let (key, value) = line.split_once(':')?;
+                                key.eq_ignore_ascii_case(name)
+                                    .then(|| value.trim().to_owned())
                             })
-                            .unwrap();
+                        };
+                        let content_length = header_value("content-length")
+                            .and_then(|value| value.parse::<usize>().ok());
+                        let transfer_encoding = header_value("transfer-encoding");
+                        let content_encoding = header_value("content-encoding");
+                        if !head_sent {
+                            let _ = head_send.send(ProxyHead {
+                                request_id,
+                                request_line,
+                                content_length,
+                                transfer_encoding,
+                                content_encoding,
+                            });
+                            head_sent = true;
+                        }
+                        let size = content_length.unwrap();
                         if bytes.len() >= at + 4 + size {
-                            break serde_json::from_slice(&bytes[at + 4..at + 4 + size]).unwrap();
+                            break (
+                                serde_json::from_slice(&bytes[at + 4..at + 4 + size]).unwrap(),
+                                size,
+                            );
                         }
                     }
                 };
@@ -2056,7 +2146,12 @@ async fn proxy() -> (
             });
         }
     });
-    (format!("http://{address}/v1"), receive, server)
+    (
+        format!("http://{address}/v1"),
+        receive,
+        head_receive,
+        server,
+    )
 }
 
 fn assert_interruption_audits(
@@ -2214,7 +2309,7 @@ async fn completed_trigger_outside_context_changes_do_not_veto_current_r_adoptio
 async fn completed_trigger_outside_context_change(change: &'static str) {
     crate::test_watchdog::watchdog("completed trigger outside-R positive", async {
         let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
+        let (url, mut receive, _heads, server) = proxy().await;
         let owner = proactive_owner(
             root.path(),
             &url,
