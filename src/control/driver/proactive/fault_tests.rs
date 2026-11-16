@@ -1575,7 +1575,9 @@ async fn prepare_with_mode(
         crate::test_watchdog::watchdog("spill-off summary attempt finishes", async {
             while !terminal_record_written(
                 &control,
-                &terminal_identity,
+                terminal_identity
+                    .as_ref()
+                    .expect("summary terminal identity captured"),
                 "adopted",
                 Some(scenario.stage()),
             )
@@ -1767,7 +1769,7 @@ async fn capture_terminal_identity(
             "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' AND json_type(a.error_json,'$.automatic_trim_attempt.token')='text' AND (?2=0 OR json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1) ORDER BY a.rowid DESC LIMIT 1",
             rusqlite::params![thread_id, require_provisional],
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
+        )?
     }).await.unwrap();
     TerminalAttemptIdentity {
         thread: thread.to_owned(),
@@ -2866,7 +2868,7 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
                     }
                     _ => unreachable!(),
                 }
-                Ok(attempt)
+                Ok((attempt, token))
             })
             .await
             .unwrap();

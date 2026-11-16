@@ -143,6 +143,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         reached,
         checkpoint_reached,
         release_checkpoint,
+        terminal_identity,
         ..
     } = prepare(fault, scenario).await;
     if fault != Fault::RejectFact {
@@ -186,7 +187,15 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
             );
         }
         release_checkpoint.notify_one();
-        after_release(&control, &mut receive, fault, scenario, &reached).await;
+        after_release(
+            &control,
+            &mut receive,
+            fault,
+            scenario,
+            &reached,
+            &terminal_identity,
+        )
+        .await;
     }
     let shutdown = control.shutdown().await;
     let final_write_is_expected = fault != Fault::RejectFinal || !scenario.summary();
