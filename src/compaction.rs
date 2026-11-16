@@ -614,62 +614,71 @@ impl Compactor {
                         "Compaction cancelled before adoption",
                     )));
                 }
-                for (ordinal, payload) in &replacements {
-                    let group = &snapshot.groups[*ordinal];
-                    let sources = group
-                        .sources
-                        .iter()
-                        .map(|source| {
-                            summary::final_r_source(
-                                source,
-                                group.complete,
-                                snapshot.protected.contains(&source.id),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let markers = snapshot
-                        .extra_sources
-                        .iter()
-                        .map(|source| {
-                            summary::final_r_source(
-                                source,
-                                true,
-                                snapshot.protected.contains(&source.id),
-                            )
-                        })
-                        .collect::<Vec<_>>();
-                    let input_key = key(&(
-                        "spill-v1",
-                        sources
+                let source_sets = replacements
+                    .iter()
+                    .map(|(ordinal, _)| {
+                        let group = &snapshot.groups[*ordinal];
+                        group
+                            .sources
                             .iter()
-                            .map(|source| (&source.fact.id, source.fact.revision, &source.hash))
-                            .collect::<Vec<_>>(),
-                        payload,
-                    ));
-                    summary::adopt_current_r_tx(
-                        &tx,
-                        summary::FinalAdoption {
-                            config: &config,
-                            cancel: &cancel,
-                            thread: &snapshot.thread,
-                            sources: &sources,
-                            markers: &markers,
+                            .map(|source| {
+                                summary::final_r_source(
+                                    source,
+                                    group.complete,
+                                    snapshot.protected.contains(&source.id),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                let markers = snapshot
+                    .extra_sources
+                    .iter()
+                    .map(|source| {
+                        summary::final_r_source(
+                            source,
+                            true,
+                            snapshot.protected.contains(&source.id),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let input_keys = replacements
+                    .iter()
+                    .zip(&source_sets)
+                    .map(|((_, payload), sources)| {
+                        key(&(
+                            "spill-v1",
+                            sources
+                                .iter()
+                                .map(|source| (&source.fact.id, source.fact.revision, &source.hash))
+                                .collect::<Vec<_>>(),
                             payload,
-                            input_key: &input_key,
-                            format: "spill-v1",
-                        },
-                    )?;
-                }
-                if drop_all_reasoning {
-                    tx.execute(
-                        "UPDATE thread SET reasoning_epoch=?2 WHERE id=?1",
-                        params![snapshot.thread, snapshot.epoch + 1],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM app_meta WHERE key=?1",
-                        [history::reasoning_keep_key(&snapshot.thread)],
-                    )?;
-                }
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                let requests = replacements
+                    .iter()
+                    .enumerate()
+                    .map(|(index, (_, payload))| summary::FinalAdoption {
+                        config: &config,
+                        cancel: &cancel,
+                        thread: &snapshot.thread,
+                        sources: &source_sets[index],
+                        markers: &markers,
+                        payload,
+                        input_key: &input_keys[index],
+                        format: "spill-v1",
+                    })
+                    .collect::<Vec<_>>();
+                summary::adopt_current_rs_tx(
+                    &tx,
+                    &requests,
+                    if drop_all_reasoning {
+                        summary::FinalReasoningPolicy::DropAll
+                    } else {
+                        summary::FinalReasoningPolicy::PreserveCurrent
+                    },
+                )?;
                 if let Some(stage) = &automatic {
                     attempt::record_tx(
                         &tx,

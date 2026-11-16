@@ -259,6 +259,7 @@ pub(super) fn restore_current_marker_tx(
         .checked_add(1)
         .ok_or_else(|| StorageError::InvalidInput("restore path position overflow".into()))?;
     let mut remove_positions = Vec::new();
+    let mut previous_retained_position = None;
     for id in replacement_ids {
         let positions = path
             .iter()
@@ -266,12 +267,16 @@ pub(super) fn restore_current_marker_tx(
             .filter_map(|(position, candidate)| (candidate == id).then_some(position))
             .collect::<Vec<_>>();
         if remove_ids.contains(id) {
-            if positions.len() != 1 || positions[0] <= start {
+            if positions.len() != 1
+                || positions[0] <= start
+                || previous_retained_position.is_some_and(|previous| positions[0] <= previous)
+            {
                 return Err(rejection(
                     RejectionReason::SourceChanged,
-                    "restore retained anchor is no longer uniquely after its marker",
+                    "restore retained anchors are no longer uniquely ordered after their marker",
                 ));
             }
+            previous_retained_position = Some(positions[0]);
             remove_positions.push(positions[0]);
         } else if !positions.is_empty() {
             return Err(rejection(
@@ -280,6 +285,7 @@ pub(super) fn restore_current_marker_tx(
             ));
         }
     }
+    remove_positions.sort_unstable();
     for position in remove_positions.into_iter().rev() {
         path.remove(position);
     }
@@ -337,96 +343,176 @@ pub(super) struct FinalAdoption<'a> {
     pub(super) format: &'a str,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum FinalReasoningPolicy {
+    PreserveCurrent,
+    DropAll,
+}
+
 pub(super) fn adopt_current_r_tx(
     tx: &rusqlite::Transaction<'_>,
     request: FinalAdoption<'_>,
 ) -> Result<String, StorageError> {
-    let FinalAdoption {
-        config,
-        cancel,
-        thread,
-        sources,
-        markers,
-        payload,
-        input_key,
-        format,
-    } = request;
+    adopt_current_rs_tx(
+        tx,
+        std::slice::from_ref(&request),
+        FinalReasoningPolicy::PreserveCurrent,
+    )?
+    .into_iter()
+    .next()
+    .ok_or_else(|| StorageError::Schema("single-R adoption returned no node".into()))
+}
+
+pub(super) fn adopt_current_rs_tx(
+    tx: &rusqlite::Transaction<'_>,
+    requests: &[FinalAdoption<'_>],
+    reasoning_policy: FinalReasoningPolicy,
+) -> Result<Vec<String>, StorageError> {
+    let Some(first) = requests.first() else {
+        return Err(StorageError::InvalidInput(
+            "final adoption batch must not be empty".into(),
+        ));
+    };
+    let thread = first.thread;
+    let cancel = first.cancel;
+    if requests
+        .iter()
+        .any(|request| request.thread != thread || !std::ptr::eq(request.cancel, cancel))
+    {
+        return Err(StorageError::InvalidInput(
+            "final adoption batch must share one Thread and cancellation token".into(),
+        ));
+    }
     if cancel.is_cancelled() {
         return Err(rejection(
             RejectionReason::Cancelled,
-            "summary cancelled before adoption",
+            "compaction cancelled before adoption",
         ));
     }
-    let ids = sources
-        .iter()
-        .map(|source| source.fact.id.clone())
-        .collect::<Vec<_>>();
-    let (selection_revision, mut path) = current_path_ids(tx, thread, markers)?;
-    current_r_sources(tx, thread, sources)?;
-    let start = locate_r(&path, &ids)?;
-    let end = start
-        .checked_add(ids.len())
-        .ok_or_else(|| StorageError::InvalidInput("summary R path length overflow".into()))?;
-    if super::gc_capture::native_tool_span_splits(
-        tx,
-        thread,
-        i64::try_from(start)
-            .map_err(|_| StorageError::InvalidInput("summary R path position overflow".into()))?,
-        i64::try_from(end)
-            .map_err(|_| StorageError::InvalidInput("summary R path position overflow".into()))?,
-    )? {
-        return Err(rejection(
-            RejectionReason::SourceChanged,
-            "summary R splits a tool call/result group",
-        ));
-    }
-    let selected_sources = sources
-        .iter()
-        .map(|source| super::ReplacementSource {
-            id: &source.fact.id,
-            revision: source.fact.revision,
-            hash: &source.hash,
-        })
-        .collect::<Vec<_>>();
-    let node = super::store_replacement_material_tx(
-        tx,
-        config,
-        super::ReplacementMaterial {
-            thread,
-            input_key,
-            format,
-            sources: &selected_sources,
-            payload,
-        },
-    )?;
-    path.splice(start..end, [node.clone()]);
-    let (reasoning_epoch, kept_reasoning_node_ids) =
-        history::reasoning_projection_for_path(tx, thread, &path)?;
-    let mut final_payload = payload.clone();
-    if final_payload.get("summary_scope").is_some()
-        || final_payload.get("reasoning_epoch").is_some()
-    {
-        final_payload["reasoning_epoch"] = json!(reasoning_epoch);
-        if let Some(item) = final_payload.get_mut("item") {
-            item["reasoning_epoch"] = json!(reasoning_epoch);
-        }
-        if kept_reasoning_node_ids.is_empty() {
-            if let Some(object) = final_payload.as_object_mut() {
-                object.remove("kept_reasoning_node_ids");
+
+    let mut markers = Vec::new();
+    for marker in requests.iter().flat_map(|request| request.markers) {
+        if let Some(existing) = markers
+            .iter()
+            .find(|item: &&FinalRSource| item.fact.id == marker.fact.id)
+        {
+            if existing.fact != marker.fact || existing.hash != marker.hash {
+                return Err(rejection(
+                    RejectionReason::SourceChanged,
+                    "summary marker facts disagree within the adoption batch",
+                ));
             }
         } else {
-            final_payload["kept_reasoning_node_ids"] = json!(kept_reasoning_node_ids);
+            markers.push(marker.clone());
         }
-        let body = final_payload.to_string();
-        tx.execute(
-            "UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4 WHERE id=?1",
-            rusqlite::params![node, body, body.len() as i64, super::key(&final_payload)],
-        )?;
+    }
+    let (selection_revision, mut path) = current_path_ids(tx, thread, &markers)?;
+
+    let mut intervals = Vec::with_capacity(requests.len());
+    for (index, request) in requests.iter().enumerate() {
+        if cancel.is_cancelled() {
+            return Err(rejection(
+                RejectionReason::Cancelled,
+                "compaction cancelled while validating adoption batch",
+            ));
+        }
+        current_r_sources(tx, thread, request.sources)?;
+        let ids = request
+            .sources
+            .iter()
+            .map(|source| source.fact.id.clone())
+            .collect::<Vec<_>>();
+        let start = locate_r(&path, &ids)?;
+        let end = start
+            .checked_add(ids.len())
+            .ok_or_else(|| StorageError::InvalidInput("summary R path length overflow".into()))?;
+        if super::gc_capture::native_tool_span_splits(
+            tx,
+            thread,
+            i64::try_from(start).map_err(|_| {
+                StorageError::InvalidInput("summary R path position overflow".into())
+            })?,
+            i64::try_from(end).map_err(|_| {
+                StorageError::InvalidInput("summary R path position overflow".into())
+            })?,
+        )? {
+            return Err(rejection(
+                RejectionReason::SourceChanged,
+                "summary R splits a tool call/result group",
+            ));
+        }
+        intervals.push((start, end, index));
+    }
+    intervals.sort_unstable_by_key(|(start, _, _)| *start);
+    if intervals.windows(2).any(|pair| pair[0].1 > pair[1].0) {
+        return Err(rejection(
+            RejectionReason::SourceChanged,
+            "final adoption intervals overlap on the current path",
+        ));
+    }
+
+    let mut nodes = Vec::with_capacity(requests.len());
+    for request in requests {
+        let selected_sources = request
+            .sources
+            .iter()
+            .map(|source| super::ReplacementSource {
+                id: &source.fact.id,
+                revision: source.fact.revision,
+                hash: &source.hash,
+            })
+            .collect::<Vec<_>>();
+        nodes.push(super::store_replacement_material_tx(
+            tx,
+            request.config,
+            super::ReplacementMaterial {
+                thread,
+                input_key: request.input_key,
+                format: request.format,
+                sources: &selected_sources,
+                payload: request.payload,
+            },
+        )?);
+    }
+    for (start, end, request_index) in intervals.iter().rev() {
+        path.splice(*start..*end, [nodes[*request_index].clone()]);
+    }
+
+    let (projected_epoch, kept_reasoning_node_ids) =
+        history::reasoning_projection_for_path(tx, thread, &path)?;
+    let final_epoch = match reasoning_policy {
+        FinalReasoningPolicy::PreserveCurrent => projected_epoch,
+        FinalReasoningPolicy::DropAll => projected_epoch
+            .checked_add(1)
+            .ok_or_else(|| StorageError::InvalidInput("reasoning epoch overflow".into()))?,
+    };
+    for (request, node) in requests.iter().zip(&nodes) {
+        let mut final_payload = request.payload.clone();
+        if final_payload.get("summary_scope").is_some()
+            || final_payload.get("reasoning_epoch").is_some()
+        {
+            final_payload["reasoning_epoch"] = json!(projected_epoch);
+            if let Some(item) = final_payload.get_mut("item") {
+                item["reasoning_epoch"] = json!(projected_epoch);
+            }
+            if kept_reasoning_node_ids.is_empty() {
+                if let Some(object) = final_payload.as_object_mut() {
+                    object.remove("kept_reasoning_node_ids");
+                }
+            } else {
+                final_payload["kept_reasoning_node_ids"] = json!(kept_reasoning_node_ids);
+            }
+            let body = final_payload.to_string();
+            tx.execute(
+                "UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4 WHERE id=?1",
+                rusqlite::params![node, body, body.len() as i64, super::key(&final_payload)],
+            )?;
+        }
     }
     if cancel.is_cancelled() {
         return Err(rejection(
             RejectionReason::Cancelled,
-            "summary cancelled before path adoption",
+            "compaction cancelled before path adoption",
         ));
     }
     history::select_path(tx, thread, selection_revision as u64, &path, &timestamp())?;
@@ -435,23 +521,62 @@ pub(super) fn adopt_current_r_tx(
         [thread],
         |row| row.get(0),
     )?;
-    let actual_keep = history::reasoning_keep(tx, thread, actual_epoch)?;
-    if actual_epoch != reasoning_epoch
-        || kept_reasoning_node_ids
+    if actual_epoch != projected_epoch {
+        return Err(StorageError::Schema(
+            "final compaction reasoning projection differs from selected-path adoption".into(),
+        ));
+    }
+    if matches!(reasoning_policy, FinalReasoningPolicy::DropAll) {
+        let changed = tx.execute(
+            "UPDATE thread SET reasoning_epoch=?2 WHERE id=?1 AND reasoning_epoch=?3",
+            rusqlite::params![thread, final_epoch, projected_epoch],
+        )?;
+        if changed != 1 {
+            return Err(StorageError::Schema(
+                "current reasoning epoch changed inside the final adoption transaction".into(),
+            ));
+        }
+        tx.execute(
+            "DELETE FROM app_meta WHERE key=?1",
+            [history::reasoning_keep_key(thread)],
+        )?;
+        for (request, node) in requests.iter().zip(&nodes) {
+            let mut final_payload = request.payload.clone();
+            if final_payload.get("summary_scope").is_some()
+                || final_payload.get("reasoning_epoch").is_some()
+            {
+                final_payload["reasoning_epoch"] = json!(final_epoch);
+                if let Some(item) = final_payload.get_mut("item") {
+                    item["reasoning_epoch"] = json!(final_epoch);
+                }
+                if let Some(object) = final_payload.as_object_mut() {
+                    object.remove("kept_reasoning_node_ids");
+                }
+                let body = final_payload.to_string();
+                tx.execute(
+                    "UPDATE node SET payload_json=?2,payload_bytes=?3,body_hash=?4 WHERE id=?1",
+                    rusqlite::params![node, body, body.len() as i64, super::key(&final_payload)],
+                )?;
+            }
+        }
+    } else {
+        let actual_keep = history::reasoning_keep(tx, thread, actual_epoch)?;
+        if kept_reasoning_node_ids
             .iter()
             .any(|id| !actual_keep.contains(id))
-    {
-        return Err(StorageError::Schema(
-            "final summary reasoning projection differs from selected-path adoption".into(),
-        ));
+        {
+            return Err(StorageError::Schema(
+                "final summary reasoning keep differs from selected-path adoption".into(),
+            ));
+        }
     }
     if cancel.is_cancelled() {
         return Err(rejection(
             RejectionReason::Cancelled,
-            "summary cancelled during adoption",
+            "compaction cancelled during adoption",
         ));
     }
-    Ok(node)
+    Ok(nodes)
 }
 
 fn manual_r_sources(
@@ -730,6 +855,102 @@ mod final_r_adoption_tests {
     }
 
     #[tokio::test]
+    async fn multi_spill_uses_one_current_epoch_projection_for_every_replacement() {
+        let (_root, db) = fixture().await;
+        seed(&db).await;
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute(
+                "INSERT INTO node(id,kind,created_at,payload_json) VALUES('between','message','now','{}')",
+                [],
+            )?;
+            let revision: i64 = tx.query_row(
+                "SELECT selection_revision FROM thread WHERE id='t'",
+                [],
+                |row| row.get(0),
+            )?;
+            history::select_path(
+                &tx,
+                "t",
+                revision as u64,
+                &["prefix".into(), "r1".into(), "between".into(), "r2".into(), "suffix".into()],
+                &timestamp(),
+            )?;
+            tx.execute("UPDATE thread SET reasoning_epoch=8 WHERE id='t'", [])?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let first_sources = [source("r1", true, false)];
+        let second_sources = [source("r2", true, false)];
+        let first_payload = json!({"spill_tools":[],"output":[],"reasoning_epoch":1,"spill_version":1,"source_node_ids":["r1"]});
+        let second_payload = json!({"spill_tools":[],"output":[],"reasoning_epoch":1,"spill_version":1,"source_node_ids":["r2"]});
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let config = Config::default();
+            let cancel = CancellationToken::new();
+            let requests = [
+                FinalAdoption {
+                    config: &config,
+                    cancel: &cancel,
+                    thread: "t",
+                    sources: &first_sources,
+                    markers: &[],
+                    payload: &first_payload,
+                    input_key: "spill-batch-one",
+                    format: "spill-v1",
+                },
+                FinalAdoption {
+                    config: &config,
+                    cancel: &cancel,
+                    thread: "t",
+                    sources: &second_sources,
+                    markers: &[],
+                    payload: &second_payload,
+                    input_key: "spill-batch-two",
+                    format: "spill-v1",
+                },
+            ];
+            let nodes = adopt_current_rs_tx(&tx, &requests, FinalReasoningPolicy::DropAll)?;
+            assert_eq!(nodes.len(), 2);
+            let epoch: i64 = tx.query_row(
+                "SELECT reasoning_epoch FROM thread WHERE id='t'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert!(epoch > 8, "drop-all advances the live projected epoch");
+            for node in &nodes {
+                let body: String =
+                    tx.query_row("SELECT payload_json FROM node WHERE id=?1", [node], |row| {
+                        row.get(0)
+                    })?;
+                let payload: Value = serde_json::from_str(&body)
+                    .map_err(|error| StorageError::Schema(error.to_string()))?;
+                assert_eq!(payload["reasoning_epoch"].as_i64(), Some(epoch));
+                assert!(payload.get("kept_reasoning_node_ids").is_none());
+            }
+            assert!(history::reasoning_keep(&tx, "t", epoch)?.is_empty());
+            let path = tx
+                .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(
+                path,
+                [
+                    "prefix",
+                    nodes[0].as_str(),
+                    "between",
+                    nodes[1].as_str(),
+                    "suffix"
+                ]
+            );
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn spill_format_uses_final_r_and_preserves_unrelated_current_prefix_suffix() {
         let (_root, db) = fixture().await;
         seed(&db).await;
@@ -838,6 +1059,68 @@ mod final_r_adoption_tests {
                 .collect::<Result<Vec<_>, _>>()?;
             assert_eq!(path, ["new-prefix", "prefix", "r1", "r2", "suffix"]);
             tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_reordered_retained_anchors_without_changing_current_path() {
+        let (_root, db) = fixture().await;
+        seed(&db).await;
+        let marker_payload =
+            json!({"summary_format":"context-trim-v1","source_node_ids":["r1","r2"]});
+        let marker_payload_for_insert = marker_payload.clone();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            tx.execute("INSERT INTO node(id,kind,created_at,payload_json) VALUES('marker','summary','now',?1)", [marker_payload_for_insert.to_string()])?;
+            let revision: i64 = tx.query_row("SELECT selection_revision FROM thread WHERE id='t'", [], |row| row.get(0))?;
+            history::select_path(&tx, "t", revision as u64, &["prefix".into(),"marker".into(),"r2".into(),"r1".into(),"suffix".into()], &timestamp())?;
+            tx.commit()?;
+            Ok(())
+        }).await.unwrap();
+        let marker = FinalRSource {
+            fact: super::super::gc_capture::GcSourceFacts {
+                ordinal: 0,
+                id: "marker".into(),
+                revision: 0,
+                turn: None,
+                group_id: None,
+                protected: false,
+                group_complete: true,
+                has_summary_marker: true,
+                attachments: Vec::new(),
+            },
+            hash: super::key(&(0, marker_payload)),
+        };
+        let replacements = [source("r1", true, false), source("r2", true, false)];
+        let replacement_ids = vec!["r1".into(), "r2".into()];
+        let remove_ids = ["r1".to_owned(), "r2".to_owned()].into_iter().collect();
+        db.call(move |db| {
+            let tx = db.transaction()?;
+            let error = restore_current_marker_tx(
+                &tx,
+                "t",
+                &CancellationToken::new(),
+                &marker,
+                &replacements,
+                &replacement_ids,
+                &remove_ids,
+            )
+            .unwrap_err()
+            .into_api_error();
+            assert_eq!(
+                crate::compaction::discard::cause(&error),
+                super::super::discard::Outcome::Rejected {
+                    reason: RejectionReason::SourceChanged,
+                }
+            );
+            let path = tx
+                .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            assert_eq!(path, ["prefix", "marker", "r2", "r1", "suffix"]);
             Ok(())
         })
         .await
