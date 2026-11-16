@@ -409,8 +409,6 @@ async fn summary_stage(
                     automatic.turn.clone(),
                     thread_boundary.clone(),
                     run_stop.clone(),
-                    #[cfg(test)]
-                    control.gc_dispatch_stage.clone(),
                 ),
             ),
         )
@@ -485,8 +483,6 @@ async fn summary_stage(
                             automatic.turn.clone(),
                             thread_boundary,
                             run_stop,
-                            #[cfg(test)]
-                            control.gc_dispatch_stage.clone(),
                         ),
                     ),
                 )

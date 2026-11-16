@@ -130,20 +130,6 @@ struct LiveShell {
 }
 
 #[cfg(test)]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum GcDispatchStage {
-    #[default]
-    NotEntered,
-    RateReservationReady,
-    RateReservationWaiting,
-    RateWaitGranted,
-    LedgerObservationStarted,
-    LedgerObservationRecorded,
-    ResponsePathEntered,
-    TransportSendEntered,
-}
-
-#[cfg(test)]
 struct AutomaticFault {
     stage: &'static str,
     kind: u8,
@@ -157,8 +143,6 @@ pub struct Control {
     memory_samples: AtomicUsize,
     #[cfg(test)]
     automatic_fault: std::sync::Mutex<Option<AutomaticFault>>,
-    #[cfg(test)]
-    gc_dispatch_stage: Arc<std::sync::Mutex<GcDispatchStage>>,
     pub store: Store,
     pub attachments: Arc<crate::attachments::AttachmentService>,
     pub index: Arc<crate::index::IndexService>,
@@ -404,8 +388,6 @@ impl Control {
             memory_samples: AtomicUsize::new(0),
             #[cfg(test)]
             automatic_fault: std::sync::Mutex::new(None),
-            #[cfg(test)]
-            gc_dispatch_stage: Arc::new(std::sync::Mutex::new(GcDispatchStage::NotEntered)),
             store,
             attachments,
             gc,

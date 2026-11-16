@@ -894,7 +894,6 @@ impl Compactor {
         turn_id: String,
         thread_boundary: Arc<tokio::sync::Mutex<()>>,
         run_stop: CancellationToken,
-        #[cfg(test)] gc_dispatch_stage: Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
     ) -> Result<CompactResult, ApiError> {
         let stage = self.resolve_gc_stage(&automatic).await?;
         let trigger = json!({"scope":if active{"active_turn"}else{"prefix"},"turn_id":turn_id});
@@ -931,7 +930,6 @@ impl Compactor {
                 Ok(setup) if failure_memory::blocks(&setup.observed,&setup.identity,setup.provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
                 Ok(_)=>{
                     let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible,
-                        #[cfg(test)] gc_dispatch_stage: Some(gc_dispatch_stage.clone()),
                     };
                     let dispatched_future=compactor.dispatch_single_summary(request);tokio::pin!(dispatched_future);
                     tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();dispatched_future.as_mut().await},result=dispatched_future.as_mut()=>result}
@@ -1004,29 +1002,14 @@ impl Compactor {
         client: &crate::model::http::HttpModelClient,
         owner: &mut single_request::DispatchOwner<'_, '_>,
         cancel: &CancellationToken,
-        #[cfg(test)] gc_dispatch_stage: Option<
-            &Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
-        >,
     ) -> Result<(crate::model::http::RateAdmission, u64), ApiError> {
         let reservation = client.reserve_rate_admission(None).map_err(|error| {
             ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
                 .details(json!({"kind":error.kind}))
         })?;
         match reservation {
-            crate::model::http::RateReservation::Ready(admission) => {
-                #[cfg(test)]
-                if let Some(stage) = gc_dispatch_stage {
-                    *stage.lock().expect("GC dispatch stage observer poisoned") =
-                        crate::control::GcDispatchStage::RateReservationReady;
-                }
-                Ok((admission, 0))
-            }
+            crate::model::http::RateReservation::Ready(admission) => Ok((admission, 0)),
             crate::model::http::RateReservation::Waiting(waiter) => {
-                #[cfg(test)]
-                if let Some(stage) = gc_dispatch_stage {
-                    *stage.lock().expect("GC dispatch stage observer poisoned") =
-                        crate::control::GcDispatchStage::RateReservationWaiting;
-                }
                 let started = tokio::time::Instant::now();
                 let wait = async {
                     let result = waiter.wait(cancel).await;
@@ -1060,11 +1043,6 @@ impl Compactor {
                             .details(json!({"kind":error.kind}))
                     }
                 })?;
-                #[cfg(test)]
-                if let Some(stage) = gc_dispatch_stage {
-                    *stage.lock().expect("GC dispatch stage observer poisoned") =
-                        crate::control::GcDispatchStage::RateWaitGranted;
-                }
                 Ok((lease, elapsed.as_millis().min(u64::MAX as u128) as u64))
             }
         }
@@ -1077,15 +1055,7 @@ impl Compactor {
         request: Value,
         cancel: CancellationToken,
         (admission, elapsed): (crate::model::http::RateAdmission, u64),
-        #[cfg(test)] gc_dispatch_stage: Option<
-            &Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
-        >,
     ) -> Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> {
-        #[cfg(test)]
-        if let Some(stage) = gc_dispatch_stage {
-            *stage.lock().expect("GC dispatch stage observer poisoned") =
-                crate::control::GcDispatchStage::ResponsePathEntered;
-        }
         let mut response: Result<crate::model::ModelResponse, crate::model::http::AttemptFailure> =
             match &admission {
                 _ if cancel.is_cancelled() => Err(crate::model::ModelError::new(
@@ -1096,13 +1066,7 @@ impl Compactor {
                 crate::model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
                 crate::model::http::RateAdmission::Lease(_) => {
                     client
-                        .response_for_thread_pre_admitted(
-                            thread,
-                            request,
-                            cancel,
-                            #[cfg(test)]
-                            gc_dispatch_stage,
-                        )
+                        .response_for_thread_pre_admitted(thread, request, cancel)
                         .await
                 }
             };

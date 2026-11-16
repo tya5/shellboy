@@ -171,20 +171,9 @@ impl HttpModelClient {
         thread: &str,
         request: Value,
         cancel: CancellationToken,
-        #[cfg(test)] gc_dispatch_stage: Option<
-            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
-        >,
     ) -> Result<ModelResponse, AttemptFailure> {
-        self.response_inner(
-            request,
-            cancel,
-            None,
-            Some(thread),
-            None,
-            #[cfg(test)]
-            gc_dispatch_stage,
-        )
-        .await
+        self.response_inner(request, cancel, None, Some(thread), None)
+            .await
     }
     // Preserve the same bounded recovery payload as response().
     #[allow(clippy::result_large_err)]
@@ -202,8 +191,6 @@ impl HttpModelClient {
             events.map(Events::Observed),
             Some(thread),
             bypass_usage_limit,
-            #[cfg(test)]
-            None,
         )
         .await
     }
@@ -215,9 +202,6 @@ impl HttpModelClient {
         events: Option<Events>,
         thread: Option<&str>,
         bypass_usage_limit: Option<crate::model::usage_limit::UsageLimit>,
-        #[cfg(test)] gc_dispatch_stage: Option<
-            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
-        >,
     ) -> Result<ModelResponse, AttemptFailure> {
         if cancel.is_cancelled() {
             return Err(cancelled().into());
@@ -256,8 +240,6 @@ impl HttpModelClient {
                 },
                 &mut facts,
                 session_header,
-                #[cfg(test)]
-                gc_dispatch_stage,
             )
             .await;
         if result.is_ok()
@@ -442,9 +424,6 @@ impl HttpModelClient {
         context: RequestContext<'_>,
         facts: &mut ResponseFacts,
         session_header: Option<HeaderValue>,
-        #[cfg(test)] gc_dispatch_stage: Option<
-            &std::sync::Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
-        >,
     ) -> Result<ModelResponse, AttemptFailure> {
         let (response, secrets, observation) = self
             .send(
@@ -454,8 +433,6 @@ impl HttpModelClient {
                 context.cancel,
                 context.deadline,
                 session_header.as_ref(),
-                #[cfg(test)]
-                gc_dispatch_stage,
             )
             .await?;
         facts.http_observation = Some(observation);

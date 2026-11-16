@@ -1227,10 +1227,6 @@ async fn prepare_with_mode(
                         result_ids.contains(&"boundary-small"),
                         "the actual normal request must carry the matching saved tool result: {result_ids:?}"
                     );
-                    let dispatch_stage = *control
-                        .gc_dispatch_stage
-                        .lock()
-                        .expect("GC dispatch stage observer poisoned");
                     let paired_head = observed_heads
                         .iter()
                         .find(|head| head.request_id == request.request_id)
@@ -1240,7 +1236,7 @@ async fn prepare_with_mode(
                     assert!(paired_head.transfer_encoding.is_none());
                     assert!(paired_head.content_encoding.is_none());
                     eprintln!(
-                        "U2 first ordinary request HTTP head/body: head={paired_head:?} body_request_id={} body_bytes={} facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?} dispatch_stage={dispatch_stage:?}",
+                        "U2 first ordinary request HTTP head/body: head={paired_head:?} body_request_id={} body_bytes={} facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?}",
                         request.request_id, request.body_bytes
                     );
                     first_normal_facts_recorded = true;
