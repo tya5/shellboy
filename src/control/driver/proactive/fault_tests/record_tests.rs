@@ -186,7 +186,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
             scenario,
             fault,
             "checkpoint",
-            active_phase.continuation_groups,
+            &active_phase,
         )
         .await;
         if fault == Fault::Remeasurement {
