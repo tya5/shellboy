@@ -325,16 +325,15 @@ pub(super) async fn stream_response(
     let live_text = control.admit_live_stream(thread, attempt).await;
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
-    let response_future = client.response_observed(
-        thread,
-        request,
-        stop.clone(),
-        Some(send),
-        bypass_usage_limit,
-    );
     #[cfg(test)]
-    let response = {
-        let mut response_future = Box::pin(response_future);
+    let response = async move {
+        let mut response_future = Box::pin(client.response_observed(
+            thread,
+            request,
+            stop.clone(),
+            Some(send),
+            bypass_usage_limit,
+        ));
         let mut first_poll = true;
         std::future::poll_fn(|cx| {
             let poll = std::future::Future::poll(response_future.as_mut(), cx);
@@ -348,9 +347,16 @@ pub(super) async fn stream_response(
             }
             poll
         })
+        .await
     };
     #[cfg(not(test))]
-    let response = response_future;
+    let response = client.response_observed(
+        thread,
+        request,
+        stop.clone(),
+        Some(send),
+        bypass_usage_limit,
+    );
     tokio::pin!(response);
     loop {
         tokio::select! {
