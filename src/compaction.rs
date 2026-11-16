@@ -2684,11 +2684,25 @@ mod tests {
                 reasoning_epoch: 0,
                 stage: "active_summary",
             };
+            let origin_epoch = stage.reasoning_epoch;
+            assert_eq!(
+                origin_epoch, 0,
+                "the saved receipt retains its original epoch"
+            );
+            let current_epoch: i64 = tx.query_row(
+                "SELECT reasoning_epoch FROM thread WHERE id='t'",
+                [],
+                |row| row.get(0),
+            )?;
+            assert_ne!(
+                current_epoch, origin_epoch,
+                "current Thread epoch has advanced beyond the origin receipt"
+            );
             let current_plan = gc_capture::plan_gc_active_turn_tx(&tx, "t", &stage, "current")?
                 .expect(
                     "the coherent plan uses the current Thread epoch, not the origin receipt epoch",
                 );
-            assert_eq!(current_plan.epoch, 1);
+            assert_eq!(current_plan.epoch, current_epoch);
             let mut wrong_receipt = stage.clone();
             wrong_receipt.token = "other-token".into();
             assert!(

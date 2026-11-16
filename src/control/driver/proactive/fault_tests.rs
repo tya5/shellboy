@@ -2680,7 +2680,11 @@ fn assert_interruption_audits(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn completed_trigger_outside_context_changes_do_not_veto_current_r_adoption() {
-    for change in ["profile_changed", "run_stopped", "turn_changed"] {
+    for change in [
+        "profile_changed",
+        "retired_run_annotation_changed",
+        "turn_changed",
+    ] {
         completed_trigger_outside_context_change(change).await;
     }
 }
@@ -2688,7 +2692,7 @@ async fn completed_trigger_outside_context_changes_do_not_veto_current_r_adoptio
 async fn completed_trigger_outside_context_change(change: &'static str) {
     crate::test_watchdog::watchdog("completed trigger outside-R positive", async {
         let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, _heads, server) = proxy().await;
+        let (url, mut receive, mut heads, server) = proxy().await;
         let owner = proactive_owner(
             root.path(),
             &url,
@@ -2712,30 +2716,124 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
             .unwrap();
         settled(&control, &target).await;
         send(&control, &target, "trigger automatic compaction").await;
-        let summary = incoming(&control, &mut receive).await;
+        let slot = control
+            .live
+            .test_drivers()
+            .lock()
+            .await
+            .get(&target)
+            .cloned()
+            .expect("trigger Run owns the retained proactive job slot");
+        let slot_id = slot.id.clone();
+        let mut held_summary = None;
+        let mut captured_origin: Option<(TerminalAttemptIdentity, String, String, i64)> = None;
+        let mut ordinary_completed = false;
+        while held_summary.is_none() || !ordinary_completed {
+            match next_held_fixture_event(&control, &target, &mut receive, &mut heads, &slot).await {
+                HeldFixtureEvent::Request(request) if request.body["tools"] == json!([]) => {
+                    assert!(held_summary.is_none(), "one automatic summary request for this trigger");
+                    let identity = capture_terminal_identity(&control, &target, true).await;
+                    let attempt = identity.attempt.clone();
+                    let token = identity.token.clone();
+                    let thread = identity.thread.clone();
+                    let (run_id, turn_id, generation): (String, String, i64) = control.store.database.call(move |db| {
+                        db.query_row(
+                            "SELECT u.run_id,u.id,u.generation FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
+                            rusqlite::params![attempt,thread,token],
+                            |row|Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                        ).map_err(Into::into)
+                    }).await.unwrap();
+                    captured_origin = Some((identity,run_id,turn_id,generation));
+                    held_summary = Some(request);
+                }
+                HeldFixtureEvent::Request(request) => {
+                    assert!(!ordinary_completed, "one ordinary trigger request is serviced");
+                    request
+                        .reply
+                        .send((200, answer_with_usage("completed ordinary trigger request", 100)))
+                        .unwrap();
+                    settled(&control, &target).await;
+                    let _retired = wait_for_driver_retired(&control, &target, &slot_id).await;
+                    ordinary_completed = true;
+                }
+                HeldFixtureEvent::Header(_) => {}
+                HeldFixtureEvent::JobFinished(facts) => panic!(
+                    "proactive job finished before its summary was captured: {facts:?}"
+                ),
+            }
+        }
+        let summary = held_summary.expect("summary request held until ordinary Run retires");
         assert_eq!(summary.body["tools"], json!([]));
         let scope = target.clone();
-        let (attempt,token) = control
-            .store
-            .database
-            .call(move |db| {
-                let (attempt,token):(String,String)=db.query_row(
-                    "SELECT a.id,json_extract(a.error_json,'$.automatic_trim_attempt.token') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND json_extract(a.error_json,'$.automatic_trim_attempt.provisional')=1 AND json_type(a.error_json,'$.automatic_trim_attempt.token')='text' ORDER BY a.rowid DESC LIMIT 1",
-                    [&scope],|row|Ok((row.get(0)?,row.get(1)?)),
-                )?;
+        let (terminal_identity, run_id, turn_id, generation) = captured_origin
+            .expect("capture original Thread/attempt/token/Run/Turn at the summary boundary");
+        let attempt = terminal_identity.attempt.clone();
+        let token = terminal_identity.token.clone();
+        let query_attempt = attempt.clone();
+        let query_token = token.clone();
+        let query_thread = scope.clone();
+        let run_id_for_mutation = run_id.clone();
+        let turn_id_for_mutation = turn_id.clone();
+        let generation_for_mutation = generation;
+        control.store.database.call(move |db| {
+            let (actual_run, actual_turn, actual_generation, run_state, turn_state): (
+                String,
+                String,
+                i64,
+                String,
+                String,
+            ) = db.query_row(
+                "SELECT u.run_id,u.id,u.generation,r.state,u.state FROM model_attempt a JOIN turn u ON u.id=a.turn_id JOIN run r ON r.id=u.run_id WHERE a.id=?1 AND u.thread_id=?2 AND json_extract(a.error_json,'$.automatic_trim_attempt.token')=?3",
+                rusqlite::params![query_attempt, query_thread, query_token],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )?;
+            assert_eq!(actual_run, run_id_for_mutation, "captured original Run ID");
+            assert_eq!(actual_turn, turn_id_for_mutation, "captured original Turn ID");
+            assert_eq!(actual_generation, generation_for_mutation, "captured original generation before mutation");
+            assert_eq!(run_state, "completed", "exact original Run retired before outside-R mutation");
+            assert_eq!(turn_state, "completed", "exact original Turn retired before outside-R mutation");
                 match change {
                     "profile_changed" => {
-                        db.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id=?1", [&scope])?;
+                        let before:i64=db.query_row("SELECT profile_revision FROM thread WHERE id=?1",[&scope],|row|row.get(0))?;
+                        let changed=db.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id=?1",[&scope])?;
+                        assert_eq!(changed,1,"captured target Thread profile mutation is nonvacuous");
+                        let after:i64=db.query_row("SELECT profile_revision FROM thread WHERE id=?1",[&scope],|row|row.get(0))?;
+                        assert_eq!(after,before+1);
                     }
-                    "run_stopped" => {
-                        db.execute("UPDATE run SET state='stopping' WHERE thread_id=?1 AND state='live'", [&scope])?;
+                    "retired_run_annotation_changed" => {
+                        // The trigger Run is already completed. Change only its outside-R stop annotation;
+                        // never fabricate a completed->stopping state transition or invoke cancellation.
+                        let before: Option<String> = db.query_row(
+                            "SELECT stop_reason FROM run WHERE id=?1 AND thread_id=?2 AND state='completed'",
+                            rusqlite::params![run_id, scope],
+                            |row| row.get(0),
+                        )?;
+                        assert_ne!(before.as_deref(), Some("retired_trigger_context_change"));
+                        let changed = db.execute(
+                            "UPDATE run SET stop_reason='retired_trigger_context_change' WHERE id=?1 AND thread_id=?2 AND state='completed' AND stop_reason IS ?3",
+                            rusqlite::params![run_id, scope, before],
+                        )?;
+                        assert_eq!(changed,1,"exact captured completed Run annotation mutation is nonvacuous");
+                        let after:String=db.query_row("SELECT stop_reason FROM run WHERE id=?1 AND thread_id=?2 AND state='completed'",rusqlite::params![run_id,scope],|row|row.get(0))?;
+                        assert_eq!(after,"retired_trigger_context_change");
                     }
                     "turn_changed" => {
-                        db.execute("UPDATE turn SET generation=generation+1 WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')", [&scope])?;
+                        let changed=db.execute("UPDATE turn SET generation=generation+1 WHERE id=?1 AND thread_id=?2 AND run_id=?3 AND state='completed' AND generation=?4",rusqlite::params![turn_id,scope,run_id,generation])?;
+                        assert_eq!(changed,1,"exact captured completed trigger Turn generation mutation is nonvacuous");
+                        let after:i64=db.query_row("SELECT generation FROM turn WHERE id=?1 AND thread_id=?2 AND run_id=?3",rusqlite::params![turn_id,scope,run_id],|row|row.get(0))?;
+                        assert_eq!(after,generation+1);
                     }
                     _ => unreachable!(),
                 }
-                Ok((attempt, token))
+            let (same_thread, same_run_state, same_turn_state): (String, String, String) = db.query_row(
+                "SELECT r.thread_id,r.state,u.state FROM run r JOIN turn u ON u.run_id=r.id WHERE r.id=?1 AND u.id=?2",
+                rusqlite::params![run_id, turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )?;
+            assert_eq!(same_thread, scope, "mutation remains scoped to captured original Thread");
+            assert_eq!(same_run_state, "completed", "context mutation never rewrites Run lifecycle state");
+            assert_eq!(same_turn_state, "completed", "context mutation never rewrites Turn lifecycle state");
+                Ok(())
             })
             .await
             .unwrap();
@@ -2743,7 +2841,6 @@ async fn completed_trigger_outside_context_change(change: &'static str) {
             .reply
             .send((200, answer("short synthetic summary")))
             .unwrap();
-        let terminal_identity=TerminalAttemptIdentity{thread:target.clone(),attempt:attempt.clone(),token};
         crate::test_watchdog::watchdog("outside-R current adoption terminal", async {
             while !terminal_record_written(&control,&terminal_identity,"adopted",Some("closed_summary")).await {
                 tokio::task::yield_now().await;
