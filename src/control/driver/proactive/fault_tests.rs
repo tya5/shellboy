@@ -173,12 +173,15 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             mut receive,
             server,
             mut held_summary,
+            mut held_normal,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
         let summary = held_summary
             .take()
             .expect("one proactive summary request is held");
-        let normal = incoming(&control, &mut receive).await;
+        let normal = held_normal
+            .take()
+            .expect("one ordinary request reached the provider before the held summary");
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -243,6 +246,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             receive,
             server,
             held_summary,
+            held_normal,
             ..
         } = &mut fx;
         let summary = held_summary
@@ -266,9 +270,10 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .await
             .unwrap();
 
-        // This barrier is the oracle: the summary response remains withheld,
-        // yet the ordinary next-Turn request reaches the same provider.
-        let normal = incoming(control, receive).await;
+        // This request reached the provider while the summary response was held.
+        let normal = held_normal
+            .take()
+            .expect("ordinary request is held at the provider barrier");
         assert_ne!(
             normal.body, summary.body,
             "next request is not a duplicate summary POST"
