@@ -143,6 +143,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         reached,
         checkpoint_reached,
         release_checkpoint,
+        ..
     } = prepare(fault, scenario).await;
     if fault != Fault::RejectFact {
         crate::test_watchdog::watchdog("record boundary postcommit barrier", async {

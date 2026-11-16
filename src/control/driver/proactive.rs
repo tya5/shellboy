@@ -30,7 +30,7 @@ mod spill_route_tests {
 pub(super) const REASON: &str = "proactive_threshold";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ProactiveOutcome {
+pub(in crate::control) enum ProactiveOutcome {
     NotStarted,
     Finished { path_changed: bool },
 }

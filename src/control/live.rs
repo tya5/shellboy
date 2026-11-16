@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LiveRegistry {
     drivers: Mutex<HashMap<String, DriverSlot>>,
     shells: Mutex<HashMap<String, LiveShell>>,

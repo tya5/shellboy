@@ -179,7 +179,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
         let summary = held_summary
             .take()
             .expect("one proactive summary request is held");
-        let normal = incoming(control, receive).await;
+        let normal = incoming(control, &mut receive).await;
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -269,7 +269,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
 
         // This barrier is the oracle: the summary response remains withheld,
         // yet the ordinary next-Turn request reaches the same provider.
-        let normal = incoming(control, receive).await;
+        let normal = incoming(control, &mut receive).await;
         assert_ne!(
             normal.body, summary.body,
             "next request is not a duplicate summary POST"
@@ -338,7 +338,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             }
         }).await.unwrap();
         send(control, target, "new Run while previous R job is held").await;
-        let overflow_request = incoming(control, receive).await;
+        let overflow_request = incoming(control, &mut receive).await;
         assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
         overflow_request
             .reply
@@ -1018,7 +1018,7 @@ async fn after_release(
     reached: &AtomicBool,
 ) {
     if scenario.continues_to_active_summary(fault) {
-        let summary_request = incoming(control, receive).await;
+        let summary_request = incoming(control, &mut receive).await;
         assert_eq!(
             summary_request.body["tools"],
             json!([]),
@@ -1082,6 +1082,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
         reached,
         checkpoint_reached,
         release_checkpoint,
+        ..
     } = prepare_with_thread_override(fault, scenario, set_thread_percent).await;
     if fault != Fault::RejectFact {
         assert!(
