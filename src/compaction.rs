@@ -894,6 +894,7 @@ impl Compactor {
         turn_id: String,
         thread_boundary: Arc<tokio::sync::Mutex<()>>,
         run_stop: CancellationToken,
+        #[cfg(test)] gc_dispatch_stage: Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
     ) -> Result<CompactResult, ApiError> {
         let stage = self.resolve_gc_stage(&automatic).await?;
         let trigger = json!({"scope":if active{"active_turn"}else{"prefix"},"turn_id":turn_id});
@@ -929,7 +930,9 @@ impl Compactor {
                 Err(error)=>Err(error.clone()),
                 Ok(setup) if failure_memory::blocks(&setup.observed,&setup.identity,setup.provider.as_deref())=>Err(discard::failed(discard::FailureReason::RetrySuppressed,discard::FailureOrigin::Preparation,"This summary range already failed for its captured source identity; original path retained")),
                 Ok(_)=>{
-                    let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible};
+                    let request=single_request::DispatchRequest{input:&material,owner:single_request::DispatchOwner::Gc,selected:0..material_groups.len(),limit:output_limit,cancel:&cancel,ledger:&mut ledger,eligible,
+                        #[cfg(test)] gc_dispatch_stage: Some(gc_dispatch_stage.clone()),
+                    };
                     let dispatched_future=compactor.dispatch_single_summary(request);tokio::pin!(dispatched_future);
                     tokio::select!{biased;_=stop_for_job.cancelled()=>{cancel.cancel();dispatched_future.as_mut().await},result=dispatched_future.as_mut()=>result}
                 }

@@ -1172,8 +1172,12 @@ async fn prepare_with_mode(
                         result_ids.contains(&"boundary-small"),
                         "the actual normal request must carry the matching saved tool result: {result_ids:?}"
                     );
+                    let dispatch_stage = *control
+                        .gc_dispatch_stage
+                        .lock()
+                        .expect("GC dispatch stage observer poisoned");
                     eprintln!(
-                        "U2 first ordinary request while Run A active: facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?}"
+                        "U2 first ordinary request while Run A active: facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?} dispatch_stage={dispatch_stage:?}"
                     );
                     first_normal_facts_recorded = true;
                 }

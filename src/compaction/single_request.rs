@@ -223,7 +223,19 @@ pub(super) struct DispatchRequest<'a, 'b> {
     pub(super) cancel: &'a CancellationToken,
     pub(super) ledger: &'a mut usage::UsageLedger,
     pub(super) eligible: Box<dyn Fn(Range<usize>) -> bool + Send + 'a>,
+    #[cfg(test)]
+    pub(super) gc_dispatch_stage: Option<Arc<std::sync::Mutex<crate::control::GcDispatchStage>>>,
 }
+#[cfg(test)]
+fn set_gc_dispatch_stage(
+    observer: &Option<&Arc<std::sync::Mutex<crate::control::GcDispatchStage>>>,
+    stage: crate::control::GcDispatchStage,
+) {
+    if let Some(observer) = observer {
+        *observer.lock().expect("GC dispatch observer poisoned") = stage;
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Dispatched {
     pub(crate) selected: Range<usize>,
@@ -344,6 +356,8 @@ impl Compactor {
                 cancel: &cancel,
                 ledger,
                 eligible: Box::new(move |local| valid(base + local.start..base + local.end)),
+                #[cfg(test)]
+                gc_dispatch_stage: None,
             })
             .await;
         let dispatched = match dispatched {
@@ -552,6 +566,8 @@ impl Compactor {
             cancel,
             ledger,
             eligible,
+            #[cfg(test)]
+            gc_dispatch_stage,
         } = request;
         let connection = self.config.connections.get(input.profile).ok_or_else(|| {
             discard::attach(
@@ -594,11 +610,41 @@ impl Compactor {
                 .selected()
                 .ok_or_else(|| invalid("Summary trial already ended"))?;
             let payload = super::single_request::request(input, selected.clone(), limit);
-            let admission = self.summary_admission(&client, &mut owner, cancel).await?;
+            #[cfg(test)]
+            set_gc_dispatch_stage(
+                &gc_dispatch_stage,
+                crate::control::GcDispatchStage::NotEntered,
+            );
+            let admission = self
+                .summary_admission(
+                    &client,
+                    &mut owner,
+                    cancel,
+                    #[cfg(test)]
+                    gc_dispatch_stage.as_ref(),
+                )
+                .await?;
+            #[cfg(test)]
+            set_gc_dispatch_stage(
+                &gc_dispatch_stage,
+                crate::control::GcDispatchStage::LedgerObservationStarted,
+            );
             let observation = ledger.begin(&self.database).await?;
-            let result =
-                Self::summary_response(&client, input.thread, payload, cancel.clone(), admission)
-                    .await;
+            #[cfg(test)]
+            set_gc_dispatch_stage(
+                &gc_dispatch_stage,
+                crate::control::GcDispatchStage::LedgerObservationRecorded,
+            );
+            let result = Self::summary_response(
+                &client,
+                input.thread,
+                payload,
+                cancel.clone(),
+                admission,
+                #[cfg(test)]
+                gc_dispatch_stage.as_ref(),
+            )
+            .await;
             let response = match result {
                 Ok(response) => {
                     ledger
