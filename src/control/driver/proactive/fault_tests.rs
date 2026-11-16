@@ -2,7 +2,7 @@
 use super::*;
 use crate::app::DataOwner;
 use crate::protocol::*;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -2102,6 +2102,8 @@ async fn proxy() -> (
                 let (release, wait_release) = oneshot::channel();
                 if send
                     .send(Incoming {
+                        request_id,
+                        body_bytes,
                         body,
                         reply,
                         release: Some(release),

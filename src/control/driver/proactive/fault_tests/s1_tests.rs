@@ -148,7 +148,7 @@ async fn terminal_public_case(case: &str) {
         };
     crate::test_watchdog::watchdog("public terminal compaction contract", async {
         let root = tempfile::tempdir().unwrap();
-        let (url, mut receive, server) = proxy().await;
+        let (url, mut receive, _heads, server) = proxy().await;
         let owner = if stream_case {
             proactive_owner_retries(root.path(), &url, "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n", retry_limit, chat_api).await
         } else {
@@ -351,7 +351,7 @@ async fn all_canonical_guard_causes_share_one_public_projection_without_requests
     use crate::compaction::discard::{Outcome, RejectionReason as R};
     use crate::status::observation::{self, Key, Kind, TextBudget};
     let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
+    let (url, mut receive, _heads, server) = proxy().await;
     let owner = proactive_owner(root.path(), &url, "").await;
     let control = Control::new(&owner, root.path().into());
     let target = thread(&control).await;

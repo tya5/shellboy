@@ -904,7 +904,7 @@ record_site_test!(
 
 async fn uncalibrated_site(fault: Fault, active: bool) {
     let root = tempfile::tempdir().unwrap();
-    let (url, mut receive, server) = proxy().await;
+    let (url, mut receive, _heads, server) = proxy().await;
     let limits =
         "[limits]\ndraft_bytes=2097152\n[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n";
     let owner = proactive_owner(root.path(), &url, limits).await;
