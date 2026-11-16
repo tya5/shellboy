@@ -722,14 +722,22 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         drop(retained_summary.take());
         if let Some(fx) = retained_fx.take() {
             let Fx {
+                root,
+                url,
+                limits,
                 owner,
                 control,
+                target,
+                receive,
                 server,
                 ..
             } = fx;
+            let keepalive = (root, url, limits, target, receive);
             server.abort();
+            let _ = server.await;
             let _ = control.shutdown().await;
             let _ = owner.shutdown().await;
+            drop(keepalive);
         }
     }
     drop(trace_keepalive);
