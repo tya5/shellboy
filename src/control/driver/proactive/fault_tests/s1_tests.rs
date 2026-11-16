@@ -180,9 +180,6 @@ async fn terminal_public_case(case: &str) {
         let mut held_sse_release = None;
         loop {
             let event = next_held_fixture_event(&control, &target, &mut receive, &mut heads, &slot).await;
-            let Some(event) = event else {
-                break;
-            };
             match event {
                 HeldFixtureEvent::Request(mut next) => {
                     let automatic_summary = if chat_api {
