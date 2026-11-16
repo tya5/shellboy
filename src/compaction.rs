@@ -46,7 +46,9 @@ mod guard_tests;
 mod policy;
 mod range;
 mod single_request;
-pub(crate) use single_request::{AdoptionSize, Dispatched};
+#[cfg(test)]
+pub(crate) use single_request::AdoptionSize;
+pub(crate) use single_request::Dispatched;
 mod summary;
 mod usage;
 pub(crate) use keys::CompactionKeys;

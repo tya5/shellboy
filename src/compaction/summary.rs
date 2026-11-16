@@ -241,16 +241,29 @@ fn locate_r(path: &[String], ids: &[String]) -> Result<usize, StorageError> {
     Ok(position)
 }
 
+pub(super) struct FinalAdoption<'a> {
+    config: &'a Config,
+    cancel: &'a CancellationToken,
+    thread: &'a str,
+    sources: &'a [FinalRSource],
+    markers: &'a [FinalRSource],
+    payload: &'a Value,
+    input_key: &'a str,
+}
+
 pub(super) fn adopt_current_r_tx(
     tx: &rusqlite::Transaction<'_>,
-    config: &Config,
-    cancel: &CancellationToken,
-    thread: &str,
-    sources: &[FinalRSource],
-    markers: &[FinalRSource],
-    payload: &Value,
-    input_key: &str,
+    request: FinalAdoption<'_>,
 ) -> Result<String, StorageError> {
+    let FinalAdoption {
+        config,
+        cancel,
+        thread,
+        sources,
+        markers,
+        payload,
+        input_key,
+    } = request;
     if cancel.is_cancelled() {
         return Err(rejection(
             RejectionReason::Cancelled,
@@ -416,13 +429,15 @@ impl SummaryAdoption {
             .collect::<Vec<_>>();
         let node = adopt_current_r_tx(
             tx,
-            config,
-            cancel,
-            &self.snapshot.thread,
-            &expected,
-            &markers,
-            &self.payload,
-            &self.input_key,
+            FinalAdoption {
+                config,
+                cancel,
+                thread: &self.snapshot.thread,
+                sources: &expected,
+                markers: &markers,
+                payload: &self.payload,
+                input_key: &self.input_key,
+            },
         )?;
         if self.automatic.is_none() {
             let mut state = super::a_state::scope_tx(
@@ -540,13 +555,15 @@ pub(super) fn adopt_gc_result_tx(
         .collect::<Vec<_>>();
     adopt_current_r_tx(
         tx,
-        config,
-        cancel,
-        &captured.thread,
-        &expected,
-        &[],
-        &artifact.payload,
-        &artifact.input_key,
+        FinalAdoption {
+            config,
+            cancel,
+            thread: &captured.thread,
+            sources: &expected,
+            markers: &[],
+            payload: &artifact.payload,
+            input_key: &artifact.input_key,
+        },
     )
 }
 
@@ -649,15 +666,21 @@ mod final_r_adoption_tests {
         .unwrap();
         db.call(|db| {
             let tx = db.transaction()?;
+            let config = Config::default();
+            let cancel = CancellationToken::new();
+            let sources = [source("r1", true, false), source("r2", true, false)];
+            let payload = summary_payload();
             let node = adopt_current_r_tx(
                 &tx,
-                &Config::default(),
-                &CancellationToken::new(),
-                "t",
-                &[source("r1", true, false), source("r2", true, false)],
-                &[],
-                &summary_payload(),
-                "final-r-positive",
+                FinalAdoption {
+                    config: &config,
+                    cancel: &cancel,
+                    thread: "t",
+                    sources: &sources,
+                    markers: &[],
+                    payload: &payload,
+                    input_key: "final-r-positive",
+                },
             )?;
             let path = tx
                 .prepare("SELECT node_id FROM thread_path WHERE thread_id='t' ORDER BY ordinal")?
@@ -730,13 +753,15 @@ mod final_r_adoption_tests {
             let tx = db.transaction()?;
             let result = adopt_current_r_tx(
                 &tx,
-                &Config::default(),
-                &CancellationToken::new(),
-                "t",
-                &[grouped_source("call-node", "g")],
-                &[],
-                &summary_payload(),
-                "final-r-partial-tool",
+                FinalAdoption {
+                    config: &Config::default(),
+                    cancel: &CancellationToken::new(),
+                    thread: "t",
+                    sources: &[grouped_source("call-node", "g")],
+                    markers: &[],
+                    payload: &summary_payload(),
+                    input_key: "final-r-partial-tool",
+                },
             );
             let error = result.unwrap_err().into_api_error();
             assert_eq!(
@@ -803,15 +828,19 @@ mod final_r_adoption_tests {
             if kind == "cancel" {
                 cancel.cancel();
             }
+            let config = Config::default();
+            let payload = summary_payload();
             let result = adopt_current_r_tx(
                 &tx,
-                &Config::default(),
-                &cancel,
-                "t",
-                &[source("r1", true, false), source("r2", true, false)],
-                &[],
-                &summary_payload(),
-                "final-r-negative",
+                FinalAdoption {
+                    config: &config,
+                    cancel: &cancel,
+                    thread: "t",
+                    sources: &[source("r1", true, false), source("r2", true, false)],
+                    markers: &[],
+                    payload: &payload,
+                    input_key: "final-r-negative",
+                },
             );
             let expected = match kind {
                 "missing" => RejectionReason::ThreadUnavailable,
