@@ -806,7 +806,7 @@ async fn prepare_with_mode(
     }
     let guard_before = guard_rows(&control).await;
     request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() || hold_summary {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
-    if !scenario.active() {
+    if !scenario.active() && !hold_summary {
         incoming(&control, &mut receive)
             .await
             .reply
@@ -832,6 +832,7 @@ async fn prepare_with_mode(
     }
     let mut held_summary = None;
     if scenario.summary() {
+        let mut first_normal_facts_recorded = false;
         loop {
             let request = incoming(&control, &mut receive).await;
             if request.body["tools"] == json!([]) {
@@ -933,29 +934,47 @@ async fn prepare_with_mode(
                         .send((200, answer("Short adopted summary.")))
                         .unwrap();
                 }
-                break;
-            }
-            if hold_summary {
-                // Drain any request that reached the provider before the
-                // summary; the tests then hold a fresh request with R pending.
+                if !hold_summary {
+                    break;
+                }
+            } else {
+                if hold_summary && !first_normal_facts_recorded {
+                    let facts = admission_boundary_facts(&control, &target).await;
+                    assert!(
+                        facts.latest_attempt_id.is_some(),
+                        "ordinary request must have report witness: {facts:?}"
+                    );
+                    assert!(
+                        facts.slot_exists && facts.job_exists,
+                        "preflight must publish the eligible job before normal dispatch: {facts:?}"
+                    );
+                    eprintln!("U2 first ordinary request while Run A active: {facts:?}");
+                    first_normal_facts_recorded = true;
+                }
                 request
                     .reply
-                    .send((200, answer_with_usage("pre-summary continuation", 100)))
+                    .send((200, answer_with_usage("normal continuation", 100)))
                     .unwrap();
-                continue;
             }
             if hold_summary {
-                let facts = admission_boundary_facts(&control, &target).await;
-                assert!(
-                    facts.latest_attempt_id.is_some(),
-                    "ordinary request must have a report witness: {facts:?}"
-                );
-                eprintln!("U2 first ordinary request before summary: {facts:?}");
+                let thread = target.clone();
+                let run_live = control
+                    .store
+                    .database
+                    .call(move |db| {
+                        db.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='live')",
+                            [thread],
+                            |row| row.get::<_, bool>(0),
+                        )
+                        .map_err(Into::into)
+                    })
+                    .await
+                    .unwrap();
+                if held_summary.is_some() && !run_live {
+                    break;
+                }
             }
-            request
-                .reply
-                .send((200, answer_with_usage("normal continuation", 100)))
-                .unwrap();
         }
     }
     if spill_off && !hold_summary {
