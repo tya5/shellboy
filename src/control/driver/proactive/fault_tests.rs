@@ -1737,7 +1737,7 @@ impl ActiveTurnPhase {
                 continue;
             }
             let mut statement = db.prepare(
-                "SELECT a.id,oi.node_id,oi.payload_json,oi.status,a.state,t.thread_id,t.run_id,t.id,a.generation,n.kind,n.thread_id,n.turn_id,n.payload_json FROM output_item oi JOIN model_attempt a ON a.id=oi.attempt_id JOIN turn t ON t.id=a.turn_id JOIN node n ON n.id=oi.node_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND oi.item_type='function_call' AND json_extract(oi.payload_json,'$.call_id')=?5 ORDER BY a.rowid,oi.ordinal",
+                "SELECT a.id,oi.node_id,oi.payload_json,oi.status,a.state,t.thread_id,t.run_id,t.id,a.generation,n.kind,n.turn_id,n.payload_json FROM output_item oi JOIN model_attempt a ON a.id=oi.attempt_id JOIN turn t ON t.id=a.turn_id JOIN node n ON n.id=oi.node_id WHERE t.thread_id=?1 AND t.run_id=?2 AND t.id=?3 AND a.generation=?4 AND oi.item_type='function_call' AND json_extract(oi.payload_json,'$.call_id')=?5 ORDER BY a.rowid,oi.ordinal",
             )?;
             let rows = statement
                 .query_map(
@@ -1768,7 +1768,6 @@ impl ActiveTurnPhase {
                 turn_id: turn,
                 attempt_generation,
                 assistant_node_kind: node_kind,
-                assistant_node_thread_id: assistant_thread,
                 assistant_node_turn_id: assistant_turn,
                 assistant_node_json: assistant_json,
             } = row;
@@ -1778,10 +1777,6 @@ impl ActiveTurnPhase {
             assert_eq!(
                 attempt_generation, custody.generation,
                 "immutable model-attempt generation"
-            );
-            assert_eq!(
-                assistant_thread, custody.thread,
-                "assistant node Thread owner"
             );
             assert_eq!(
                 assistant_turn.as_deref(),
@@ -1908,7 +1903,6 @@ struct ActivePhaseCustodyRow {
     turn_id: String,
     attempt_generation: i64,
     assistant_node_kind: String,
-    assistant_node_thread_id: String,
     assistant_node_turn_id: Option<String>,
     assistant_node_json: String,
 }
@@ -1926,9 +1920,8 @@ impl ActivePhaseCustodyRow {
             turn_id: row.get(7)?,
             attempt_generation: row.get(8)?,
             assistant_node_kind: row.get(9)?,
-            assistant_node_thread_id: row.get(10)?,
-            assistant_node_turn_id: row.get(11)?,
-            assistant_node_json: row.get(12)?,
+            assistant_node_turn_id: row.get(10)?,
+            assistant_node_json: row.get(11)?,
         })
     }
 }
