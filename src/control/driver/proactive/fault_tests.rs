@@ -1408,77 +1408,118 @@ fn assert_interruption_audits(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn completed_trigger_real_profile_rejection_is_visible_in_status_and_log() {
-    completed_trigger_rejection("profile_changed").await;
+async fn completed_trigger_outside_context_changes_do_not_veto_current_r_adoption() {
+    for change in ["profile_changed", "run_stopped", "turn_changed"] {
+        completed_trigger_outside_context_change(change).await;
+    }
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn completed_trigger_real_run_turn_rejections_are_visible_in_status_and_log() {
-    completed_trigger_rejection("run_stopped").await;
-    completed_trigger_rejection("turn_changed").await;
-}
-async fn completed_trigger_rejection(reason: &'static str) {
-    crate::test_watchdog::watchdog("completed trigger discard pipeline", async {
-        let root=tempfile::tempdir().unwrap();
-        let (url,mut receive,server)=proxy().await;
-        let owner=proactive_owner(root.path(),&url,"[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n").await;
-        let control=Control::new(&owner,root.path().into());
-        let target=thread(&control).await;
-        send(&control,&target,"Original synthetic request PRIVATE_SENTINEL").await;
-        incoming(&control,&mut receive).await.reply.send((200,answer_with_usage("completed first answer",100))).unwrap();
-        settled(&control,&target).await;
-        send(&control,&target,"next synthetic request").await;
-        incoming(&control,&mut receive).await.reply.send((200,answer_with_usage("completed second answer",200))).unwrap();
-        settled(&control,&target).await;
-        send(&control,&target,"trigger automatic compaction").await;
-        let summary=incoming(&control,&mut receive).await;
-        assert_eq!(summary.body["tools"],json!([]));
-        let scope=target.clone();
-        let (attempt,usage,response)=control.store.database.call(move |db| {
-            let row=db.query_row("SELECT a.id,a.usage_json,a.response_id FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND json_extract(a.error_json,'$.automatic_trim_attempt.token') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",[&scope],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
-            // Real captured-input invalidation, not a forged rejection/error body.
-            match reason {
-                "profile_changed" => {db.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id=?1",[scope])?;}
-                "run_stopped" => {db.execute("UPDATE run SET state='stopping' WHERE thread_id=?1 AND state='live'",[scope])?;}
-                "turn_changed" => {db.execute("UPDATE turn SET generation=generation+1 WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')",[scope])?;}
-                _ => unreachable!(),
-            }
-            Ok(row)
-        }).await.unwrap();
-        summary.reply.send((200,answer("short synthetic summary"))).unwrap();
-        let expected=attempt.clone();
-        crate::test_watchdog::watchdog("discard durable publication",async {
-            loop {
-                let id=expected.clone();
-                let saved=control.store.database.call(move |db|Ok(db.query_row("SELECT json_extract(error_json,'$.automatic_trim_attempt.compaction_outcome.outcome.reason') FROM model_attempt WHERE id=?1",[id],|r|r.get::<_,Option<String>>(0))?)).await.unwrap();
-                if saved.as_deref()==Some(reason) {break;}
+
+async fn completed_trigger_outside_context_change(change: &'static str) {
+    crate::test_watchdog::watchdog("completed trigger outside-R positive", async {
+        let root = tempfile::tempdir().unwrap();
+        let (url, mut receive, server) = proxy().await;
+        let owner = proactive_owner(
+            root.path(),
+            &url,
+            "[compaction]\nauto_at_tokens=200\nsummary_max_chars=4000\n",
+        )
+        .await;
+        let control = Control::new(&owner, root.path().into());
+        let target = thread(&control).await;
+        send(&control, &target, "Original synthetic request PRIVATE_SENTINEL").await;
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("completed first answer", 100)))
+            .unwrap();
+        settled(&control, &target).await;
+        send(&control, &target, "next synthetic request").await;
+        incoming(&control, &mut receive)
+            .await
+            .reply
+            .send((200, answer_with_usage("completed second answer", 200)))
+            .unwrap();
+        settled(&control, &target).await;
+        send(&control, &target, "trigger automatic compaction").await;
+        let summary = incoming(&control, &mut receive).await;
+        assert_eq!(summary.body["tools"], json!([]));
+        let scope = target.clone();
+        let attempt = control
+            .store
+            .database
+            .call(move |db| {
+                let attempt: String = db.query_row(
+                    "SELECT a.id FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND a.state='completed' AND json_extract(a.error_json,'$.automatic_trim_attempt.token') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",
+                    [&scope],
+                    |row| row.get(0),
+                )?;
+                match change {
+                    "profile_changed" => {
+                        db.execute("UPDATE thread SET profile_revision=profile_revision+1 WHERE id=?1", [&scope])?;
+                    }
+                    "run_stopped" => {
+                        db.execute("UPDATE run SET state='stopping' WHERE thread_id=?1 AND state='live'", [&scope])?;
+                    }
+                    "turn_changed" => {
+                        db.execute("UPDATE turn SET generation=generation+1 WHERE thread_id=?1 AND state IN ('preparing','running','waiting','recovery_wait')", [&scope])?;
+                    }
+                    _ => unreachable!(),
+                }
+                Ok(attempt)
+            })
+            .await
+            .unwrap();
+        summary
+            .reply
+            .send((200, answer("short synthetic summary")))
+            .unwrap();
+        crate::test_watchdog::watchdog("outside-R current adoption terminal", async {
+            while !terminal_record_written(&control).await {
                 tokio::task::yield_now().await;
             }
-        }).await.unwrap();
-        let scope=target.clone();let id=attempt.clone();
-        let status_fact=control.store.database.call(move |db| {
-            let page=crate::status::snapshot(db,&StatusArgs{thread_id:Some(scope),all:true,limit:200,..Default::default()},"fixture").unwrap();
-            let current=page.items.iter().find(|row|row.id==id).unwrap();
-            let fact=current.compaction_outcome.unwrap();
-            assert_eq!(serde_json::to_value(fact.outcome).unwrap()["reason"],reason);
-            assert_eq!(fact.phase,crate::compaction::discard::CompactionPhase::ClosedSummary);
-            let point=crate::status::observation::prepare(crate::status::observation::read_status_tx(db,&[crate::status::observation::Key{kind:crate::status::observation::Kind::Attempt,id:id.clone()}],&mut Default::default()).unwrap());
-            assert_eq!(point["items"][0]["current"]["compaction_outcome"],serde_json::to_value(fact).unwrap());
-            assert!(!point.to_string().contains("PRIVATE_SENTINEL"));
-            let saved=db.query_row("SELECT state,usage_json,response_id FROM model_attempt WHERE id=?1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,Option<String>>(1)?,r.get::<_,Option<String>>(2)?)))?;
-            assert_eq!(saved,("completed".into(),usage,response));
-            assert!(!serde_json::to_string(&page).unwrap().contains("PRIVATE_SENTINEL"));
-            Ok(fact)
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
+        let attempt_id = attempt.clone();
+        control
+            .store
+            .database
+            .call(move |db| {
+                let record: String = db.query_row(
+                    "SELECT error_json FROM model_attempt WHERE id=?1",
+                    [&attempt_id],
+                    |row| row.get(0),
+                )?;
+                let record: Value = serde_json::from_str(&record).unwrap();
+                let automatic = &record["automatic_trim_attempt"];
+                assert_eq!(automatic["outcome"], "adopted", "{change}: {automatic}");
+                assert_eq!(automatic["provisional"], false);
+                assert!(
+                    automatic["committed_stages"]
+                        .as_object()
+                        .is_some_and(|stages| stages.values().any(Value::is_object)),
+                    "the R still committed after the outside-R change: {automatic}"
+                );
+                assert!(automatic["compaction_outcome"].is_null());
+                let path = db
+                    .prepare("SELECT p.node_id FROM thread_path p WHERE p.thread_id=?1 ORDER BY p.ordinal")?
+                    .query_map([&target], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                assert!(path.iter().any(|id| {
+                    db.query_row("SELECT kind='summary' FROM node WHERE id=?1", [id], |row| row.get::<_, bool>(0)).unwrap_or(false)
+                }), "summary node adopted for {change}: {path:?}");
+                assert!(!record.to_string().contains("PRIVATE_SENTINEL"));
+                Ok(())
+            })
+            .await
+            .unwrap();
         control.shutdown().await.unwrap();
-        drop(control);owner.shutdown().await.unwrap();server.abort();
-        let text=std::fs::read_to_string(root.path().join("data/logs/shellboy.log")).unwrap();
-        let facts=text.lines().map(|line|serde_json::from_str::<Value>(line).unwrap()).filter(|row|row["event"]=="compaction_outcome").collect::<Vec<_>>();
-        assert_eq!(facts.len(),1);
-        assert_eq!(facts[0]["compaction_outcome"]["outcome"]["reason"],reason);
-        assert_eq!(facts[0]["ids"]["attempt_id"],attempt);
-        assert_eq!(facts[0]["compaction_outcome"],serde_json::to_value(status_fact).unwrap());
-        assert!(!facts[0].to_string().contains("PRIVATE_SENTINEL"));
-    }).await.unwrap();
+        drop(control);
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
 }
 
 mod s1_tests;

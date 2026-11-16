@@ -3037,7 +3037,7 @@ mod tests {
     /// original node or edge changes, no original node gains an edge, and the
     /// original order stays readable from the summary's provenance.
     #[tokio::test]
-    async fn target_active_summary_preserves_later_rounds_and_drops_prior_reasoning() {
+    async fn target_active_summary_preserves_prior_prefix_reasoning_and_later_rounds() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"completed first round"}]}]});
         let (url, server) = summary_proxy(vec![raw]).await;
         let (_root, db) = database().await;
@@ -3068,14 +3068,23 @@ mod tests {
                     r.get(0)
                 })?;
             assert_eq!(epoch, 1);
-            assert!(history::reasoning_keep(db, "t", epoch)?.is_empty());
+            assert_eq!(
+                history::reasoning_keep(db, "t", epoch)?,
+                HashSet::from(["last-answer".to_owned()]),
+                "the unchanged prefix remains current reasoning custody"
+            );
             let replay = crate::control::replay::ReplayCache::new(0)
                 .load(db, "t")?
                 .materialize();
             assert!(
-                !replay.iter().any(
-                    |item| item["type"] == "reasoning" || crate::model::opaque::is_opaque(item)
-                )
+                replay.iter().any(crate::model::opaque::is_opaque),
+                "the unchanged prefix's signed reasoning stays replayable"
+            );
+            assert!(
+                !replay.iter().any(|item| {
+                    ["rs-g1", "rs-g2", "rs-g3"].contains(&item["id"].as_str().unwrap_or(""))
+                }),
+                "reasoning at or after the edited R is not kept"
             );
             Ok(())
         })

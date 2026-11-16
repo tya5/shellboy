@@ -202,73 +202,87 @@ async fn partial_hidden_summary_is_rejected_with_boundary_candidates_without_htt
 }
 
 #[tokio::test]
-async fn hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path()
- {
-    for selection_change in [false, true] {
-        let (fixture, mut requests, release, server) = configured_fixture(1, true).await;
-        let marker = omit_middle(&fixture).await;
-        let before = fixture.path().await;
-        let compactor = fixture.compactor.clone();
-        let args = summary_args("middle-a", "middle-b");
-        let request =
-            tokio::spawn(async move { compactor.edit("t", &args, CancellationToken::new()).await });
-        crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path", requests.recv())
-            .await
-            .unwrap()
-            .unwrap();
-        if selection_change {
-            fixture.text("later", "racing appended message").await;
-        } else {
-            fixture
-                .db
-                .call(move |db| {
-                    db.execute(
-                        "UPDATE node SET payload_revision=payload_revision+1 WHERE id=?1",
-                        [marker],
-                    )?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-        }
-        release.send(()).unwrap();
-        let error = crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path", request)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap_err();
-        assert_eq!(error.code, ErrorCode::InvalidState);
-        assert!(error.message.contains("changed"));
-        let mut expected = before;
-        if selection_change {
-            expected.push("later".into());
-        }
-        assert_eq!(fixture.path().await, expected);
-        assert_eq!(raw_parts(&fixture).await, 0); // raw part cache retired (§9)
-        fixture
-            .db
-            .call(|db| {
-                assert_eq!(
-                    db.query_row(
-                        "SELECT count(*) FROM replacement WHERE format_version=?1",
-                        [FORMAT],
-                        |row| row.get::<_, i64>(0)
-                    )?,
-                    0
-                );
-                Ok(())
-            })
-            .await
-            .unwrap();
-        assert_eq!(
-            crate::test_watchdog::watchdog("src/compaction/edit/summary_tests.rs: hidden_summary_late_marker_revision_or_selection_change_rejects_adoption_and_keeps_the_original_path", server)
-                .await
-                .unwrap()
-                .unwrap(),
-            1
-        );
-        fixture.close().await;
-    }
+async fn hidden_summary_marker_revision_change_rejects_adoption_and_keeps_the_original_path() {
+    let (fixture, mut requests, release, server) = configured_fixture(1, true).await;
+    let marker = omit_middle(&fixture).await;
+    let before = fixture.path().await;
+    let compactor = fixture.compactor.clone();
+    let args = summary_args("middle-a", "middle-b");
+    let request =
+        tokio::spawn(async move { compactor.edit("t", &args, CancellationToken::new()).await });
+    crate::test_watchdog::watchdog("hidden marker revision barrier", requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .db
+        .call(move |db| {
+            db.execute(
+                "UPDATE node SET payload_revision=payload_revision+1 WHERE id=?1",
+                [marker],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    release.send(()).unwrap();
+    let error = crate::test_watchdog::watchdog("hidden marker revision rejection", request)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::InvalidState);
+    assert!(error.message.contains("changed"));
+    assert_eq!(fixture.path().await, before);
+    assert_eq!(raw_parts(&fixture).await, 0);
+    fixture
+        .db
+        .call(|db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM replacement WHERE format_version=?1",
+                    [FORMAT],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                0
+            );
+            Ok(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(server.await.unwrap(), 1);
+    fixture.close().await;
+}
+
+#[tokio::test]
+async fn hidden_summary_late_outside_r_append_is_preserved_during_adoption() {
+    let (fixture, mut requests, release, server) = configured_fixture(1, true).await;
+    let marker = omit_middle(&fixture).await;
+    let compactor = fixture.compactor.clone();
+    let args = summary_args("middle-a", "middle-b");
+    let request =
+        tokio::spawn(async move { compactor.edit("t", &args, CancellationToken::new()).await });
+    crate::test_watchdog::watchdog("hidden summary held at provider", requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    fixture.text("later", "racing appended message").await;
+    release.send(()).unwrap();
+    let result = crate::test_watchdog::watchdog("hidden summary current-R adoption", request)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let summary = result.compact.summary_node_id.unwrap();
+    assert_eq!(result.compact.original_node_ids, ["middle-a", "middle-b"]);
+    assert_eq!(
+        fixture.path().await,
+        vec!["before".to_owned(), summary, "after".into(), "later".into()]
+    );
+    assert!(!fixture.path().await.contains(&marker));
+    assert_eq!(raw_parts(&fixture).await, 0);
+    assert_eq!(server.await.unwrap(), 1);
+    fixture.close().await;
 }
 
 #[tokio::test]

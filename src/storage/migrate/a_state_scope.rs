@@ -274,11 +274,19 @@ mod tests {
         assert_eq!(raw_rows(&db), after);
     }
 
-    fn schema45() -> Connection {
+    fn schema45_with_generation_column() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(crate::storage::CURRENT_SCHEMA).unwrap();
-        db.execute_batch("DELETE FROM schema_migration WHERE version=46; PRAGMA user_version=45;")
+        db.execute("DELETE FROM schema_migration WHERE version=40", [])
             .unwrap();
+        db.execute_batch(include_str!(
+            "../../../migrations/0040_selection_nonappend_generation.sql"
+        ))
+        .unwrap();
+        db.execute_batch(
+            "DELETE FROM schema_migration WHERE version IN (46,47); PRAGMA user_version=45;",
+        )
+        .unwrap();
         db.execute("INSERT INTO thread(id,cwd,agents_path,profile_id,model_id,updated_at) VALUES('t','/','','p','m','now')",[]).unwrap();
         db.execute(
             "INSERT INTO app_meta VALUES('compact.a_state.t',?1)",
@@ -296,7 +304,7 @@ mod tests {
 
     #[test]
     fn forward46_ledger_conversion_and_sql_fault_share_immediate_rollback() {
-        let mut db = schema45();
+        let mut db = schema45_with_generation_column();
         let before = raw_rows(&db);
         db.execute_batch("CREATE TRIGGER reject_scope_conversion BEFORE UPDATE ON app_meta WHEN OLD.key='compact.a_state.u' BEGIN SELECT RAISE(ABORT,'injected scope conversion failure'); END;").unwrap();
         let error = super::super::run(&mut db, 45, &|_, _| {}, &|| {}).unwrap_err();
@@ -327,9 +335,10 @@ mod tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            46
+            47
         );
         assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=46 AND name='0046_scope_identity_v2'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        assert_eq!(db.query_row("SELECT count(*) FROM schema_migration WHERE version=47 AND name='0047_drop_selection_nonappend_generation'",[],|r|r.get::<_,i64>(0)).unwrap(),1);
         let state = crate::compaction::a_state::read(&db, "t").unwrap().unwrap();
         assert_eq!(
             state.reading(),
@@ -360,12 +369,12 @@ mod tests {
             original
         );
         let after = raw_rows(&db);
-        super::super::run(&mut db, 46, &|_, _| {}, &|| {}).unwrap();
+        super::super::run(&mut db, 47, &|_, _| {}, &|| {}).unwrap();
         assert_eq!(raw_rows(&db), after);
     }
     #[test]
     fn forward46_invalid_utf8_text_key_does_not_block_later_valid_rows() {
-        let mut db = schema45();
+        let mut db = schema45_with_generation_column();
         db.execute("DELETE FROM app_meta WHERE key='compact.a_state.u'", [])
             .unwrap();
         let mut invalid_key = PREFIX.as_bytes().to_vec();
@@ -437,7 +446,7 @@ mod tests {
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            46
+            47
         );
         assert_eq!(
             db.query_row(
@@ -448,9 +457,13 @@ mod tests {
             .unwrap(),
             1
         );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM schema_migration WHERE version=47 AND name='0047_drop_selection_nonappend_generation'", [], |r| r.get::<_, i64>(0)).unwrap(),
+            1
+        );
         let t = crate::compaction::a_state::read(&db, "t").unwrap();
         let u = crate::compaction::a_state::read(&db, "u").unwrap();
-        super::super::run(&mut db, 46, &|_, _| {}, &|| {}).unwrap();
+        super::super::run(&mut db, 47, &|_, _| {}, &|| {}).unwrap();
         assert_eq!(raw_key_row(&db), original);
         assert_eq!(crate::compaction::a_state::read(&db, "t").unwrap(), t);
         assert_eq!(crate::compaction::a_state::read(&db, "u").unwrap(), u);
