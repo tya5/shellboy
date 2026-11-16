@@ -340,7 +340,18 @@ pub(super) async fn stream_response(
             let outcome = match &poll {
                 std::task::Poll::Pending => crate::control::HttpPollResult::Pending,
                 std::task::Poll::Ready(Ok(_)) => crate::control::HttpPollResult::ReadySuccess,
-                std::task::Poll::Ready(Err(_)) => crate::control::HttpPollResult::ReadyError,
+                std::task::Poll::Ready(Err(error)) => {
+                    let class = match error.code.as_str() {
+                        "cancelled" => crate::control::HttpErrorClass::Cancelled,
+                        "request_timeout" => crate::control::HttpErrorClass::RequestTimeout,
+                        "response_header_timeout" => {
+                            crate::control::HttpErrorClass::ResponseHeaderTimeout
+                        }
+                        "stream_idle_timeout" => crate::control::HttpErrorClass::StreamIdleTimeout,
+                        _ => crate::control::HttpErrorClass::Other,
+                    };
+                    crate::control::HttpPollResult::ReadyError(class)
+                }
             };
             let phase = match poll_count {
                 0 => Some(crate::control::DriverAwaitPhase::HttpFutureFirstPoll(

@@ -94,10 +94,11 @@ async fn wait_for_run_b_provider_request(
             event = phases.recv() => match event {
                 Ok(event) if event.thread == thread && event.run == run => {
                     eprintln!("Run B typed future progress: attempt={:?} phase={:?}", event.attempt, event.phase);
-                    if matches!(event.phase,
-                        crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(crate::control::HttpPollResult::ReadyError))
+                    if let crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(
+                        crate::control::HttpPollResult::ReadyError(class),
+                    ) = event.phase
                     {
-                        panic!("Run B response future completed with typed error before any provider body: Thread={thread} Run={run} Attempt={:?}", event.attempt);
+                        panic!("Run B response future completed with typed error before any provider body: Thread={thread} Run={run} Attempt={:?} Class={class:?}", event.attempt);
                     }
                 }
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}

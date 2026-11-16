@@ -117,10 +117,20 @@ pub(super) enum DriverAwaitPhase {
 
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HttpErrorClass {
+    Cancelled,
+    RequestTimeout,
+    ResponseHeaderTimeout,
+    StreamIdleTimeout,
+    Other,
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum HttpPollResult {
     Pending,
     ReadySuccess,
-    ReadyError,
+    ReadyError(HttpErrorClass),
 }
 
 #[cfg(test)]
