@@ -11,6 +11,52 @@ use tokio::{
 
 mod record_tests;
 
+static DRIVER_AWAIT_PHASES: std::sync::OnceLock<
+    tokio::sync::broadcast::Sender<(String, String, super::DriverAwaitPhase)>,
+> = std::sync::OnceLock::new();
+
+pub(super) fn subscribe_driver_await_phases()
+-> tokio::sync::broadcast::Receiver<(String, String, super::DriverAwaitPhase)> {
+    DRIVER_AWAIT_PHASES
+        .get_or_init(|| tokio::sync::broadcast::channel(64).0)
+        .subscribe()
+}
+
+pub(super) fn record_driver_await_phase(thread: &str, run: &str, phase: super::DriverAwaitPhase) {
+    let Some(sender) = DRIVER_AWAIT_PHASES.get() else {
+        return;
+    };
+    let event = (thread.to_owned(), run.to_owned(), phase);
+    if sender.receiver_count() > 0 {
+        eprintln!(
+            "U2 driver await phase: thread={} run={} phase={:?}",
+            event.0, event.1, event.2
+        );
+        let _ = sender.send(event);
+    }
+}
+
+async fn wait_for_driver_await_phase(
+    phases: &mut tokio::sync::broadcast::Receiver<(String, String, super::DriverAwaitPhase)>,
+    thread: &str,
+    run: &str,
+    expected: super::DriverAwaitPhase,
+) {
+    loop {
+        match phases.recv().await {
+            Ok((observed_thread, observed_run, phase))
+                if observed_thread == thread && observed_run == run && phase == expected =>
+            {
+                return;
+            }
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                panic!("test-only driver phase stream closed before {expected:?}")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Fault {
     Storage,
@@ -175,13 +221,10 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             mut held_phase,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
-        let HeldSummaryPhase { summary, normal } = held_phase
+        let HeldSummaryPhase { summary } = held_phase
             .take()
             .expect("proactive summary reached its provider boundary");
-        let normal = match normal {
-            Some(normal) => normal,
-            None => incoming(&control, &mut receive).await,
-        };
+        let normal = incoming(&control, &mut receive).await;
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -248,14 +291,11 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             held_phase,
             ..
         } = &mut fx;
-        let HeldSummaryPhase { summary, normal } = held_phase
+        let HeldSummaryPhase { summary } = held_phase
             .take()
             .expect("proactive summary reached its provider boundary");
         assert_eq!(summary.body["tools"], json!([]));
-        let normal = match normal {
-            Some(normal) => normal,
-            None => incoming(control, receive).await,
-        };
+        let normal = incoming(control, receive).await;
         let before: Vec<String> = control
             .store
             .database
@@ -333,6 +373,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         // Let Run A finish naturally while its Thread-owned R job is still
         // held, then admit a new Run on the same Thread.
         settled(control, target).await;
+        let mut driver_phases = subscribe_driver_await_phases();
         let accepted: MessageAccepted = serde_json::from_value(
             send(control, target, "new Run while previous R job is held").await,
         )
@@ -395,6 +436,13 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         assert_eq!(receipt_state, "accepted");
         assert_eq!(message_turn.as_deref(), Some(accepted.turn_id.as_deref().unwrap()));
         assert_eq!(turn_started_events, 1, "Run B has a persisted turn_started event");
+        wait_for_driver_await_phase(
+            &mut driver_phases,
+            target,
+            &run_id,
+            super::DriverAwaitPhase::RequestFutureAwait,
+        )
+        .await;
         let overflow_request = incoming(control, receive).await;
         assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
         overflow_request
@@ -509,14 +557,11 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             mut receive,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
-        let HeldSummaryPhase { summary, normal } = held_phase
+        let HeldSummaryPhase { summary } = held_phase
             .take()
             .expect("proactive summary reached its provider boundary");
         assert_eq!(summary.body["tools"], json!([]));
-        let normal = match normal {
-            Some(normal) => normal,
-            None => incoming(&control, &mut receive).await,
-        };
+        let normal = incoming(&control, &mut receive).await;
         normal
             .reply
             .send((200, answer_with_usage("finish Run A", 100)))
@@ -1315,7 +1360,6 @@ async fn prepare_with_mode(
     let held_phase = if hold_summary {
         Some(HeldSummaryPhase {
             summary: held_summary.expect("held-summary phase captured its summary request"),
-            normal: None,
         })
     } else {
         None
@@ -1403,7 +1447,6 @@ async fn prepare_with_mode(
 
 struct HeldSummaryPhase {
     summary: Incoming,
-    normal: Option<Incoming>,
 }
 
 struct Fx {

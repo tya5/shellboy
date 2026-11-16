@@ -7,6 +7,25 @@ use futures_util::FutureExt;
 mod fault_tests;
 
 #[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DriverAwaitPhase {
+    ThreadBoundaryAcquire,
+    ThreadBoundaryAcquired,
+    SnapshotReady,
+    CapacityReady,
+    InstructionsReady,
+    RateAdmissionWaiting,
+    RateAdmitted,
+    AttemptPrepared,
+    RequestFutureAwait,
+}
+
+#[cfg(test)]
+pub(super) fn observe_driver_await_phase(thread: &str, run: &str, phase: DriverAwaitPhase) {
+    fault_tests::record_driver_await_phase(thread, run, phase);
+}
+
+#[cfg(test)]
 mod spill_route_tests {
     use super::{SpillRoute, spill_route};
 
