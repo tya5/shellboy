@@ -231,7 +231,7 @@ async fn drive_inner(
             && let Some(plan) = proactive::preflight(&control, &snapshot).await?
         {
             drop(boundary_guard);
-            let mut job = proactive::spawn_background(
+            let job = proactive::spawn_background(
                 control.clone(),
                 *snapshot.clone(),
                 slot.clone(),

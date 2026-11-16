@@ -816,6 +816,7 @@ pub(super) fn spawn_background(
                 &slot,
                 &mut boundary_owner,
                 task_cancel,
+                plan,
             )
             .await;
             drop(boundary_owner.into_guard());
