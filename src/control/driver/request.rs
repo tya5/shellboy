@@ -316,16 +316,41 @@ pub(super) async fn stream_response(
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
     let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
+    #[cfg(test)]
+    crate::control::record_live_attempt_phase(
+        thread,
+        attempt,
+        crate::control::DriverAwaitPhase::LiveAdmissionEntered,
+    );
     let live_text = control.admit_live_stream(thread, attempt).await;
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
-    let response = client.response_observed(
+    let response_future = client.response_observed(
         thread,
         request,
         stop.clone(),
         Some(send),
         bypass_usage_limit,
     );
+    #[cfg(test)]
+    let response = {
+        let mut response_future = Box::pin(response_future);
+        let mut first_poll = true;
+        std::future::poll_fn(|cx| {
+            let poll = std::future::Future::poll(response_future.as_mut(), cx);
+            if first_poll {
+                first_poll = false;
+                crate::control::record_live_attempt_phase(
+                    thread,
+                    attempt,
+                    crate::control::DriverAwaitPhase::HttpFutureFirstPoll,
+                );
+            }
+            poll
+        })
+    };
+    #[cfg(not(test))]
+    let response = response_future;
     tokio::pin!(response);
     loop {
         tokio::select! {

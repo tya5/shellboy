@@ -95,6 +95,97 @@ pub enum EngineEvent {
         error: ApiError,
     },
 }
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DriverAwaitPhase {
+    ThreadBoundaryAcquire,
+    ThreadBoundaryAcquired,
+    SnapshotReady,
+    CapacityReady,
+    InstructionsReady,
+    RateAdmissionWaiting,
+    RateAdmitted,
+    AttemptPrepared,
+    RequestFutureAwait,
+    LiveAdmissionEntered,
+    LiveAdmissionGranted,
+    HttpFutureFirstPoll,
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug)]
+pub(super) struct DriverPhaseEvent {
+    pub(super) thread: String,
+    pub(super) run: String,
+    pub(super) attempt: Option<String>,
+    pub(super) phase: DriverAwaitPhase,
+}
+
+#[cfg(test)]
+static DRIVER_AWAIT_PHASES: std::sync::OnceLock<tokio::sync::broadcast::Sender<DriverPhaseEvent>> =
+    std::sync::OnceLock::new();
+#[cfg(test)]
+static DRIVER_PHASE_RUNS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(super) fn subscribe_driver_await_phases() -> tokio::sync::broadcast::Receiver<DriverPhaseEvent>
+{
+    DRIVER_AWAIT_PHASES
+        .get_or_init(|| tokio::sync::broadcast::channel(64).0)
+        .subscribe()
+}
+
+#[cfg(test)]
+pub(super) fn record_driver_await_phase(thread: &str, run: &str, phase: DriverAwaitPhase) {
+    let Some(sender) = DRIVER_AWAIT_PHASES.get() else {
+        return;
+    };
+    if sender.receiver_count() == 0 {
+        return;
+    }
+    DRIVER_PHASE_RUNS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(thread.to_owned(), run.to_owned());
+    record_driver_phase(DriverPhaseEvent {
+        thread: thread.to_owned(),
+        run: run.to_owned(),
+        attempt: None,
+        phase,
+    });
+}
+
+#[cfg(test)]
+pub(super) fn record_live_attempt_phase(thread: &str, attempt: &str, phase: DriverAwaitPhase) {
+    let run = DRIVER_PHASE_RUNS
+        .get()
+        .and_then(|runs| runs.lock().ok()?.get(thread).cloned())
+        .unwrap_or_default();
+    record_driver_phase(DriverPhaseEvent {
+        thread: thread.to_owned(),
+        run,
+        attempt: Some(attempt.to_owned()),
+        phase,
+    });
+}
+
+#[cfg(test)]
+fn record_driver_phase(event: DriverPhaseEvent) {
+    let Some(sender) = DRIVER_AWAIT_PHASES.get() else {
+        return;
+    };
+    if sender.receiver_count() > 0 {
+        eprintln!(
+            "U2 driver await phase: thread={} run={} attempt={:?} phase={:?}",
+            event.thread, event.run, event.attempt, event.phase
+        );
+        let _ = sender.send(event);
+    }
+}
+
 #[derive(Clone)]
 struct DriverSlot {
     id: String,

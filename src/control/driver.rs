@@ -166,17 +166,17 @@ async fn drive_inner(
         }
         let _ = slot.nudge.notified().now_or_never();
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::ThreadBoundaryAcquire,
+            super::DriverAwaitPhase::ThreadBoundaryAcquire,
         );
         let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::ThreadBoundaryAcquired,
+            super::DriverAwaitPhase::ThreadBoundaryAcquired,
         );
         let completed_job = {
             let mut job = slot.proactive_job.lock().await;
@@ -223,10 +223,10 @@ async fn drive_inner(
                 Next::Ready(snapshot) => snapshot,
             };
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::SnapshotReady,
+            super::DriverAwaitPhase::SnapshotReady,
         );
         let turn_binding = slot.bind_turn(&control, &snapshot.turn).await?;
         if turn_binding.cancel.is_cancelled() {
@@ -241,10 +241,10 @@ async fn drive_inner(
             return fail_turn(&control, &snapshot, error).await;
         }
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::CapacityReady,
+            super::DriverAwaitPhase::CapacityReady,
         );
         // Safe request boundary: tool groups are complete and no request is in
         // flight. A reported input over the threshold compacts here, one step
@@ -287,10 +287,10 @@ async fn drive_inner(
             continue;
         };
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::InstructionsReady,
+            super::DriverAwaitPhase::InstructionsReady,
         );
         let rate_client = match model_client(&control, &snapshot) {
             Ok(client) => client,
@@ -302,10 +302,10 @@ async fn drive_inner(
             Ok(model::http::RateReservation::Ready(lease)) => (snapshot, boundary_guard, lease, 0),
             pending => {
                 #[cfg(test)]
-                proactive::observe_driver_await_phase(
+                super::record_driver_await_phase(
                     &thread,
                     &slot.run_id,
-                    proactive::DriverAwaitPhase::RateAdmissionWaiting,
+                    super::DriverAwaitPhase::RateAdmissionWaiting,
                 );
                 // Waiting must not hold the Thread boundary or a pinned replay snapshot.
                 let witness = (
@@ -369,10 +369,10 @@ async fn drive_inner(
             }
         };
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::RateAdmitted,
+            super::DriverAwaitPhase::RateAdmitted,
         );
         let admitted = prepare_attempt(
             &control,
@@ -396,10 +396,10 @@ async fn drive_inner(
             continue;
         };
         #[cfg(test)]
-        proactive::observe_driver_await_phase(
+        super::record_driver_await_phase(
             &thread,
             &slot.run_id,
-            proactive::DriverAwaitPhase::AttemptPrepared,
+            super::DriverAwaitPhase::AttemptPrepared,
         );
         if slot.stop.is_cancelled() {
             return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
@@ -411,10 +411,10 @@ async fn drive_inner(
             model::http::RateAdmission::QuotaBlocked(fact) => Err(fact.error().into()),
             model::http::RateAdmission::Lease(_) => {
                 #[cfg(test)]
-                proactive::observe_driver_await_phase(
+                super::record_driver_await_phase(
                     &thread,
                     &slot.run_id,
-                    proactive::DriverAwaitPhase::RequestFutureAwait,
+                    super::DriverAwaitPhase::RequestFutureAwait,
                 );
                 stream_response(
                     &control,

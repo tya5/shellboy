@@ -11,43 +11,37 @@ use tokio::{
 
 mod record_tests;
 
-static DRIVER_AWAIT_PHASES: std::sync::OnceLock<
-    tokio::sync::broadcast::Sender<(String, String, super::DriverAwaitPhase)>,
-> = std::sync::OnceLock::new();
-
-pub(super) fn subscribe_driver_await_phases()
--> tokio::sync::broadcast::Receiver<(String, String, super::DriverAwaitPhase)> {
-    DRIVER_AWAIT_PHASES
-        .get_or_init(|| tokio::sync::broadcast::channel(64).0)
-        .subscribe()
-}
-
-pub(super) fn record_driver_await_phase(thread: &str, run: &str, phase: super::DriverAwaitPhase) {
-    let Some(sender) = DRIVER_AWAIT_PHASES.get() else {
-        return;
-    };
-    let event = (thread.to_owned(), run.to_owned(), phase);
-    if sender.receiver_count() > 0 {
-        eprintln!(
-            "U2 driver await phase: thread={} run={} phase={:?}",
-            event.0, event.1, event.2
-        );
-        let _ = sender.send(event);
-    }
-}
-
 async fn wait_for_driver_await_phase(
-    phases: &mut tokio::sync::broadcast::Receiver<(String, String, super::DriverAwaitPhase)>,
+    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
     thread: &str,
     run: &str,
-    expected: super::DriverAwaitPhase,
+    expected: crate::control::DriverAwaitPhase,
 ) {
     loop {
         match phases.recv().await {
-            Ok((observed_thread, observed_run, phase))
-                if observed_thread == thread && observed_run == run && phase == expected =>
-            {
+            Ok(event) if event.thread == thread && event.run == run && event.phase == expected => {
                 return;
+            }
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                panic!("test-only driver phase stream closed before {expected:?}")
+            }
+        }
+    }
+}
+
+async fn wait_for_driver_attempt_phase(
+    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
+    thread: &str,
+    run: &str,
+    expected: crate::control::DriverAwaitPhase,
+) -> String {
+    loop {
+        match phases.recv().await {
+            Ok(event) if event.thread == thread && event.run == run && event.phase == expected => {
+                if let Some(attempt) = event.attempt {
+                    return attempt;
+                }
             }
             Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -373,7 +367,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         // Let Run A finish naturally while its Thread-owned R job is still
         // held, then admit a new Run on the same Thread.
         settled(control, target).await;
-        let mut driver_phases = subscribe_driver_await_phases();
+        let mut driver_phases = crate::control::subscribe_driver_await_phases();
         let accepted: MessageAccepted = serde_json::from_value(
             send(control, target, "new Run while previous R job is held").await,
         )
@@ -443,9 +437,32 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             &mut driver_phases,
             target,
             &run_id,
-            super::DriverAwaitPhase::RequestFutureAwait,
+            crate::control::DriverAwaitPhase::RequestFutureAwait,
         )
         .await;
+        let live_attempt = wait_for_driver_attempt_phase(
+            &mut driver_phases,
+            target,
+            &run_id,
+            crate::control::DriverAwaitPhase::LiveAdmissionEntered,
+        )
+        .await;
+        let granted_attempt = wait_for_driver_attempt_phase(
+            &mut driver_phases,
+            target,
+            &run_id,
+            crate::control::DriverAwaitPhase::LiveAdmissionGranted,
+        )
+        .await;
+        let first_polled_attempt = wait_for_driver_attempt_phase(
+            &mut driver_phases,
+            target,
+            &run_id,
+            crate::control::DriverAwaitPhase::HttpFutureFirstPoll,
+        )
+        .await;
+        assert_eq!(live_attempt, granted_attempt, "live admission events refer to the same persisted attempt");
+        assert_eq!(granted_attempt, first_polled_attempt, "HTTP first poll belongs to the live-admitted attempt");
         let overflow_request = incoming(control, receive).await;
         assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
         overflow_request
