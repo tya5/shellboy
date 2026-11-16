@@ -533,9 +533,15 @@ impl Compactor {
             },
         };
         let config = self.config.clone();
-        self.database.call(move |db| {let tx=db.transaction()?;let keep_thread=adoption.snapshot.thread.clone();let keep_epoch=adoption.snapshot.epoch;let result=adoption.adopt_tx(&tx,&config,&cancel)?;
-            if reaches_latest {tx.execute("INSERT INTO app_meta(key,value)VALUES(?1,?2) ON CONFLICT(key)DO UPDATE SET value=excluded.value",params![history::reasoning_keep_key(&keep_thread),json!({"epoch":keep_epoch,"nodes":kept_reasoning}).to_string()])?;}
-            tx.commit()?;Ok(result)}).await.map_err(storage_error)
+        self.database
+            .call(move |db| {
+                let tx = db.transaction()?;
+                let result = adoption.adopt_tx(&tx, &config, &cancel)?;
+                tx.commit()?;
+                Ok(result)
+            })
+            .await
+            .map_err(storage_error)
     }
 
     pub(super) async fn dispatch_single_summary(

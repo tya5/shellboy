@@ -42,7 +42,7 @@ pub(crate) fn owner_rejection_reason(
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum WriterCompletion {
     Ready,
     Failed,
@@ -122,23 +122,29 @@ fn close_for_lifecycle(job: &mut OwnedGcJob) {
 }
 
 fn record_child_exit(job: &mut OwnedGcJob, exit: ChildExit) {
-    match exit {
+    let unexpected = match exit {
+        ChildExit::Finished(Some(terminal)) if job.terminal == Some(terminal) => false,
         ChildExit::Finished(Some(terminal)) => {
             job.lifecycle
                 .get_or_insert(WriterLifecycle::ProducerTerminated);
             job.terminal.get_or_insert(terminal);
+            true
         }
         ChildExit::Finished(None) => {
             job.lifecycle
                 .get_or_insert(WriterLifecycle::ProducerTerminated);
+            true
         }
         ChildExit::Panicked => {
             job.lifecycle.get_or_insert(WriterLifecycle::ChildPanicked);
+            true
         }
+    };
+    // The producer's exit only closes a candidate when it lacked an accepted
+    // terminal event; Ready/Failed completion remains the single authority.
+    if unexpected {
+        close_for_lifecycle(job);
     }
-    // The producer is the only code allowed to drive an accepted candidate to
-    // adoption. Its exit without strict adoption closes the candidate.
-    close_for_lifecycle(job);
 }
 
 /// Not Clone, Send-only as required by the storage Job, and never shared behind
@@ -188,6 +194,7 @@ impl WriterGcCoordinator {
         let cancel = CancellationToken::new();
         let id = WriterJobId(NEXT_JOB.fetch_add(1, Ordering::Relaxed));
         let (signal_tx, completion_signal) = tokio::sync::oneshot::channel();
+        let exit_wake = retirement_wake.clone();
         let launch = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             launch(id, captured, cancel.clone())
         }));
@@ -199,6 +206,7 @@ impl WriterGcCoordinator {
                         Err(_) => ChildExit::Panicked,
                     };
                     let _ = signal_tx.send(exit);
+                    let _ = exit_wake.notify(id).await;
                 });
                 (Some(task), WriterJobPhase::Computing, None)
             }
@@ -232,7 +240,7 @@ impl WriterGcCoordinator {
         Ok(id)
     }
 
-    pub(crate) fn reconcile_joined_retirement(&mut self, id: WriterJobId) -> bool {
+    pub(crate) fn process_lifecycle_event(&mut self, id: WriterJobId) -> bool {
         if !self.active.as_ref().is_some_and(|job| job.id == id) {
             return false;
         }
@@ -479,5 +487,64 @@ impl WriterGcCoordinator {
             None => true,
             Some(id) => self.retire_joined(id),
         }
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_event_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn matching_child_exit_preserves_the_single_ready_completion() {
+        let root = tempfile::tempdir().unwrap();
+        let db = crate::storage::DbWorker::open(root.path().join("db"))
+            .await
+            .unwrap();
+        let id = WriterJobId(77);
+        let (exit_tx, completion_signal) = tokio::sync::oneshot::channel();
+        exit_tx
+            .send(ChildExit::Finished(Some(WriterCompletion::Ready)))
+            .unwrap();
+        let stage = super::super::attempt::GcStage {
+            attempt_id: "a".into(),
+            token: "tok".into(),
+            thread_id: "t".into(),
+            profile_id: "p".into(),
+            model_id: "m".into(),
+            effort: None,
+            reasoning_epoch: 0,
+            stage: "closed_summary",
+        };
+        let cancel = CancellationToken::new();
+        let mut coordinator = WriterGcCoordinator {
+            active: Some(OwnedGcJob {
+                id,
+                cancel: cancel.clone(),
+                task: None,
+                completion_signal: Some(completion_signal),
+                retirement_task: None,
+                joined_receiver: None,
+                joined: false,
+                runtime: tokio::runtime::Handle::current(),
+                retirement_wake: db.gc_retirement_wake(),
+                phase: WriterJobPhase::Ready,
+                terminal: Some(WriterCompletion::Ready),
+                lifecycle: None,
+                adoption_candidate: None,
+                stage,
+                rejection: None,
+            }),
+        };
+
+        assert!(!coordinator.process_lifecycle_event(id));
+        let job = coordinator
+            .active
+            .as_ref()
+            .expect("Ready slot remains owned");
+        assert_eq!(job.phase, WriterJobPhase::Ready);
+        assert_eq!(job.terminal, Some(WriterCompletion::Ready));
+        assert!(job.lifecycle.is_none());
+        assert!(!cancel.is_cancelled());
+        db.shutdown().await.unwrap();
     }
 }

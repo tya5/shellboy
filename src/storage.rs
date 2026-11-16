@@ -468,7 +468,7 @@ impl GcRetirementWake {
 fn make_gc_retirement_job(id: crate::compaction::WriterJobId) -> Command {
     let job: Job = Box::new(move |connection, _, _, writer_gc| {
         let _ = connection;
-        let _ = writer_gc.reconcile_joined_retirement(id);
+        let _ = writer_gc.process_lifecycle_event(id);
         JobOutcome::default()
     });
     Command::Run {
@@ -2677,7 +2677,16 @@ mod lane_budget_tests {
         }
     }
 
-    async fn active_gc_source_fixture() -> (
+    #[derive(Clone, Copy)]
+    enum TestProducerExit {
+        AwaitCancellation,
+        ReturnNone,
+        Panic,
+    }
+
+    async fn active_gc_source_fixture(
+        exit: TestProducerExit,
+    ) -> (
         tempfile::TempDir,
         DbWorker,
         crate::compaction::WriterJobId,
@@ -2756,9 +2765,15 @@ mod lane_budget_tests {
                 },
                 move |id, _, cancel| async move {
                     let _ = started_tx.send(id);
-                    let _ = cancel.cancelled().await;
-                    let _ = tx.send(());
-                    None
+                    match exit {
+                        TestProducerExit::AwaitCancellation => {
+                            let _ = cancel.cancelled().await;
+                            let _ = tx.send(());
+                            None
+                        }
+                        TestProducerExit::ReturnNone => None,
+                        TestProducerExit::Panic => panic!("synthetic idle GC producer panic"),
+                    }
                 },
                 None,
             )
@@ -2773,8 +2788,10 @@ mod lane_budget_tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn gc_completion_job_id_isolated_between_writer_slots() {
-        let (_root_a, db_a, job_a, cancelled_a) = active_gc_source_fixture().await;
-        let (_root_b, db_b, job_b, cancelled_b) = active_gc_source_fixture().await;
+        let (_root_a, db_a, job_a, cancelled_a) =
+            active_gc_source_fixture(TestProducerExit::AwaitCancellation).await;
+        let (_root_b, db_b, job_b, cancelled_b) =
+            active_gc_source_fixture(TestProducerExit::AwaitCancellation).await;
         assert_ne!(job_a, job_b);
         let mut result = Some(Ok(synthetic_gc_summary()));
         assert_eq!(
@@ -2845,7 +2862,8 @@ mod lane_budget_tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ordinary_and_background_source_mutations_do_not_cancel_before_final_adoption() {
         for background in [false, true] {
-            let (_root, db, job_id, cancelled) = active_gc_source_fixture().await;
+            let (_root, db, job_id, cancelled) =
+                active_gc_source_fixture(TestProducerExit::AwaitCancellation).await;
             if background {
                 assert!(matches!(
                     db.call_background_kind("gc_witness_fixture", |db| {
@@ -2891,6 +2909,43 @@ mod lane_budget_tests {
             cancelled.await.unwrap();
             db.shutdown().await.unwrap();
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idle_gc_none_and_panic_exit_retire_slot_without_unrelated_db_jobs() {
+        crate::test_watchdog::watchdog("idle GC producer exit retirement", async {
+            for exit in [TestProducerExit::ReturnNone, TestProducerExit::Panic] {
+                let (_root, db, _job_id, _cancelled) = active_gc_source_fixture(exit).await;
+                let stage = crate::compaction::GcStage {
+                    attempt_id: "a".into(),
+                    token: "tok".into(),
+                    thread_id: "t".into(),
+                    profile_id: "fixture".into(),
+                    model_id: "fixture".into(),
+                    effort: None,
+                    reasoning_epoch: 0,
+                    stage: "closed_summary",
+                };
+                loop {
+                    match db
+                        .call_with_gc_capture_cancellable(
+                            stage.clone(),
+                            |_, _| Ok(crate::compaction::GcCaptureOutcome::NoTarget),
+                            |_, _, _| async { panic!("NoTarget probe must not launch a producer") },
+                            None,
+                        )
+                        .await
+                    {
+                        Ok(GcCaptureAdmission::NoTarget) => break,
+                        Err(StorageError::QueueFull) => tokio::task::yield_now().await,
+                        other => panic!("unexpected lifecycle probe result: {other:?}"),
+                    }
+                }
+                db.shutdown().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

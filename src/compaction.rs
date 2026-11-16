@@ -2300,6 +2300,70 @@ mod tests {
         });
         (format!("http://{address}/v1"), server)
     }
+    async fn held_summary_proxy(
+        response: Value,
+    ) -> (
+        String,
+        tokio::sync::oneshot::Receiver<Value>,
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0; 8192];
+            let (split, length) = loop {
+                let n = stream.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                if let Some(split) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&bytes[..split]);
+                    let length = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= split + 4 + length {
+                        break (split + 4, length);
+                    }
+                }
+            };
+            let body: Value = serde_json::from_slice(&bytes[split..split + length]).unwrap();
+            assert_eq!(body["store"], false);
+            assert_eq!(body["tools"], json!([]));
+            request_tx.send(body).unwrap();
+            release_rx.await.unwrap();
+            let body = response.to_string();
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        (
+            format!("http://{address}/v1"),
+            request_rx,
+            release_tx,
+            server,
+        )
+    }
+
     fn summary_config(url: String) -> Config {
         let mut config = Config::default();
         config.connections.insert(
@@ -2627,6 +2691,64 @@ mod tests {
     /// thinking) and ② (the request) byte-identical, replaces every tool round
     /// with one summary that carries ④ as text, and leaves no thinking,
     /// tool_use or tool_result of the active Turn after the edit point.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn manual_active_summary_preserves_current_reasoning_keep_after_epoch_change() {
+        let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\nTask\n## Current state\nThe selected tools completed."}]}]});
+        let (url, request_rx, release_tx, server) = held_summary_proxy(raw).await;
+        let (_root, db) = database().await;
+        active_turn_fixture(&db).await;
+        let compactor = Compactor::new(db.clone(), Arc::new(summary_config(url)));
+        let summary = tokio::spawn(async move {
+            compactor
+                .summarize_active_turn("t", CancellationToken::new())
+                .await
+        });
+        let request = request_rx.await.unwrap();
+        assert!(!request["input"].as_array().unwrap().is_empty());
+        db.call(|db| {
+            let tx = db.transaction()?;
+            tx.execute("UPDATE thread SET reasoning_epoch=1 WHERE id='t'", [])?;
+            tx.execute(
+                "INSERT INTO app_meta(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                params![history::reasoning_keep_key("t"), json!({"epoch":1,"nodes":["last-answer"]}).to_string()],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        release_tx.send(()).unwrap();
+        let result = summary.await.unwrap().unwrap();
+        let summary_id = result.summary_node_id.unwrap();
+        db.call(move |db| {
+            assert_eq!(
+                db.query_row(
+                    "SELECT reasoning_epoch FROM thread WHERE id='t'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                1
+            );
+            assert_eq!(
+                history::reasoning_keep(db, "t", 1)?,
+                HashSet::from(["last-answer".to_owned()])
+            );
+            let body: String = db.query_row(
+                "SELECT payload_json FROM node WHERE id=?1",
+                [&summary_id],
+                |row| row.get(0),
+            )?;
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(payload["reasoning_epoch"], 1);
+            assert_eq!(payload["kept_reasoning_node_ids"], json!(["last-answer"]));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+        db.shutdown().await.unwrap();
+    }
+
     #[tokio::test]
     async fn active_turn_summary_keeps_prefix_byte_identical_and_no_signed_tail() {
         let raw = json!({"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"## Goal\nTask\n## Current state\ng1 and g2 ran"}]}]});
