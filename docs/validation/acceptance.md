@@ -12085,7 +12085,9 @@ protection, tool-closure, cancellation or replay behavior.
 Candidate base: `0ce8bfcd91c0755ee516ef98b09aa886284992ce`; follow-up branch:
 `task/core-v21-unit-a-closeout-63724`. Deterministic source tests were added for spill-format
 current-R adoption, restore outside-prefix/suffix preservation, changed-restore-source
-rejection, and outside-R failure-memory append. They are authored but **not run**. Only
-format and whitespace checks passed. Native full qualification, independent review and
-exact-SHA CI for the follow-up are **pending**; do not treat the frozen base SHA's green
-native check or in-progress three-OS CI as evidence for these edits.
+rejection, and outside-R failure-memory append. They are authored but **not run**. Format, test-layout, watchdog-policy and whitespace
+checks passed. Guarded `cargo check --tests` on the initial commit failed with E0451
+(private `FinalAdoption` fields) after an earlier path-only wrapper setup error; that
+field-visibility defect is corrected in the working tree, but the corrected SHA is not
+compiled yet. Native full qualification, independent review and exact-SHA CI for the
+follow-up are **pending**; do not transfer the frozen base SHA's native/three-OS green.

@@ -327,14 +327,14 @@ pub(super) fn locate_r(path: &[String], ids: &[String]) -> Result<usize, Storage
 }
 
 pub(super) struct FinalAdoption<'a> {
-    config: &'a Config,
-    cancel: &'a CancellationToken,
-    thread: &'a str,
-    sources: &'a [FinalRSource],
-    markers: &'a [FinalRSource],
-    payload: &'a Value,
-    input_key: &'a str,
-    format: &'a str,
+    pub(super) config: &'a Config,
+    pub(super) cancel: &'a CancellationToken,
+    pub(super) thread: &'a str,
+    pub(super) sources: &'a [FinalRSource],
+    pub(super) markers: &'a [FinalRSource],
+    pub(super) payload: &'a Value,
+    pub(super) input_key: &'a str,
+    pub(super) format: &'a str,
 }
 
 pub(super) fn adopt_current_r_tx(

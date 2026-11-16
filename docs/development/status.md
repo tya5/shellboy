@@ -390,6 +390,13 @@ now states the operative v2.1 contract.
 `cargo fmt --all` and `cargo fmt --all -- --check` passed via the pinned worktree toolchain
 and shared rust-slot; `git diff --check` passed. A first formatter attempt from the wrong
 working directory used the sandbox stable toolchain and failed because its rustfmt
-component is absent; it changed nothing. No component was installed. No Rust build, test,
-Clippy, full check or CI was run on this follow-up; these source changes are unvalidated.
-The `0ce8` three-OS workflow remains separate and must finish under its existing watcher.
+component is absent; it changed nothing. No component was installed. The first guarded `cargo check --tests` attempt on `0de70de1` exited 1 before Cargo because
+the nested shell redundantly changed to a relative worktree path; it consumed no build
+resources and is not source evidence. The next guarded run on `0de70de1` reached Rust and
+exited 101 at E0451 because `FinalAdoption` request fields were private to `summary`; the
+exact compiler log/resource receipt is saved at
+`.local/private-reports/studio-current-20261113/core-v21-u1-closeout-check-0de70de1-r2.log`
+and its adjacent `-result.json` / `-resources.tsv`. The source now makes those fields
+`pub(super)` in the separate follow-up worktree. No test, strict Clippy, full check or CI
+has run on the corrected source; it remains unqualified. The separate `0ce8` three-OS
+workflow is green and does not transfer to this candidate.
