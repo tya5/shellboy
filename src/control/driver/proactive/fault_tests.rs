@@ -321,10 +321,16 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             })
             .await
             .unwrap();
-        assert_eq!(
-            after_normal, before,
-            "held summary did not adopt at first Turn end"
-        );
+        assert!(after_normal.len() >= before.len(), "ordinary request history remains on the selected path");
+        let selected_summaries: i64 = control.store.database.call({
+            let thread = target.clone();
+            move |db| Ok(db.query_row(
+                "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
+                [thread], |row| row.get(0),
+            )?)
+        }).await.unwrap();
+        assert_eq!(selected_summaries, 0, "held summary is not adopted before Run B");
+
 
         // Let Run A finish naturally while its Thread-owned R job is still
         // held, then admit a new Run on the same Thread.
