@@ -334,17 +334,34 @@ pub(super) async fn stream_response(
             Some(send),
             bypass_usage_limit,
         ));
-        let mut first_poll = true;
+        let mut poll_count = 0u8;
         std::future::poll_fn(|cx| {
             let poll = std::future::Future::poll(response_future.as_mut(), cx);
-            if first_poll {
-                first_poll = false;
+            let outcome = match &poll {
+                std::task::Poll::Pending => crate::control::HttpPollResult::Pending,
+                std::task::Poll::Ready(Ok(_)) => crate::control::HttpPollResult::ReadySuccess,
+                std::task::Poll::Ready(Err(_)) => crate::control::HttpPollResult::ReadyError,
+            };
+            let phase = match poll_count {
+                0 => Some(crate::control::DriverAwaitPhase::HttpFutureFirstPoll(
+                    outcome,
+                )),
+                1 => Some(crate::control::DriverAwaitPhase::HttpFutureSecondPoll(
+                    outcome,
+                )),
+                _ => None,
+            };
+            if let Some(phase) = phase {
+                crate::control::record_live_attempt_phase(thread, attempt, phase);
+            }
+            if matches!(poll, std::task::Poll::Ready(_)) {
                 crate::control::record_live_attempt_phase(
                     thread,
                     attempt,
-                    crate::control::DriverAwaitPhase::HttpFutureFirstPoll,
+                    crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(outcome),
                 );
             }
+            poll_count = poll_count.saturating_add(1);
             poll
         })
         .await

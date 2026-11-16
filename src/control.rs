@@ -109,7 +109,17 @@ pub(super) enum DriverAwaitPhase {
     RequestFutureAwait,
     LiveAdmissionEntered,
     LiveAdmissionGranted,
-    HttpFutureFirstPoll,
+    HttpFutureFirstPoll(HttpPollResult),
+    HttpFutureSecondPoll(HttpPollResult),
+    HttpResponseFutureCompleted(HttpPollResult),
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum HttpPollResult {
+    Pending,
+    ReadySuccess,
+    ReadyError,
 }
 
 #[cfg(test)]

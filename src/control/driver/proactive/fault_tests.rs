@@ -51,6 +51,87 @@ async fn wait_for_driver_attempt_phase(
     }
 }
 
+async fn wait_for_http_future_first_poll(
+    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
+    thread: &str,
+    run: &str,
+) -> (String, crate::control::HttpPollResult) {
+    loop {
+        match phases.recv().await {
+            Ok(event) if event.thread == thread && event.run == run => {
+                if let crate::control::DriverAwaitPhase::HttpFutureFirstPoll(result) = event.phase {
+                    if let Some(attempt) = event.attempt {
+                        return (attempt, result);
+                    }
+                }
+            }
+            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                panic!("test-only driver phase stream closed before the HTTP future's first poll")
+            }
+        }
+    }
+}
+
+async fn wait_for_run_b_provider_request(
+    control: &Control,
+    thread: &str,
+    run: &str,
+    receive: &mut mpsc::Receiver<Incoming>,
+    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
+    slot: &DriverSlot,
+) -> Incoming {
+    let mut events = control.subscribe();
+    loop {
+        let notified = slot.nudge.notified();
+        tokio::pin!(notified);
+        tokio::select! {
+            request = receive.recv() => {
+                return request.unwrap_or_else(|| panic!(
+                    "provider body channel closed before Run B request; Thread={thread} Run={run}"
+                ));
+            }
+            event = phases.recv() => match event {
+                Ok(event) if event.thread == thread && event.run == run => {
+                    eprintln!("Run B typed future progress: attempt={:?} phase={:?}", event.attempt, event.phase);
+                    if matches!(event.phase,
+                        crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(crate::control::HttpPollResult::ReadyError))
+                    {
+                        panic!("Run B response future completed with typed error before any provider body: Thread={thread} Run={run} Attempt={:?}", event.attempt);
+                    }
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => panic!("driver phase stream closed while awaiting Run B provider request"),
+            },
+            event = events.recv() => match event {
+                Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => {
+                    let target = thread.to_owned();
+                    let run_id = run.to_owned();
+                    let run_live = control.store.database.call(move |db| Ok(db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM run WHERE id=?1 AND thread_id=?2 AND state='live')",
+                        rusqlite::params![run_id, target], |row| row.get::<_, bool>(0),
+                    )?)).await.unwrap();
+                    if !run_live {
+                        panic!("Run B ended before its provider request; Thread={thread} Run={run}");
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => panic!("engine event stream closed while awaiting Run B provider request"),
+                _ => {}
+            },
+            _ = &mut notified => {
+                let finished = {
+                    let job = slot.proactive_job.lock().await;
+                    job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
+                };
+                if finished {
+                    panic!("retained proactive job finished before Run B provider body; Thread={thread} Run={run}");
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Fault {
     Storage,
@@ -424,7 +505,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             let drivers = control.live.test_drivers().lock().await;
             drivers.get(target).cloned()
         };
-        let slot_facts = if let Some(slot) = slot {
+        let slot_facts = if let Some(slot) = slot.as_ref() {
             let job = slot.proactive_job.lock().await;
             Some((
                 slot.run_id.clone(),
@@ -441,6 +522,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         assert_eq!(receipt_state, "accepted");
         assert_eq!(message_turn.as_deref(), Some(accepted.turn_id.as_deref().unwrap()));
         assert_eq!(turn_started_events, 1, "Run B has a persisted turn_started event");
+        let slot = slot.expect("accepted Run B has a registered Thread driver slot");
         wait_for_driver_await_phase(
             &mut driver_phases,
             target,
@@ -462,16 +544,20 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             crate::control::DriverAwaitPhase::LiveAdmissionGranted,
         )
         .await;
-        let first_polled_attempt = wait_for_driver_attempt_phase(
-            &mut driver_phases,
-            target,
-            &run_id,
-            crate::control::DriverAwaitPhase::HttpFutureFirstPoll,
-        )
-        .await;
+        let (first_polled_attempt, first_poll_outcome) =
+            wait_for_http_future_first_poll(&mut driver_phases, target, &run_id).await;
         assert_eq!(live_attempt, granted_attempt, "live admission events refer to the same persisted attempt");
         assert_eq!(granted_attempt, first_polled_attempt, "HTTP first poll belongs to the live-admitted attempt");
-        let overflow_request = incoming(control, receive).await;
+        eprintln!("Run B HTTP response future first-poll result: {first_poll_outcome:?}");
+        let overflow_request = wait_for_run_b_provider_request(
+            control,
+            target,
+            &run_id,
+            receive,
+            &mut driver_phases,
+            &slot,
+        )
+        .await;
         assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
         overflow_request
             .reply
