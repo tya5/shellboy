@@ -5033,7 +5033,7 @@ async fn proactive_resumes_when_an_older_complete_tool_group_becomes_reducible()
     server.abort();
 }
 
-async fn active_gc_candidate_mutation_case(mutation: &'static str) {
+async fn active_gc_candidate_mutation_case(mutation: &'static str, expect_adopted: bool) {
     let root = tempfile::tempdir().unwrap();
     let (url, mut receive, server) = proxy().await;
     let owner = proactive_owner(
@@ -5096,11 +5096,23 @@ async fn active_gc_candidate_mutation_case(mutation: &'static str) {
         let outcome:Option<String>=db.query_row("SELECT json_extract(a.error_json,'$.automatic_trim_attempt.outcome') FROM model_attempt a JOIN turn t ON t.id=a.turn_id WHERE t.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt') IS NOT NULL ORDER BY a.rowid DESC LIMIT 1",[&target],|r|r.get(0)).optional()?;
         Ok((summaries,outcome))
     }).await.unwrap();
-    assert_eq!(
-        outcome,
-        (0, Some("failed".into())),
-        "{mutation} mutation cannot adopt stale GC R"
-    );
+    if expect_adopted {
+        assert_eq!(
+            outcome.0, 1,
+            "R-external {mutation} change keeps the accepted summary"
+        );
+        assert_eq!(
+            outcome.1.as_deref(),
+            Some("adopted"),
+            "{mutation}: {outcome:?}"
+        );
+    } else {
+        assert_eq!(
+            outcome,
+            (0, Some("failed".into())),
+            "{mutation} changes R or its closure/protection"
+        );
+    }
     ordinary
         .reply
         .send((200, answer_with_usage("continued", 10)))
@@ -5112,11 +5124,12 @@ async fn active_gc_candidate_mutation_case(mutation: &'static str) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn proactive_active_candidate_rejects_source_protection_tool_and_unwitnessed_epoch_mutations()
+async fn proactive_active_candidate_rejects_r_mutations_and_adopts_across_r_external_epoch_change()
 {
-    for mutation in ["source", "protection", "tool", "epoch"] {
-        active_gc_candidate_mutation_case(mutation).await;
+    for mutation in ["source", "protection", "tool"] {
+        active_gc_candidate_mutation_case(mutation, false).await;
     }
+    active_gc_candidate_mutation_case("epoch", true).await;
 }
 
 /// #303 §6.2 (replaces the #180 bounded no-target proof): with only a
@@ -6147,13 +6160,13 @@ async fn proactive_spill_then_cancelled_connection_wait_preserves_adoption() {
         let id = target.clone();
         let after = control.store.database.call(move |db| proactive_wait_witness(db, &id)).await.unwrap();
         assert_eq!(after, changed, "cancelled admission preserves selected spills, the changed-model epoch, and ordered provenance");
-        // The profile-change source witness wins before the later RunStop token;
-        // preserve its reason while still proving Stop completion and spill custody.
+        // Explicit RunStop cancels the in-flight summary and determines the
+        // original attempt terminal outcome; the previously committed spill remains owned.
         let attempts = bx_attempts(&control, &target).await;
         assert_eq!(attempts.len(), 1, "{attempts:#?}");
         let record = &attempts[0];
-        assert_eq!(record["outcome"], "failed", "{record:#?}");
-        assert_eq!(record["compaction_outcome"]["outcome"]["reason"],"profile_changed","{record:#?}");
+        assert_eq!(record["outcome"], "cancelled", "{record:#?}");
+        assert_eq!(record["compaction_outcome"]["outcome"]["reason"],"cancelled","{record:#?}");
         assert_eq!(record["trigger"]["a_input_tokens"], 100);
         assert_eq!(record["committed_stages"]["active_spill"]["spilled_groups"], 2, "{record:#?}");
         assert!(record["committed_stages"]["active_summary"].is_null(), "{record:#?}");

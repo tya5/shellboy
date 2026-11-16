@@ -2377,7 +2377,7 @@ async fn manual_summary_waits_for_connection_cooldown_and_shutdown_cancels_it() 
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn manual_summary_revalidates_selection_after_connection_wait() {
+async fn manual_summary_adopts_fixed_r_after_model_change_during_connection_wait() {
     let mut fixture = Fixture::with_history(
         0,
         10,
@@ -2455,28 +2455,45 @@ async fn manual_summary_revalidates_selection_after_connection_wait() {
     )
     .await
     .expect("waiting compaction must not hold the Thread boundary");
-    let state = crate::test_watchdog::watchdog("manual summary rejects stale selection", async {
-        loop {
-            let status = request(
-                &fixture.control,
-                Command::OperationGet(OperationTarget {
-                    operation_id: operation.clone(),
-                }),
-            )
-            .await;
-            let state = status["downstream"]["state"].as_str().unwrap_or("");
-            if state == "failed" || state == "completed" {
-                break state.to_owned();
-            }
-            tokio::task::yield_now().await;
-        }
-    })
+    let summary = crate::test_watchdog::watchdog(
+        "manual summary proceeds after R-external model change",
+        fixture.incoming(),
+    )
     .await
     .unwrap();
+    assert_eq!(summary.body["tools"], json!([]));
+    summary.reply.send(Reply::success()).ok().unwrap();
+    let state =
+        crate::test_watchdog::watchdog("manual summary adopts after connection wait", async {
+            loop {
+                let status = request(
+                    &fixture.control,
+                    Command::OperationGet(OperationTarget {
+                        operation_id: operation.clone(),
+                    }),
+                )
+                .await;
+                let state = status["downstream"]["state"].as_str().unwrap_or("");
+                if state == "failed" || state == "completed" {
+                    break state.to_owned();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
     assert_eq!(
-        state, "failed",
-        "changed model must invalidate the pending summary"
+        state, "completed",
+        "R IDs remain authoritative after model change"
     );
+    let thread = fixture.accepted.thread_id.clone();
+    fixture.control.store.database.call(move |db| {
+        let sources: Vec<String> = db.prepare("SELECT s.source_node_id FROM replacement_source s JOIN replacement r ON r.id=s.replacement_id JOIN thread_path p ON p.node_id=r.output_node_id WHERE p.thread_id=?1 AND r.format_version='shellboy-summary-v1' ORDER BY s.ordinal")?
+            .query_map([thread], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        assert_eq!(sources, ["old-large-context", "old-answer"]);
+        Ok(())
+    }).await.unwrap();
     fixture.no_more_requests().await;
     fixture.close().await;
 }

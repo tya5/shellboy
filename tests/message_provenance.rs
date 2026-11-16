@@ -123,6 +123,15 @@ async fn schema40_upgrade_preserves_receipts_and_matches_fresh_indexes() {
     db.execute_batch(crate::schema42_fixture::REWIND_CURRENT_TO_42)
         .unwrap();
     db.execute_batch("DROP INDEX node_notification_event; ALTER TABLE node DROP COLUMN notification_event_id; ALTER TABLE event DROP COLUMN semantic_json; DROP INDEX receipt_reply_node_lookup; DELETE FROM schema_migration WHERE version>=41; PRAGMA user_version=40;").unwrap();
+    // The historical schema-40 shape still has migration 40's generation column.
+    db.execute("DELETE FROM schema_migration WHERE version=40", [])
+        .unwrap();
+    db.execute_batch(include_str!(
+        "../migrations/0040_selection_nonappend_generation.sql"
+    ))
+    .unwrap();
+    db.execute_batch("DELETE FROM schema_migration WHERE version>40; PRAGMA user_version=40;")
+        .unwrap();
     drop(db);
     let worker = DbWorker::open(&path).await.unwrap();
     worker.shutdown().await.unwrap();
