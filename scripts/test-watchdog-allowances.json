@@ -1138,22 +1138,6 @@
   {
     "file": "tests/response_retries.rs",
     "rule": "raw-timeout",
-    "fingerprint": "156a869498e511029a8bc33a129a3ad1a097de903529d119b4ef9509898f50d1",
-    "function": "manual_summary_revalidates_selection_after_connection_wait",
-    "count": 1,
-    "reason": "Synthetic stale-selection test: 250ms checks no send during a five-second floor; two seconds checks the Thread boundary remains responsive."
-  },
-  {
-    "file": "tests/response_retries.rs",
-    "rule": "raw-timeout",
-    "fingerprint": "887ce6a2d0ef24e271afb671cae2e6cf121c9f642e25146bf7fb1adf0ce569c4",
-    "function": "manual_summary_revalidates_selection_after_connection_wait",
-    "count": 1,
-    "reason": "Synthetic stale-selection test: 250ms checks no send during a five-second floor; two seconds checks the Thread boundary remains responsive."
-  },
-  {
-    "file": "tests/response_retries.rs",
-    "rule": "raw-timeout",
     "fingerprint": "10a0938983a7e32a4b54101919a8d2814a6a1af990cdc6e5d1d639de4b5310dd",
     "function": "shared_connection_wait_is_recorded_on_successful_attempt",
     "count": 1,

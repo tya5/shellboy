@@ -2435,15 +2435,11 @@ async fn manual_summary_adopts_fixed_r_after_model_change_during_connection_wait
     .await
     .unwrap();
     assert!(
-        tokio::time::timeout(
-            std::time::Duration::from_millis(250),
-            fixture.requests.recv()
-        )
-        .await
-        .is_err()
+        fixture.requests.try_recv().is_err(),
+        "the provider summary remains queued behind the shared cooldown"
     );
-    tokio::time::timeout(
-        std::time::Duration::from_secs(2),
+    crate::test_watchdog::watchdog(
+        "Thread boundary stays available during summary admission wait",
         request(
             &fixture.control,
             Command::ThreadSet(Box::new(ThreadSetArgs {
@@ -2454,7 +2450,7 @@ async fn manual_summary_adopts_fixed_r_after_model_change_during_connection_wait
         ),
     )
     .await
-    .expect("waiting compaction must not hold the Thread boundary");
+    .unwrap();
     let summary = crate::test_watchdog::watchdog(
         "manual summary proceeds after R-external model change",
         fixture.incoming(),
