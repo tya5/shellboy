@@ -228,7 +228,7 @@ pub(super) struct DispatchRequest<'a, 'b> {
 }
 #[cfg(test)]
 fn set_gc_dispatch_stage(
-    observer: &Option<&Arc<std::sync::Mutex<crate::control::GcDispatchStage>>>,
+    observer: &Option<Arc<std::sync::Mutex<crate::control::GcDispatchStage>>>,
     stage: crate::control::GcDispatchStage,
 ) {
     if let Some(observer) = observer {

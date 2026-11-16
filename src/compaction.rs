@@ -1004,14 +1004,29 @@ impl Compactor {
         client: &crate::model::http::HttpModelClient,
         owner: &mut single_request::DispatchOwner<'_, '_>,
         cancel: &CancellationToken,
+        #[cfg(test)] gc_dispatch_stage: Option<
+            &Arc<std::sync::Mutex<crate::control::GcDispatchStage>>,
+        >,
     ) -> Result<(crate::model::http::RateAdmission, u64), ApiError> {
         let reservation = client.reserve_rate_admission(None).map_err(|error| {
             ApiError::new(ErrorCode::IoFailed, "Summary admission deferred")
                 .details(json!({"kind":error.kind}))
         })?;
         match reservation {
-            crate::model::http::RateReservation::Ready(admission) => Ok((admission, 0)),
+            crate::model::http::RateReservation::Ready(admission) => {
+                #[cfg(test)]
+                if let Some(stage) = gc_dispatch_stage {
+                    *stage.lock().expect("GC dispatch stage observer poisoned") =
+                        crate::control::GcDispatchStage::RateReservationReady;
+                }
+                Ok((admission, 0))
+            }
             crate::model::http::RateReservation::Waiting(waiter) => {
+                #[cfg(test)]
+                if let Some(stage) = gc_dispatch_stage {
+                    *stage.lock().expect("GC dispatch stage observer poisoned") =
+                        crate::control::GcDispatchStage::RateReservationWaiting;
+                }
                 let started = tokio::time::Instant::now();
                 let wait = async {
                     let result = waiter.wait(cancel).await;
@@ -1045,6 +1060,11 @@ impl Compactor {
                             .details(json!({"kind":error.kind}))
                     }
                 })?;
+                #[cfg(test)]
+                if let Some(stage) = gc_dispatch_stage {
+                    *stage.lock().expect("GC dispatch stage observer poisoned") =
+                        crate::control::GcDispatchStage::RateWaitGranted;
+                }
                 Ok((lease, elapsed.as_millis().min(u64::MAX as u128) as u64))
             }
         }
