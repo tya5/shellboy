@@ -367,6 +367,14 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         // Let Run A finish naturally while its Thread-owned R job is still
         // held, then admit a new Run on the same Thread.
         settled(control, target).await;
+        let run_a_slot = {
+            let drivers = control.live.test_drivers().lock().await;
+            drivers
+                .get(target)
+                .cloned()
+                .expect("Run A slot remains while its proactive job is retained")
+        };
+        let _run_a_retired = wait_for_driver_retired(control, target, &run_a_slot.id).await;
         let mut driver_phases = crate::control::subscribe_driver_await_phases();
         let accepted: MessageAccepted = serde_json::from_value(
             send(control, target, "new Run while previous R job is held").await,
@@ -587,13 +595,14 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             .send((200, answer_with_usage("finish Run A", 100)))
             .unwrap();
         settled(&control, &target).await;
-        let slot = {
+        let slot_id = {
             let drivers = control.live.test_drivers().lock().await;
             drivers
                 .get(&target)
-                .cloned()
-                .expect("natural Run exit retains the Thread slot")
+                .map(|slot| slot.id.clone())
+                .expect("natural Run slot remains until retire_driver processes it")
         };
+        let slot = wait_for_driver_retired(&control, &target, &slot_id).await;
         assert!(!slot.driver_active.load(Ordering::Acquire));
         let job_arc = slot.proactive_job.clone();
         let cancel = {
@@ -2048,6 +2057,39 @@ fn incoming<'a>(
         }
     }
 }
+async fn wait_for_driver_retired(
+    control: &Control,
+    thread: &str,
+    expected_slot: &str,
+) -> DriverSlot {
+    let mut events = control.subscribe();
+    loop {
+        let slot = control
+            .live
+            .test_drivers()
+            .lock()
+            .await
+            .get(thread)
+            .cloned()
+            .expect("retained proactive Thread slot remains registered through driver retirement");
+        assert_eq!(
+            slot.id, expected_slot,
+            "the observed driver slot was not replaced"
+        );
+        if !slot.driver_active.load(Ordering::Acquire) {
+            return slot;
+        }
+        match events.recv().await {
+            Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => {}
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                panic!("event stream closed before driver retirement for Thread {thread}")
+            }
+            _ => {}
+        }
+    }
+}
+
 #[track_caller]
 fn settled<'a>(
     control: &'a Control,
