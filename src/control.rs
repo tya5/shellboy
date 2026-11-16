@@ -112,7 +112,7 @@ pub(super) enum DriverAwaitPhase {
     HttpFutureFirstPoll(HttpPollResult),
     HttpFutureSecondPoll(HttpPollResult),
     HttpResponseFutureCompleted(HttpPollResult),
-    TestWatchdogReturnedAfterDrop,
+    TestWatchdogDecisionBeforeFixtureTeardown,
 }
 
 #[cfg(test)]
@@ -189,7 +189,7 @@ pub(super) fn record_live_attempt_phase(thread: &str, attempt: &str, phase: Driv
 }
 
 #[cfg(test)]
-pub(super) fn record_test_watchdog_returned_after_drop(thread: &str) {
+pub(super) fn record_test_watchdog_decision_before_fixture_teardown(thread: &str) {
     let run = DRIVER_PHASE_RUNS
         .get()
         .and_then(|runs| runs.lock().ok()?.get(thread).cloned())
@@ -198,7 +198,7 @@ pub(super) fn record_test_watchdog_returned_after_drop(thread: &str) {
         thread: thread.to_owned(),
         run,
         attempt: None,
-        phase: DriverAwaitPhase::TestWatchdogReturnedAfterDrop,
+        phase: DriverAwaitPhase::TestWatchdogDecisionBeforeFixtureTeardown,
         order: 0,
     });
 }

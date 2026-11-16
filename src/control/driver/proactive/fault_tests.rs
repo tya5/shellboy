@@ -387,10 +387,19 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
 async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_boundary() {
     let mut trace_keepalive = None;
     let mut trace_thread = None;
+    let mut retained_fx: Option<Fx> = None;
+    let mut retained_summary: Option<Incoming> = None;
     let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
         trace_thread = Some(fx.target.clone());
         trace_keepalive = Some(crate::control::subscribe_driver_await_phases());
+        retained_summary = Some(
+            fx.held_phase
+                .take()
+                .expect("summary request is held outside the timed lifecycle wait")
+                .summary,
+        );
+        retained_fx = Some(fx);
         let Fx {
             root,
             url,
@@ -400,13 +409,14 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             target,
             receive,
             server,
-            held_phase,
             ..
-        } = &mut fx;
-        let HeldSummaryPhase { summary } = held_phase
-            .take()
-            .expect("proactive summary reached its provider boundary");
-        assert_eq!(summary.body["tools"], json!([]));
+        } = retained_fx
+            .as_mut()
+            .expect("fixture owners remain outside the timed future");
+        assert_eq!(
+            retained_summary.as_ref().unwrap().body["tools"],
+            json!([])
+        );
         let normal = incoming(control, receive).await;
         let before: Vec<String> = control
             .store
@@ -427,7 +437,8 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
 
         // This request reached the provider while the summary response was held.
         assert_ne!(
-            normal.body, summary.body,
+            &normal.body,
+            &retained_summary.as_ref().unwrap().body,
             "next request is not a duplicate summary POST"
         );
         let during_request: Vec<String> = control
@@ -598,7 +609,11 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             &slot,
         )
         .await;
-        assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
+        assert_ne!(
+            overflow_request.body,
+            retained_summary.as_ref().unwrap().body,
+            "Run B proceeds without cancelling R"
+        );
         overflow_request
             .reply
             .send((400, json!({"error":{"message":"context limit","code":"context_length_exceeded"}})))
@@ -650,7 +665,9 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .await
             .unwrap();
         assert!(before_release.len() >= before.len());
-        summary
+        retained_summary
+            .take()
+            .expect("held summary sender remains alive until this response boundary")
             .reply
             .send((200, answer("background summary completed")))
             .unwrap();
@@ -696,10 +713,24 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         let _ = (root, url, limits, owner);
     })
     .await;
-    if result.is_err()
-        && let Some(thread) = trace_thread.as_deref()
-    {
-        crate::control::record_test_watchdog_returned_after_drop(thread);
+    if result.is_err() {
+        if let Some(thread) = trace_thread.as_deref() {
+            crate::control::record_test_watchdog_decision_before_fixture_teardown(thread);
+        }
+        // Establish the timeout decision while Fx and the held response sender
+        // still exist, then perform cleanup in explicit owner order.
+        drop(retained_summary.take());
+        if let Some(fx) = retained_fx.take() {
+            let Fx {
+                owner,
+                control,
+                server,
+                ..
+            } = fx;
+            server.abort();
+            let _ = control.shutdown().await;
+            let _ = owner.shutdown().await;
+        }
     }
     drop(trace_keepalive);
     result.unwrap();
