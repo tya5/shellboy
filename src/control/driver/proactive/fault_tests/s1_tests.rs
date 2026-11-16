@@ -175,7 +175,7 @@ async fn terminal_public_case(case: &str) {
             .cloned()
             .expect("trigger Run retains the original proactive summary job");
         let mut terminal_identity = None;
-        let mut ordinary_replied = false;
+        let mut ordinary_resolved = false;
         let mut summary_posts = 0;
         let mut held_sse_release = None;
         loop {
@@ -252,7 +252,7 @@ async fn terminal_public_case(case: &str) {
                             answer_with_usage("conversation continues", 10)
                         };
                         next.reply.send((200, response)).unwrap();
-                        ordinary_replied = true;
+                        ordinary_resolved = true;
                     }
                 }
                 HeldFixtureEvent::Header(_) => {}
@@ -277,29 +277,35 @@ async fn terminal_public_case(case: &str) {
                 ),
             }
         }
-        if !ordinary_replied {
-            let next = incoming(&control, &mut receive).await;
-            let automatic_summary = if chat_api {
-                next.body
-                    .get("tools")
-                    .and_then(Value::as_array)
-                    .is_none_or(Vec::is_empty)
-            } else {
-                next.body["tools"] == json!([])
+        if !ordinary_resolved {
+            // A provider quota may settle the trigger attempt locally without an HTTP body.
+            let next = tokio::select! {
+                next = incoming(&control, &mut receive) => Some(next),
+                _ = settled(&control, &target) => None,
             };
-            assert!(!automatic_summary, "finished original job cannot produce another summary request");
-            if let Some(release) = held_sse_release.take() {
-                let _ = release.send(());
+            if let Some(next) = next {
+                let automatic_summary = if chat_api {
+                    next.body
+                        .get("tools")
+                        .and_then(Value::as_array)
+                        .is_none_or(Vec::is_empty)
+                } else {
+                    next.body["tools"] == json!([])
+                };
+                assert!(!automatic_summary, "finished original job cannot produce another summary request");
+                if let Some(release) = held_sse_release.take() {
+                    let _ = release.send(());
+                }
+                let response = if chat_api {
+                    chat_answer_with_usage("conversation continues", 10)
+                } else {
+                    answer_with_usage("conversation continues", 10)
+                };
+                next.reply.send((200, response)).unwrap();
             }
-            let response = if chat_api {
-                chat_answer_with_usage("conversation continues", 10)
-            } else {
-                answer_with_usage("conversation continues", 10)
-            };
-            next.reply.send((200, response)).unwrap();
-            ordinary_replied = true;
+            ordinary_resolved = true;
         }
-        assert!(ordinary_replied, "service the ordinary trigger response before readback");
+        assert!(ordinary_resolved, "ordinary trigger request replied or settled locally after original FINISH");
         settled(&control, &target).await;
         let page = request(&control, Command::Status(StatusArgs { thread_id: Some(target.clone()), all: true, limit: 200, ..Default::default() })).await;
         let list = request(&control, Command::CompactList(CompactListArgs { thread_id: Some(target.clone()), since: None, until: None, limit: 20 })).await;
