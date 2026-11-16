@@ -263,7 +263,7 @@ async fn terminal_public_case(case: &str) {
             }
         }
         if !ordinary_replied {
-            let mut next = incoming(&control, &mut receive).await;
+            let next = incoming(&control, &mut receive).await;
             let automatic_summary = if chat_api {
                 next.body
                     .get("tools")
