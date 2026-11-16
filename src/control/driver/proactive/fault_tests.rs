@@ -742,7 +742,9 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     })
     .await;
     if result.is_err() {
-        eprintln!("U2 watchdog decision branch reachability before fixture teardown: {run_b_branch:?}");
+        eprintln!(
+            "U2 watchdog decision branch reachability before fixture teardown: {run_b_branch:?}"
+        );
         if let Some(thread) = trace_thread.as_deref() {
             crate::control::record_test_watchdog_decision_before_fixture_teardown(thread);
         }
