@@ -805,7 +805,7 @@ async fn prepare_with_mode(
         }).await.unwrap();
     }
     let guard_before = guard_rows(&control).await;
-    request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
+    request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() || hold_summary {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
     if !scenario.active() {
         incoming(&control, &mut receive)
             .await
@@ -821,6 +821,12 @@ async fn prepare_with_mode(
             facts.latest_attempt_id.is_some(),
             "closed trigger report must have an attempt witness: {facts:?}"
         );
+        if hold_summary {
+            assert!(
+                facts.slot_exists && facts.job_exists && !facts.job_finished,
+                "Run A must retain the eligible summary job before it naturally retires: {facts:?}"
+            );
+        }
         eprintln!("U2 closed trigger before next Turn: {facts:?}");
         send(&control, &target, "next turn").await;
     }
