@@ -343,7 +343,7 @@ pub(super) async fn stream_response(
                 std::task::Poll::Ready(Err(failure)) => {
                     let class = match failure.error.kind.as_str() {
                         "cancelled" => crate::control::HttpErrorClass::Cancelled,
-                        "request_timeout" => crate::control::HttpErrorClass::RequestTimeout,
+                        "request_timeout" | "timeout" => crate::control::HttpErrorClass::Timeout,
                         "response_header_timeout" => {
                             crate::control::HttpErrorClass::ResponseHeaderTimeout
                         }

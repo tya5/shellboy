@@ -119,7 +119,7 @@ pub(super) enum DriverAwaitPhase {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum HttpErrorClass {
     Cancelled,
-    RequestTimeout,
+    Timeout,
     ResponseHeaderTimeout,
     StreamIdleTimeout,
     Other,
