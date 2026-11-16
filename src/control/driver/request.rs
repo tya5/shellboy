@@ -340,8 +340,8 @@ pub(super) async fn stream_response(
             let outcome = match &poll {
                 std::task::Poll::Pending => crate::control::HttpPollResult::Pending,
                 std::task::Poll::Ready(Ok(_)) => crate::control::HttpPollResult::ReadySuccess,
-                std::task::Poll::Ready(Err(error)) => {
-                    let class = match error.code.as_str() {
+                std::task::Poll::Ready(Err(failure)) => {
+                    let class = match failure.error.kind.as_str() {
                         "cancelled" => crate::control::HttpErrorClass::Cancelled,
                         "request_timeout" => crate::control::HttpErrorClass::RequestTimeout,
                         "response_header_timeout" => {
