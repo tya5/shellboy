@@ -204,6 +204,7 @@ pub(super) async fn retry_or_recover<'a>(
     mut failure: model::http::AttemptFailure,
     budget: &mut RetryBudget,
     overflow: &mut OverflowBudget,
+    proactive_job: &mut Option<super::proactive::BackgroundJob>,
     boundary: &'a tokio::sync::Mutex<()>,
     boundary_guard: tokio::sync::MutexGuard<'a, ()>,
 ) -> Result<(), ApiError> {
@@ -272,7 +273,33 @@ pub(super) async fn retry_or_recover<'a>(
         None
     };
     let mut trim_not_applied = None;
-    if delay.is_some() {
+    let mut proactive_adopted = false;
+    if failure.error.is_context_limit() && proactive_job.is_some() {
+        let waited = {
+            let job = proactive_job
+                .as_mut()
+                .expect("context-limit path observed a proactive job");
+            boundary_guard.pause(&slot.stop, job.join()).await
+        };
+        let joined = match waited {
+            Ok(joined) => joined,
+            Err(_) if slot.stop.is_cancelled() => return Ok(()),
+            Err(_) => return Err(invalid("proactive summary boundary wait cancelled")),
+        };
+        proactive_job.take();
+        match joined {
+            Ok(Ok(super::proactive::ProactiveOutcome::Finished { path_changed: true })) => {
+                proactive_adopted = true;
+                trim_not_applied = Some(json!({"outcome":"adopted","reason":"same_proactive_job"}));
+                control.changed(&snapshot.thread);
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(error)) if error.is_storage_failure() => return Err(error),
+            Ok(Err(_)) => {}
+            Err(_) => return Err(invalid("proactive summary task panicked")),
+        }
+    }
+    if delay.is_some() && !proactive_adopted {
         let open_loop = control.compactor.tool_loop_open(&snapshot.thread).await?;
         if failure.error.is_context_limit() && open_loop {
             // #182 rule 3: before a closed-loop boundary, selective trims and

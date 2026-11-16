@@ -7,7 +7,7 @@ use crate::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{Arc, atomic::{AtomicBool, Ordering}},
 };
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
@@ -30,12 +30,29 @@ impl LiveRegistry {
         interrupt: bool,
     ) -> Option<DriverSlot> {
         let mut drivers = self.drivers.lock().await;
-        if let Some(slot) = drivers.get(thread) {
-            slot.nudge.notify_one();
-            if interrupt {
-                slot.foreground.release(ForegroundRelease::AdditionalInput);
+        if let Some(existing) = drivers.get(thread) {
+            if existing.driver_active.load(Ordering::Acquire) {
+                existing.nudge.notify_one();
+                if interrupt {
+                    existing.foreground.release(ForegroundRelease::AdditionalInput);
+                }
+                return None;
             }
-            return None;
+            // A natural Run exit may leave one writer-owned proactive job for
+            // this Thread. A later Run reuses that same slot/job reference.
+            let slot = DriverSlot {
+                id: uuid::Uuid::new_v4().to_string(),
+                run_id: run,
+                stop: owner_stop.child_token(),
+                nudge: existing.nudge.clone(),
+                foreground: Arc::new(ForegroundSlot::default()),
+                turn: Arc::new(Mutex::new(None)),
+                driver_active: Arc::new(AtomicBool::new(true)),
+                proactive_active: existing.proactive_active.clone(),
+                proactive_job: existing.proactive_job.clone(),
+            };
+            drivers.insert(thread.to_owned(), slot.clone());
+            return Some(slot);
         }
         let slot = DriverSlot {
             id: uuid::Uuid::new_v4().to_string(),
@@ -44,6 +61,9 @@ impl LiveRegistry {
             nudge: Arc::new(Notify::new()),
             foreground: Arc::new(ForegroundSlot::default()),
             turn: Arc::new(Mutex::new(None)),
+            driver_active: Arc::new(AtomicBool::new(true)),
+            proactive_active: Arc::new(AtomicBool::new(false)),
+            proactive_job: Arc::new(Mutex::new(None)),
         };
         drivers.insert(thread.to_owned(), slot.clone());
         Some(slot)
@@ -62,11 +82,56 @@ impl LiveRegistry {
 
     pub(super) async fn remove_driver_if_current(&self, thread: &str, slot: &str) -> bool {
         let mut drivers = self.drivers.lock().await;
-        if drivers.get(thread).is_some_and(|entry| entry.id == slot) {
+        if let Some(entry) = drivers.get(thread).filter(|entry| entry.id == slot) {
+            entry.driver_active.store(false, Ordering::Release);
+            if entry.proactive_active.load(Ordering::Acquire) {
+                return false;
+            }
             drivers.remove(thread);
             true
         } else {
             false
+        }
+    }
+
+    /// Cancel and join the Thread-owned job on Stop/error or owner shutdown.
+    pub(super) async fn cancel_join_proactive_job(&self, thread: &str, slot: &DriverSlot) {
+        let job = slot.proactive_job.lock().await.take();
+        if let Some(mut job) = job {
+            job.cancel();
+            let _ = job.join().await;
+        }
+        slot.proactive_active.store(false, Ordering::Release);
+        self.prune_idle_background(thread, &slot.proactive_active).await;
+    }
+
+    /// Drain jobs retained by naturally completed Runs before owner teardown.
+    pub(super) async fn cancel_join_proactive_jobs(&self) {
+        let slots = self
+            .drivers
+            .lock()
+            .await
+            .iter()
+            .map(|(thread, slot)| (thread.clone(), slot.clone()))
+            .collect::<Vec<_>>();
+        for (thread, slot) in slots {
+            self.cancel_join_proactive_job(&thread, &slot).await;
+        }
+    }
+
+    pub(super) async fn prune_idle_background(
+        &self,
+        thread: &str,
+        proactive_active: &Arc<AtomicBool>,
+    ) {
+        let mut drivers = self.drivers.lock().await;
+        let prune = drivers.get(thread).is_some_and(|entry| {
+            Arc::ptr_eq(&entry.proactive_active, proactive_active)
+                && !entry.driver_active.load(Ordering::Acquire)
+                && !entry.proactive_active.load(Ordering::Acquire)
+        });
+        if prune {
+            drivers.remove(thread);
         }
     }
 
@@ -284,6 +349,171 @@ mod tests {
                 .remove_driver_if_current("thread", &replacement.id)
                 .await
         );
+        assert!(registry.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn natural_run_exit_reattaches_the_same_thread_owned_proactive_job() {
+        let registry = LiveRegistry::default();
+        let owner_stop = CancellationToken::new();
+        let first = registry
+            .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
+            .await
+            .unwrap();
+        first.proactive_active.store(true, Ordering::Release);
+        let old_run_stop = first.stop.clone();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let registry_for_job = registry.clone();
+        let active_for_job = first.proactive_active.clone();
+        let task = tokio::spawn(async move {
+            let _ = release_rx.await;
+            registry_for_job
+                .prune_idle_background("thread", &active_for_job)
+                .await;
+            let _ = finished_tx.send(());
+            Ok(crate::control::driver::proactive::ProactiveOutcome::Finished {
+                path_changed: false,
+            })
+        });
+        *first.proactive_job.lock().await = Some(
+            crate::control::driver::proactive::BackgroundJob::test_started(
+                first.stop.clone(),
+                task,
+            ),
+        );
+        assert!(
+            !registry
+                .remove_driver_if_current("thread", &first.id)
+                .await,
+            "natural retirement preserves the Thread slot while its job is unjoined"
+        );
+        release_tx.send(()).unwrap();
+        finished_rx.await.unwrap();
+        assert!(
+            registry.test_drivers().lock().await.contains_key("thread"),
+            "completion alone cannot prune a result that Run B must join"
+        );
+        crate::test_watchdog::watchdog("proactive job finishes before Run B reattaches", async {
+            loop {
+                let finished = first
+                    .proactive_job
+                    .lock()
+                    .await
+                    .as_ref()
+                    .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished);
+                if finished {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let second = registry
+            .register_or_nudge_driver("thread", "run-b".into(), &owner_stop, false)
+            .await
+            .expect("a natural Run exit permits a new driver on the same Thread");
+        assert!(Arc::ptr_eq(&first.proactive_job, &second.proactive_job));
+        assert!(second.proactive_active.load(Ordering::Acquire));
+        assert!(!old_run_stop.is_cancelled(), "natural retirement is not Stop");
+        assert!(!second.stop.is_cancelled());
+        assert!(
+            second.proactive_job.lock().await.as_ref().unwrap().is_finished(),
+            "Run B reattaches the completed-but-unjoined Run A job"
+        );
+        let job = second.proactive_job.lock().await.take().unwrap();
+        assert!(matches!(
+            job.join().await.unwrap(),
+            Ok(crate::control::driver::proactive::ProactiveOutcome::Finished {
+                path_changed: false
+            })
+        ));
+        second.proactive_active.store(false, Ordering::Release);
+        registry
+            .prune_idle_background("thread", &second.proactive_active)
+            .await;
+        assert!(registry.foreground_for_run("thread", "run-b").await.is_some());
+        assert!(
+            !registry.remove_driver_if_current("thread", &first.id).await,
+            "late Run-A cleanup cannot remove Run-B's Thread slot"
+        );
+        assert!(
+            registry
+                .remove_driver_if_current("thread", &second.id)
+                .await,
+            "normal retirement removes the slot after the background job is joined"
+        );
+        assert!(registry.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn stop_cancels_and_joins_the_job_in_the_shared_thread_slot() {
+        let registry = LiveRegistry::default();
+        let owner_stop = CancellationToken::new();
+        let slot = registry
+            .register_or_nudge_driver("thread", "run".into(), &owner_stop, false)
+            .await
+            .unwrap();
+        slot.proactive_active.store(true, Ordering::Release);
+        let job_cancel = CancellationToken::new();
+        let observed_join = Arc::new(AtomicBool::new(false));
+        let task_cancel = job_cancel.clone();
+        let joined = observed_join.clone();
+        let task = tokio::spawn(async move {
+            task_cancel.cancelled().await;
+            joined.store(true, Ordering::Release);
+            Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
+        });
+        *slot.proactive_job.lock().await = Some(
+            crate::control::driver::proactive::BackgroundJob::test_started(
+                job_cancel,
+                task,
+            ),
+        );
+
+        assert!(registry.cancel_run("thread", "run").await);
+        assert!(slot.stop.is_cancelled());
+        registry.cancel_join_proactive_job("thread", &slot).await;
+        assert!(observed_join.load(Ordering::Acquire));
+        assert!(slot.proactive_job.lock().await.is_none());
+        assert!(!slot.proactive_active.load(Ordering::Acquire));
+        assert!(registry.remove_driver_if_current("thread", &slot.id).await);
+        assert!(registry.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn owner_shutdown_joins_a_job_retained_after_natural_run_exit() {
+        let registry = LiveRegistry::default();
+        let owner_stop = CancellationToken::new();
+        let slot = registry
+            .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
+            .await
+            .unwrap();
+        slot.proactive_active.store(true, Ordering::Release);
+        let job_cancel = CancellationToken::new();
+        let joined = Arc::new(AtomicBool::new(false));
+        let task_cancel = job_cancel.clone();
+        let observed = joined.clone();
+        let task = tokio::spawn(async move {
+            task_cancel.cancelled().await;
+            observed.store(true, Ordering::Release);
+            Ok(crate::control::driver::proactive::ProactiveOutcome::NotStarted)
+        });
+        *slot.proactive_job.lock().await = Some(
+            crate::control::driver::proactive::BackgroundJob::test_started(
+                job_cancel,
+                task,
+            ),
+        );
+        assert!(!registry.remove_driver_if_current("thread", &slot.id).await);
+
+        registry.cancel_join_proactive_jobs().await;
+
+        assert!(joined.load(Ordering::Acquire));
+        assert!(slot.proactive_job.lock().await.is_none());
+        assert!(!slot.proactive_active.load(Ordering::Acquire));
         assert!(registry.is_empty().await);
     }
 

@@ -164,6 +164,273 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary_post() {
+    crate::test_watchdog::watchdog("context-limit joins the active proactive job", async {
+        let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
+        let Fx {
+            owner,
+            control,
+            target,
+            mut receive,
+            server,
+            held_summary,
+            ..
+        } = &mut fx;
+        let summary = held_summary
+            .take()
+            .expect("one proactive summary request is held");
+        let normal = incoming(control, receive).await;
+        assert_ne!(normal.body, summary.body);
+        normal
+            .reply
+            .send((
+                400,
+                json!({"error":{"message":"context limit","code":"context_length_exceeded"}}),
+            ))
+            .unwrap();
+        summary
+            .reply
+            .send((200, answer("background summary completed")))
+            .unwrap();
+        crate::test_watchdog::watchdog("same proactive job terminal", async {
+            while !terminal_record_written(control).await {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let thread = target.clone();
+        let (path, summaries) = control
+            .store
+            .database
+            .call(move |db| {
+                let path = db
+                    .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+                    .query_map([&thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                let summaries = db.query_row(
+                    "SELECT count(*) FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind='summary'",
+                    [&thread],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                Ok((path, summaries))
+            })
+            .await
+            .unwrap();
+        assert!(summaries > 0, "the already-running summary was adopted: {path:?}");
+        assert!(
+            receive.try_recv().is_err(),
+            "context-limit recovery did not launch another summary or replay the POST"
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_boundary() {
+    crate::test_watchdog::watchdog("proactive summary request barrier", async {
+        let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
+        let Fx {
+            root,
+            url,
+            limits,
+            owner,
+            control,
+            target,
+            mut receive,
+            server,
+            held_summary,
+            ..
+        } = &mut fx;
+        let summary = held_summary
+            .take()
+            .expect("summary request is held at provider barrier");
+        assert_eq!(summary.body["tools"], json!([]));
+        let before: Vec<String> = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+
+        // This barrier is the oracle: the summary response remains withheld,
+        // yet the ordinary next-Turn request reaches the same provider.
+        let normal = incoming(control, receive).await;
+        assert_ne!(
+            normal.body, summary.body,
+            "next request is not a duplicate summary POST"
+        );
+        let during_request: Vec<String> = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            during_request, before,
+            "no summary adoption during the in-flight normal request"
+        );
+        normal
+            .reply
+            .send((200, answer_with_usage("normal request completed", 100)))
+            .unwrap();
+        settled(control, target).await;
+        let after_normal: Vec<String> = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            after_normal, before,
+            "held summary did not adopt at first Turn end"
+        );
+
+        // Let Run A finish naturally while its Thread-owned R job is still
+        // held, then admit a new Run on the same Thread.
+        crate::test_watchdog::watchdog("Run A naturally retires with proactive R pending", async {
+            loop {
+                let thread = target.clone();
+                let finished = control.store.database.call(move |db| {
+                    db.query_row(
+                        "SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='live')",
+                        [thread],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(Into::into)
+                }).await.unwrap();
+                if finished { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.unwrap();
+        send(control, target, "new Run while previous R job is held").await;
+        let overflow_request = incoming(control, receive).await;
+        assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
+        overflow_request
+            .reply
+            .send((400, json!({"error":{"message":"context limit","code":"context_length_exceeded"}})))
+            .unwrap();
+        let during_overflow: Vec<String> = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+        assert_eq!(during_overflow, before, "same R remains pending during overflow wait");
+        assert!(receive.try_recv().is_err(), "Run B does not start a second summary while joining Run A's job");
+
+        let before_release: Vec<String> = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+        assert!(before_release.len() >= before.len());
+        summary
+            .reply
+            .send((200, answer("background summary completed")))
+            .unwrap();
+        settled(control, target).await;
+        assert!(
+            receive.try_recv().is_err(),
+            "an exhausted context-limit ends in the established recovery path without a duplicate POST"
+        );
+        crate::test_watchdog::watchdog("background summary FINISH", async {
+            while !terminal_record_written(control).await {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let after: Vec<String> = control
+            .store
+            .database
+            .call({
+                let thread = target.clone();
+                move |db| {
+                    db.prepare(
+                        "SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal",
+                    )?
+                    .query_map([thread], |row| row.get::<_, String>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(Into::into)
+                }
+            })
+            .await
+            .unwrap();
+        assert!(
+            after.len() < before_release.len(),
+            "closed R is adopted while later path remains"
+        );
+        assert_eq!(
+            after.last(),
+            before_release.last(),
+            "later context-overflow request suffix is preserved"
+        );
+        control.shutdown().await.unwrap();
+        owner.shutdown().await.unwrap();
+        server.abort();
+        let _ = (root, url, limits);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn spill_off_skips_automatic_spill_stages_and_adopts_summary() {
     for scenario in [Scenario::ClosedSummary, Scenario::ActiveSummary] {
         let fx = prepare_with_options(Fault::Cancellation, scenario, true, true).await;
@@ -260,6 +527,20 @@ async fn prepare_with_options(
     scenario: Scenario,
     set_thread_percent: bool,
     spill_off: bool,
+) -> Fx {
+    prepare_with_mode(fault, scenario, set_thread_percent, spill_off, false).await
+}
+
+async fn prepare_held_summary(scenario: Scenario) -> Fx {
+    prepare_with_mode(Fault::Cancellation, scenario, true, true, true).await
+}
+
+async fn prepare_with_mode(
+    fault: Fault,
+    scenario: Scenario,
+    set_thread_percent: bool,
+    spill_off: bool,
+    hold_summary: bool,
 ) -> Fx {
     eprintln!(
         "automatic boundary {fault:?} scenario={scenario:?} T=200 P={} A=100 input=200 target={}",
@@ -462,98 +743,122 @@ async fn prepare_with_options(
         settled(&control, &target).await;
         send(&control, &target, "next turn").await;
     }
+    let mut held_summary = None;
+    let mut held_normal = None;
     if scenario.summary() {
-        let summary_request = incoming(&control, &mut receive).await;
-        let diagnostic = control
-            .store
-            .database
-            .call({
-                let target = target.clone();
-                move |db| {
-                    let attempt: Option<(String, String)> = db
-                        .query_row(
-                            "SELECT a.id,COALESCE(a.error_json,'{}') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 ORDER BY a.rowid DESC LIMIT 1",
-                            [&target],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .optional()?;
-                    let path: Vec<String> = db
-                        .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
-                        .query_map([&target], |row| row.get(0))?
-                        .collect::<rusqlite::Result<_>>()?;
-                    let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
-                        crate::compaction::context_usage::read_context_usage_tx(db, &target, None)?,
+        loop {
+            let request = incoming(&control, &mut receive).await;
+            if request.body["tools"] == json!([]) {
+                if hold_summary {
+                    held_summary = Some(request);
+                } else {
+                    let summary_request = request;
+                    let diagnostic = control
+                        .store
+                        .database
+                        .call({
+                            let target = target.clone();
+                            move |db| {
+                                let attempt: Option<(String, String)> = db
+                                    .query_row(
+                                        "SELECT a.id,COALESCE(a.error_json,'{}') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 ORDER BY a.rowid DESC LIMIT 1",
+                                        [&target],
+                                        |row| Ok((row.get(0)?, row.get(1)?)),
+                                    )
+                                    .optional()?;
+                                let path: Vec<String> = db
+                                    .prepare("SELECT node_id FROM thread_path WHERE thread_id=?1 ORDER BY ordinal")?
+                                    .query_map([&target], |row| row.get(0))?
+                                    .collect::<rusqlite::Result<_>>()?;
+                                let (usage, _) = crate::compaction::context_usage::prepare_context_usage(
+                                    crate::compaction::context_usage::read_context_usage_tx(db, &target, None)?,
+                                );
+                                let report_attempt = usage["last_successful_attempt"]["attempt_id"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_owned();
+                                let outputs = db
+                                    .prepare("SELECT o.node_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?2 AND p.node_id=o.node_id) FROM output_item o WHERE o.attempt_id=?1 ORDER BY o.node_id")?
+                                    .query_map(rusqlite::params![report_attempt, target], |row| {
+                                        Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+                                    })?
+                                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                                let replacements = db
+                                    .prepare("SELECT r.id,r.created_at,r.state,r.format_version,r.prompt_version,r.output_node_id,n.kind,json_extract(n.payload_json,'$.summary_scope'),COALESCE((SELECT json_group_array(source_node_id) FROM (SELECT source_node_id FROM replacement_source WHERE replacement_id=r.id ORDER BY ordinal)),'[]') FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND r.created_at>(SELECT started_at FROM model_attempt WHERE id=?2) ORDER BY r.created_at,r.id")?
+                                    .query_map(rusqlite::params![target, report_attempt], |row| Ok((
+                                        row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+                                        row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                                        row.get::<_, String>(4)?, row.get::<_, String>(5)?,
+                                        row.get::<_, String>(6)?, row.get::<_, Option<String>>(7)?,
+                                        row.get::<_, String>(8)?,
+                                    )))?
+                                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                                let report_facts: Option<(String, Option<String>, String)> = db.query_row(
+                                    "SELECT started_at,ended_at,COALESCE(error_json,'{}') FROM model_attempt WHERE id=?1",
+                                    [&report_attempt], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
+                                ).optional()?;
+                                let a = crate::compaction::a_state::read(db, &target)?;
+                                let a = match crate::compaction::a_state::reading(a.as_ref()) {
+                                    crate::compaction::a_state::Reading::Known(tokens) => Some(tokens),
+                                    _ => None,
+                                };
+                                Ok((attempt, path, usage, outputs, replacements, report_facts, a))
+                            }
+                        })
+                        .await
+                        .unwrap();
+                    if scenario.active() && !spill_off {
+                        assert_eq!(
+                            diagnostic.2["last_successful_attempt"]["next_request_pending"], true,
+                            "the active spill committed after the trigger attempt; witnesses: latest row={:?}; usage/report attempt={:?}; output nodes/path={:?}; replacements after report attempt={:?}",
+                            diagnostic.0, diagnostic.2["last_successful_attempt"], diagnostic.3, diagnostic.4,
+                        );
+                        assert!(
+                            !diagnostic.3.is_empty() && diagnostic.3.iter().all(|(_, selected)| *selected),
+                            "the trigger attempt's output items remain selected on the path: {:?}",
+                            diagnostic.3
+                        );
+                        assert!(
+                            !diagnostic.4.is_empty(),
+                            "active spill must leave typed replacement facts: {:?}",
+                            diagnostic.4
+                        );
+                    }
+                    assert_eq!(
+                        summary_request.body["tools"],
+                        json!([]),
+                        "expected tool-free GC summary POST; unexpected provider request body={:?}, latest attempt/stage={:?}, selected path={:?}, trigger usage={:?}, report outputs/path={:?}, typed replacement facts={:?}, report attempt facts={:?}, current A={:?}",
+                        summary_request.body,
+                        diagnostic.0,
+                        diagnostic.1,
+                        diagnostic.2,
+                        diagnostic.3,
+                        diagnostic.4,
+                        diagnostic.5,
+                        diagnostic.6,
                     );
-                    let report_attempt = usage["last_successful_attempt"]["attempt_id"]
-                        .as_str()
-                        .unwrap_or("")
-                        .to_owned();
-                    let outputs = db
-                        .prepare("SELECT o.node_id,EXISTS(SELECT 1 FROM thread_path p WHERE p.thread_id=?2 AND p.node_id=o.node_id) FROM output_item o WHERE o.attempt_id=?1 ORDER BY o.node_id")?
-                        .query_map(rusqlite::params![report_attempt, target], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
-                        })?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    let replacements = db
-                        .prepare("SELECT r.id,r.created_at,r.state,r.format_version,r.prompt_version,r.output_node_id,n.kind,json_extract(n.payload_json,'$.summary_scope'),COALESCE((SELECT json_group_array(source_node_id) FROM (SELECT source_node_id FROM replacement_source WHERE replacement_id=r.id ORDER BY ordinal)),'[]') FROM thread_replacement tr JOIN replacement r ON r.id=tr.replacement_id JOIN node n ON n.id=r.output_node_id WHERE tr.thread_id=?1 AND r.created_at>(SELECT started_at FROM model_attempt WHERE id=?2) ORDER BY r.created_at,r.id")?
-                        .query_map(rusqlite::params![target, report_attempt], |row| Ok((
-                            row.get::<_, String>(0)?, row.get::<_, String>(1)?,
-                            row.get::<_, String>(2)?, row.get::<_, String>(3)?,
-                            row.get::<_, String>(4)?, row.get::<_, String>(5)?,
-                            row.get::<_, String>(6)?, row.get::<_, Option<String>>(7)?,
-                            row.get::<_, String>(8)?,
-                        )))?
-                        .collect::<rusqlite::Result<Vec<_>>>()?;
-                    let report_facts: Option<(String, Option<String>, String)> = db.query_row(
-                        "SELECT started_at,ended_at,COALESCE(error_json,'{}') FROM model_attempt WHERE id=?1",
-                        [&report_attempt], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
-                    ).optional()?;
-                    let a = crate::compaction::a_state::read(db, &target)?;
-                    let a = match crate::compaction::a_state::reading(a.as_ref()) {
-                        crate::compaction::a_state::Reading::Known(tokens) => Some(tokens),
-                        _ => None,
-                    };
-                    Ok((attempt, path, usage, outputs, replacements, report_facts, a))
+                    summary_request
+                        .reply
+                        .send((200, answer("Short adopted summary.")))
+                        .unwrap();
                 }
-            })
-            .await
-            .unwrap();
-        if scenario.active() && !spill_off {
-            assert_eq!(
-                diagnostic.2["last_successful_attempt"]["next_request_pending"], true,
-                "the active spill committed after the trigger attempt; witnesses: latest row={:?}; usage/report attempt={:?}; output nodes/path={:?}; replacements after report attempt={:?}",
-                diagnostic.0, diagnostic.2["last_successful_attempt"], diagnostic.3, diagnostic.4,
-            );
-            assert!(
-                !diagnostic.3.is_empty() && diagnostic.3.iter().all(|(_, selected)| *selected),
-                "the trigger attempt's output items remain selected on the path: {:?}",
-                diagnostic.3
-            );
-            assert!(
-                !diagnostic.4.is_empty(),
-                "active spill must leave typed replacement facts: {:?}",
-                diagnostic.4
-            );
+                break;
+            }
+            if hold_summary {
+                assert!(
+                    held_normal.is_none(),
+                    "one normal request may be held before the summary"
+                );
+                held_normal = Some(request);
+                continue;
+            }
+            request
+                .reply
+                .send((200, answer_with_usage("normal continuation", 100)))
+                .unwrap();
         }
-        assert_eq!(
-            summary_request.body["tools"],
-            json!([]),
-            "expected tool-free GC summary POST; unexpected provider request body={:?}, latest attempt/stage={:?}, selected path={:?}, trigger usage={:?}, report outputs/path={:?}, typed replacement facts={:?}, report attempt facts={:?}, current A={:?}",
-            summary_request.body,
-            diagnostic.0,
-            diagnostic.1,
-            diagnostic.2,
-            diagnostic.3,
-            diagnostic.4,
-            diagnostic.5,
-            diagnostic.6,
-        );
-        summary_request
-            .reply
-            .send((200, answer("Short adopted summary.")))
-            .unwrap();
     }
-    if spill_off {
+    if spill_off && !hold_summary {
         crate::test_watchdog::watchdog("spill-off summary attempt finishes", async {
             while !terminal_record_written(&control).await {
                 tokio::task::yield_now().await;
@@ -566,41 +871,43 @@ async fn prepare_with_options(
     // adoption transaction, before the driver's terminal writer runs. The
     // rejected-stage observation point is after that terminal write.
     while !spill_off
+        && !hold_summary
         && !if fault == Fault::RejectFact {
             reached.load(Ordering::SeqCst) && terminal_record_written(&control).await
         } else {
             checkpoint_reached.load(Ordering::SeqCst)
         }
     {
-        if let Ok(unexpected) = receive.try_recv() {
-            let body = unexpected.body.clone();
-            let trigger = control.store.database.call(move |db| {
-                Ok(db.query_row(
-                    "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
-                    [],
-                    |row| row.get::<_, String>(0),
-                ).optional()?)
-            }).await.unwrap().and_then(|text| serde_json::from_str::<Value>(&text).ok());
-            let tools = body["tools"].as_array().map_or(0, Vec::len);
-            let excerpt = body["input"]
-                .as_array()
-                .and_then(|input| {
-                    input.iter().find_map(|message| {
-                        message["content"]
-                            .as_array()
-                            .and_then(|parts| parts.iter().find_map(|part| part["text"].as_str()))
-                    })
-                })
-                .unwrap_or("")
-                .chars()
-                .take(120)
-                .collect::<String>();
-            panic!(
-                "unexpected POST before selected {:?} checkpoint: tools_count={tools}, trigger={trigger:?}, excerpt={excerpt:?}",
-                scenario,
+        if let Ok(normal) = receive.try_recv() {
+            assert_ne!(
+                normal.body["tools"],
+                json!([]),
+                "summary request already completed above"
             );
+            normal
+                .reply
+                .send((200, answer_with_usage("background continuation", 100)))
+                .unwrap();
         }
         tokio::task::yield_now().await;
+    }
+    if hold_summary {
+        return Fx {
+            root,
+            url,
+            limits,
+            owner,
+            control,
+            target,
+            receive,
+            server,
+            guard_before,
+            reached,
+            checkpoint_reached,
+            release_checkpoint,
+            held_summary,
+            held_normal,
+        };
     }
     let saved = control.store.database.call(|db| Ok(db.query_row(
         "SELECT json_extract(error_json,'$.automatic_trim_attempt') FROM model_attempt WHERE json_type(error_json,'$.automatic_trim_attempt')='object' ORDER BY rowid DESC LIMIT 1",
@@ -662,6 +969,8 @@ async fn prepare_with_options(
         reached,
         checkpoint_reached,
         release_checkpoint,
+        held_summary,
+        held_normal,
     }
 }
 
@@ -678,6 +987,8 @@ struct Fx {
     reached: Arc<AtomicBool>,
     checkpoint_reached: Arc<AtomicBool>,
     release_checkpoint: Arc<tokio::sync::Notify>,
+    held_summary: Option<Incoming>,
+    held_normal: Option<Incoming>,
 }
 
 /// Whether the latest automatic attempt record has left the provisional state,

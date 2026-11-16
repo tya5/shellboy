@@ -2,7 +2,7 @@
 mod adoption;
 mod notification_admission;
 mod overflow;
-mod proactive;
+pub(super) mod proactive;
 mod request;
 mod retry;
 mod shell_output;
@@ -142,6 +142,21 @@ pub(super) async fn drive(
     thread: String,
     slot: DriverSlot,
 ) -> Result<(), ApiError> {
+    let result = drive_inner(control, thread, slot.clone()).await;
+    if result.is_err() || slot.stop.is_cancelled() {
+        control
+            .live
+            .cancel_join_proactive_job(&thread, &slot)
+            .await;
+    }
+    result
+}
+
+async fn drive_inner(
+    control: Arc<Control>,
+    thread: String,
+    slot: DriverSlot,
+) -> Result<(), ApiError> {
     // Keep one connection generation across this Run, including waits and tool loops.
     let clients = control.store.clients.snapshot();
     let boundary = control.boundary(&thread).await;
@@ -154,6 +169,38 @@ pub(super) async fn drive(
         }
         let _ = slot.nudge.notified().now_or_never();
         let boundary_guard = tokio::select! {biased;_=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,guard=boundary.lock()=>guard};
+        let completed_job = {
+            let mut job = slot.proactive_job.lock().await;
+            if job
+                .as_ref()
+                .is_some_and(proactive::BackgroundJob::is_finished)
+            {
+                job.take()
+            } else {
+                None
+            }
+        };
+        if let Some(mut job) = completed_job {
+            let joined = job.join().await;
+            slot.proactive_active.store(false, std::sync::atomic::Ordering::Release);
+            control
+                .live
+                .prune_idle_background(&thread, &slot.proactive_active)
+                .await;
+            match joined {
+                Ok(Ok(proactive::ProactiveOutcome::Finished { path_changed: true })) => {
+                    instructions.clear();
+                    drop(boundary_guard);
+                    continue;
+                }
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Err(invalid("background proactive compaction task panicked")),
+            }
+        }
+        if slot.stop.is_cancelled() {
+            return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
+        }
         super::turn_interrupt::acknowledge(&control, &thread, &slot.run_id).await?;
         let snapshot =
             match next_with_clients(&control, &thread, &slot.run_id, clients.clone()).await? {
@@ -171,6 +218,7 @@ pub(super) async fn drive(
         if turn_binding.cancel.is_cancelled() {
             continue;
         }
+        let mut boundary_guard = boundary_guard;
         let mut request_slot = slot.clone();
         request_slot.stop = turn_binding.cancel.clone();
         overflow.observe(&snapshot.turn, snapshot.generation);
@@ -182,34 +230,25 @@ pub(super) async fn drive(
         // flight. A reported input over the threshold compacts here, one step
         // after the large request; the new snapshot is then read again.
         let mut snapshot = snapshot;
-        let mut compact_boundary =
-            crate::compaction::boundary::Boundary::new(&boundary, boundary_guard);
-        let compacted = proactive::maybe_compact_with_run_stop(
-            &control,
-            &mut snapshot,
-            &request_slot,
-            &mut compact_boundary,
-            slot.stop.clone(),
-        )
-        .await;
-        if let Err(error) = &compacted
-            && error.is_storage_failure()
-        {
-            return Err(error.clone());
-        }
-        let Some(boundary_guard) = compact_boundary.into_guard() else {
-            if slot.stop.is_cancelled() {
-                return drain_and_stop(&control, &slot.run_id, Some(&thread)).await;
-            }
-            if turn_binding.cancel.is_cancelled() {
-                continue;
-            }
-            return Err(invalid(
-                "Compaction released its Thread boundary unexpectedly",
-            ));
-        };
-        if compacted? {
-            continue;
+        let proactive_job_exists = slot.proactive_job.lock().await.is_some();
+        if !proactive_job_exists {
+            drop(boundary_guard);
+            slot.proactive_active.store(true, std::sync::atomic::Ordering::Release);
+            let mut job = proactive::spawn_background(
+                control.clone(),
+                snapshot.clone(),
+                slot.clone(),
+                boundary.clone(),
+                slot.stop.clone(),
+            );
+            let started = job.wait_started().await;
+            *slot.proactive_job.lock().await = Some(job);
+            started?;
+            boundary_guard = tokio::select! {biased;
+                _=slot.stop.cancelled()=>return drain_and_stop(&control,&slot.run_id,Some(&thread)).await,
+                _=turn_binding.cancel.cancelled()=>continue,
+                guard=boundary.lock()=>guard,
+            };
         }
         let refreshed = instructions
             .refresh(&control, snapshot, &request_slot)
@@ -450,18 +489,29 @@ pub(super) async fn drive(
                     &attempt,
                     &failure.error,
                 );
-                retry::retry_or_recover(
-                    &control,
-                    &snapshot,
-                    &request_slot,
-                    attempt,
-                    failure,
-                    &mut retry_budget,
-                    &mut overflow,
-                    &boundary,
-                    boundary_guard,
-                )
-                .await?;
+                {
+                    let mut proactive_job = slot.proactive_job.lock().await;
+                    retry::retry_or_recover(
+                        &control,
+                        &snapshot,
+                        &request_slot,
+                        attempt,
+                        failure,
+                        &mut retry_budget,
+                        &mut overflow,
+                        &mut proactive_job,
+                        &boundary,
+                        boundary_guard,
+                    )
+                    .await?;
+                    if proactive_job.is_none() {
+                        slot.proactive_active.store(false, std::sync::atomic::Ordering::Release);
+                    }
+                }
+                control
+                    .live
+                    .prune_idle_background(&thread, &slot.proactive_active)
+                    .await;
                 continue;
             }
         };

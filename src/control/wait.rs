@@ -1149,7 +1149,8 @@ mod tests {
                 nudge: Arc::new(tokio::sync::Notify::new()),
                 foreground: foreground.clone(),
                 turn: Arc::new(tokio::sync::Mutex::new(None)),
-            },
+
+                ..super::super::DriverSlot::default()},
         );
         (directory, owner, control, foreground, receive)
     }

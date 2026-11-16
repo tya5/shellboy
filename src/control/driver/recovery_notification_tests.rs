@@ -437,7 +437,9 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         nudge: Arc::new(Notify::new()),
         foreground: Arc::new(ForegroundSlot::default()),
         turn: Arc::new(tokio::sync::Mutex::new(None)),
-    };
+
+        ..DriverSlot {
+        id:::default(),};
     let mut failure: model::http::AttemptFailure =
         model::ModelError::new("provider", "synthetic permanent failure").into();
     failure.facts.status = Some(400);
@@ -450,6 +452,7 @@ async fn terminal_provider_failure_through_retry_persists_one_transition_time() 
         failure,
         &mut retry::RetryBudget::default(),
         &mut OverflowBudget::default(),
+        &mut None,
         &mutex,
         mutex.lock().await,
     )
@@ -495,7 +498,9 @@ async fn capacity_failure_through_drive_persists_one_transition_time() {
         nudge: Arc::new(Notify::new()),
         foreground: Arc::new(ForegroundSlot::default()),
         turn: Arc::new(tokio::sync::Mutex::new(None)),
-    };
+
+        ..DriverSlot {
+        id:::default(),};
     let error = drive(control.clone(), accepted.thread_id, slot)
         .await
         .unwrap_err();
@@ -531,7 +536,9 @@ async fn low_disk_holds_the_turn_and_explicit_retry_resumes_after_space_returns(
         nudge: Arc::new(Notify::new()),
         foreground: Arc::new(ForegroundSlot::default()),
         turn: Arc::new(tokio::sync::Mutex::new(None)),
-    };
+
+        ..DriverSlot {
+        id:::default(),};
     let error = drive(control.clone(), accepted.thread_id.clone(), slot)
         .await
         .unwrap_err();

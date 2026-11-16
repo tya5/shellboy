@@ -6343,7 +6343,8 @@ mod independent_run_notification_tests {
                     nudge: nudge.clone(),
                     foreground: Arc::new(super::super::foreground::ForegroundSlot::default()),
                     turn: Arc::new(tokio::sync::Mutex::new(None)),
-                },
+
+                    ..super::super::DriverSlot::default()},
             );
             let mut events = control.subscribe();
             for completed in [false, true] {
@@ -6420,7 +6421,8 @@ mod driverless_child_stop_notification_tests {
                     nudge: nudge.clone(),
                     foreground: Arc::new(super::super::foreground::ForegroundSlot::default()),
                     turn: Arc::new(tokio::sync::Mutex::new(None)),
-                },
+
+                    ..super::super::DriverSlot::default()},
             );
             assert!(
                 !control

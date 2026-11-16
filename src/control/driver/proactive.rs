@@ -1,6 +1,7 @@
 //! Proactive threshold compaction and measured retry policy (#125, #153).
 //! Uses ordinary safe boundaries, recording partial spill adoption separately.
 use super::*;
+use futures_util::FutureExt;
 
 #[cfg(test)]
 mod fault_tests;
@@ -27,6 +28,54 @@ mod spill_route_tests {
 }
 
 pub(super) const REASON: &str = "proactive_threshold";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProactiveOutcome {
+    NotStarted,
+    Finished { path_changed: bool },
+}
+
+pub(in crate::control) struct BackgroundJob {
+    cancel: tokio_util::sync::CancellationToken,
+    started: Option<tokio::sync::oneshot::Receiver<()>>,
+    task: tokio::task::JoinHandle<Result<ProactiveOutcome, ApiError>>,
+}
+impl BackgroundJob {
+    #[cfg(test)]
+    pub(in crate::control) fn test_started(
+        cancel: tokio_util::sync::CancellationToken,
+        task: tokio::task::JoinHandle<Result<ProactiveOutcome, ApiError>>,
+    ) -> Self {
+        Self { cancel, started: None, task }
+    }
+
+    pub(in crate::control) fn is_finished(&self) -> bool {
+        self.task.is_finished()
+    }
+
+    pub(super) fn cancel(&self) {
+        self.cancel.cancel();
+    }
+
+    pub(super) async fn wait_started(&mut self) -> Result<(), ApiError> {
+        self.started
+            .take()
+            .expect("background launch acknowledgement consumed once")
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    ErrorCode::InvalidState,
+                    "background compaction task panicked before launch",
+                )
+            })
+    }
+
+    pub(super) async fn join(
+        &mut self,
+    ) -> Result<Result<ProactiveOutcome, ApiError>, tokio::task::JoinError> {
+        (&mut self.task).await
+    }
+}
 
 fn terminal_attempt_outcome(
     result: &Result<crate::compaction::CompactResult, ApiError>,
@@ -360,7 +409,7 @@ pub(super) async fn maybe_compact_with_run_stop(
     slot: &DriverSlot,
     boundary: &mut crate::compaction::boundary::Boundary<'_>,
     run_stop: tokio_util::sync::CancellationToken,
-) -> Result<bool, ApiError> {
+) -> Result<ProactiveOutcome, ApiError> {
     // One decision per fresh provider report; no character forecast or marks.
     let thread = snapshot.thread.clone();
     let config = control.store.config.clone();
@@ -421,17 +470,17 @@ pub(super) async fn maybe_compact_with_run_stop(
     )
     .target_percent;
     if threshold == 0 {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     }
     let report = &data.1["last_successful_attempt"];
     let (Some(input), Some(attempt)) = (
         report["input_tokens"].as_u64(),
         report["attempt_id"].as_str(),
     ) else {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     };
     if input < threshold || report["next_request_pending"] == true {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     }
     let a = data.3;
     let target = ((threshold as u128 * percent as u128) / 100) as u64;
@@ -489,7 +538,7 @@ pub(super) async fn maybe_compact_with_run_stop(
         tx.commit()?;Ok(Some(captured_trigger))
     }).await.map_err(storage_error)?;
     let Some(captured_trigger) = can_run else {
-        return Ok(false);
+        return Ok(ProactiveOutcome::NotStarted);
     };
     control.diagnostics.record(
         crate::diagnostics::DiagnosticEvent::AutomaticCompactionStarted,
@@ -608,6 +657,10 @@ pub(super) async fn maybe_compact_with_run_stop(
             .map(|_| compacted),
         Err(error) => Err(error),
     };
+    let path_changed = committed_spill
+        .as_ref()
+        .is_some_and(|spill| !spill.no_target)
+        || result.as_ref().is_ok_and(|summary| !summary.no_target);
     // Aggregate of every stage this attempt adopted: the committed spill plus
     // the summary. A spill committed before a failed summary stays adopted.
     let summary = match (&result, committed_spill) {
@@ -689,5 +742,61 @@ pub(super) async fn maybe_compact_with_run_stop(
     {
         return Err(error);
     }
-    Ok(true)
+    Ok(ProactiveOutcome::Finished { path_changed })
+}
+pub(super) fn spawn_background(
+    control: Arc<Control>,
+    mut snapshot: Snapshot,
+    slot: DriverSlot,
+    boundary: Arc<tokio::sync::Mutex<()>>,
+    cancel: tokio_util::sync::CancellationToken,
+) -> BackgroundJob {
+    let task_cancel = cancel.clone();
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let thread = snapshot.thread.clone();
+    let control_for_cleanup = control.clone();
+    let task = tokio::spawn(async move {
+        let result = std::panic::AssertUnwindSafe(async {
+            let guard = tokio::select! {
+                biased;
+                _ = task_cancel.cancelled() => None,
+                guard = boundary.lock() => Some(guard),
+            };
+            let _ = started_tx.send(());
+            let Some(guard) = guard else {
+                return Ok(ProactiveOutcome::NotStarted);
+            };
+            let mut boundary_owner = crate::compaction::boundary::Boundary::new(&boundary, guard);
+            let result = maybe_compact_with_run_stop(
+                &control,
+                &mut snapshot,
+                &slot,
+                &mut boundary_owner,
+                task_cancel,
+            )
+            .await;
+            drop(boundary_owner.into_guard());
+            result
+        })
+        .catch_unwind()
+        .await
+        .unwrap_or_else(|_| Err(invalid("background proactive compaction task panicked")));
+        if matches!(&result, Err(error) if error.is_storage_failure()) {
+            control.fail_storage().await;
+        }
+        // Keep the Thread slot until some Run or owner shutdown joins this handle.
+        slot.nudge.notify_one();
+        control_for_cleanup
+            .live
+            .prune_idle_background(&thread, &slot.proactive_active)
+            .await;
+        control_for_cleanup.changed(&thread);
+        result
+    });
+
+    BackgroundJob {
+        cancel,
+        started: Some(started),
+        task,
+    }
 }

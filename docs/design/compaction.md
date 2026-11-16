@@ -33,13 +33,32 @@ Spill, restore and failure-memory bookkeeping are distinct operations; none is c
 
 At present, the driver calls `proactive::maybe_compact_with_run_stop` at a safe request boundary and awaits it before refreshing the snapshot and dispatching the next model request. The thread boundary and Run cancellation remain active for this operation. The GC coordinator owns producer completion, terminal facts, joining/retirement, transactional adoption and attempt FINISH; natural Turn completion is not a substitute for the explicit cancellation token. This U1 source does **not** establish that ordinary requests progress while a summary is held, that a later Run reuses a still-live proactive job after natural Run exit, or that only a context-limit response waits. Do not describe those outcomes as implemented here.
 
-## Planned U2: nonblocking proactive turn (not current runtime)
+## U2: nonblocking proactive turn (source implementation; qualification pending)
 
-A separate follow-up recorded in [the adopted #301 direction](https://github.com/tya5/shellboy/issues/301#issuecomment-6902558988) aims to launch an eligible proactive job and let the ordinary request proceed, retain that same Thread-owned job through natural Run/Turn completion, reuse it from later Runs without duplicate summary requests, and join it only on context-limit recovery or actual shutdown/Stop. Eligibility should be established before spawn; ownership must remain with existing Thread/job lifecycle, not a detached task or new registry. These are planned acceptance conditions, not behavior delivered or qualified by this U1 source commit. Keep U2 in its separate work unit and report its actual status independently.
+The U2 source candidate launches the eligible proactive operation as a joined
+`BackgroundJob` stored in the existing per-Thread `DriverSlot` in `LiveRegistry`.
+The normal request proceeds while the job waits for the current Thread boundary;
+adoption still occurs only through the shared final transaction above. No second
+coordinator, registry, detached observer or retry layer is introduced.
+
+Natural Run/Turn completion does not cancel or join the task. The Thread slot
+retains the same handle, including after task completion, until a later Run
+reattaches and joins it; only that join permits idle-slot pruning. Context-limit
+recovery joins the same job before following existing overflow rules, without a
+duplicate summary or identical POST. Stop/error and owner shutdown cancel and
+join through the shared slot. The existing writer coordinator continues to own
+producer completion, terminal facts, FINISH and retirement.
+
+The U2 source draft contains deterministic controls for next-request progress
+while a summary is held, natural Run A exit and same-Thread Run B reuse, same-job
+context-limit joining, no duplicate summary, Stop/error join and owner-shutdown
+join. Source presence is not test evidence: focused native results, full normal,
+independent review and exact-SHA CI remain separate qualification gates.
+
 
 ## Validation and evidence
 
-The U1 deterministic suite must establish outside-R prefix/suffix preservation for summary and multi-range spill, current reasoning epoch/keep consistency across the whole spill transaction, and restore marker/source/retained-anchor ordering; changed/pruned/protected/tool-split R, cancellation, failure-slot CAS and FINISH rollback remain negative controls. U2 separately requires controls for natural Run exit, ordinary request progress, same-job context-limit joining, duplicate prevention and shutdown cleanup; those are not U1 evidence.
+The U1 deterministic suite must establish outside-R prefix/suffix preservation for summary and multi-range spill, current reasoning epoch/keep consistency across the whole spill transaction, and restore marker/source/retained-anchor ordering; changed/pruned/protected/tool-split R, cancellation, failure-slot CAS and FINISH rollback remain negative controls. U2 additionally requires controls for natural Run exit, ordinary request progress, same-job context-limit joining, duplicate prevention and Stop/shutdown cleanup; these are separate U2 evidence.
 
 Source review, focused tests, full native `scripts/check.sh`, independent review, and exact-SHA required CI are separate gates. A green native check does not imply CI or main landing. No provider/runtime comparison, private measurement, installation, owner restart, tag, publication or release is part of implementation qualification. Core release remains STOPPED.
 
