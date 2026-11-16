@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::{Mutex, Notify};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(super) struct LiveRegistry {
     drivers: Mutex<HashMap<String, DriverSlot>>,
     shells: Mutex<HashMap<String, LiveShell>>,
@@ -360,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn natural_run_exit_reattaches_the_same_thread_owned_proactive_job() {
-        let registry = LiveRegistry::default();
+        let registry = Arc::new(LiveRegistry::default());
         let owner_stop = CancellationToken::new();
         let first = registry
             .register_or_nudge_driver("thread", "run-a".into(), &owner_stop, false)
@@ -438,7 +438,7 @@ mod tests {
                 .is_finished(),
             "Run B reattaches the completed-but-unjoined Run A job"
         );
-        let job = second.proactive_job.lock().await.take().unwrap();
+        let mut job = second.proactive_job.lock().await.take().unwrap();
         assert!(matches!(
             job.join().await.unwrap(),
             Ok(

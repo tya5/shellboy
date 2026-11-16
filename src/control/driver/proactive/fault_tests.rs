@@ -166,20 +166,19 @@ fn assert_trigger_evidence(trigger: &Value, scenario: Scenario) {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary_post() {
     crate::test_watchdog::watchdog("context-limit joins the active proactive job", async {
-        let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
         let Fx {
             owner,
             control,
             target,
             mut receive,
             server,
-            held_summary,
+            mut held_summary,
             ..
-        } = &mut fx;
+        } = prepare_held_summary(Scenario::ClosedSummary).await;
         let summary = held_summary
             .take()
             .expect("one proactive summary request is held");
-        let normal = incoming(control, &mut receive).await;
+        let normal = incoming(control, receive).await;
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -193,7 +192,7 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             .send((200, answer("background summary completed")))
             .unwrap();
         crate::test_watchdog::watchdog("same proactive job terminal", async {
-            while !terminal_record_written(control).await {
+            while !terminal_record_written(&control).await {
                 tokio::task::yield_now().await;
             }
         })
@@ -241,7 +240,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             owner,
             control,
             target,
-            mut receive,
+            receive,
             server,
             held_summary,
             ..
@@ -269,7 +268,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
 
         // This barrier is the oracle: the summary response remains withheld,
         // yet the ordinary next-Turn request reaches the same provider.
-        let normal = incoming(control, &mut receive).await;
+        let normal = incoming(control, receive).await;
         assert_ne!(
             normal.body, summary.body,
             "next request is not a duplicate summary POST"
@@ -338,7 +337,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             }
         }).await.unwrap();
         send(control, target, "new Run while previous R job is held").await;
-        let overflow_request = incoming(control, &mut receive).await;
+        let overflow_request = incoming(control, receive).await;
         assert_ne!(overflow_request.body, summary.body, "Run B proceeds without cancelling R");
         overflow_request
             .reply
@@ -422,9 +421,8 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             "later context-overflow request suffix is preserved"
         );
         control.shutdown().await.unwrap();
-        owner.shutdown().await.unwrap();
         server.abort();
-        let _ = (root, url, limits);
+        let _ = (root, url, limits, owner);
     })
     .await
     .unwrap();
@@ -1018,7 +1016,7 @@ async fn after_release(
     reached: &AtomicBool,
 ) {
     if scenario.continues_to_active_summary(fault) {
-        let summary_request = incoming(control, &mut receive).await;
+        let summary_request = incoming(control, receive).await;
         assert_eq!(
             summary_request.body["tools"],
             json!([]),
