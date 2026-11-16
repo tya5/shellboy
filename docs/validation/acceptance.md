@@ -12096,3 +12096,15 @@ reasoning epoch projection and rejects reordered retained restore anchors. No co
 focused tests have yet completed on that corrected candidate. Native full qualification,
 independent review and exact-SHA CI remain pending; do not transfer the frozen base SHA's
 green.
+
+### Corrected closeout focused result
+
+Exact code SHA `0f4e9f5c24a4feb1f9da3047a58efc53fb5e919b` passed guarded
+`cargo check --tests` on its parent `c622888c`, then the focused guard+slot suite on
+0f4e9f5c: final R/spill/restore module 12/12, failure-scope CAS 1/1, active-spill
+DROP_ALL replay 1/1 and canonical rejection projection 1/1. These are focused checks, not
+full `scripts/check.sh`. The multi-interval test verifies one shared pre-drop epoch for
+all replacement payloads and one current Thread epoch advance; the retained-anchor reorder
+control verifies rejection before any path mutation. A nonfatal macOS compact-unwind linker
+warning was emitted. Full standard, independent final-delta review, and exact-SHA required
+CI for the final candidate remain pending.

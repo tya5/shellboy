@@ -467,3 +467,31 @@ caller write. The new multi-spill test asserts all replacements share that proje
 and the Thread is exactly one newer. A follow-up compile caught a missing local test
 accumulator; fixed in the next working-tree edit. These are distinct compile/test REDs and
 remain preserved. The corrected candidate must rerun compile and all four focused groups.
+
+### Corrected Source/Focused Candidate (pending full standard)
+
+After preserving the earlier 0de and a322 RED receipts, current U1 closeout source SHA
+`0f4e9f5c24a4feb1f9da3047a58efc53fb5e919b` (parent `5b6455bff018d3c391ba0fa8fb3d7c073525b58c`)
+now passes guarded `cargo check --tests` at `c622888c` and the complete guarded focused
+group on exact code SHA `0f4e9f5c`: `final_r_adoption_tests` 12/12, manual failure-memory
+positive 1/1, staged active-spill DROP_ALL replay 1/1, and canonical public rejection
+projection 1/1 (15 selected; 0 failed). Test build emitted the nonfatal linker warning
+that `__eh_frame` exceeded compact unwind offset encoding. Guarded focused peak RSS
+2385.44 MiB / footprint 4148.91 MiB under 8192 MiB; shell cleanup confirmed; both Rust
+slots free.
+
+The shared batch kernel now keeps each active-spill replacement payload at the one
+current *pre-drop* projection epoch, validates the keep-set projection through
+`select_path`, then advances the Thread exactly once and clears keep in the same
+transaction. This intentional one-step payload/Thread epoch difference makes signed
+reasoning in spill outputs stale and non-replayable; no captured snapshot epoch is written
+by a caller. The two-interval regression verifies all spill payloads share that projection
+and current epoch advances once. The retained-anchor regression now installs a valid base
+path and directly fixtures the adversarial current `thread_path` permutation (to avoid
+tripping conversation-edge cycle guards); it confirms typed rejection without path writes.
+
+`docs/design/compaction.md` now separates U1's actual awaited driver from planned U2; no
+nonblocking or natural-Run reuse behavior is claimed as current. Full standard on the
+current exact final source SHA, independent closure review, and same-SHA three-OS CI are
+still pending. Earlier failed attempts and their logs remain preserved; no result is
+transferred from 0ce or any intermediate closeout SHA.
