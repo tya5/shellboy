@@ -172,13 +172,12 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
             target,
             mut receive,
             server,
-            mut held_summary,
+            mut held_phase,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
-        let summary = held_summary
+        let HeldSummaryPhase { summary, normal } = held_phase
             .take()
-            .expect("one proactive summary request is held");
-        let normal = incoming(&control, &mut receive).await;
+            .expect("summary and normal request are held as one phase");
         assert_ne!(normal.body, summary.body);
         normal
             .reply
@@ -242,12 +241,12 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             target,
             receive,
             server,
-            held_summary,
+            held_phase,
             ..
         } = &mut fx;
-        let summary = held_summary
+        let HeldSummaryPhase { summary, normal } = held_phase
             .take()
-            .expect("summary request is held at provider barrier");
+            .expect("summary and normal request are held at the provider boundary");
         assert_eq!(summary.body["tools"], json!([]));
         let before: Vec<String> = control
             .store
@@ -267,7 +266,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .unwrap();
 
         // This request reached the provider while the summary response was held.
-        let normal = incoming(control, receive).await;
         assert_ne!(
             normal.body, summary.body,
             "next request is not a duplicate summary POST"
@@ -326,21 +324,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
 
         // Let Run A finish naturally while its Thread-owned R job is still
         // held, then admit a new Run on the same Thread.
-        crate::test_watchdog::watchdog("Run A naturally retires with proactive R pending", async {
-            loop {
-                let thread = target.clone();
-                let finished = control.store.database.call(move |db| {
-                    db.query_row(
-                        "SELECT NOT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='live')",
-                        [thread],
-                        |row| row.get::<_, bool>(0),
-                    )
-                    .map_err(Into::into)
-                }).await.unwrap();
-                if finished { break; }
-                tokio::task::yield_now().await;
-            }
-        }).await.unwrap();
+        settled(control, target).await;
         let accepted: MessageAccepted = serde_json::from_value(
             send(control, target, "new Run while previous R job is held").await,
         )
@@ -513,13 +497,18 @@ async fn deleting_a_naturally_idle_thread_cancels_and_joins_its_retained_summary
             control,
             target,
             server,
-            mut held_summary,
+            mut held_phase,
             ..
         } = prepare_held_summary(Scenario::ClosedSummary).await;
-        let summary = held_summary
+        let HeldSummaryPhase { summary, normal } = held_phase
             .take()
-            .expect("Run A retired while its tool-free summary POST is held");
+            .expect("summary and normal request are held before natural Run A completion");
         assert_eq!(summary.body["tools"], json!([]));
+        normal
+            .reply
+            .send((200, answer_with_usage("finish Run A", 100)))
+            .unwrap();
+        settled(&control, &target).await;
         let slot = {
             let drivers = control.live.test_drivers().lock().await;
             drivers
@@ -1018,33 +1007,57 @@ async fn prepare_with_mode(
         send(&control, &target, "next turn").await;
     }
     let mut held_summary = None;
+    let mut held_normal = None;
+    let held_slot = if hold_summary {
+        let drivers = control.live.test_drivers().lock().await;
+        Some(
+            drivers
+                .get(&target)
+                .cloned()
+                .expect("Run A owns its Thread slot"),
+        )
+    } else {
+        None
+    };
     if scenario.summary() {
         let mut first_normal_facts_recorded = false;
         let mut observed_heads = Vec::new();
         loop {
-            let request = if hold_summary {
-                loop {
-                    tokio::select! {
-                        event = heads.recv() => {
-                            match event.expect("mock server request event channel remains open") {
-                                ProxyRequestEvent::Accepted { request_id, peer } => {
-                                    eprintln!("U2 mock listener accepted connection: id={request_id} peer={peer}");
-                                }
-                                ProxyRequestEvent::Headers(head) => {
-                                    assert!(head.request_line.starts_with("POST /v1/responses "), "unexpected accepted request line: {head:?}");
-                                    assert!(head.content_length.is_some(), "fixture expects Content-Length framing: {head:?}");
-                                    assert!(head.transfer_encoding.is_none(), "fixture does not decode chunked request bodies: {head:?}");
-                                    assert!(head.content_encoding.is_none(), "fixture does not decode compressed request bodies: {head:?}");
-                                    eprintln!("U2 accepted HTTP request headers: {head:?}");
-                                    observed_heads.push(head);
-                                }
-                            }
-                        }
-                        request = receive.recv() => break request.expect("mock server body channel remains open"),
-                    }
-                }
+            let event = if let Some(slot) = held_slot.as_ref() {
+                next_held_fixture_event(&control, &target, &mut receive, &mut heads, slot).await
             } else {
-                incoming(&control, &mut receive).await
+                HeldFixtureEvent::Request(incoming(&control, &mut receive).await)
+            };
+            let request = match event {
+                HeldFixtureEvent::Request(request) => request,
+                HeldFixtureEvent::Header(ProxyRequestEvent::Accepted { request_id, peer }) => {
+                    eprintln!("U2 mock listener accepted connection: id={request_id} peer={peer}");
+                    continue;
+                }
+                HeldFixtureEvent::Header(ProxyRequestEvent::Headers(head)) => {
+                    assert!(
+                        head.request_line.starts_with("POST /v1/responses "),
+                        "unexpected accepted request line: {head:?}"
+                    );
+                    assert!(
+                        head.content_length.is_some(),
+                        "fixture expects Content-Length framing: {head:?}"
+                    );
+                    assert!(
+                        head.transfer_encoding.is_none(),
+                        "fixture does not decode chunked request bodies: {head:?}"
+                    );
+                    assert!(
+                        head.content_encoding.is_none(),
+                        "fixture does not decode compressed request bodies: {head:?}"
+                    );
+                    eprintln!("U2 accepted HTTP request headers: {head:?}");
+                    observed_heads.push(head);
+                    continue;
+                }
+                HeldFixtureEvent::JobFinished(facts) => panic!(
+                    "proactive job terminated before both held provider requests were captured: {facts:?}"
+                ),
             };
             if hold_summary
                 && !observed_heads
@@ -1241,29 +1254,20 @@ async fn prepare_with_mode(
                     );
                     first_normal_facts_recorded = true;
                 }
-                request
-                    .reply
-                    .send((200, answer_with_usage("normal continuation", 100)))
-                    .unwrap();
-            }
-            if hold_summary {
-                let thread = target.clone();
-                let run_live = control
-                    .store
-                    .database
-                    .call(move |db| {
-                        db.query_row(
-                            "SELECT EXISTS(SELECT 1 FROM run WHERE thread_id=?1 AND state='live')",
-                            [thread],
-                            |row| row.get::<_, bool>(0),
-                        )
-                        .map_err(Into::into)
-                    })
-                    .await
-                    .unwrap();
-                if held_summary.is_some() && !run_live {
-                    break;
+                if hold_summary {
+                    assert!(
+                        held_normal.replace(request).is_none(),
+                        "only one ordinary Run A request is held"
+                    );
+                } else {
+                    request
+                        .reply
+                        .send((200, answer_with_usage("normal continuation", 100)))
+                        .unwrap();
                 }
+            }
+            if hold_summary && held_summary.is_some() && held_normal.is_some() {
+                break;
             }
         }
     }
@@ -1300,6 +1304,14 @@ async fn prepare_with_mode(
         }
         tokio::task::yield_now().await;
     }
+    let held_phase = if hold_summary {
+        Some(HeldSummaryPhase {
+            summary: held_summary.expect("held-summary phase captured its summary request"),
+            normal: held_normal.expect("held-summary phase captured its ordinary request"),
+        })
+    } else {
+        None
+    };
     if hold_summary {
         return Fx {
             root,
@@ -1314,7 +1326,7 @@ async fn prepare_with_mode(
             reached,
             checkpoint_reached,
             release_checkpoint,
-            held_summary,
+            held_phase,
         };
     }
     let saved = control.store.database.call(|db| Ok(db.query_row(
@@ -1377,8 +1389,13 @@ async fn prepare_with_mode(
         reached,
         checkpoint_reached,
         release_checkpoint,
-        held_summary,
+        held_phase,
     }
+}
+
+struct HeldSummaryPhase {
+    summary: Incoming,
+    normal: Incoming,
 }
 
 struct Fx {
@@ -1394,7 +1411,7 @@ struct Fx {
     reached: Arc<AtomicBool>,
     checkpoint_reached: Arc<AtomicBool>,
     release_checkpoint: Arc<tokio::sync::Notify>,
-    held_summary: Option<Incoming>,
+    held_phase: Option<HeldSummaryPhase>,
 }
 
 /// Whether the latest automatic attempt record has left the provisional state,
@@ -1885,6 +1902,47 @@ async fn admission_boundary_facts(control: &Control, thread: &str) -> AdmissionB
         slot_exists: slot.is_some(),
         job_exists,
         job_finished,
+    }
+}
+
+enum HeldFixtureEvent {
+    Request(Incoming),
+    Header(ProxyRequestEvent),
+    JobFinished(AdmissionBoundaryFacts),
+}
+
+async fn next_held_fixture_event(
+    control: &Control,
+    thread: &str,
+    receive: &mut mpsc::Receiver<Incoming>,
+    heads: &mut mpsc::UnboundedReceiver<ProxyRequestEvent>,
+    slot: &DriverSlot,
+) -> HeldFixtureEvent {
+    loop {
+        let notified = slot.nudge.notified();
+        tokio::pin!(notified);
+        let finished = {
+            let job = slot.proactive_job.lock().await;
+            job.as_ref()
+                .is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
+        };
+        if finished {
+            return HeldFixtureEvent::JobFinished(admission_boundary_facts(control, thread).await);
+        }
+        tokio::select! {
+            biased;
+            event = heads.recv() => return HeldFixtureEvent::Header(event.expect("mock head channel remains open")),
+            request = receive.recv() => return HeldFixtureEvent::Request(request.expect("mock body channel remains open")),
+            _ = &mut notified => {
+                let finished = {
+                    let job = slot.proactive_job.lock().await;
+                    job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
+                };
+                if finished {
+                    return HeldFixtureEvent::JobFinished(admission_boundary_facts(control, thread).await);
+                }
+            }
+        }
     }
 }
 
