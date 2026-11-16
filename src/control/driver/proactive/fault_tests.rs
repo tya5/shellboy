@@ -2231,10 +2231,10 @@ async fn next_held_fixture_event_with_completion(
     // Subscribe before reading FINISH so a terminal write cannot race past the waiter.
     let mut events = control.subscribe();
     loop {
-        if let Some(identity) = identity {
-            if terminal_attempt_finished(control, identity).await {
-                return HeldFixtureEvent::OriginalFinished;
-            }
+        if let Some(identity) = identity
+            && terminal_attempt_finished(control, identity).await
+        {
+            return HeldFixtureEvent::OriginalFinished;
         }
         let notified = slot.nudge.notified();
         tokio::pin!(notified);
@@ -2260,10 +2260,10 @@ async fn next_held_fixture_event_with_completion(
             request = receive.recv() => return HeldFixtureEvent::Request(request.expect("mock body channel remains open")),
             event = events.recv(), if identity.is_some() => match event {
                 Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => {
-                    if let Some(identity) = identity {
-                        if terminal_attempt_finished(control, identity).await {
-                            return HeldFixtureEvent::OriginalFinished;
-                        }
+                    if let Some(identity) = identity
+                        && terminal_attempt_finished(control, identity).await
+                    {
+                        return HeldFixtureEvent::OriginalFinished;
                     }
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {},
