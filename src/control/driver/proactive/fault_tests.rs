@@ -96,10 +96,10 @@ async fn wait_for_run_b_provider_request(
                 Ok(event) if event.thread == thread && event.run == run => {
                     eprintln!("Run B typed future progress: attempt={:?} phase={:?}", event.attempt, event.phase);
                     if let crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(
-                        crate::control::HttpPollResult::ReadyError(class),
+                        crate::control::HttpPollResult::ReadyError { kind },
                     ) = event.phase
                     {
-                        panic!("Run B response future completed with typed error before any provider body: Thread={thread} Run={run} Attempt={:?} Class={class:?}", event.attempt);
+                        panic!("Run B response future completed with typed error before any provider body: Thread={thread} Run={run} Attempt={:?} existing_error_kind={kind:?}", event.attempt);
                     }
                 }
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
@@ -699,7 +699,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     if result.is_err()
         && let Some(thread) = trace_thread.as_deref()
     {
-        crate::control::record_test_watchdog_expired(thread);
+        crate::control::record_test_watchdog_returned_after_drop(thread);
     }
     drop(trace_keepalive);
     result.unwrap();

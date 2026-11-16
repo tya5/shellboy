@@ -341,24 +341,17 @@ pub(super) async fn stream_response(
                 std::task::Poll::Pending => crate::control::HttpPollResult::Pending,
                 std::task::Poll::Ready(Ok(_)) => crate::control::HttpPollResult::ReadySuccess,
                 std::task::Poll::Ready(Err(failure)) => {
-                    let class = match failure.error.kind.as_str() {
-                        "cancelled" => crate::control::HttpErrorClass::Cancelled,
-                        "request_timeout" | "timeout" => crate::control::HttpErrorClass::Timeout,
-                        "response_header_timeout" => {
-                            crate::control::HttpErrorClass::ResponseHeaderTimeout
-                        }
-                        "stream_idle_timeout" => crate::control::HttpErrorClass::StreamIdleTimeout,
-                        _ => crate::control::HttpErrorClass::Other,
-                    };
-                    crate::control::HttpPollResult::ReadyError(class)
+                    crate::control::HttpPollResult::ReadyError {
+                        kind: failure.error.kind.clone(),
+                    }
                 }
             };
             let phase = match poll_count {
                 0 => Some(crate::control::DriverAwaitPhase::HttpFutureFirstPoll(
-                    outcome,
+                    outcome.clone(),
                 )),
                 1 => Some(crate::control::DriverAwaitPhase::HttpFutureSecondPoll(
-                    outcome,
+                    outcome.clone(),
                 )),
                 _ => None,
             };

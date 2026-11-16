@@ -112,25 +112,15 @@ pub(super) enum DriverAwaitPhase {
     HttpFutureFirstPoll(HttpPollResult),
     HttpFutureSecondPoll(HttpPollResult),
     HttpResponseFutureCompleted(HttpPollResult),
-    TestWatchdogExpired,
+    TestWatchdogReturnedAfterDrop,
 }
 
 #[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum HttpErrorClass {
-    Cancelled,
-    Timeout,
-    ResponseHeaderTimeout,
-    StreamIdleTimeout,
-    Other,
-}
-
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum HttpPollResult {
     Pending,
     ReadySuccess,
-    ReadyError(HttpErrorClass),
+    ReadyError { kind: String },
 }
 
 #[cfg(test)]
@@ -199,7 +189,7 @@ pub(super) fn record_live_attempt_phase(thread: &str, attempt: &str, phase: Driv
 }
 
 #[cfg(test)]
-pub(super) fn record_test_watchdog_expired(thread: &str) {
+pub(super) fn record_test_watchdog_returned_after_drop(thread: &str) {
     let run = DRIVER_PHASE_RUNS
         .get()
         .and_then(|runs| runs.lock().ok()?.get(thread).cloned())
@@ -208,7 +198,7 @@ pub(super) fn record_test_watchdog_expired(thread: &str) {
         thread: thread.to_owned(),
         run,
         attempt: None,
-        phase: DriverAwaitPhase::TestWatchdogExpired,
+        phase: DriverAwaitPhase::TestWatchdogReturnedAfterDrop,
         order: 0,
     });
 }
