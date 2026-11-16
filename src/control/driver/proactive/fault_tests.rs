@@ -89,6 +89,13 @@ struct RunBWaitContext<'a> {
     slot: &'a DriverSlot,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RunBBranchReachability {
+    Unreached,
+    IncomingReturned,
+    ContextLimitReplySent,
+}
+
 async fn wait_for_run_b_provider_request(wait: &mut RunBWaitContext<'_>) -> Incoming {
     let control = wait.control;
     let identity = wait.identity;
@@ -405,6 +412,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     let mut trace_thread = None;
     let mut retained_fx: Option<Fx> = None;
     let mut retained_summary: Option<Incoming> = None;
+    let mut run_b_branch = RunBBranchReachability::Unreached;
     let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
         trace_thread = Some(fx.target.clone());
@@ -627,6 +635,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             slot: &slot,
         };
         let overflow_request = wait_for_run_b_provider_request(&mut run_b_wait).await;
+        run_b_branch = RunBBranchReachability::IncomingReturned;
         assert_ne!(
             overflow_request.body,
             retained_summary.as_ref().unwrap().body,
@@ -636,6 +645,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .reply
             .send((400, json!({"error":{"message":"context limit","code":"context_length_exceeded"}})))
             .unwrap();
+        run_b_branch = RunBBranchReachability::ContextLimitReplySent;
         let during_overflow: Vec<String> = control
             .store
             .database
@@ -732,6 +742,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     })
     .await;
     if result.is_err() {
+        eprintln!("U2 watchdog decision branch reachability before fixture teardown: {run_b_branch:?}");
         if let Some(thread) = trace_thread.as_deref() {
             crate::control::record_test_watchdog_decision_before_fixture_teardown(thread);
         }
