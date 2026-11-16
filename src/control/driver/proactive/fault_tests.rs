@@ -1135,6 +1135,22 @@ async fn prepare_with_mode(
                         facts.slot_exists && facts.job_exists,
                         "preflight must publish the eligible job before normal dispatch: {facts:?}"
                     );
+                    let thread_for_progress = target.clone();
+                    let (automatic_attempts, active_witness): (Vec<(String, String, String)>, Option<String>) = control
+                        .store
+                        .database
+                        .call(move |db| {
+                            let attempts = db.prepare(
+                                "SELECT a.id,a.state,COALESCE(json_extract(a.error_json,'$.automatic_trim_attempt'),'null') FROM model_attempt a JOIN turn u ON u.id=a.turn_id WHERE u.thread_id=?1 AND json_type(a.error_json,'$.automatic_trim_attempt')='object' ORDER BY a.rowid DESC LIMIT 4",
+                            )?.query_map([&thread_for_progress], |row| {
+                                Ok((row.get(0)?,row.get(1)?,row.get(2)?))
+                            })?.collect::<rusqlite::Result<Vec<_>>>()?;
+                            let key = crate::compaction::CompactionKeys::new(&thread_for_progress).automatic_active();
+                            let active = db.query_row("SELECT value FROM app_meta WHERE key=?1",[key],|row|row.get(0)).optional()?;
+                            Ok((attempts,active))
+                        })
+                        .await
+                        .unwrap();
                     let input = request.body["input"]
                         .as_array()
                         .expect("Responses request carries an input array");
@@ -1157,7 +1173,7 @@ async fn prepare_with_mode(
                         "the actual normal request must carry the matching saved tool result: {result_ids:?}"
                     );
                     eprintln!(
-                        "U2 first ordinary request while Run A active: facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?}"
+                        "U2 first ordinary request while Run A active: facts={facts:?} call_ids={call_ids:?} result_ids={result_ids:?} automatic_attempts={automatic_attempts:?} active_witness={active_witness:?}"
                     );
                     first_normal_facts_recorded = true;
                 }
