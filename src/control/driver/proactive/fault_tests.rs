@@ -1132,6 +1132,7 @@ async fn prepare_with_mode(
         }).await.unwrap();
     }
     let guard_before = guard_rows(&control).await;
+    let mut active_phase = ActiveTurnPhase::default();
     request_boundary.reply.send((200, json!({"id":"boundary-small","status":"completed","usage":{"input_tokens":if scenario.active() || hold_summary {Scenario::LATEST_PROVIDER_INPUT} else {Scenario::FIRST_KNOWN_A},"output_tokens":1},"output":[{"type":"function_call","call_id":"boundary-small","name":"shell","arguments":json!({"command":"echo last"}).to_string()}]}))).unwrap();
     if !scenario.active() && !hold_summary {
         incoming(&control, &mut receive)
@@ -1355,6 +1356,8 @@ async fn prepare_with_mode(
                 if !hold_summary {
                     break;
                 }
+            } else if scenario.active() {
+                active_phase.continue_turn(request);
             } else {
                 if hold_summary && !first_normal_facts_recorded {
                     let facts = admission_boundary_facts(&control, &target).await;
@@ -1425,17 +1428,28 @@ async fn prepare_with_mode(
         }
     }
     if spill_off && !hold_summary {
+        let identity = terminal_identity
+            .as_ref()
+            .expect("summary terminal identity captured");
         crate::test_watchdog::watchdog("spill-off summary attempt finishes", async {
-            while !terminal_record_written(
-                &control,
-                terminal_identity
-                    .as_ref()
-                    .expect("summary terminal identity captured"),
-                "adopted",
-                Some(scenario.stage()),
-            )
-            .await
-            {
+            loop {
+                if let Ok(request) = receive.try_recv() {
+                    assert_ne!(request.body["tools"], json!([]), "one summary POST only");
+                    if scenario.active() {
+                        active_phase.continue_turn(request);
+                    } else {
+                        request
+                            .reply
+                            .send((200, answer_with_usage("spill-off continuation", 100)))
+                            .unwrap();
+                    }
+                    continue;
+                }
+                if terminal_record_written(&control, identity, "adopted", Some(scenario.stage()))
+                    .await
+                {
+                    break;
+                }
                 tokio::task::yield_now().await;
             }
         })
@@ -1480,10 +1494,14 @@ async fn prepare_with_mode(
                 json!([]),
                 "summary request already completed above"
             );
-            normal
-                .reply
-                .send((200, answer_with_usage("background continuation", 100)))
-                .unwrap();
+            if scenario.active() {
+                active_phase.continue_turn(normal);
+            } else {
+                normal
+                    .reply
+                    .send((200, answer_with_usage("background continuation", 100)))
+                    .unwrap();
+            }
         }
         tokio::task::yield_now().await;
     }
@@ -1509,6 +1527,7 @@ async fn prepare_with_mode(
             checkpoint_reached,
             release_checkpoint,
             held_phase,
+            active_phase,
             terminal_identity: terminal_identity
                 .expect("capture original attempt before held summary return"),
         };
@@ -1578,6 +1597,7 @@ async fn prepare_with_mode(
         checkpoint_reached,
         release_checkpoint,
         held_phase,
+        active_phase,
         terminal_identity,
     }
 }
@@ -1591,6 +1611,38 @@ struct TerminalAttemptIdentity {
 
 struct HeldSummaryPhase {
     summary: Incoming,
+}
+
+/// Keep active fixture Turns open using the same complete shell tool-group lifecycle.
+#[derive(Default)]
+struct ActiveTurnPhase {
+    next_call: u64,
+    continuation_groups: usize,
+}
+
+impl ActiveTurnPhase {
+    fn continue_turn(&mut self, request: Incoming) {
+        let call_id = format!("active-phase-{}", self.next_call);
+        self.next_call = self.next_call.saturating_add(1);
+        self.continuation_groups = self.continuation_groups.saturating_add(1);
+        request
+            .reply
+            .send((
+                200,
+                json!({
+                    "id": format!("active-phase-response-{}", self.next_call),
+                    "status": "completed",
+                    "usage": {"input_tokens": 100, "output_tokens": 1},
+                    "output": [{
+                        "type": "function_call",
+                        "call_id": call_id,
+                        "name": "shell",
+                        "arguments": json!({"command": "echo active-phase"}).to_string()
+                    }]
+                }),
+            ))
+            .unwrap();
+    }
 }
 
 struct Fx {
@@ -1607,6 +1659,7 @@ struct Fx {
     checkpoint_reached: Arc<AtomicBool>,
     release_checkpoint: Arc<tokio::sync::Notify>,
     held_phase: Option<HeldSummaryPhase>,
+    active_phase: ActiveTurnPhase,
     terminal_identity: TerminalAttemptIdentity,
 }
 
@@ -1704,51 +1757,60 @@ async fn after_release(
     scenario: Scenario,
     reached: &AtomicBool,
     terminal_identity: &TerminalAttemptIdentity,
+    active_phase: &mut ActiveTurnPhase,
 ) {
-    if scenario.continues_to_active_summary(fault) {
-        let summary_request = incoming(control, receive).await;
-        assert_eq!(
-            summary_request.body["tools"],
-            json!([]),
-            "only the active summary request follows the released active spill"
-        );
-        summary_request
-            .reply
-            .send((200, answer("Short adopted summary.")))
-            .unwrap();
+    if !scenario.continues_to_active_summary(fault) {
+        return;
     }
-    if fault == Fault::Remeasurement {
-        crate::test_watchdog::watchdog("remeasurement failure consumed", async {
-            while control.compactor.fail_remeasurement.load(Ordering::SeqCst) {
-                tokio::task::yield_now().await;
+    let mut summary_seen = false;
+    crate::test_watchdog::watchdog("active spill continuation provider pump", async {
+        loop {
+            if let Ok(request) = receive.try_recv() {
+                if request.body["tools"] == json!([]) {
+                    assert!(
+                        !summary_seen,
+                        "active spill may issue one follow-on summary"
+                    );
+                    request
+                        .reply
+                        .send((200, answer("Short adopted summary.")))
+                        .unwrap();
+                    summary_seen = true;
+                } else {
+                    active_phase.continue_turn(request);
+                }
+                continue;
             }
-            // The failed remeasurement is classified by the driver's own
-            // terminal write; shutdown must not race that classification.
-            while !terminal_record_written(
-                control,
-                terminal_identity,
-                expected_outcome(fault, scenario, ObservationPhase::AfterShutdownAndRestart),
-                Some(expected_terminal_stage(scenario, fault)),
-            )
-            .await
-            {
-                tokio::task::yield_now().await;
+            let stage_complete = match fault {
+                Fault::Remeasurement => {
+                    !control.compactor.fail_remeasurement.load(Ordering::SeqCst)
+                        && terminal_record_written(
+                            control,
+                            terminal_identity,
+                            expected_outcome(
+                                fault,
+                                scenario,
+                                ObservationPhase::AfterShutdownAndRestart,
+                            ),
+                            Some(expected_terminal_stage(scenario, fault)),
+                        )
+                        .await
+                }
+                Fault::RejectFinal => reached.load(Ordering::SeqCst),
+                _ => unreachable!("only continuing active-spill faults reach this pump"),
+            };
+            if stage_complete {
+                break;
             }
-        })
-        .await
-        .unwrap();
-    }
-    // Strict summary FINISH already completed inside adoption before this
-    // postcommit hook is installed; no second W4 final write follows it.
-    if fault == Fault::RejectFinal && !scenario.summary() {
-        crate::test_watchdog::watchdog("rejected final write reached", async {
-            while !reached.load(Ordering::SeqCst) {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-    }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        summary_seen,
+        "released active spill reached its active summary request"
+    );
 }
 
 /// Persisted #180 guard and status rows, byte-exact.
@@ -1778,6 +1840,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
         checkpoint_reached,
         release_checkpoint,
         terminal_identity,
+        mut active_phase,
         ..
     } = prepare_with_thread_override(fault, scenario, set_thread_percent).await;
     if fault != Fault::RejectFact {
@@ -1785,7 +1848,15 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             checkpoint_reached.load(Ordering::SeqCst),
             "postcommit barrier reached"
         );
-        assert_boundary(&control, &target, scenario, fault, "checkpoint").await;
+        assert_boundary(
+            &control,
+            &target,
+            scenario,
+            fault,
+            "checkpoint",
+            active_phase.continuation_groups,
+        )
+        .await;
         if fault == Fault::Remeasurement {
             assert!(
                 control.compactor.fail_remeasurement.load(Ordering::SeqCst),
@@ -1800,6 +1871,7 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             scenario,
             &reached,
             &terminal_identity,
+            &mut active_phase,
         )
         .await;
     }
@@ -1823,7 +1895,15 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
             "fault hook reached its configured checkpoint"
         );
     }
-    assert_boundary(&control, &target, scenario, fault, "shutdown").await;
+    assert_boundary(
+        &control,
+        &target,
+        scenario,
+        fault,
+        "shutdown",
+        active_phase.continuation_groups,
+    )
+    .await;
     control
         .store
         .database
@@ -1840,7 +1920,15 @@ async fn boundary_with_thread_override(fault: Fault, scenario: Scenario, set_thr
     owner.shutdown().await.unwrap();
     let owner = proactive_owner(root.path(), &url, &limits).await;
     let control = Control::new(&owner, root.path().into());
-    assert_boundary(&control, &target, scenario, fault, "reopen").await;
+    assert_boundary(
+        &control,
+        &target,
+        scenario,
+        fault,
+        "reopen",
+        active_phase.continuation_groups,
+    )
+    .await;
     let id = target.clone();
     control
         .store
@@ -1940,6 +2028,7 @@ async fn assert_boundary(
     scenario: Scenario,
     fault: Fault,
     phase: &'static str,
+    active_phase_continuations: usize,
 ) {
     assert_immutable(control).await;
     let target = target.to_owned();
@@ -1973,7 +2062,8 @@ async fn assert_boundary(
         assert!(record["committed_stages"][scenario.stage()].is_object(), "fault reached the intended stage: {record}");
         let kinds: Vec<String> = db.prepare("SELECT n.kind FROM thread_path p JOIN node n ON n.id=p.node_id WHERE p.thread_id=?1 AND n.kind IN ('spill','summary') ORDER BY p.ordinal")?.query_map([&target], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
         let expected: Vec<&str> = match scenario {
-            Scenario::ClosedSpill | Scenario::ActiveSpill => vec!["spill", "spill"],
+            Scenario::ClosedSpill => vec!["spill", "spill"],
+            Scenario::ActiveSpill => vec!["spill"; 2 + active_phase_continuations],
             Scenario::ClosedSummary => vec!["summary", "spill", "spill"],
             Scenario::ActiveSummary => vec!["summary"],
         };

@@ -144,6 +144,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
         checkpoint_reached,
         release_checkpoint,
         terminal_identity,
+        mut active_phase,
         ..
     } = prepare(fault, scenario).await;
     if fault != Fault::RejectFact {
@@ -179,7 +180,15 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
     );
     if fault != Fault::RejectFact {
         assert!(checkpoint_reached.load(Ordering::SeqCst));
-        assert_boundary(&control, &target, scenario, fault, "checkpoint").await;
+        assert_boundary(
+            &control,
+            &target,
+            scenario,
+            fault,
+            "checkpoint",
+            active_phase.continuation_groups,
+        )
+        .await;
         if fault == Fault::Remeasurement {
             assert!(
                 control.compactor.fail_remeasurement.load(Ordering::SeqCst),
@@ -194,6 +203,7 @@ async fn record_boundary(fault: Fault, scenario: Scenario) -> Value {
             scenario,
             &reached,
             &terminal_identity,
+            &mut active_phase,
         )
         .await;
     }
