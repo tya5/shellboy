@@ -1,4 +1,4 @@
-//! Post-adoption data safety, independent of best-effort attempt diagnostics.
+//! Post-adoption data safety and lifecycle controls for proactive compaction.
 use super::*;
 use crate::app::DataOwner;
 use crate::protocol::*;
@@ -11,68 +11,6 @@ use tokio::{
 
 mod record_tests;
 
-async fn wait_for_driver_await_phase(
-    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
-    thread: &str,
-    run: &str,
-    expected: crate::control::DriverAwaitPhase,
-) {
-    loop {
-        match phases.recv().await {
-            Ok(event) if event.thread == thread && event.run == run && event.phase == expected => {
-                return;
-            }
-            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                panic!("test-only driver phase stream closed before {expected:?}")
-            }
-        }
-    }
-}
-
-async fn wait_for_driver_attempt_phase(
-    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
-    thread: &str,
-    run: &str,
-    expected: crate::control::DriverAwaitPhase,
-) -> String {
-    loop {
-        match phases.recv().await {
-            Ok(event) if event.thread == thread && event.run == run && event.phase == expected => {
-                if let Some(attempt) = event.attempt {
-                    return attempt;
-                }
-            }
-            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                panic!("test-only driver phase stream closed before {expected:?}")
-            }
-        }
-    }
-}
-
-async fn wait_for_http_future_first_poll(
-    phases: &mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
-    thread: &str,
-    run: &str,
-) -> (String, crate::control::HttpPollResult) {
-    loop {
-        match phases.recv().await {
-            Ok(event) if event.thread == thread && event.run == run => {
-                if let crate::control::DriverAwaitPhase::HttpFutureFirstPoll(result) = event.phase
-                    && let Some(attempt) = event.attempt
-                {
-                    return (attempt, result);
-                }
-            }
-            Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                panic!("test-only driver phase stream closed before the HTTP future's first poll")
-            }
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 struct RunTurnWaitIdentity<'a> {
     thread: &'a str,
@@ -84,16 +22,8 @@ struct RunBWaitContext<'a> {
     control: &'a Control,
     identity: RunTurnWaitIdentity<'a>,
     receive: &'a mut mpsc::Receiver<Incoming>,
-    phases: &'a mut tokio::sync::broadcast::Receiver<crate::control::DriverPhaseEvent>,
     events: &'a mut tokio::sync::broadcast::Receiver<EngineEvent>,
     slot: &'a DriverSlot,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum RunBBranchReachability {
-    Unreached,
-    IncomingReturned,
-    ContextLimitReplySent,
 }
 
 async fn wait_for_run_b_provider_request(wait: &mut RunBWaitContext<'_>) -> Incoming {
@@ -103,86 +33,47 @@ async fn wait_for_run_b_provider_request(wait: &mut RunBWaitContext<'_>) -> Inco
     let run = identity.run;
     let turn = identity.turn;
     let receive = &mut *wait.receive;
-    let phases = &mut *wait.phases;
     let events = &mut *wait.events;
     let slot = wait.slot;
     loop {
         let notified = slot.nudge.notified();
         tokio::pin!(notified);
         tokio::select! {
-            request = receive.recv() => {
-                return request.unwrap_or_else(|| panic!(
-                    "provider body channel closed before Run B request; Thread={thread} Run={run}"
-                ));
-            }
-            event = phases.recv() => match event {
-                Ok(event) if event.thread == thread && event.run == run => {
-                    eprintln!("Run B typed future progress: attempt={:?} phase={:?}", event.attempt, event.phase);
-                    if let crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(
-                        crate::control::HttpPollResult::ReadyError { kind },
-                    ) = event.phase
-                    {
-                        panic!("Run B response future completed with typed error before any provider body: Thread={thread} Run={run} Attempt={:?} existing_error_kind={kind:?}", event.attempt);
-                    }
-                }
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => panic!("driver phase stream closed while awaiting Run B provider request"),
-            },
-            event = events.recv() => match event {
-                Ok(EngineEvent::Changed { thread_id, .. }) if thread_id == thread => {
-                    let target = thread.to_owned();
-                    let run_id = run.to_owned();
-                    let turn_id = turn.to_owned();
-                    let state = control.store.database.call(move |db| {
+            request=receive.recv()=>return request.unwrap_or_else(||panic!(
+                "provider body channel closed before Run B request; Thread={thread} Run={run}"
+            )),
+            event=events.recv()=>match event {
+                Ok(EngineEvent::Changed{thread_id,..}) if thread_id==thread=>{
+                    let target=thread.to_owned();
+                    let run_id=run.to_owned();
+                    let turn_id=turn.to_owned();
+                    let state=control.store.database.call(move|db|{
                         db.query_row(
                             concat!(
-                                "SELECT r.state,t.state, ",
-                                "(SELECT state FROM model_attempt WHERE turn_id=t.id ",
-                                "ORDER BY started_at DESC,rowid DESC LIMIT 1), ",
-                                "(SELECT json_extract(error_json,'$.kind') FROM model_attempt ",
-                                "WHERE turn_id=t.id ORDER BY started_at DESC,rowid DESC LIMIT 1) ",
+                                "SELECT r.state,t.state,",
+                                "(SELECT state FROM model_attempt WHERE turn_id=t.id ORDER BY started_at DESC,rowid DESC LIMIT 1),",
+                                "(SELECT json_extract(error_json,'$.kind') FROM model_attempt WHERE turn_id=t.id ORDER BY started_at DESC,rowid DESC LIMIT 1) ",
                                 "FROM run r JOIN turn t ON t.run_id=r.id AND t.thread_id=r.thread_id ",
                                 "WHERE r.id=?1 AND r.thread_id=?2 AND t.id=?3",
                             ),
-                            rusqlite::params![run_id, target, turn_id],
-                            |row| Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, String>(1)?,
-                                row.get::<_, Option<String>>(2)?,
-                                row.get::<_, Option<String>>(3)?,
-                            )),
+                            rusqlite::params![run_id,target,turn_id],
+                            |row|Ok((row.get::<_,String>(0)?,row.get::<_,String>(1)?,row.get::<_,Option<String>>(2)?,row.get::<_,Option<String>>(3)?)),
                         ).map_err(Into::into)
                     }).await.unwrap();
-                    if state.0 != "live"
-                        || !matches!(state.1.as_str(), "preparing" | "running" | "waiting")
-                    {
-                        panic!(
-                            "Run B driver ended before provider body: Thread={thread} Run={run} Turn={turn} run_state={} turn_state={} attempt_state={:?} failure_kind={:?}",
-                            state.0, state.1, state.2, state.3
-                        );
+                    if state.0!="live" || !matches!(state.1.as_str(),"preparing"|"running"|"waiting") {
+                        panic!("Run B driver ended before provider body: Thread={thread} Run={run} Turn={turn} run_state={} turn_state={} attempt_state={:?} failure_kind={:?}",state.0,state.1,state.2,state.3);
                     }
-                    if state.2.as_deref() == Some("failed")
-                        || state.2.as_deref() == Some("incomplete")
-                        || state.2.as_deref() == Some("cancelled")
-                    {
-                        panic!(
-                            "Run B model attempt failed before provider body: Thread={thread} Run={run} Turn={turn} attempt_state={:?} failure_kind={:?}",
-                            state.2, state.3
-                        );
+                    if matches!(state.2.as_deref(),Some("failed"|"incomplete"|"cancelled")) {
+                        panic!("Run B model attempt failed before provider body: Thread={thread} Run={run} Turn={turn} attempt_state={:?} failure_kind={:?}",state.2,state.3);
                     }
                 }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => panic!("engine event stream closed while awaiting Run B provider request"),
-                _ => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_))=>{},
+                Err(tokio::sync::broadcast::error::RecvError::Closed)=>panic!("engine event stream closed while awaiting Run B provider request"),
+                _=>{},
             },
-            _ = &mut notified => {
-                let finished = {
-                    let job = slot.proactive_job.lock().await;
-                    job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)
-                };
-                if finished {
-                    panic!("retained proactive job finished before Run B provider body; Thread={thread} Run={run}");
-                }
+            _=&mut notified=>{
+                let finished={let job=slot.proactive_job.lock().await;job.as_ref().is_some_and(crate::control::driver::proactive::BackgroundJob::is_finished)};
+                if finished { panic!("retained proactive job finished before Run B provider body; Thread={thread} Run={run}"); }
             }
         }
     }
@@ -409,16 +300,11 @@ async fn context_limit_waits_for_the_same_proactive_job_without_a_second_summary
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_boundary() {
-    let mut trace_keepalive = None;
-    let mut trace_thread = None;
     let mut retained_fx: Option<Fx> = None;
     let mut retained_summary: Option<Incoming> = None;
-    let mut run_b_branch = RunBBranchReachability::Unreached;
     let result = crate::test_watchdog::watchdog("proactive summary request barrier", async {
         let mut fx = prepare_held_summary(Scenario::ClosedSummary).await;
         let terminal_identity=fx.terminal_identity.clone();
-        trace_thread = Some(fx.target.clone());
-        trace_keepalive = Some(crate::control::subscribe_driver_await_phases());
         retained_summary = Some(
             fx.held_phase
                 .take()
@@ -530,7 +416,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
                 .expect("Run A slot remains while its proactive job is retained")
         };
         let _run_a_retired = wait_for_driver_retired(control, target, &run_a_slot.id).await;
-        let mut driver_phases = crate::control::subscribe_driver_await_phases();
         let mut driver_events = control.subscribe();
         let accepted: MessageAccepted = serde_json::from_value(
             send(control, target, "new Run while previous R job is held").await,
@@ -598,46 +483,20 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
         assert_eq!(message_turn.as_deref(), Some(accepted.turn_id.as_deref().unwrap()));
         assert_eq!(turn_started_events, 1, "Run B has a persisted turn_started event");
         let slot = slot.expect("accepted Run B has a registered Thread driver slot");
-        wait_for_driver_await_phase(
-            &mut driver_phases,
-            target,
-            &run_id,
-            crate::control::DriverAwaitPhase::RequestFutureAwait,
-        )
-        .await;
-        let live_attempt = wait_for_driver_attempt_phase(
-            &mut driver_phases,
-            target,
-            &run_id,
-            crate::control::DriverAwaitPhase::LiveAdmissionEntered,
-        )
-        .await;
-        let granted_attempt = wait_for_driver_attempt_phase(
-            &mut driver_phases,
-            target,
-            &run_id,
-            crate::control::DriverAwaitPhase::LiveAdmissionGranted,
-        )
-        .await;
-        let (first_polled_attempt, first_poll_outcome) =
-            wait_for_http_future_first_poll(&mut driver_phases, target, &run_id).await;
-        assert_eq!(live_attempt, granted_attempt, "live admission events refer to the same persisted attempt");
-        assert_eq!(granted_attempt, first_polled_attempt, "HTTP first poll belongs to the live-admitted attempt");
-        eprintln!("Run B HTTP response future first-poll result: {first_poll_outcome:?}");
-        let mut run_b_wait = RunBWaitContext {
-            control,
-            identity: RunTurnWaitIdentity {
-                thread: target,
-                run: &run_id,
-                turn: &turn_id,
-            },
-            receive,
-            phases: &mut driver_phases,
-            events: &mut driver_events,
-            slot: &slot,
+        let overflow_request = {
+            let mut wait = RunBWaitContext {
+                control,
+                identity: RunTurnWaitIdentity {
+                    thread: target,
+                    run: &run_id,
+                    turn: &turn_id,
+                },
+                receive,
+                events: &mut driver_events,
+                slot: &slot,
+            };
+            wait_for_run_b_provider_request(&mut wait).await
         };
-        let overflow_request = wait_for_run_b_provider_request(&mut run_b_wait).await;
-        run_b_branch = RunBBranchReachability::IncomingReturned;
         assert_ne!(
             overflow_request.body,
             retained_summary.as_ref().unwrap().body,
@@ -647,7 +506,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             .reply
             .send((400, json!({"error":{"message":"context limit","code":"context_length_exceeded"}})))
             .unwrap();
-        run_b_branch = RunBBranchReachability::ContextLimitReplySent;
         let during_overflow: Vec<String> = control
             .store
             .database
@@ -756,14 +614,7 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
     })
     .await;
     if result.is_err() {
-        eprintln!(
-            "U2 watchdog decision branch reachability before fixture teardown: {run_b_branch:?}"
-        );
-        if let Some(thread) = trace_thread.as_deref() {
-            crate::control::record_test_watchdog_decision_before_fixture_teardown(thread);
-        }
-        // Establish the timeout decision while Fx and the held response sender
-        // still exist, then perform cleanup in explicit owner order.
+        // Keep fixture owners alive until explicit cleanup finishes.
         drop(retained_summary.take());
         if let Some(fx) = retained_fx.take() {
             let Fx {
@@ -785,7 +636,6 @@ async fn proactive_background_summary_survives_next_turn_and_adopts_at_current_b
             drop(keepalive);
         }
     }
-    drop(trace_keepalive);
     result.unwrap();
 }
 

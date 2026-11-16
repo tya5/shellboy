@@ -316,61 +316,9 @@ pub(super) async fn stream_response(
     stop: &CancellationToken,
 ) -> Result<model::ModelResponse, model::http::AttemptFailure> {
     let (send, mut receive) = mpsc::channel::<model::http::ObservedEvent>(32);
-    #[cfg(test)]
-    crate::control::record_live_attempt_phase(
-        thread,
-        attempt,
-        crate::control::DriverAwaitPhase::LiveAdmissionEntered,
-    );
     let live_text = control.admit_live_stream(thread, attempt).await;
     let mut stream_chars = 0usize;
     let mut last_receive_notice: Option<std::time::Instant> = None;
-    #[cfg(test)]
-    let response = async move {
-        let mut response_future = Box::pin(client.response_observed(
-            thread,
-            request,
-            stop.clone(),
-            Some(send),
-            bypass_usage_limit,
-        ));
-        let mut poll_count = 0u8;
-        std::future::poll_fn(|cx| {
-            let poll = std::future::Future::poll(response_future.as_mut(), cx);
-            let outcome = match &poll {
-                std::task::Poll::Pending => crate::control::HttpPollResult::Pending,
-                std::task::Poll::Ready(Ok(_)) => crate::control::HttpPollResult::ReadySuccess,
-                std::task::Poll::Ready(Err(failure)) => {
-                    crate::control::HttpPollResult::ReadyError {
-                        kind: failure.error.kind.clone(),
-                    }
-                }
-            };
-            let phase = match poll_count {
-                0 => Some(crate::control::DriverAwaitPhase::HttpFutureFirstPoll(
-                    outcome.clone(),
-                )),
-                1 => Some(crate::control::DriverAwaitPhase::HttpFutureSecondPoll(
-                    outcome.clone(),
-                )),
-                _ => None,
-            };
-            if let Some(phase) = phase {
-                crate::control::record_live_attempt_phase(thread, attempt, phase);
-            }
-            if matches!(poll, std::task::Poll::Ready(_)) {
-                crate::control::record_live_attempt_phase(
-                    thread,
-                    attempt,
-                    crate::control::DriverAwaitPhase::HttpResponseFutureCompleted(outcome),
-                );
-            }
-            poll_count = poll_count.saturating_add(1);
-            poll
-        })
-        .await
-    };
-    #[cfg(not(test))]
     let response = client.response_observed(
         thread,
         request,

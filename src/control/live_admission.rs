@@ -23,12 +23,6 @@ impl Control {
                     db.query_row(NONTERMINAL, rusqlite::params![a, t], |r| r.get(0))?;
                 if allowed {
                     clock.admit_live(&t, &a, &token, &alive);
-                    #[cfg(test)]
-                    super::record_live_attempt_phase(
-                        &t,
-                        &a,
-                        super::DriverAwaitPhase::LiveAdmissionGranted,
-                    );
                 }
                 Ok(())
             })
